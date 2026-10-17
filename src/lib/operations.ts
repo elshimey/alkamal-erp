@@ -1,5 +1,5 @@
 import { and, eq, gte, lte, ne } from "drizzle-orm";
-import type { Db } from "@/db";
+import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
 import { resolvePrice, type Rate, type Trip } from "@/lib/pricing";
 
@@ -133,7 +133,7 @@ export async function setContractStatus(db: Db, contractId: number, status: "act
 }
 
 /** العقد الساري للعميل في تاريخ معيّن (يُقترح على البوليصة). */
-export async function activeContract(db: Db, customerId: number, onDate: string) {
+export async function activeContract(db: Db | Tx, customerId: number, onDate: string) {
   const [row] = await db
     .select()
     .from(s.contracts)
@@ -148,7 +148,7 @@ export async function activeContract(db: Db, customerId: number, onDate: string)
   return row ?? null;
 }
 
-export async function contractRatesFor(db: Db, contractId: number): Promise<Rate[]> {
+export async function contractRatesFor(db: Db | Tx, contractId: number): Promise<Rate[]> {
   const rows = await db.select().from(s.contractRates).where(eq(s.contractRates.contractId, contractId));
   return rows.map((r) => ({ ...r, price: Number(r.price) }));
 }

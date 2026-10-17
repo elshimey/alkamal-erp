@@ -12,6 +12,7 @@ import { createJournalEntry } from "@/lib/ledger";
 import { assignVehicle, createDriver, createVehicle, driverOnDate, expiringDocuments, releaseAssignment } from "@/lib/fleet";
 import { addSubAccount } from "@/lib/accounts";
 import { activeContract, createContract, createLocation, createParty, createRoute, priceTrip, setContractStatus } from "@/lib/operations";
+import { addExpense, addFuel, approveWaybill, createWaybill, deleteWaybill, recordStage, rejectWaybill, revertWaybill } from "@/lib/waybills";
 
 const url = process.env.TEST_DATABASE_URL;
 const YEAR = 2026;
@@ -285,6 +286,132 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       await expect(
         db.insert(s.contractRates).values({ contractId: c1.id, method: "per_km_vehicle_type", price: "2" }),
       ).rejects.toThrow();
+    });
+  });
+
+  describe("البوليصة", () => {
+    const D = `${YEAR}-08-05`;
+    let customerId: number;
+    let routeId: number;
+    let vehicle: { id: number; costCenterId: number };
+    let driver: { id: number; payableAccountId: number; custodyAccountId: number };
+    let stationId: number;
+    let carrierId: number;
+    let firstId: number;
+
+    const linesOf = async (entryId: number) => {
+      const rows = await db.select({ l: s.journalLines, code: s.accounts.code }).from(s.journalLines).innerJoin(s.accounts, eq(s.accounts.id, s.journalLines.accountId)).where(eq(s.journalLines.entryId, entryId));
+      return rows.map(({ l, code }) => ({ code, debit: Number(l.debitBase), credit: Number(l.creditBase), cc: l.costCenterId, party: l.partyId, driver: l.driverId, waybill: l.waybillId, account: l.accountId }));
+    };
+
+    beforeAll(async () => {
+      const [sa] = await db.select().from(s.locations).where(eq(s.locations.countryCode, "SA"));
+      const jeddah = await createLocation(db, { parentId: sa.id, nameAr: "جدة" });
+      const makkah = await createLocation(db, { parentId: sa.id, nameAr: "مكة" });
+      routeId = (await createRoute(db, { fromLocationId: jeddah.id, toLocationId: makkah.id, distanceKm: 90, driverCommission: 200 })).id;
+      customerId = (await createParty(db, { nameAr: "شركة النخيل", roles: ["customer"] })).id;
+      const c = await createContract(db, { customerId, number: "C-9", fromDate: `${YEAR}-01-01`, toDate: `${YEAR}-12-31`, creditLimit: 5000 });
+      await db.insert(s.contractRates).values({ contractId: c.id, method: "route_fixed", routeId, price: "3000" });
+      await setContractStatus(db, c.id, "active");
+      stationId = (await createParty(db, { nameAr: "محطة ساسكو", roles: ["fuel_station"] })).id;
+      carrierId = (await createParty(db, { nameAr: "ناقل الشمال", roles: ["carrier"] })).id;
+      vehicle = await createVehicle(db, { plate: "ر س ت 999", chassis: "CH-9", odometer: 4000 });
+      const d = await createDriver(db, { nameAr: "سائق البوالص" });
+      const [emp] = await db.select().from(s.employees).where(eq(s.employees.id, d.employeeId));
+      driver = { id: d.id, payableAccountId: emp.payableAccountId!, custodyAccountId: d.custodyAccountId };
+      await assignVehicle(db, { vehicleId: vehicle.id, driverId: d.id, fromDate: `${YEAR}-08-01` });
+    });
+
+    it("تأخذ السائق المسند والسعر من العقد والعمولة من المسار", async () => {
+      const w = await createWaybill(db, { waybillDate: D, customerId, routeId, shipper: "مصنع جدة", consignee: "مستودع مكة", vehicleId: vehicle.id });
+      firstId = w.id;
+      expect(w.number).toBe(`WB-${YEAR}-000001`);
+      expect(w.driverId).toBe(driver.id);
+      expect(Number(w.amount)).toBe(3000);
+      expect(Number(w.driverCommission)).toBe(200);
+      expect(w.execution).toBe("fleet");
+      await expect(createWaybill(db, { waybillDate: D, customerId, routeId, shipper: "أ", consignee: "ب", vehicleId: vehicle.id, carrierId })).rejects.toThrow("لا الاثنين");
+    });
+
+    it("المراحل تغيّر الحالة وتسجل العداد", async () => {
+      await recordStage(db, firstId, "loading", { odometer: 5000 });
+      let [w] = await db.select().from(s.waybills).where(eq(s.waybills.id, firstId));
+      expect(w.status).toBe("in_transit");
+      expect(w.odometerStart).toBe(5000);
+      await recordStage(db, firstId, "delivery", { odometer: 5090 });
+      [w] = await db.select().from(s.waybills).where(eq(s.waybills.id, firstId));
+      expect(w.status).toBe("delivered");
+      expect(w.odometerEnd).toBe(5090);
+    });
+
+    it("الاعتماد يرحّل قيد التكلفة على المركبة: الديزل حسب مصدره، والعمولة لراتب السائق، والمصاريف من العهدة", async () => {
+      await addFuel(db, firstId, { source: "custody", amount: 400, vatAmount: 60, liters: 200 });
+      await addFuel(db, firstId, { source: "station_credit", partyId: stationId, amount: 300 });
+      const [loading] = await db.select().from(s.chargeTypes).where(eq(s.chargeTypes.nameAr, "تحميل"));
+      await addExpense(db, firstId, { chargeTypeId: loading.id, amount: 100 });
+
+      const { entry } = await approveWaybill(db, firstId, { userId: undefined });
+      expect(entry).not.toBeNull();
+      const [je] = await db.select().from(s.journalEntries).where(eq(s.journalEntries.id, entry!.id));
+      expect(je.status).toBe("posted");
+      expect(je.sourceType).toBe("waybill");
+      const lines = await linesOf(entry!.id);
+      const sum = (f: (l: (typeof lines)[number]) => boolean, k: "debit" | "credit") => lines.filter(f).reduce((a, l) => a + l[k], 0);
+      expect(sum(() => true, "debit")).toBe(1060);
+      expect(sum(() => true, "credit")).toBe(1060);
+      expect(sum((l) => l.code === "5101", "debit")).toBe(700);
+      expect(sum((l) => l.code === "1108", "debit")).toBe(60);
+      expect(sum((l) => l.code === "5102", "debit")).toBe(200);
+      expect(sum((l) => l.code === "5104", "debit")).toBe(100);
+      expect(sum((l) => l.account === driver.custodyAccountId, "credit")).toBe(560);
+      expect(sum((l) => l.account === driver.payableAccountId, "credit")).toBe(200);
+      expect(lines.find((l) => l.code === "2103")).toMatchObject({ credit: 300, party: stationId });
+      expect(lines.filter((l) => l.code.startsWith("5")).every((l) => l.cc === vehicle.costCenterId && l.driver === driver.id)).toBe(true);
+      expect(lines.every((l) => l.waybill === firstId)).toBe(true);
+      const [v] = await db.select().from(s.vehicles).where(eq(s.vehicles.id, vehicle.id));
+      expect(v.odometer).toBe(5090);
+      await expect(addFuel(db, firstId, { source: "custody", amount: 1 })).rejects.toThrow("معتمدة");
+    });
+
+    it("تجاوز الحد الائتماني يمنع الاعتماد إلا بصلاحية وسبب", async () => {
+      const w = await createWaybill(db, { waybillDate: D, customerId, routeId, shipper: "أ", consignee: "ب", vehicleId: vehicle.id });
+      await expect(approveWaybill(db, w.id)).rejects.toThrow("الحد الائتماني");
+      await expect(approveWaybill(db, w.id, { canOverride: true })).rejects.toThrow("سبب التجاوز");
+      await approveWaybill(db, w.id, { canOverride: true, overrideReason: "موافقة المدير العام" });
+      const [row] = await db.select().from(s.waybills).where(eq(s.waybills.id, w.id));
+      expect(row.status).toBe("approved");
+      expect(row.overrideReason).toBe("موافقة المدير العام");
+    });
+
+    it("الإرجاع لمسودة يلغي القيد", async () => {
+      const [before] = await db.select().from(s.waybills).where(eq(s.waybills.id, firstId));
+      await revertWaybill(db, firstId);
+      const [after] = await db.select().from(s.waybills).where(eq(s.waybills.id, firstId));
+      expect(after.status).toBe("delivered");
+      expect(after.journalEntryId).toBeNull();
+      expect(await db.select().from(s.journalEntries).where(eq(s.journalEntries.id, before.journalEntryId!))).toHaveLength(0);
+    });
+
+    it("الناقل الخارجي: تكلفته على مركز الناقلين ودائنة للناقل", async () => {
+      const w = await createWaybill(db, { waybillDate: D, customerId, routeId, shipper: "أ", consignee: "ب", carrierId, carrierCost: 1500, amount: 1 });
+      expect(Number(w.driverCommission)).toBe(0);
+      const { entry } = await approveWaybill(db, w.id, { canOverride: true, overrideReason: "اختبار" });
+      const lines = await linesOf(entry!.id);
+      const [ext] = await db.select().from(s.costCenters).where(eq(s.costCenters.code, "EXT"));
+      expect(lines.find((l) => l.code === "5105")).toMatchObject({ debit: 1500, cc: ext.id, party: carrierId });
+      expect(lines.find((l) => l.code === "2102")).toMatchObject({ credit: 1500, party: carrierId });
+    });
+
+    it("بلا عقد ساري لا تُعتمد، والرفض يعيدها مع السبب، والمسودة تُحذف مع سجل", async () => {
+      const other = await createParty(db, { nameAr: "عميل بلا عقد", roles: ["customer"] });
+      const w = await createWaybill(db, { waybillDate: D, customerId: other.id, routeId, shipper: "أ", consignee: "ب", vehicleId: vehicle.id });
+      expect(w.priceNote).toBe("لا يوجد عقد ساري");
+      await expect(approveWaybill(db, w.id)).rejects.toThrow("لا يوجد عقد ساري");
+      await rejectWaybill(db, w.id, "صورة العداد غير واضحة");
+      await expect(approveWaybill(db, w.id, { canOverride: true, overrideReason: "x" })).rejects.toThrow("مرفوضة");
+      await deleteWaybill(db, w.id, { reason: "مكررة" });
+      const logs = await db.select().from(s.deletionLog).where(eq(s.deletionLog.entityId, String(w.id)));
+      expect(logs[0].entity).toBe("waybill");
     });
   });
 });

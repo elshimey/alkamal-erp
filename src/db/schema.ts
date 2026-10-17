@@ -307,7 +307,7 @@ export const journalEntries = pgTable(
 );
 
 // سطر القيد: القلب الذي تُبنى منه كل التقارير.
-// أبعاد البوليصة والعقد والمسار تُضاف مع وحدة التشغيل.
+// الأبعاد: جهة الاتصال، مركز التكلفة (المركبة)، السائق، البوليصة.
 export const journalLines = pgTable(
   "journal_lines",
   {
@@ -333,9 +333,11 @@ export const journalLines = pgTable(
     partyId: ref("party_id").references(() => parties.id),
     costCenterId: ref("cost_center_id").references(() => costCenters.id),
     driverId: ref("driver_id").references((): AnyPgColumn => drivers.id),
+    waybillId: ref("waybill_id").references((): AnyPgColumn => waybills.id),
   },
   (t) => [
     uniqueIndex("journal_lines_entry_line_uq").on(t.entryId, t.lineNo),
+    index("journal_lines_waybill_idx").on(t.waybillId),
     index("journal_lines_account_idx").on(t.accountId),
     index("journal_lines_cost_center_idx").on(t.costCenterId),
     index("journal_lines_party_idx").on(t.partyId),
@@ -602,3 +604,151 @@ export const chargeTypes = pgTable("charge_types", {
   costAccountId: ref("cost_account_id").references(() => accounts.id),
   isActive: boolean("is_active").notNull().default(true),
 });
+
+// ───────────────────────── البوليصة (الرحلة) ─────────────────────────
+
+// مسودة ← في الطريق ← مُسلَّمة ← معتمدة ← مفوترة؛ أو مرفوضة (تعود للتصحيح مع السبب)
+export const waybillStatus = pgEnum("waybill_status", ["draft", "in_transit", "delivered", "approved", "invoiced", "rejected"]);
+export const waybillExecution = pgEnum("waybill_execution", ["fleet", "carrier"]);
+
+export const waybills = pgTable(
+  "waybills",
+  {
+    id: id(),
+    number: varchar("number", { length: 30 }).notNull().unique(),
+    waybillDate: date("waybill_date").notNull(),
+    customerId: ref("customer_id").notNull().references(() => parties.id),
+    contractId: ref("contract_id").references(() => contracts.id),
+    routeId: ref("route_id").notNull().references(() => routes.id),
+    shipper: text("shipper").notNull(),
+    consignee: text("consignee").notNull(),
+    deliveryAddress: text("delivery_address"),
+    isInternational: boolean("is_international").notNull().default(false),
+    currencyCode: varchar("currency_code", { length: 3 }).notNull().default("SAR").references(() => currencies.code),
+    // التنفيذ: أسطول داخلي (مركبة + سائق) أو ناقل خارجي، لا الاثنين
+    execution: waybillExecution("execution").notNull().default("fleet"),
+    vehicleId: ref("vehicle_id").references(() => vehicles.id),
+    driverId: ref("driver_id").references(() => drivers.id),
+    carrierId: ref("carrier_id").references(() => parties.id),
+    carrierCost: money("carrier_cost"),
+    carrierDriverName: text("carrier_driver_name"),
+    carrierDriverMobile: varchar("carrier_driver_mobile", { length: 20 }),
+    carrierPlate: varchar("carrier_plate", { length: 30 }),
+    distanceKm: integer("distance_km"),
+    weightTons: numeric("weight_tons", { precision: 10, scale: 3 }),
+    containerNumber: varchar("container_number", { length: 30 }),
+    customsDeclaration: varchar("customs_declaration", { length: 40 }),
+    deliveryNoteNumber: varchar("delivery_note_number", { length: 40 }),
+    // المالي
+    amount: money("amount").notNull().default("0"),
+    taxCodeId: ref("tax_code_id").references(() => taxCodes.id),
+    // شرح مصدر السعر (بند العقد المطبَّق) للمراجعة
+    priceNote: text("price_note"),
+    driverCommission: money("driver_commission").notNull().default("0"),
+    salesRepId: ref("sales_rep_id").references(() => parties.id),
+    salesRepCommission: money("sales_rep_commission").notNull().default("0"),
+    odometerStart: integer("odometer_start"),
+    odometerEnd: integer("odometer_end"),
+    emptyReturn: boolean("empty_return").notNull().default(false),
+    returnWaybillId: ref("return_waybill_id").references((): AnyPgColumn => waybills.id),
+    notes: text("notes"),
+    status: waybillStatus("status").notNull().default("draft"),
+    rejectionReason: text("rejection_reason"),
+    // سبب تجاوز الضوابط (بلا عقد ساري، الحد الائتماني) لمن يملك الصلاحية
+    overrideReason: text("override_reason"),
+    approvedBy: ref("approved_by").references(() => users.id),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    journalEntryId: ref("journal_entry_id").references(() => journalEntries.id),
+    createdBy: ref("created_by").references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("waybills_status_idx").on(t.status, t.waybillDate),
+    index("waybills_customer_idx").on(t.customerId),
+    index("waybills_vehicle_idx").on(t.vehicleId, t.waybillDate),
+    index("waybills_driver_idx").on(t.driverId, t.waybillDate),
+    check(
+      "waybills_execution_refs",
+      sql`case ${t.execution}
+        when 'fleet' then ${t.vehicleId} is not null and ${t.driverId} is not null and ${t.carrierId} is null
+        when 'carrier' then ${t.carrierId} is not null and ${t.vehicleId} is null and ${t.driverId} is null
+      end`,
+    ),
+    check("waybills_amounts", sql`${t.amount} >= 0 and ${t.driverCommission} >= 0 and ${t.salesRepCommission} >= 0 and coalesce(${t.carrierCost}, 0) >= 0`),
+    check("waybills_odometer", sql`${t.odometerEnd} is null or ${t.odometerStart} is null or ${t.odometerEnd} >= ${t.odometerStart}`),
+  ],
+);
+
+export const tripStageType = pgEnum("trip_stage_type", ["loading", "in_transit", "border", "delivery"]);
+
+export const tripStages = pgTable(
+  "trip_stages",
+  {
+    id: id(),
+    waybillId: ref("waybill_id").notNull().references(() => waybills.id, { onDelete: "cascade" }),
+    stage: tripStageType("stage").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    latitude: numeric("latitude", { precision: 9, scale: 6 }),
+    longitude: numeric("longitude", { precision: 9, scale: 6 }),
+    odometer: integer("odometer"),
+    note: text("note"),
+    createdBy: ref("created_by").references(() => users.id),
+  },
+  (t) => [index("trip_stages_waybill_idx").on(t.waybillId, t.at)],
+);
+
+// الديزل يُقيد حسب مصدره الفعلي (القرار 4)
+export const fuelSource = pgEnum("fuel_source", ["custody", "fuel_card", "station_credit"]);
+
+export const waybillFuel = pgTable(
+  "waybill_fuel",
+  {
+    id: id(),
+    waybillId: ref("waybill_id").notNull().references(() => waybills.id, { onDelete: "cascade" }),
+    source: fuelSource("source").notNull(),
+    // المحطة (للآجل) أو مزوّد البطاقة
+    partyId: ref("party_id").references(() => parties.id),
+    liters: numeric("liters", { precision: 10, scale: 2 }),
+    // المبلغ قبل الضريبة، والضريبة منفصلة لتُقيد مدخلات
+    amount: money("amount").notNull(),
+    vatAmount: money("vat_amount").notNull().default("0"),
+    currencyCode: varchar("currency_code", { length: 3 }).notNull().default("SAR").references(() => currencies.code),
+    exchangeRate: numeric("exchange_rate", { precision: 18, scale: 6 }).notNull().default("1"),
+    odometer: integer("odometer"),
+    invoiceNumber: varchar("invoice_number", { length: 40 }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("waybill_fuel_waybill_idx").on(t.waybillId),
+    check("waybill_fuel_amounts", sql`${t.amount} > 0 and ${t.vatAmount} >= 0 and ${t.exchangeRate} > 0`),
+    check("waybill_fuel_station", sql`${t.source} <> 'station_credit' or ${t.partyId} is not null`),
+  ],
+);
+
+export const expenseBillTo = pgEnum("expense_bill_to", ["company", "customer"]);
+export const expensePayer = pgEnum("expense_payer", ["driver_custody", "customs_broker"]);
+
+// مصاريف الحدود والطريق على البوليصة؛ ما يكون على العميل يُسحب للفاتورة كرسوم
+export const waybillExpenses = pgTable(
+  "waybill_expenses",
+  {
+    id: id(),
+    waybillId: ref("waybill_id").notNull().references(() => waybills.id, { onDelete: "cascade" }),
+    chargeTypeId: ref("charge_type_id").notNull().references(() => chargeTypes.id),
+    amount: money("amount").notNull(),
+    currencyCode: varchar("currency_code", { length: 3 }).notNull().default("SAR").references(() => currencies.code),
+    exchangeRate: numeric("exchange_rate", { precision: 18, scale: 6 }).notNull().default("1"),
+    billTo: expenseBillTo("bill_to").notNull().default("company"),
+    payer: expensePayer("payer").notNull().default("driver_custody"),
+    // المخلص عند الدفع عن طريقه
+    partyId: ref("party_id").references(() => parties.id),
+    note: text("note"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("waybill_expenses_waybill_idx").on(t.waybillId),
+    check("waybill_expenses_amounts", sql`${t.amount} > 0 and ${t.exchangeRate} > 0`),
+    check("waybill_expenses_broker", sql`${t.payer} <> 'customs_broker' or ${t.partyId} is not null`),
+  ],
+);
