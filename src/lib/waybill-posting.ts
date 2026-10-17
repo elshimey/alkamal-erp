@@ -63,19 +63,12 @@ export function waybillPostingLines(
     const fx = { currencyCode: f.currencyCode, exchangeRate: f.exchangeRate };
     const creditAccount =
       f.source === "custody" ? custody() : f.source === "fuel_card" ? account.fuelCards : account.fuelStations;
-    lines.push({ accountId: account.fuelCost, debit: f.amount, ...fx, ...dims, description: `ديزل البوليصة ${w.number}` });
+    const credit = { accountId: creditAccount, ...fx, partyId: f.partyId, driverId: w.driverId, waybillId: w.id, description: `ديزل البوليصة ${w.number}` };
+    // كل مدين يقابله دائن بالمبلغ نفسه، فيبقى القيد متوازناً بالريال مهما كان تقريب سعر الصرف
+    pair({ accountId: account.fuelCost, ...fx, ...dims, description: `ديزل البوليصة ${w.number}` }, credit, f.amount);
     if (f.vatAmount > 0) {
-      lines.push({ accountId: account.inputVat, debit: f.vatAmount, ...fx, taxCodeId: inputVatTaxCodeId, waybillId: w.id, description: "ضريبة مدخلات الديزل" });
+      pair({ accountId: account.inputVat, ...fx, taxCodeId: inputVatTaxCodeId, waybillId: w.id, description: "ضريبة مدخلات الديزل" }, credit, f.vatAmount);
     }
-    lines.push({
-      accountId: creditAccount,
-      credit: f.amount + f.vatAmount,
-      ...fx,
-      partyId: f.partyId,
-      driverId: w.driverId,
-      waybillId: w.id,
-      description: `ديزل البوليصة ${w.number}`,
-    });
   }
 
   if (w.execution === "fleet" && w.driverCommission > 0) {

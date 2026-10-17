@@ -55,6 +55,12 @@ const PATHS = {
   logout: <path d="M14 4h5v16h-5M10 8l-4 4 4 4m-4-4h10" />,
   calendar: <path d="M4 6h16v15H4Zm0 5h16M8 3v5m8-5v5" />,
   alert: <path d="M12 3 2 20h20Zm0 6v5m0 3v.5" />,
+  invoice: <path d="M6 3h12v18l-3-2-3 2-3-2-3 2Zm3 5h6m-6 4h6m-6 4h3" />,
+  cash: <path d="M3 7h18v10H3Zm9 2.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5ZM6 10v4m12-4v4" />,
+  exchange: <path d="M4 8h13l-3-3m6 11H7l3 3" />,
+  fuel: <path d="M5 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16M4 21h12M7 8h6m2 2 3 2v6a1.5 1.5 0 0 0 3 0V9l-3-3" />,
+  chart: <path d="M4 20V4m0 16h16M8 16v-4m4 4V8m4 8v-6" />,
+  wrench: <path d="M14.5 6.5a4 4 0 0 0 5 5L12 19a2.1 2.1 0 0 1-3-3l7.5-7.5a4 4 0 0 1-2-2Z" />,
 } satisfies Record<string, ReactNode>;
 
 export type IconName = keyof typeof PATHS;

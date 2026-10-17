@@ -752,3 +752,125 @@ export const waybillExpenses = pgTable(
     check("waybill_expenses_broker", sql`${t.payer} <> 'customs_broker' or ${t.partyId} is not null`),
   ],
 );
+
+// ───────────────────────── المبيعات: الفاتورة التجميعية والتحصيل ─────────────────────────
+
+export const invoiceStatus = pgEnum("invoice_status", ["draft", "issued"]);
+// حالة الربط مع هيئة الزكاة (الفوترة الإلكترونية)
+export const zatcaStatus = pgEnum("zatca_status", ["not_sent", "accepted", "rejected"]);
+
+export const salesInvoices = pgTable(
+  "sales_invoices",
+  {
+    id: id(),
+    number: varchar("number", { length: 30 }).notNull().unique(),
+    invoiceDate: date("invoice_date").notNull(),
+    dueDate: date("due_date").notNull(),
+    customerId: ref("customer_id").notNull().references(() => parties.id),
+    contractId: ref("contract_id").references(() => contracts.id),
+    currencyCode: varchar("currency_code", { length: 3 }).notNull().default("SAR").references(() => currencies.code),
+    exchangeRate: numeric("exchange_rate", { precision: 18, scale: 6 }).notNull().default("1"),
+    subtotal: money("subtotal").notNull().default("0"),
+    vatTotal: money("vat_total").notNull().default("0"),
+    total: money("total").notNull().default("0"),
+    // مجموع ما خُصص لها من سندات القبض المرحّلة
+    paidAmount: money("paid_amount").notNull().default("0"),
+    status: invoiceStatus("status").notNull().default("draft"),
+    zatcaStatus: zatcaStatus("zatca_status").notNull().default("not_sent"),
+    zatcaResponse: text("zatca_response"),
+    notes: text("notes"),
+    journalEntryId: ref("journal_entry_id").references(() => journalEntries.id),
+    issuedBy: ref("issued_by").references(() => users.id),
+    issuedAt: timestamp("issued_at", { withTimezone: true }),
+    createdBy: ref("created_by").references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("sales_invoices_customer_idx").on(t.customerId, t.status),
+    check("sales_invoices_dates", sql`${t.dueDate} >= ${t.invoiceDate}`),
+    check("sales_invoices_paid", sql`${t.paidAmount} >= 0 and ${t.paidAmount} <= ${t.total}`),
+  ],
+);
+
+export const invoiceLineKind = pgEnum("invoice_line_kind", ["waybill", "expense"]);
+
+// سطر لكل بوليصة (والبوليصة لا تُفوتر مرتين)، أو مصروف محمّل على العميل
+export const salesInvoiceLines = pgTable(
+  "sales_invoice_lines",
+  {
+    id: id(),
+    invoiceId: ref("invoice_id").notNull().references(() => salesInvoices.id, { onDelete: "cascade" }),
+    lineNo: smallint("line_no").notNull(),
+    kind: invoiceLineKind("kind").notNull(),
+    waybillId: ref("waybill_id").references(() => waybills.id),
+    waybillExpenseId: ref("waybill_expense_id").references(() => waybillExpenses.id),
+    description: text("description").notNull(),
+    amount: money("amount").notNull(),
+    taxCodeId: ref("tax_code_id").references(() => taxCodes.id),
+    vatRate: numeric("vat_rate", { precision: 5, scale: 2 }).notNull().default("0"),
+    vatAmount: money("vat_amount").notNull().default("0"),
+    accountId: ref("account_id").notNull().references(() => accounts.id),
+    // مركز التكلفة = مركبة البوليصة (أو مركز الناقلين الخارجيين)
+    costCenterId: ref("cost_center_id").references(() => costCenters.id),
+  },
+  (t) => [
+    uniqueIndex("sales_invoice_lines_waybill_uq").on(t.waybillId).where(sql`${t.kind} = 'waybill'`),
+    uniqueIndex("sales_invoice_lines_expense_uq").on(t.waybillExpenseId).where(sql`${t.waybillExpenseId} is not null`),
+    index("sales_invoice_lines_invoice_idx").on(t.invoiceId),
+    check(
+      "sales_invoice_lines_refs",
+      sql`case ${t.kind}
+        when 'waybill' then ${t.waybillId} is not null and ${t.waybillExpenseId} is null
+        when 'expense' then ${t.waybillExpenseId} is not null
+      end`,
+    ),
+    check("sales_invoice_lines_amounts", sql`${t.amount} >= 0 and ${t.vatAmount} >= 0`),
+  ],
+);
+
+export const paymentMethod = pgEnum("payment_method", ["cash", "transfer", "cheque", "card"]);
+export const receiptStatus = pgEnum("receipt_status", ["draft", "posted"]);
+
+export const receipts = pgTable(
+  "receipts",
+  {
+    id: id(),
+    number: varchar("number", { length: 30 }).notNull().unique(),
+    receiptDate: date("receipt_date").notNull(),
+    customerId: ref("customer_id").notNull().references(() => parties.id),
+    amount: money("amount").notNull(),
+    currencyCode: varchar("currency_code", { length: 3 }).notNull().default("SAR").references(() => currencies.code),
+    exchangeRate: numeric("exchange_rate", { precision: 18, scale: 6 }).notNull().default("1"),
+    method: paymentMethod("method").notNull(),
+    // الصندوق أو البنك (حساب تفصيلي تحت 1101 أو 1102)
+    cashAccountId: ref("cash_account_id").notNull().references(() => accounts.id),
+    // المحصّل حقل مستقل (العيب 13)
+    collector: text("collector"),
+    reference: varchar("reference", { length: 60 }),
+    notes: text("notes"),
+    status: receiptStatus("status").notNull().default("draft"),
+    journalEntryId: ref("journal_entry_id").references(() => journalEntries.id),
+    createdBy: ref("created_by").references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("receipts_customer_idx").on(t.customerId, t.receiptDate),
+    check("receipts_amount_positive", sql`${t.amount} > 0 and ${t.exchangeRate} > 0`),
+  ],
+);
+
+// تخصيص القبض على الفواتير (يُغذي تقرير الأعمار)
+export const receiptAllocations = pgTable(
+  "receipt_allocations",
+  {
+    receiptId: ref("receipt_id").notNull().references(() => receipts.id, { onDelete: "cascade" }),
+    invoiceId: ref("invoice_id").notNull().references(() => salesInvoices.id),
+    amount: money("amount").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.receiptId, t.invoiceId] }),
+    index("receipt_allocations_invoice_idx").on(t.invoiceId),
+    check("receipt_allocations_positive", sql`${t.amount} > 0`),
+  ],
+);

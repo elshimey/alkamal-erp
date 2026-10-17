@@ -131,6 +131,28 @@ aside:hover > .road-line {
   animation-delay: calc(var(--i, 0) * 70ms);
 }
 
+/* أعمدة الرسوم البيانية تنمو عند الظهور */
+@keyframes grow-y {
+  from {
+    transform: scaleY(0);
+  }
+}
+@keyframes grow-x {
+  from {
+    transform: scaleX(0);
+  }
+}
+.grow-y {
+  transform-origin: bottom;
+  animation: grow-y 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation-delay: calc(var(--i, 0) * 60ms);
+}
+.grow-x {
+  transform-origin: right;
+  animation: grow-x 0.8s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation-delay: calc(var(--i, 0) * 60ms);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -138,5 +160,15 @@ aside:hover > .road-line {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+@media print {
+  body {
+    background: #fff;
+  }
+  @page {
+    size: A4;
+    margin: 12mm;
   }
 }

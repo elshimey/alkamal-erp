@@ -1,0 +1,481 @@
+import { and, asc, eq, inArray, like, lte, sql } from "drizzle-orm";
+import type { Db, Tx } from "@/db";
+import * as s from "@/db/schema";
+import { createJournalEntryTx, deleteEntryTx, nextDocumentNumber } from "@/lib/ledger";
+import { invoicePostingLines, lineVat, round2 } from "@/lib/invoice-posting";
+import { rateOn } from "@/lib/waybills";
+import { SALES_ACCOUNTS } from "@/data/sales";
+
+// الفاتورة التجميعية: عدة بوالص معتمدة لعميل واحد، سطر لكل بوليصة. هنا يُقيد الإيراد (القرار 3).
+
+const num = (v: string | null | undefined) => (v == null ? 0 : Number(v));
+
+async function accountId(db: Db | Tx, code: string) {
+  const [row] = await db.select({ id: s.accounts.id }).from(s.accounts).where(eq(s.accounts.code, code));
+  if (!row) throw new Error(`الحساب ${code} غير موجود في الشجرة`);
+  return row.id;
+}
+
+async function lockInvoice(tx: Tx, id: number) {
+  const [inv] = await tx.select().from(s.salesInvoices).where(eq(s.salesInvoices.id, id)).for("update");
+  if (!inv) throw new Error("الفاتورة غير موجودة");
+  return inv;
+}
+
+const addDays = (iso: string, days: number) => {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+};
+
+/** البوالص المعتمدة غير المفوترة (ليست على أي فاتورة، ولو مسودة). */
+function uninvoicedWaybills() {
+  return and(
+    eq(s.waybills.status, "approved"),
+    sql`not exists (select 1 from sales_invoice_lines l where l.waybill_id = ${s.waybills.id} and l.kind = 'waybill')`,
+  );
+}
+
+/** قائمة الفوترة: لكل عميل وعملة عدد البوالص المعتمدة غير المفوترة ومبلغها. */
+export async function invoicingQueue(db: Db | Tx, upTo?: string) {
+  return db
+    .select({
+      customerId: s.waybills.customerId,
+      customer: s.parties.nameAr,
+      currencyCode: s.waybills.currencyCode,
+      count: sql<number>`count(*)::int`,
+      amount: sql<string>`sum(${s.waybills.amount})`,
+      from: sql<string>`min(${s.waybills.waybillDate})`,
+      to: sql<string>`max(${s.waybills.waybillDate})`,
+    })
+    .from(s.waybills)
+    .innerJoin(s.parties, eq(s.parties.id, s.waybills.customerId))
+    .where(and(uninvoicedWaybills(), upTo ? lte(s.waybills.waybillDate, upTo) : undefined))
+    .groupBy(s.waybills.customerId, s.parties.nameAr, s.waybills.currencyCode)
+    .orderBy(asc(s.parties.nameAr));
+}
+
+/** يبني سطور البوالص ومصاريفها المحمّلة على العميل، بعملة الفاتورة. */
+async function buildLines(tx: Tx, waybillIds: number[], currencyCode: string, rate: number) {
+  if (!waybillIds.length) return [];
+  const [ext] = await tx.select({ id: s.costCenters.id }).from(s.costCenters).where(eq(s.costCenters.code, "EXT"));
+  const acc = {
+    domestic: await accountId(tx, SALES_ACCOUNTS.domesticRevenue),
+    international: await accountId(tx, SALES_ACCOUNTS.internationalRevenue),
+    recharged: await accountId(tx, SALES_ACCOUNTS.rechargedExpenses),
+  };
+  const rows = await tx
+    .select({ w: s.waybills, plate: s.vehicles.plate, vehicleCc: s.vehicles.costCenterId, taxRate: s.taxCodes.rate })
+    .from(s.waybills)
+    .leftJoin(s.vehicles, eq(s.vehicles.id, s.waybills.vehicleId))
+    .leftJoin(s.taxCodes, eq(s.taxCodes.id, s.waybills.taxCodeId))
+    .where(inArray(s.waybills.id, waybillIds))
+    .orderBy(asc(s.waybills.waybillDate), asc(s.waybills.id));
+  const routeNames = new Map(
+    (
+      await tx.execute<{ id: number; label: string }>(sql`
+        select r.id, f.name_ar || ' ← ' || t.name_ar as label
+        from routes r join locations f on f.id = r.from_location_id join locations t on t.id = r.to_location_id
+        where r.id in (select route_id from waybills where id in ${sql.raw(`(${waybillIds.join(",")})`)})`)
+    ).map((r) => [Number(r.id), r.label]),
+  );
+  const expenses = await tx
+    .select({ e: s.waybillExpenses, type: s.chargeTypes.nameAr })
+    .from(s.waybillExpenses)
+    .innerJoin(s.chargeTypes, eq(s.chargeTypes.id, s.waybillExpenses.chargeTypeId))
+    .where(
+      and(
+        inArray(s.waybillExpenses.waybillId, waybillIds),
+        eq(s.waybillExpenses.billTo, "customer"),
+        sql`not exists (select 1 from sales_invoice_lines l where l.waybill_expense_id = ${s.waybillExpenses.id})`,
+      ),
+    );
+
+  const lines: (typeof s.salesInvoiceLines.$inferInsert)[] = [];
+  for (const { w, plate, vehicleCc, taxRate } of rows) {
+    if (w.status !== "approved") throw new Error(`البوليصة ${w.number} غير معتمدة`);
+    if (w.currencyCode !== currencyCode) throw new Error(`البوليصة ${w.number} بعملة ${w.currencyCode} والفاتورة بـ ${currencyCode}`);
+    const vatRate = num(taxRate);
+    const amount = num(w.amount);
+    const base = {
+      taxCodeId: w.taxCodeId,
+      vatRate: String(vatRate),
+      costCenterId: vehicleCc ?? ext?.id ?? null,
+      waybillId: w.id,
+    };
+    lines.push({
+      ...base,
+      lineNo: 0,
+      invoiceId: 0,
+      kind: "waybill",
+      description: `${w.number} · ${routeNames.get(w.routeId) ?? ""} · ${plate ?? "ناقل خارجي"} · ${w.waybillDate}`,
+      amount: String(amount),
+      vatAmount: String(lineVat(amount, vatRate)),
+      accountId: w.isInternational ? acc.international : acc.domestic,
+    });
+    for (const { e, type } of expenses.filter((x) => x.e.waybillId === w.id)) {
+      // المصروف بعملته، ويُحوَّل لعملة الفاتورة بسعري الصرف
+      const converted = round2((num(e.amount) * num(e.exchangeRate)) / rate);
+      lines.push({
+        ...base,
+        lineNo: 0,
+        invoiceId: 0,
+        kind: "expense",
+        waybillExpenseId: e.id,
+        description: `${type} – ${w.number}`,
+        amount: String(converted),
+        vatAmount: String(lineVat(converted, vatRate)),
+        accountId: acc.recharged,
+      });
+    }
+  }
+  return lines;
+}
+
+async function recomputeTotals(tx: Tx, invoiceId: number) {
+  const [t] = await tx
+    .select({
+      subtotal: sql<string>`coalesce(sum(${s.salesInvoiceLines.amount}), 0)`,
+      vat: sql<string>`coalesce(sum(${s.salesInvoiceLines.vatAmount}), 0)`,
+    })
+    .from(s.salesInvoiceLines)
+    .where(eq(s.salesInvoiceLines.invoiceId, invoiceId));
+  const subtotal = round2(num(t.subtotal));
+  const vat = round2(num(t.vat));
+  await tx
+    .update(s.salesInvoices)
+    .set({ subtotal: String(subtotal), vatTotal: String(vat), total: String(round2(subtotal + vat)), updatedAt: new Date() })
+    .where(eq(s.salesInvoices.id, invoiceId));
+}
+
+async function insertLines(tx: Tx, invoiceId: number, lines: (typeof s.salesInvoiceLines.$inferInsert)[]) {
+  if (!lines.length) return;
+  const [{ max }] = await tx
+    .select({ max: sql<number>`coalesce(max(${s.salesInvoiceLines.lineNo}), 0)::int` })
+    .from(s.salesInvoiceLines)
+    .where(eq(s.salesInvoiceLines.invoiceId, invoiceId));
+  await tx.insert(s.salesInvoiceLines).values(lines.map((l, i) => ({ ...l, invoiceId, lineNo: max + i + 1 })));
+}
+
+export interface InvoiceInput {
+  customerId: number;
+  invoiceDate: string;
+  currencyCode?: string;
+  // فارغ = كل البوالص المعتمدة غير المفوترة للعميل حتى تاريخ الفاتورة
+  waybillIds?: number[];
+  notes?: string | null;
+  userId?: number;
+}
+
+/** ينشئ فاتورة تجميعية مسودة من بوالص العميل المعتمدة. */
+export async function createInvoice(db: Db, input: InvoiceInput) {
+  return db.transaction(async (tx) => {
+    const currency = input.currencyCode ?? "SAR";
+    const candidates = await tx
+      .select({ id: s.waybills.id, contractId: s.waybills.contractId })
+      .from(s.waybills)
+      .where(
+        and(
+          uninvoicedWaybills(),
+          eq(s.waybills.customerId, input.customerId),
+          eq(s.waybills.currencyCode, currency),
+          lte(s.waybills.waybillDate, input.invoiceDate),
+          input.waybillIds?.length ? inArray(s.waybills.id, input.waybillIds) : undefined,
+        ),
+      );
+    if (input.waybillIds?.length && candidates.length !== input.waybillIds.length) {
+      throw new Error("بعض البوالص المختارة غير معتمدة أو مفوترة أو لعميل آخر");
+    }
+    if (!candidates.length) throw new Error("لا توجد بوالص معتمدة غير مفوترة لهذا العميل حتى تاريخ الفاتورة");
+
+    const contractId = candidates.find((c) => c.contractId)?.contractId ?? null;
+    const [contract] = contractId ? await tx.select().from(s.contracts).where(eq(s.contracts.id, contractId)) : [];
+    const rate = await rateOn(tx, currency, input.invoiceDate);
+    const number = await nextDocumentNumber(tx, "sales_invoice", "INV", Number(input.invoiceDate.slice(0, 4)));
+    const [inv] = await tx
+      .insert(s.salesInvoices)
+      .values({
+        number,
+        invoiceDate: input.invoiceDate,
+        dueDate: addDays(input.invoiceDate, contract?.paymentTermsDays ?? 30),
+        customerId: input.customerId,
+        contractId,
+        currencyCode: currency,
+        exchangeRate: String(rate),
+        notes: input.notes || null,
+        createdBy: input.userId,
+      })
+      .returning();
+    await insertLines(tx, inv.id, await buildLines(tx, candidates.map((c) => c.id), currency, rate));
+    await recomputeTotals(tx, inv.id);
+    return inv;
+  });
+}
+
+/** فوترة الكل: فاتورة لكل عميل وعملة بكل بوالصه المعتمدة غير المفوترة. */
+export async function createAllInvoices(db: Db, invoiceDate: string, userId?: number) {
+  const queue = await invoicingQueue(db, invoiceDate);
+  const created: { number: string; customer: string }[] = [];
+  const errors: string[] = [];
+  for (const q of queue) {
+    try {
+      const inv = await createInvoice(db, { customerId: q.customerId, invoiceDate, currencyCode: q.currencyCode, userId });
+      created.push({ number: inv.number, customer: q.customer });
+    } catch (err) {
+      errors.push(`${q.customer}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  return { created, errors };
+}
+
+export async function addWaybillsToInvoice(db: Db, invoiceId: number, waybillIds: number[]) {
+  return db.transaction(async (tx) => {
+    const inv = await lockInvoice(tx, invoiceId);
+    if (inv.status !== "draft") throw new Error("الفاتورة مُصدرة؛ أرجعها لمسودة أولاً");
+    const ok = await tx
+      .select({ id: s.waybills.id })
+      .from(s.waybills)
+      .where(and(uninvoicedWaybills(), eq(s.waybills.customerId, inv.customerId), inArray(s.waybills.id, waybillIds)));
+    if (ok.length !== waybillIds.length) throw new Error("بعض البوالص غير معتمدة أو مفوترة أو لعميل آخر");
+    await insertLines(tx, invoiceId, await buildLines(tx, waybillIds, inv.currencyCode, num(inv.exchangeRate)));
+    await recomputeTotals(tx, invoiceId);
+  });
+}
+
+/** يحذف سطراً من مسودة؛ حذف سطر بوليصة يحذف مصاريفها المحمّلة معه. */
+export async function removeInvoiceLine(db: Db, invoiceId: number, lineId: number) {
+  return db.transaction(async (tx) => {
+    const inv = await lockInvoice(tx, invoiceId);
+    if (inv.status !== "draft") throw new Error("الفاتورة مُصدرة؛ أرجعها لمسودة أولاً");
+    const [line] = await tx
+      .select()
+      .from(s.salesInvoiceLines)
+      .where(and(eq(s.salesInvoiceLines.id, lineId), eq(s.salesInvoiceLines.invoiceId, invoiceId)));
+    if (!line) return;
+    if (line.kind === "waybill") {
+      await tx.delete(s.salesInvoiceLines).where(and(eq(s.salesInvoiceLines.invoiceId, invoiceId), eq(s.salesInvoiceLines.waybillId, line.waybillId!)));
+    } else {
+      await tx.delete(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.id, lineId));
+    }
+    await recomputeTotals(tx, invoiceId);
+  });
+}
+
+/** الإصدار: يرحّل قيد الإيراد والضريبة، وتصبح بوالصها «مفوترة». */
+export async function issueInvoice(db: Db, invoiceId: number, userId?: number) {
+  return db.transaction(async (tx) => {
+    const inv = await lockInvoice(tx, invoiceId);
+    if (inv.status !== "draft") throw new Error(`الفاتورة ${inv.number} مُصدرة مسبقاً`);
+    const lines = await tx.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, invoiceId)).orderBy(asc(s.salesInvoiceLines.lineNo));
+    if (!lines.length || !(num(inv.total) > 0)) throw new Error("الفاتورة فارغة أو مبلغها صفر");
+    const waybillIds = [...new Set(lines.map((l) => l.waybillId).filter((v): v is number => v != null))];
+    const locked = await tx.select({ id: s.waybills.id, number: s.waybills.number, status: s.waybills.status }).from(s.waybills).where(inArray(s.waybills.id, waybillIds)).for("update");
+    const notApproved = locked.filter((w) => w.status !== "approved");
+    if (notApproved.length) throw new Error(`بوالص لم تعد معتمدة: ${notApproved.map((w) => w.number).join("، ")}`);
+
+    const [vatOut] = await tx.select({ id: s.taxCodes.id }).from(s.taxCodes).where(eq(s.taxCodes.code, "VAT15-OUT"));
+    const entry = await createJournalEntryTx(tx, {
+      entryDate: inv.invoiceDate,
+      description: `فاتورة مبيعات ${inv.number}`,
+      source: { type: "sales_invoice", id: inv.id },
+      post: true,
+      userId,
+      lines: invoicePostingLines(
+        { number: inv.number, customerId: inv.customerId, currencyCode: inv.currencyCode, exchangeRate: num(inv.exchangeRate) },
+        lines.map((l) => ({
+          accountId: l.accountId,
+          amount: num(l.amount),
+          vatAmount: num(l.vatAmount),
+          costCenterId: l.costCenterId,
+          waybillId: l.waybillId,
+          description: l.description,
+        })),
+        { receivable: await accountId(tx, SALES_ACCOUNTS.receivable), outputVat: await accountId(tx, SALES_ACCOUNTS.outputVat) },
+        vatOut?.id ?? null,
+      ),
+    });
+    await tx
+      .update(s.salesInvoices)
+      .set({ status: "issued", journalEntryId: entry.id, issuedBy: userId ?? null, issuedAt: new Date(), updatedAt: new Date() })
+      .where(eq(s.salesInvoices.id, invoiceId));
+    await tx.update(s.waybills).set({ status: "invoiced", updatedAt: new Date() }).where(inArray(s.waybills.id, waybillIds));
+    return entry;
+  });
+}
+
+/** الإرجاع لمسودة: يلغي القيد ويعيد البوالص «معتمدة». يُمنع بعد تخصيص قبض عليها. */
+export async function revertInvoice(db: Db, invoiceId: number) {
+  return db.transaction(async (tx) => {
+    const inv = await lockInvoice(tx, invoiceId);
+    if (inv.status !== "issued") throw new Error("الفاتورة ليست مُصدرة");
+    if (num(inv.paidAmount) > 0) throw new Error("على الفاتورة سندات قبض مخصصة؛ أرجع السندات أولاً");
+    if (inv.zatcaStatus === "accepted") throw new Error("الفاتورة مقبولة لدى الزكاة؛ صحّحها بإشعار دائن");
+    await tx.update(s.salesInvoices).set({ status: "draft", journalEntryId: null, issuedBy: null, issuedAt: null, updatedAt: new Date() }).where(eq(s.salesInvoices.id, invoiceId));
+    if (inv.journalEntryId) await deleteEntryTx(tx, inv.journalEntryId);
+    await tx
+      .update(s.waybills)
+      .set({ status: "approved", updatedAt: new Date() })
+      .where(sql`${s.waybills.id} in (select waybill_id from sales_invoice_lines where invoice_id = ${invoiceId} and kind = 'waybill')`);
+  });
+}
+
+export async function deleteInvoice(db: Db, invoiceId: number, opts: { reason: string; userId?: number }) {
+  if (!opts.reason.trim()) throw new Error("اكتب سبب الحذف");
+  return db.transaction(async (tx) => {
+    const inv = await lockInvoice(tx, invoiceId);
+    if (inv.status !== "draft") throw new Error("الحذف متاح للمسودة فقط");
+    const lines = await tx.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, invoiceId));
+    await tx.insert(s.deletionLog).values({ entity: "sales_invoice", entityId: String(invoiceId), snapshot: { invoice: inv, lines }, reason: opts.reason.trim(), userId: opts.userId });
+    await tx.delete(s.salesInvoices).where(eq(s.salesInvoices.id, invoiceId));
+  });
+}
+
+// ───────────── سندات القبض ─────────────
+
+export interface ReceiptInput {
+  receiptDate: string;
+  customerId: number;
+  amount: number;
+  currencyCode?: string;
+  exchangeRate?: number | null;
+  method: "cash" | "transfer" | "cheque" | "card";
+  cashAccountId: number;
+  collector?: string | null;
+  reference?: string | null;
+  notes?: string | null;
+  // فارغ = يُخصص تلقائياً على أقدم الفواتير المستحقة
+  invoiceId?: number | null;
+  post?: boolean;
+  userId?: number;
+}
+
+export async function createReceipt(db: Db, input: ReceiptInput) {
+  return db.transaction(async (tx) => {
+    const [cash] = await tx.select().from(s.accounts).where(eq(s.accounts.id, input.cashAccountId));
+    if (!cash || !cash.isPostable || !/^110[12]/.test(cash.code)) throw new Error("اختر صندوقاً أو حساب بنك تفصيلياً");
+    const currency = input.currencyCode ?? "SAR";
+    if (cash.currencyCode && cash.currencyCode !== currency) throw new Error(`الحساب ${cash.nameAr} بعملة ${cash.currencyCode}`);
+    const number = await nextDocumentNumber(tx, "receipt", "RC", Number(input.receiptDate.slice(0, 4)));
+    const [r] = await tx
+      .insert(s.receipts)
+      .values({
+        number,
+        receiptDate: input.receiptDate,
+        customerId: input.customerId,
+        amount: String(input.amount),
+        currencyCode: currency,
+        exchangeRate: String(input.exchangeRate ?? (await rateOn(tx, currency, input.receiptDate))),
+        method: input.method,
+        cashAccountId: cash.id,
+        collector: input.collector || null,
+        reference: input.reference || null,
+        notes: input.notes || null,
+        createdBy: input.userId,
+      })
+      .returning();
+    if (input.post) await postReceiptTx(tx, r.id, { invoiceId: input.invoiceId, userId: input.userId });
+    return r;
+  });
+}
+
+export async function postReceipt(db: Db, receiptId: number, opts: { invoiceId?: number | null; userId?: number } = {}) {
+  return db.transaction((tx) => postReceiptTx(tx, receiptId, opts));
+}
+
+async function postReceiptTx(tx: Tx, receiptId: number, opts: { invoiceId?: number | null; userId?: number }) {
+  const [r] = await tx.select().from(s.receipts).where(eq(s.receipts.id, receiptId)).for("update");
+  if (!r) throw new Error("السند غير موجود");
+  if (r.status === "posted") throw new Error(`السند ${r.number} مرحّل مسبقاً`);
+  const amount = num(r.amount);
+  const fx = { currencyCode: r.currencyCode, exchangeRate: num(r.exchangeRate) };
+  const entry = await createJournalEntryTx(tx, {
+    entryDate: r.receiptDate,
+    description: `سند قبض ${r.number}`,
+    source: { type: "receipt", id: r.id },
+    post: true,
+    userId: opts.userId,
+    lines: [
+      { accountId: r.cashAccountId, debit: amount, ...fx, partyId: r.customerId, description: `قبض ${r.number}` },
+      { accountId: await accountId(tx, SALES_ACCOUNTS.receivable), credit: amount, ...fx, partyId: r.customerId, description: `قبض ${r.number}` },
+    ],
+  });
+
+  // التخصيص: على الفاتورة المختارة، وإلا على أقدم الفواتير المستحقة بنفس العملة
+  const open = await tx
+    .select()
+    .from(s.salesInvoices)
+    .where(
+      and(
+        eq(s.salesInvoices.customerId, r.customerId),
+        eq(s.salesInvoices.status, "issued"),
+        eq(s.salesInvoices.currencyCode, r.currencyCode),
+        sql`${s.salesInvoices.paidAmount} < ${s.salesInvoices.total}`,
+        opts.invoiceId ? eq(s.salesInvoices.id, opts.invoiceId) : undefined,
+      ),
+    )
+    .orderBy(asc(s.salesInvoices.dueDate), asc(s.salesInvoices.id))
+    .for("update");
+  if (opts.invoiceId && !open.length) throw new Error("الفاتورة المختارة مسددة أو ليست لهذا العميل بنفس العملة");
+  let left = amount;
+  for (const inv of open) {
+    if (left <= 0) break;
+    const take = round2(Math.min(left, num(inv.total) - num(inv.paidAmount)));
+    await tx.insert(s.receiptAllocations).values({ receiptId: r.id, invoiceId: inv.id, amount: String(take) });
+    await tx.update(s.salesInvoices).set({ paidAmount: String(round2(num(inv.paidAmount) + take)), updatedAt: new Date() }).where(eq(s.salesInvoices.id, inv.id));
+    left = round2(left - take);
+  }
+  await tx.update(s.receipts).set({ status: "posted", journalEntryId: entry.id }).where(eq(s.receipts.id, r.id));
+  // الباقي (إن وُجد) يبقى رصيداً دائناً للعميل يُخصص لاحقاً
+  return { entry, unallocated: left };
+}
+
+/** إرجاع السند لمسودة: يلغي القيد والتخصيصات. */
+export async function revertReceipt(db: Db, receiptId: number) {
+  return db.transaction(async (tx) => {
+    const [r] = await tx.select().from(s.receipts).where(eq(s.receipts.id, receiptId)).for("update");
+    if (!r) throw new Error("السند غير موجود");
+    if (r.status !== "posted") throw new Error("السند ليس مرحّلاً");
+    const allocs = await tx.select().from(s.receiptAllocations).where(eq(s.receiptAllocations.receiptId, receiptId));
+    for (const a of allocs) {
+      await tx
+        .update(s.salesInvoices)
+        .set({ paidAmount: sql`${s.salesInvoices.paidAmount} - ${a.amount}`, updatedAt: new Date() })
+        .where(eq(s.salesInvoices.id, a.invoiceId));
+    }
+    await tx.delete(s.receiptAllocations).where(eq(s.receiptAllocations.receiptId, receiptId));
+    await tx.update(s.receipts).set({ status: "draft", journalEntryId: null }).where(eq(s.receipts.id, receiptId));
+    if (r.journalEntryId) await deleteEntryTx(tx, r.journalEntryId);
+  });
+}
+
+export async function deleteReceipt(db: Db, receiptId: number, opts: { reason: string; userId?: number }) {
+  if (!opts.reason.trim()) throw new Error("اكتب سبب الحذف");
+  return db.transaction(async (tx) => {
+    const [r] = await tx.select().from(s.receipts).where(eq(s.receipts.id, receiptId)).for("update");
+    if (!r) throw new Error("السند غير موجود");
+    if (r.status !== "draft") throw new Error("الحذف متاح للمسودة فقط");
+    await tx.insert(s.deletionLog).values({ entity: "receipt", entityId: String(receiptId), snapshot: r, reason: opts.reason.trim(), userId: opts.userId });
+    await tx.delete(s.receipts).where(eq(s.receipts.id, receiptId));
+  });
+}
+
+/** الصناديق والبنوك التفصيلية لقائمة الاختيار. */
+export async function cashAccounts(db: Db | Tx) {
+  return db
+    .select({ id: s.accounts.id, code: s.accounts.code, nameAr: s.accounts.nameAr, currencyCode: s.accounts.currencyCode })
+    .from(s.accounts)
+    .where(and(eq(s.accounts.isPostable, true), eq(s.accounts.isActive, true), sql`(${s.accounts.code} like '1101%' or ${s.accounts.code} like '1102%')`))
+    .orderBy(asc(s.accounts.code));
+}
+
+/** رصيد العميل المستحق من القيود المرحّلة على حساب العملاء. */
+export async function customerBalance(db: Db | Tx, customerId: number) {
+  const [row] = await db
+    .select({ balance: sql<string>`coalesce(sum(${s.journalLines.debitBase} - ${s.journalLines.creditBase}), 0)` })
+    .from(s.journalLines)
+    .innerJoin(s.journalEntries, eq(s.journalEntries.id, s.journalLines.entryId))
+    .innerJoin(s.accounts, eq(s.accounts.id, s.journalLines.accountId))
+    .where(and(eq(s.journalLines.partyId, customerId), eq(s.journalEntries.status, "posted"), like(s.accounts.code, `${SALES_ACCOUNTS.receivable}%`)));
+  return num(row.balance);
+}
+
