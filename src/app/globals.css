@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Segoe UI", Tahoma, "Noto Sans Arabic", "Geeza Pro", system-ui, sans-serif;
+  --color-brand-50: #eef6ff;
+  --color-brand-100: #d9eaff;
+  --color-brand-600: #1d5fbf;
+  --color-brand-700: #184e9c;
+  --color-brand-900: #0f2f5c;
+}
+
+body {
+  background: #f5f7fa;
+  color: #1f2937;
+}
+
+/* الأرقام والرموز تبقى من اليسار لليمين داخل النص العربي */
+.ltr-nums {
+  direction: ltr;
+  unicode-bidi: isolate;
+  font-variant-numeric: tabular-nums;
+}
