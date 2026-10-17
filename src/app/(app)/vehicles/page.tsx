@@ -3,9 +3,9 @@ import { db } from "@/db";
 import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
-import { ActionForm, SubmitButton } from "@/components/action-form";
-import { Badge, Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
-import { addVehicle } from "./actions";
+import { SheetEditor } from "@/components/sheet-editor";
+import { Badge, Card, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
+import { saveVehicles } from "./actions";
 
 const STATUS = {
   active: { label: "تعمل", tone: "green" },
@@ -30,46 +30,21 @@ export default async function VehiclesPage() {
     <>
       <PageHeader title="المركبات" description="كل مركبة تُضاف تنشئ مركز تكلفتها تلقائياً." />
       {can(user.perms, "vehicles", "create") && (
-        <Card title="إضافة مركبة" className="mb-6">
-          <ActionForm action={addVehicle} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <Field label="اللوحة *">
-              <Input name="plate" required placeholder="أ ب ج 1234" />
-            </Field>
-            <Field label="رقم الشاسيه *">
-              <Input name="chassis" required dir="ltr" />
-            </Field>
-            <Field label="النوع">
-              <Select name="vehicleTypeId" defaultValue="">
-                <option value="">—</option>
-                {types.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.nameAr}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="الملكية">
-              <Select name="ownership" defaultValue="owned">
-                <option value="owned">مملوكة</option>
-                <option value="leased">مستأجرة</option>
-              </Select>
-            </Field>
-            <Field label="الماركة">
-              <Input name="make" placeholder="مرسيدس" />
-            </Field>
-            <Field label="الطراز">
-              <Input name="model" placeholder="أكتروس" />
-            </Field>
-            <Field label="سنة الصنع">
-              <Input name="year" type="number" min={1980} max={2100} dir="ltr" />
-            </Field>
-            <Field label="عداد الكيلومترات">
-              <Input name="odometer" type="number" min={0} dir="ltr" />
-            </Field>
-            <div className="col-span-full">
-              <SubmitButton>إضافة المركبة</SubmitButton>
-            </div>
-          </ActionForm>
+        <Card title="إدخال مركبات" className="mb-6">
+          <SheetEditor
+            templateName="المركبات"
+            action={saveVehicles}
+            columns={[
+              { key: "plate", label: "اللوحة", required: true, placeholder: "أ ب ج 1234" },
+              { key: "chassis", label: "رقم الشاسيه", required: true, ltr: true, width: "11rem" },
+              { key: "vehicleTypeId", label: "النوع", type: "select", options: types.map((t) => ({ value: String(t.id), label: t.nameAr })) },
+              { key: "make", label: "الماركة" },
+              { key: "model", label: "الطراز" },
+              { key: "year", label: "سنة الصنع", type: "number", width: "5rem" },
+              { key: "ownership", label: "الملكية", type: "select", options: [{ value: "owned", label: "مملوكة" }, { value: "leased", label: "مستأجرة" }] },
+              { key: "odometer", label: "العداد (كم)", type: "number", width: "6rem" },
+            ]}
+          />
         </Card>
       )}
       <Table head={["اللوحة", "النوع", "الماركة والطراز", "السنة", "العداد", "الملكية", "الحالة", "مركز التكلفة"]}>

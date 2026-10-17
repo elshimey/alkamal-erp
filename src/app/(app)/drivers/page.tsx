@@ -4,9 +4,9 @@ import { db } from "@/db";
 import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
-import { ActionForm, SubmitButton } from "@/components/action-form";
-import { Badge, Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
-import { addDriver } from "./actions";
+import { SheetEditor } from "@/components/sheet-editor";
+import { Badge, Card, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
+import { saveDrivers } from "./actions";
 
 const LANG = { ar: "عربي", ur: "أوردو", hi: "هندي", en: "إنجليزي" } as const;
 const STATUS = {
@@ -39,57 +39,25 @@ export default async function DriversPage() {
         description="كل سائق يُنشأ معه موظفه، وحساب عهدته تحت 1105، وحساب رواتبه المستحقة تحت 2107 تلقائياً."
       />
       {can(user.perms, "drivers", "create") && (
-        <Card title="إضافة سائق" className="mb-6">
-          <ActionForm action={addDriver} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <Field label="الاسم *">
-              <Input name="nameAr" required />
-            </Field>
-            <Field label="الجوال">
-              <Input name="mobile" dir="ltr" />
-            </Field>
-            <Field label="الجنسية">
-              <Input name="nationality" />
-            </Field>
-            <Field label="لغة التطبيق">
-              <Select name="appLanguage" defaultValue="ar">
-                {Object.entries(LANG).map(([k, v]) => (
-                  <option key={k} value={k}>
-                    {v}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="رقم الهوية">
-              <Input name="nationalId" dir="ltr" />
-            </Field>
-            <Field label="رقم الإقامة">
-              <Input name="residencyNumber" dir="ltr" />
-            </Field>
-            <Field label="رقم الرخصة">
-              <Input name="licenseNumber" dir="ltr" />
-            </Field>
-            <Field label="بطاقة هيئة النقل">
-              <Input name="transportCardNumber" dir="ltr" />
-            </Field>
-            <Field label="فئة العمولة">
-              <Select name="commissionClass" defaultValue="domestic">
-                <option value="domestic">داخلي</option>
-                <option value="international">خارجي</option>
-              </Select>
-            </Field>
-            <Field label="تاريخ التعيين">
-              <Input name="hireDate" type="date" />
-            </Field>
-            <Field label="الراتب الأساسي">
-              <Input name="basicSalary" type="number" min={0} step="0.01" dir="ltr" />
-            </Field>
-            <Field label="سقف العهدة">
-              <Input name="custodyLimit" type="number" min={0} step="0.01" dir="ltr" />
-            </Field>
-            <div className="col-span-full">
-              <SubmitButton>إضافة السائق</SubmitButton>
-            </div>
-          </ActionForm>
+        <Card title="إدخال سائقين" className="mb-6">
+          <SheetEditor
+            templateName="السائقون"
+            action={saveDrivers}
+            columns={[
+              { key: "nameAr", label: "الاسم", required: true, width: "12rem" },
+              { key: "mobile", label: "الجوال", ltr: true },
+              { key: "nationality", label: "الجنسية" },
+              { key: "appLanguage", label: "لغة التطبيق", type: "select", options: Object.entries(LANG).map(([value, label]) => ({ value, label })) },
+              { key: "nationalId", label: "الهوية", ltr: true },
+              { key: "residencyNumber", label: "الإقامة", ltr: true },
+              { key: "licenseNumber", label: "الرخصة", ltr: true },
+              { key: "transportCardNumber", label: "بطاقة هيئة النقل", ltr: true },
+              { key: "commissionClass", label: "فئة العمولة", type: "select", options: [{ value: "domestic", label: "داخلي" }, { value: "international", label: "خارجي" }] },
+              { key: "hireDate", label: "تاريخ التعيين", type: "date" },
+              { key: "basicSalary", label: "الراتب الأساسي", type: "number" },
+              { key: "custodyLimit", label: "سقف العهدة", type: "number" },
+            ]}
+          />
         </Card>
       )}
       <Table head={["الاسم", "الجوال", "الجنسية", "لغة التطبيق", "العمولة", "المركبة الحالية", "حساب العهدة", "الحالة"]}>

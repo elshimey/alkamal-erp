@@ -4,8 +4,8 @@ export function PageHeader({ title, description, children }: { title: string; de
   return (
     <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
       <div>
-        <h1 className="text-2xl font-bold text-brand-900">{title}</h1>
-        {description && <p className="mt-1 text-sm text-gray-500">{description}</p>}
+        <h1 className="border-s-4 border-brand-600 ps-3 text-2xl font-bold text-brand-900">{title}</h1>
+        {description && <p className="mt-1 ps-4 text-sm text-gray-500">{description}</p>}
       </div>
       {children}
     </div>
@@ -14,7 +14,7 @@ export function PageHeader({ title, description, children }: { title: string; de
 
 export function Card({ title, children, className = "" }: { title?: string; children: ReactNode; className?: string }) {
   return (
-    <section className={`rounded-xl border border-gray-200 bg-white p-5 shadow-sm ${className}`}>
+    <section className={`rounded-xl border border-black/5 bg-white p-5 shadow-sm ${className}`}>
       {title && <h2 className="mb-4 text-base font-semibold text-gray-800">{title}</h2>}
       {children}
     </section>
@@ -46,7 +46,7 @@ export function Table({ head, children }: { head: ReactNode[]; children: ReactNo
   return (
     <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
       <table className="w-full text-sm">
-        <thead className="bg-gray-50 text-gray-600">
+        <thead className="bg-asphalt-900 text-white/85">
           <tr>
             {head.map((h, i) => (
               <th key={i} className="px-4 py-3 text-start font-medium whitespace-nowrap">
@@ -69,7 +69,7 @@ export function Badge({ children, tone = "gray" }: { children: ReactNode; tone?:
   const tones = {
     gray: "bg-gray-100 text-gray-700",
     green: "bg-green-100 text-green-800",
-    blue: "bg-brand-100 text-brand-700",
+    blue: "bg-sky-100 text-sky-800",
     amber: "bg-amber-100 text-amber-800",
     red: "bg-red-100 text-red-700",
   };

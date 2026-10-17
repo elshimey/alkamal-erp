@@ -1,17 +1,28 @@
 @import "tailwindcss";
 
+/* هوية «الكمال للنقليات»: أسفلت الطريق + أصفر إشارات المرور، مع خط الطريق المتقطع كعنصر متكرر */
 @theme {
-  --font-sans: "Segoe UI", Tahoma, "Noto Sans Arabic", "Geeza Pro", system-ui, sans-serif;
-  --color-brand-50: #eef6ff;
-  --color-brand-100: #d9eaff;
-  --color-brand-600: #1d5fbf;
-  --color-brand-700: #184e9c;
-  --color-brand-900: #0f2f5c;
+  --font-sans: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, "Noto Sans Arabic", system-ui, sans-serif;
+
+  /* أصفر الإشارة: للأزرار والتمييز */
+  --color-brand-50: #fff8e6;
+  --color-brand-100: #fdebb8;
+  --color-brand-500: #f5b82e;
+  --color-brand-600: #e9a100;
+  /* للروابط والنصوص المميزة (تباين كافٍ على الأبيض) */
+  --color-brand-700: #8a5c00;
+  /* الأسفلت: للقائمة الجانبية والعناوين */
+  --color-brand-900: #1b2126;
+
+  --color-asphalt-700: #303a42;
+  --color-asphalt-800: #232b31;
+  --color-asphalt-900: #1b2126;
+  --color-concrete: #f3f1eb;
 }
 
 body {
-  background: #f5f7fa;
-  color: #1f2937;
+  background: var(--color-concrete);
+  color: #1f2428;
 }
 
 /* الأرقام والرموز تبقى من اليسار لليمين داخل النص العربي */
@@ -19,4 +30,14 @@ body {
   direction: ltr;
   unicode-bidi: isolate;
   font-variant-numeric: tabular-nums;
+}
+
+/* خط الطريق المتقطع */
+.road-line {
+  background-image: repeating-linear-gradient(to bottom, var(--color-brand-600) 0 18px, transparent 18px 34px);
+  width: 4px;
+}
+.road-line-h {
+  background-image: repeating-linear-gradient(to left, var(--color-brand-600) 0 22px, transparent 22px 40px);
+  height: 4px;
 }
