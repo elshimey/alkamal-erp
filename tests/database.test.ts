@@ -13,6 +13,7 @@ import { assignVehicle, createDriver, createVehicle, driverOnDate, expiringDocum
 import { addSubAccount } from "@/lib/accounts";
 import { activeContract, createContract, createLocation, createParty, createRoute, priceTrip, setContractStatus } from "@/lib/operations";
 import { createInvoice, createReceipt, invoicingQueue, issueInvoice, revertInvoice, revertReceipt } from "@/lib/invoices";
+import { createExpense, approveExpense, createPayment, createPurchaseInvoice, custodyBalances, postPurchaseInvoice, rejectExpense, revertExpense, revertPayment, revertPurchaseInvoice, supplierBalances } from "@/lib/purchases";
 import { alertCounts, financials, operations, periodRange, receivablesAging, vehicleProfit } from "@/lib/dashboard";
 import { addExpense, addFuel, approveWaybill, createWaybill, deleteWaybill, recordStage, rejectWaybill, revertWaybill } from "@/lib/waybills";
 
@@ -482,6 +483,92 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(ext).toMatchObject({ vehicleId: null, cost: 1500, trips: 1 });
       expect(await receivablesAging(db, `${YEAR}-10-17`)).toMatchObject({ overdueCount: 1, d30: 5000, notDue: 0 });
       expect(await alertCounts(db, `${YEAR}-10-17`)).toMatchObject({ overdue: 1, toApprove: 0, toInvoice: 0, kwdRateDate: null });
+    });
+
+    it("فاتورة الورشة: الصيانة على مركز تكلفة المركبة، وضريبة المدخلات، ودائنة لحساب الورش", async () => {
+      const workshopId = (await createParty(db, { nameAr: "ورشة الخليج", roles: ["workshop"] })).id;
+      const [maint] = await db.select().from(s.accounts).where(eq(s.accounts.code, "5107"));
+      await expect(
+        createPurchaseInvoice(db, { supplierId: workshopId, supplierInvoiceNo: "W-1", invoiceDate: `${YEAR}-08-20`, lines: [{ accountId: maint.id, description: "تغيير زيت", amount: 800, vatRate: 15 }] }),
+      ).rejects.toThrow("يتطلب مركبة");
+      await expect(
+        createPurchaseInvoice(db, { supplierId: customerId, supplierInvoiceNo: "X", invoiceDate: `${YEAR}-08-20`, lines: [{ accountId: maint.id, description: "x", amount: 1, vehicleId: vehicle.id }] }),
+      ).rejects.toThrow("ليست مورداً");
+      const inv = await createPurchaseInvoice(db, {
+        supplierId: workshopId,
+        supplierInvoiceNo: "W-1",
+        invoiceDate: `${YEAR}-08-20`,
+        lines: [
+          { accountId: maint.id, vehicleId: vehicle.id, description: "تغيير زيت", amount: 800, vatRate: 15 },
+          { accountId: maint.id, vehicleId: vehicle.id, description: "شغل يد", amount: 200 },
+        ],
+      });
+      expect(inv.number).toBe(`PI-${YEAR}-000001`);
+      expect([Number(inv.subtotal), Number(inv.vatTotal), Number(inv.total)]).toEqual([1000, 120, 1120]);
+      expect(inv.dueDate).toBe(`${YEAR}-09-19`);
+      await expect(createPurchaseInvoice(db, { supplierId: workshopId, supplierInvoiceNo: "W-1", invoiceDate: `${YEAR}-08-21`, lines: [{ accountId: maint.id, vehicleId: vehicle.id, description: "x", amount: 1 }] })).rejects.toThrow("مسجلة مسبقاً");
+
+      const entry = await postPurchaseInvoice(db, inv.id);
+      const jl = await linesOf(entry.id);
+      const sum = (code: string, k: "debit" | "credit") => jl.filter((l) => l.code === code).reduce((a, l) => a + l[k], 0);
+      expect(sum("5107", "debit")).toBe(1000);
+      expect(jl.filter((l) => l.code === "5107").every((l) => l.cc === vehicle.costCenterId)).toBe(true);
+      expect(sum("1108", "debit")).toBe(120);
+      expect(sum("2104", "credit")).toBe(1120);
+      expect((await supplierBalances(db)).find((b) => b.id === workshopId)?.balance).toBe(1120);
+
+      // سداد جزئي ثم كامل، والإرجاع ممنوع بعد السداد
+      const p1 = await createPayment(db, { paymentDate: `${YEAR}-09-01`, kind: "supplier", partyId: workshopId, amount: 500, method: "transfer", cashAccountId: acc["110101"], post: true });
+      let [row] = await db.select().from(s.purchaseInvoices).where(eq(s.purchaseInvoices.id, inv.id));
+      expect(Number(row.paidAmount)).toBe(500);
+      await expect(revertPurchaseInvoice(db, inv.id)).rejects.toThrow("سندات صرف");
+      await createPayment(db, { paymentDate: `${YEAR}-09-02`, kind: "supplier", partyId: workshopId, amount: 700, method: "cash", cashAccountId: acc["110101"], post: true });
+      [row] = await db.select().from(s.purchaseInvoices).where(eq(s.purchaseInvoices.id, inv.id));
+      expect(Number(row.paidAmount)).toBe(1120);
+      expect((await supplierBalances(db)).find((b) => b.id === workshopId)?.balance).toBe(-80);
+      // الإرجاع يلغي تخصيص السند الأول فقط؛ الثاني خُصص منه 620 والباقي 80 دفعة مقدمة
+      await revertPayment(db, p1.id);
+      [row] = await db.select().from(s.purchaseInvoices).where(eq(s.purchaseInvoices.id, inv.id));
+      expect(Number(row.paidAmount)).toBe(620);
+    });
+
+    it("سداد الناقل يخفض رصيده المسجل من البوالص، وصرف العهدة يرفع رصيد السائق", async () => {
+      const before = (await supplierBalances(db)).find((b) => b.id === carrierId)?.balance ?? 0;
+      expect(before).toBeGreaterThan(0);
+      const p = await createPayment(db, { paymentDate: `${YEAR}-09-03`, kind: "supplier", partyId: carrierId, amount: 500, method: "transfer", cashAccountId: acc["110101"], post: true });
+      const jl = await linesOf(p.journalEntryId ?? (await db.select().from(s.payments).where(eq(s.payments.id, p.id)))[0].journalEntryId!);
+      expect(jl.find((l) => l.code === "2102")).toMatchObject({ debit: 500, party: carrierId });
+      expect((await supplierBalances(db)).find((b) => b.id === carrierId)?.balance).toBe(before - 500);
+
+      const custody = async () => (await custodyBalances(db)).find((c) => c.id === driver.id)!.balance;
+      const c0 = await custody();
+      await createPayment(db, { paymentDate: `${YEAR}-09-03`, kind: "custody", driverId: driver.id, amount: 1000, method: "cash", cashAccountId: acc["110101"], post: true });
+      expect(await custody()).toBe(c0 + 1000);
+    });
+
+    it("المصروف من العهدة: معلّق حتى الاعتماد، ثم مدين على المركبة ودائن على عهدة السائق", async () => {
+      const [tolls] = await db.select().from(s.accounts).where(eq(s.accounts.code, "5106"));
+      const [office] = await db.select().from(s.accounts).where(eq(s.accounts.code, "6109"));
+      const custody = async () => (await custodyBalances(db)).find((c) => c.id === driver.id)!.balance;
+      const c0 = await custody();
+      const e = await createExpense(db, { expenseDate: `${YEAR}-09-04`, payer: "driver_custody", waybillId: firstId, accountId: tolls.id, description: "رسوم طريق", amount: 100, vatAmount: 15 });
+      expect(e).toMatchObject({ status: "pending", driverId: driver.id, vehicleId: vehicle.id, costCenterId: vehicle.costCenterId });
+      expect(await custody()).toBe(c0);
+      const entry = await approveExpense(db, e.id);
+      const jl = await linesOf(entry.id);
+      expect(jl.find((l) => l.code === "5106")).toMatchObject({ debit: 100, cc: vehicle.costCenterId, driver: driver.id, waybill: firstId });
+      expect(jl.find((l) => l.code === "1108")).toMatchObject({ debit: 15 });
+      expect(await custody()).toBe(c0 - 115);
+      await revertExpense(db, e.id);
+      expect(await custody()).toBe(c0);
+      await rejectExpense(db, e.id, "بلا إيصال");
+      const [r] = await db.select().from(s.expenses).where(eq(s.expenses.id, e.id));
+      expect(r).toMatchObject({ status: "rejected", rejectReason: "بلا إيصال" });
+
+      await expect(createExpense(db, { expenseDate: `${YEAR}-09-04`, payer: "cash", accountId: office.id, description: "ضيافة", amount: 50 })).rejects.toThrow("صندوقاً");
+      await expect(createExpense(db, { expenseDate: `${YEAR}-09-04`, payer: "cash", cashAccountId: acc["110101"], accountId: acc["110101"], description: "x", amount: 50 })).rejects.toThrow("ليس حساب تكلفة");
+      const cashExp = await createExpense(db, { expenseDate: `${YEAR}-09-04`, payer: "cash", cashAccountId: acc["110101"], accountId: office.id, description: "ضيافة", amount: 50, approve: true });
+      expect(cashExp.number).toMatch(/^EX-/);
     });
   });
 });

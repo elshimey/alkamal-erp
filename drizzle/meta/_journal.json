@@ -43,6 +43,13 @@
       "when": 1792246794786,
       "tag": "0005_sales_invoices_receipts",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792248183591,
+      "tag": "0006_purchases_expenses_payments",
+      "breakpoints": true
     }
   ]
 }

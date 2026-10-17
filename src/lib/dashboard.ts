@@ -276,7 +276,14 @@ export async function alertCounts(db: Db, today: string) {
           (select count(*) from fleet_documents where expiry_date < ${today})::int as docs_expired,
           (select count(*) from fleet_documents where expiry_date between ${today} and ${today}::date + 30)::int as docs_expiring,
           (select max(rate_date) from exchange_rates where currency_code = 'KWD') as kwd_rate_date,
-          (select count(*) from vehicles where status = 'active' and not exists (select 1 from vehicle_assignments va where va.vehicle_id = vehicles.id and va.to_date is null))::int as unassigned`,
+          (select count(*) from vehicles where status = 'active' and not exists (select 1 from vehicle_assignments va where va.vehicle_id = vehicles.id and va.to_date is null))::int as unassigned,
+          (select count(*) from expenses where status = 'pending')::int as pending_expenses,
+          (select count(*) from purchase_invoices where status = 'draft')::int as draft_purchases,
+          (select count(*) from purchase_invoices where status = 'posted' and paid_amount < total and due_date < ${today})::int as overdue_purchases,
+          (select coalesce(sum((total - paid_amount) * exchange_rate), 0) from purchase_invoices
+            where status = 'posted' and paid_amount < total and due_date between ${today} and ${today}::date + 7) as due_week,
+          (select count(*) from drivers d where d.status = 'active' and (select coalesce(sum(l.debit_base - l.credit_base), 0) from journal_lines l
+            join journal_entries e on e.id = l.entry_id and e.status = 'posted' where l.account_id = d.custody_account_id) < 0)::int as negative_custody`,
   );
   return {
     toApprove: n(r.to_approve),
@@ -290,5 +297,10 @@ export async function alertCounts(db: Db, today: string) {
     docsExpiring: n(r.docs_expiring),
     kwdRateDate: (r.kwd_rate_date as string | null) ?? null,
     unassigned: n(r.unassigned),
+    pendingExpenses: n(r.pending_expenses),
+    draftPurchases: n(r.draft_purchases),
+    overduePurchases: n(r.overdue_purchases),
+    dueWeek: n(r.due_week),
+    negativeCustody: n(r.negative_custody),
   };
 }

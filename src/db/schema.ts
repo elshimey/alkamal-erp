@@ -874,3 +874,148 @@ export const receiptAllocations = pgTable(
     check("receipt_allocations_positive", sql`${t.amount} > 0`),
   ],
 );
+
+// ───────────── المشتريات والمصروفات ─────────────
+
+export const purchaseStatus = pgEnum("purchase_status", ["draft", "posted"]);
+
+// فاتورة المورد: تكلفة أو مصروف بسطوره (الحساب ومركز التكلفة)، ودائنة لحساب دور المورد
+export const purchaseInvoices = pgTable(
+  "purchase_invoices",
+  {
+    id: id(),
+    number: varchar("number", { length: 30 }).notNull().unique(),
+    supplierId: ref("supplier_id").notNull().references(() => parties.id),
+    // رقم فاتورة المورد نفسه، ولا يتكرر للمورد الواحد
+    supplierInvoiceNo: varchar("supplier_invoice_no", { length: 60 }).notNull(),
+    invoiceDate: date("invoice_date").notNull(),
+    dueDate: date("due_date").notNull(),
+    currencyCode: varchar("currency_code", { length: 3 }).notNull().default("SAR").references(() => currencies.code),
+    exchangeRate: numeric("exchange_rate", { precision: 18, scale: 6 }).notNull().default("1"),
+    // ذمم الموردين أو الناقلين أو المحطات أو الورش أو المخلصين حسب دور الجهة
+    payableAccountId: ref("payable_account_id").notNull().references(() => accounts.id),
+    subtotal: money("subtotal").notNull().default("0"),
+    vatTotal: money("vat_total").notNull().default("0"),
+    total: money("total").notNull().default("0"),
+    paidAmount: money("paid_amount").notNull().default("0"),
+    status: purchaseStatus("status").notNull().default("draft"),
+    notes: text("notes"),
+    journalEntryId: ref("journal_entry_id").references(() => journalEntries.id),
+    postedBy: ref("posted_by").references(() => users.id),
+    createdBy: ref("created_by").references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("purchase_invoices_supplier_no_uq").on(t.supplierId, t.supplierInvoiceNo),
+    index("purchase_invoices_supplier_idx").on(t.supplierId, t.status),
+    check("purchase_invoices_dates", sql`${t.dueDate} >= ${t.invoiceDate}`),
+    check("purchase_invoices_paid", sql`${t.paidAmount} >= 0 and ${t.paidAmount} <= ${t.total}`),
+  ],
+);
+
+export const purchaseInvoiceLines = pgTable(
+  "purchase_invoice_lines",
+  {
+    id: id(),
+    invoiceId: ref("invoice_id").notNull().references(() => purchaseInvoices.id, { onDelete: "cascade" }),
+    lineNo: smallint("line_no").notNull(),
+    accountId: ref("account_id").notNull().references(() => accounts.id),
+    costCenterId: ref("cost_center_id").references(() => costCenters.id),
+    description: text("description").notNull(),
+    amount: money("amount").notNull(),
+    taxCodeId: ref("tax_code_id").references(() => taxCodes.id),
+    vatRate: numeric("vat_rate", { precision: 5, scale: 2 }).notNull().default("0"),
+    vatAmount: money("vat_amount").notNull().default("0"),
+  },
+  (t) => [index("purchase_invoice_lines_invoice_idx").on(t.invoiceId), check("purchase_invoice_lines_amounts", sql`${t.amount} > 0 and ${t.vatAmount} >= 0`)],
+);
+
+export const directExpensePayer = pgEnum("direct_expense_payer", ["driver_custody", "cash"]);
+export const expenseStatus = pgEnum("expense_status", ["pending", "approved", "rejected"]);
+
+// المصروف المباشر: من عهدة سائق أو من صندوق/بنك، ويُقيد عند الاعتماد
+export const expenses = pgTable(
+  "expenses",
+  {
+    id: id(),
+    number: varchar("number", { length: 30 }).notNull().unique(),
+    expenseDate: date("expense_date").notNull(),
+    payer: directExpensePayer("payer").notNull(),
+    driverId: ref("driver_id").references(() => drivers.id),
+    cashAccountId: ref("cash_account_id").references(() => accounts.id),
+    accountId: ref("account_id").notNull().references(() => accounts.id),
+    vehicleId: ref("vehicle_id").references(() => vehicles.id),
+    costCenterId: ref("cost_center_id").references(() => costCenters.id),
+    waybillId: ref("waybill_id").references(() => waybills.id),
+    description: text("description").notNull(),
+    amount: money("amount").notNull(),
+    vatAmount: money("vat_amount").notNull().default("0"),
+    currencyCode: varchar("currency_code", { length: 3 }).notNull().default("SAR").references(() => currencies.code),
+    exchangeRate: numeric("exchange_rate", { precision: 18, scale: 6 }).notNull().default("1"),
+    // مرجع إيصال المحل ورقمه الضريبي (لاسترداد ضريبة المدخلات)
+    vendorName: text("vendor_name"),
+    reference: varchar("reference", { length: 60 }),
+    status: expenseStatus("status").notNull().default("pending"),
+    rejectReason: text("reject_reason"),
+    journalEntryId: ref("journal_entry_id").references(() => journalEntries.id),
+    approvedBy: ref("approved_by").references(() => users.id),
+    createdBy: ref("created_by").references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("expenses_status_idx").on(t.status, t.expenseDate),
+    check("expenses_amounts", sql`${t.amount} > 0 and ${t.vatAmount} >= 0 and ${t.exchangeRate} > 0`),
+    check(
+      "expenses_payer_refs",
+      sql`case ${t.payer} when 'driver_custody' then ${t.driverId} is not null when 'cash' then ${t.cashAccountId} is not null end`,
+    ),
+  ],
+);
+
+export const paymentKind = pgEnum("payment_kind", ["supplier", "custody"]);
+
+// سند الصرف: سداد لمورد (بنفس منطق القبض) أو صرف عهدة لسائق
+export const payments = pgTable(
+  "payments",
+  {
+    id: id(),
+    number: varchar("number", { length: 30 }).notNull().unique(),
+    paymentDate: date("payment_date").notNull(),
+    kind: paymentKind("kind").notNull(),
+    partyId: ref("party_id").references(() => parties.id),
+    driverId: ref("driver_id").references(() => drivers.id),
+    // الحساب المدين: ذمة المورد أو عهدة السائق
+    debitAccountId: ref("debit_account_id").notNull().references(() => accounts.id),
+    amount: money("amount").notNull(),
+    currencyCode: varchar("currency_code", { length: 3 }).notNull().default("SAR").references(() => currencies.code),
+    exchangeRate: numeric("exchange_rate", { precision: 18, scale: 6 }).notNull().default("1"),
+    method: paymentMethod("method").notNull(),
+    cashAccountId: ref("cash_account_id").notNull().references(() => accounts.id),
+    reference: varchar("reference", { length: 60 }),
+    notes: text("notes"),
+    status: receiptStatus("status").notNull().default("draft"),
+    journalEntryId: ref("journal_entry_id").references(() => journalEntries.id),
+    createdBy: ref("created_by").references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("payments_party_idx").on(t.partyId, t.paymentDate),
+    check("payments_amount_positive", sql`${t.amount} > 0 and ${t.exchangeRate} > 0`),
+    check("payments_kind_refs", sql`case ${t.kind} when 'supplier' then ${t.partyId} is not null when 'custody' then ${t.driverId} is not null end`),
+  ],
+);
+
+export const paymentAllocations = pgTable(
+  "payment_allocations",
+  {
+    paymentId: ref("payment_id").notNull().references(() => payments.id, { onDelete: "cascade" }),
+    invoiceId: ref("invoice_id").notNull().references(() => purchaseInvoices.id),
+    amount: money("amount").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.paymentId, t.invoiceId] }),
+    index("payment_allocations_invoice_idx").on(t.invoiceId),
+    check("payment_allocations_positive", sql`${t.amount} > 0`),
+  ],
+);

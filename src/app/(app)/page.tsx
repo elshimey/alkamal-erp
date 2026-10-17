@@ -74,6 +74,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   // التنبيهات: ما يحتاج تدخلاً، كل واحد يفتح القسم المعني
   const kwdStale = !alerts.kwdRateDate || daysBetween(alerts.kwdRateDate, today) > 30;
   const alertList: { show: boolean; tone: "red" | "amber" | "blue"; icon: IconName; text: string; href: string }[] = [
+    { show: !!bal && bal.cash < 0, tone: "red", icon: "cash", text: `رصيد النقدية بالسالب (${money(bal?.cash ?? 0)} ر.س): سندات صرف أكثر من المقبوض`, href: "/payments" },
     { show: can(user.perms, "fleet_documents", "view") && alerts.docsExpired > 0, tone: "red", icon: "document", text: `${alerts.docsExpired} وثيقة منتهية (استمارات، رخص، تأمين)`, href: "/fleet-documents" },
     { show: canSales && alerts.overdue > 0, tone: "red", icon: "invoice", text: `${alerts.overdue} فاتورة متأخرة السداد`, href: "/invoices" },
     { show: canOps && alerts.toApprove > 0, tone: "amber", icon: "waybill", text: `${alerts.toApprove} بوليصة مسلّمة بانتظار الاعتماد`, href: "/waybills?status=delivered" },
@@ -84,6 +85,11 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     { show: can(user.perms, "receipts", "approve") && alerts.draftReceipts > 0, tone: "blue", icon: "cash", text: `${alerts.draftReceipts} سند قبض بانتظار الترحيل`, href: "/receipts" },
     { show: canOps && alerts.staleDrafts > 0, tone: "blue", icon: "waybill", text: `${alerts.staleDrafts} بوليصة مسودة منذ أكثر من يومين`, href: "/waybills?status=draft" },
     { show: canFinance && kwdStale, tone: "blue", icon: "exchange", text: alerts.kwdRateDate ? `آخر سعر للدينار الكويتي بتاريخ ${alerts.kwdRateDate}` : "لا يوجد سعر صرف للدينار الكويتي", href: "/exchange-rates" },
+    { show: can(user.perms, "payments", "view") && alerts.overduePurchases > 0, tone: "red", icon: "invoice", text: `${alerts.overduePurchases} فاتورة مورد تجاوزت استحقاقها`, href: "/purchases" },
+    { show: can(user.perms, "expenses", "approve") && alerts.pendingExpenses > 0, tone: "amber", icon: "fuel", text: `${alerts.pendingExpenses} مصروف بانتظار الاعتماد`, href: "/expenses?status=pending" },
+    { show: can(user.perms, "payments", "view") && alerts.dueWeek > 0, tone: "amber", icon: "cash", text: `مستحق للموردين خلال 7 أيام: ${money(alerts.dueWeek)} ر.س`, href: "/payments" },
+    { show: can(user.perms, "payments", "view") && alerts.negativeCustody > 0, tone: "blue", icon: "driver", text: `${alerts.negativeCustody} سائق صرف من جيبه (عهدة بالسالب)`, href: "/expenses" },
+    { show: can(user.perms, "purchase_invoices", "approve") && alerts.draftPurchases > 0, tone: "blue", icon: "invoice", text: `${alerts.draftPurchases} فاتورة مورد مسودة لم تُرحّل`, href: "/purchases" },
     { show: canFleet && alerts.unassigned > 0, tone: "blue", icon: "handover", text: `${alerts.unassigned} مركبة عاملة بلا سائق مسند`, href: "/assignments" },
   ];
   const activeAlerts = alertList.filter((a) => a.show);
@@ -279,8 +285,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                 <Line label="النقدية في الصناديق والبنوك" value={bal.cash} strong href="/receipts" />
                 <Line label="مستحق من العملاء" value={bal.receivable} href="/invoices" />
                 {unbilled && unbilled.count > 0 && <Line label={`رحلات منفذة لم تُفوتر (${unbilled.count})`} value={unbilled.value} href="/invoices" />}
-                <Line label="عهد السائقين والموظفين" value={bal.custody} />
-                <Line label="مستحق للموردين والناقلين" value={bal.payable} />
+                <Line label="عهد السائقين والموظفين" value={bal.custody} href="/expenses" />
+                <Line label="مستحق للموردين والناقلين" value={bal.payable} href="/payments" />
                 <Line label="ضريبة القيمة المضافة المستحقة" value={bal.vat} />
               </dl>
               {coll && <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">حُصّل {PERIODS[period]}: {money(coll.total)} ر.س في {coll.count} سند.</p>}

@@ -29,6 +29,14 @@ const NAV: { title: string; items: { href: string; label: string; icon: IconName
     ],
   },
   {
+    title: "المشتريات والمصروفات",
+    items: [
+      { href: "/purchases", label: "فواتير الموردين", icon: "invoice", entity: "purchase_invoices" },
+      { href: "/expenses", label: "المصروفات", icon: "fuel", entity: "expenses" },
+      { href: "/payments", label: "سندات الصرف", icon: "cash", entity: "payments" },
+    ],
+  },
+  {
     title: "المحاسبة",
     items: [
       { href: "/accounts", label: "شجرة الحسابات", icon: "tree", entity: "accounts" },
@@ -45,7 +53,7 @@ const NAV: { title: string; items: { href: string; label: string; icon: IconName
   },
 ];
 
-const COMING = ["المصروفات", "الصيانة", "الرواتب", "التقارير"];
+const COMING = ["الصيانة", "الرواتب", "التقارير"];
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
