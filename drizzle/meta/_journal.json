@@ -57,6 +57,13 @@
       "when": 1792249126170,
       "tag": "0007_maintenance",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1792250258759,
+      "tag": "0008_payroll",
+      "breakpoints": true
     }
   ]
 }

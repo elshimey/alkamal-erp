@@ -397,7 +397,12 @@ export const employees = pgTable("employees", {
   jobTitle: text("job_title"),
   hireDate: date("hire_date"),
   basicSalary: money("basic_salary").notNull().default("0"),
+  housingAllowance: money("housing_allowance").notNull().default("0"),
+  // بدلات أخرى (نقل، طعام...)
   allowances: money("allowances").notNull().default("0"),
+  // سعودي: يُستقطع منه نصيبه في التأمينات؛ غير السعودي: أخطار مهنية على المنشأة فقط
+  isSaudi: boolean("is_saudi").notNull().default(false),
+  gosiSubject: boolean("gosi_subject").notNull().default(true),
   bankName: text("bank_name"),
   iban: varchar("iban", { length: 34 }),
   // حساب الرواتب المستحقة الخاص به (فرعي تحت 2107)، وإليه تُقيد العمولات والخصومات
@@ -1129,5 +1134,90 @@ export const maintenanceLines = pgTable(
   (t) => [
     index("maintenance_lines_order_idx").on(t.orderId),
     check("maintenance_lines_amounts", sql`${t.quantity} > 0 and ${t.unitPrice} >= 0 and ${t.amount} >= 0 and ${t.vatAmount} >= 0`),
+  ],
+);
+
+// ───────────── الرواتب ─────────────
+
+export const advanceStatus = pgEnum("advance_status", ["pending", "paid", "settled"]);
+export const payrollStatus = pgEnum("payroll_status", ["draft", "approved", "paid"]);
+
+// سلفة الموظف (ومنها مقدم العمولة للسائق): تُصرف من صندوق أو بنك، وتُستقطع أقساطاً في المسير
+export const employeeAdvances = pgTable(
+  "employee_advances",
+  {
+    id: id(),
+    number: varchar("number", { length: 30 }).notNull().unique(),
+    employeeId: ref("employee_id").notNull().references(() => employees.id),
+    advanceDate: date("advance_date").notNull(),
+    amount: money("amount").notNull(),
+    installment: money("installment").notNull(),
+    repaidAmount: money("repaid_amount").notNull().default("0"),
+    cashAccountId: ref("cash_account_id").references(() => accounts.id),
+    status: advanceStatus("status").notNull().default("pending"),
+    notes: text("notes"),
+    journalEntryId: ref("journal_entry_id").references(() => journalEntries.id),
+    createdBy: ref("created_by").references(() => users.id),
+    approvedBy: ref("approved_by").references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("employee_advances_employee_idx").on(t.employeeId),
+    check("employee_advances_amounts", sql`${t.amount} > 0 and ${t.installment} > 0 and ${t.installment} <= ${t.amount} and ${t.repaidAmount} between 0 and ${t.amount}`),
+  ],
+);
+
+// مسير الشهر: مسودة ← معتمد (قيد الاستحقاق) ← مصروف (قيد الصرف من البنك)
+export const payrollRuns = pgTable(
+  "payroll_runs",
+  {
+    id: id(),
+    number: varchar("number", { length: 30 }).notNull().unique(),
+    // أول يوم في الشهر
+    month: date("month").notNull().unique(),
+    status: payrollStatus("status").notNull().default("draft"),
+    paymentDate: date("payment_date"),
+    bankAccountId: ref("bank_account_id").references(() => accounts.id),
+    journalEntryId: ref("journal_entry_id").references(() => journalEntries.id),
+    paymentEntryId: ref("payment_entry_id").references(() => journalEntries.id),
+    notes: text("notes"),
+    createdBy: ref("created_by").references(() => users.id),
+    approvedBy: ref("approved_by").references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [check("payroll_runs_month_start", sql`extract(day from ${t.month}) = 1`)],
+);
+
+export const payrollLines = pgTable(
+  "payroll_lines",
+  {
+    id: id(),
+    runId: ref("run_id").notNull().references(() => payrollRuns.id, { onDelete: "cascade" }),
+    employeeId: ref("employee_id").notNull().references(() => employees.id),
+    // السائق: تُحمَّل تكلفته على مركز تكلفة مركبته
+    driverId: ref("driver_id").references(() => drivers.id),
+    costCenterId: ref("cost_center_id").references(() => costCenters.id),
+    basic: money("basic").notNull().default("0"),
+    housing: money("housing").notNull().default("0"),
+    otherAllowances: money("other_allowances").notNull().default("0"),
+    absenceDays: numeric("absence_days", { precision: 5, scale: 2 }).notNull().default("0"),
+    absenceDeduction: money("absence_deduction").notNull().default("0"),
+    additions: money("additions").notNull().default("0"),
+    deductions: money("deductions").notNull().default("0"),
+    // للعرض فقط: العمولات قُيدت لحسابه عند اعتماد البوالص
+    commissions: money("commissions").notNull().default("0"),
+    advanceDeduction: money("advance_deduction").notNull().default("0"),
+    gosiEmployee: money("gosi_employee").notNull().default("0"),
+    gosiEmployer: money("gosi_employer").notNull().default("0"),
+    eosbAccrual: money("eosb_accrual").notNull().default("0"),
+    net: money("net").notNull().default("0"),
+    notes: text("notes"),
+  },
+  (t) => [
+    uniqueIndex("payroll_lines_run_employee_uq").on(t.runId, t.employeeId),
+    check(
+      "payroll_lines_amounts",
+      sql`${t.basic} >= 0 and ${t.housing} >= 0 and ${t.otherAllowances} >= 0 and ${t.absenceDays} >= 0 and ${t.additions} >= 0 and ${t.deductions} >= 0 and ${t.advanceDeduction} >= 0`,
+    ),
   ],
 );
