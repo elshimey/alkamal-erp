@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: erp
+          POSTGRES_PASSWORD: erp
+          POSTGRES_DB: alkamal_erp
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U erp" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://erp:erp@localhost:5432/alkamal_erp
+      TEST_DATABASE_URL: postgres://erp:erp@localhost:5432/alkamal_erp_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - name: Create test database
+        run: PGPASSWORD=erp psql -h localhost -U erp -d alkamal_erp -c "create database alkamal_erp_test"
+      - name: Migrate and seed
+        run: npm run db:setup
+        env:
+          ADMIN_PASSWORD: ci-only-password
+      - run: npm test
+      - run: npm run build
