@@ -38,6 +38,13 @@ const NAV: { title: string; items: { href: string; label: string; icon: IconName
     ],
   },
   {
+    title: "الموظفون والرواتب",
+    items: [
+      { href: "/employees", label: "الموظفون", icon: "people", entity: "employees" },
+      { href: "/payroll", label: "مسيرات الرواتب", icon: "cash", entity: "payroll" },
+    ],
+  },
+  {
     title: "المحاسبة",
     items: [
       { href: "/accounts", label: "شجرة الحسابات", icon: "tree", entity: "accounts" },
@@ -54,7 +61,7 @@ const NAV: { title: string; items: { href: string; label: string; icon: IconName
   },
 ];
 
-const COMING = ["الرواتب", "التقارير"];
+const COMING = ["التقارير"];
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();

@@ -95,6 +95,10 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     { show: can(user.perms, "maintenance", "view") && alerts.plansDue > 0, tone: "amber", icon: "calendar", text: `${alerts.plansDue} صيانة دورية متأخرة أو مستحقة خلال 7 أيام`, href: "/maintenance/plans" },
     { show: can(user.perms, "maintenance", "view") && alerts.openMaintenance > 0, tone: "blue", icon: "wrench", text: `${alerts.openMaintenance} مركبة في الورشة (أمر صيانة تحت التنفيذ)`, href: "/maintenance?status=approved" },
     { show: can(user.perms, "maintenance", "approve") && alerts.draftMaintenance > 0, tone: "blue", icon: "wrench", text: `${alerts.draftMaintenance} أمر صيانة مسودة لم يُعتمد`, href: "/maintenance?status=draft" },
+    { show: can(user.perms, "payroll", "create") && alerts.lastMonthRunMissing, tone: "amber", icon: "calendar", text: "لم يُنشأ مسير رواتب الشهر الماضي", href: "/payroll" },
+    { show: can(user.perms, "payroll", "approve") && alerts.draftPayroll > 0, tone: "blue", icon: "cash", text: `${alerts.draftPayroll} مسير رواتب مسودة لم يُعتمد`, href: "/payroll" },
+    { show: can(user.perms, "payroll", "approve") && alerts.unpaidPayroll > 0, tone: "amber", icon: "cash", text: `${alerts.unpaidPayroll} مسير معتمد لم تُصرف رواتبه`, href: "/payroll" },
+    { show: can(user.perms, "payroll", "approve") && alerts.pendingAdvances > 0, tone: "blue", icon: "cash", text: `${alerts.pendingAdvances} سلفة بانتظار الصرف`, href: "/payroll/advances" },
     { show: canFleet && alerts.unassigned > 0, tone: "blue", icon: "handover", text: `${alerts.unassigned} مركبة عاملة بلا سائق مسند`, href: "/assignments" },
   ];
   const activeAlerts = alertList.filter((a) => a.show);

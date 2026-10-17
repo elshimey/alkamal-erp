@@ -3,7 +3,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import postgres from "postgres";
 import * as s from "@/db/schema";
 import type { Db } from "@/db";
@@ -15,6 +15,8 @@ import { activeContract, createContract, createLocation, createParty, createRout
 import { createInvoice, createReceipt, invoicingQueue, issueInvoice, revertInvoice, revertReceipt } from "@/lib/invoices";
 import { createExpense, approveExpense, createPayment, createPurchaseInvoice, custodyBalances, postPurchaseInvoice, rejectExpense, revertExpense, revertPayment, revertPurchaseInvoice, supplierBalances } from "@/lib/purchases";
 import { addMaintenanceLines, approveBreakdownRequest, approveMaintenanceOrder, completeMaintenanceOrder, createBreakdownRequest, createMaintenanceOrder, deleteMaintenanceOrder, planSchedule, rejectBreakdownRequest, revertMaintenanceOrder, reviewBreakdownRequest, savePlan } from "@/lib/maintenance";
+import { adjustPayrollLines, approvePayrollRun, bankTransferRows, createAdvance, createEmployee, createPayrollRun, payAdvance, payPayrollRun, revertAdvance, revertPayrollPayment, revertPayrollRun, updateEmployee } from "@/lib/payroll";
+import { computePayrollLine } from "@/data/payroll";
 import { alertCounts, financials, operations, periodRange, receivablesAging, vehicleProfit } from "@/lib/dashboard";
 import { addExpense, addFuel, approveWaybill, createWaybill, deleteWaybill, recordStage, rejectWaybill, revertWaybill } from "@/lib/waybills";
 
@@ -637,6 +639,84 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(jl.find((l) => l.code === "5108")).toMatchObject({ debit: 1800, cc: vehicle.costCenterId });
       expect(jl.filter((l) => l.code === "110101").reduce((a, l) => a + l.credit, 0)).toBe(2070);
       await completeMaintenanceOrder(db, o.id, { completedDate: `${YEAR}-09-14` });
+    });
+    it("المسير: الأساسي والبدلات على المركبة أو الإدارة، والتأمينات ونهاية الخدمة والسلف، والعمولات تُصرف ولا تُقيد مرتين", async () => {
+      const staff = await createEmployee(db, { nameAr: "محاسب الرواتب", hireDate: "2020-01-01", basicSalary: 8000, housingAllowance: 2000, allowances: 500, isSaudi: true, iban: "SA03 8000 0000 6080 1016 7519" });
+      expect(staff.iban).toBe("SA0380000000608010167519");
+      await expect(createEmployee(db, { nameAr: "آيبان خطأ", iban: "123" })).rejects.toThrow("الآيبان");
+      const [drvRow] = await db.select().from(s.drivers).where(eq(s.drivers.id, driver.id));
+      await updateEmployee(db, drvRow.employeeId, { basicSalary: 3000, housingAllowance: 750, hireDate: `${YEAR}-01-01` });
+
+      const adv = await createAdvance(db, { employeeId: drvRow.employeeId, advanceDate: `${YEAR}-08-10`, amount: 1000, installment: 400 });
+      await expect(createAdvance(db, { employeeId: drvRow.employeeId, advanceDate: `${YEAR}-08-10`, amount: 100, installment: 200 })).rejects.toThrow("القسط");
+      const advEntry = await payAdvance(db, adv.id, { cashAccountId: acc["110101"] });
+      expect((await linesOf(advEntry.id)).find((l) => l.code === "1107")).toMatchObject({ debit: 1000 });
+
+      const [{ commission }] = await db
+        .select({ commission: sql<string>`coalesce(sum(${s.journalLines.creditBase} - ${s.journalLines.debitBase}), 0)` })
+        .from(s.journalLines)
+        .innerJoin(s.journalEntries, eq(s.journalEntries.id, s.journalLines.entryId))
+        .where(sql`${s.journalEntries.status} = 'posted' and ${s.journalLines.accountId} = ${driver.payableAccountId} and ${s.journalLines.waybillId} is not null and ${s.journalEntries.entryDate} between '${sql.raw(`${YEAR}-08-01`)}' and '${sql.raw(`${YEAR}-08-31`)}'`);
+
+      const run = await createPayrollRun(db, { month: `${YEAR}-08` });
+      await expect(createPayrollRun(db, { month: `${YEAR}-08-01` })).rejects.toThrow("موجود");
+      await adjustPayrollLines(db, run.id, [
+        { employeeId: staff.id, absenceDays: 2 },
+        { employeeId: drvRow.employeeId, additions: 100 },
+      ]);
+      await expect(adjustPayrollLines(db, run.id, [{ employeeId: drvRow.employeeId, advanceDeduction: 1500 }])).rejects.toThrow("المتبقي");
+      const lines = await db.select().from(s.payrollLines).where(eq(s.payrollLines.runId, run.id));
+      const sl = lines.find((l) => l.employeeId === staff.id)!;
+      const dl = lines.find((l) => l.employeeId === drvRow.employeeId)!;
+      expect(Number(sl.absenceDeduction)).toBe(700);
+      expect(Number(sl.gosiEmployee)).toBe(975);
+      expect(Number(sl.gosiEmployer)).toBe(1175);
+      expect(Number(sl.eosbAccrual)).toBe(875);
+      expect(Number(sl.net)).toBe(10500 - 700 - 975);
+      expect(Number(dl.commissions)).toBe(Number(commission));
+      expect(Number(dl.advanceDeduction)).toBe(400);
+      expect(Number(dl.gosiEmployee)).toBe(0);
+      expect(Number(dl.gosiEmployer)).toBe(75);
+      expect(Number(dl.eosbAccrual)).toBe(156.25);
+      expect(Number(dl.net)).toBe(3850 - 400 + Number(commission));
+      expect(dl.costCenterId).toBe(vehicle.costCenterId);
+
+      const entry = await approvePayrollRun(db, run.id);
+      const jl = await linesOf(entry.id);
+      const sum = (f: (l: (typeof jl)[number]) => boolean, k: "debit" | "credit") => jl.filter(f).reduce((a, l) => a + l[k], 0);
+      expect(jl.find((l) => l.code === "5103")).toMatchObject({ debit: 3850, cc: vehicle.costCenterId, driver: driver.id });
+      expect(sum((l) => l.code === "6101", "debit")).toBe(9800);
+      expect(sum((l) => l.code === "2115", "credit")).toBe(975 + 1175 + 75);
+      expect(sum((l) => l.code === "1107", "credit")).toBe(400);
+      expect(sum((l) => l.code === "2203", "credit")).toBe(875 + 156.25);
+      expect(sum((l) => l.code === "5102", "debit")).toBe(0);
+      let [a] = await db.select().from(s.employeeAdvances).where(eq(s.employeeAdvances.id, adv.id));
+      expect(Number(a.repaidAmount)).toBe(400);
+      await expect(revertAdvance(db, adv.id)).rejects.toThrow("مسير");
+
+      await expect(payPayrollRun(db, run.id, { bankAccountId: acc["110101"], paymentDate: `${YEAR}-08-20` })).rejects.toThrow("قبل نهاية");
+      const pay = await payPayrollRun(db, run.id, { bankAccountId: acc["110101"], paymentDate: `${YEAR}-09-01` });
+      const bank = await bankTransferRows(db, run.id);
+      const pl = await linesOf(pay.id);
+      expect(pl.find((l) => l.account === driver.payableAccountId)).toMatchObject({ debit: Number(dl.net) });
+      expect(pl.filter((l) => l.code === "110101").reduce((t, l) => t + l.credit, 0)).toBe(bank.reduce((t, r) => t + r.net, 0));
+      expect(bank.find((r) => r.name === "محاسب الرواتب")).toMatchObject({ iban: "SA0380000000608010167519", net: 8825 });
+
+      await expect(revertPayrollRun(db, run.id)).rejects.toThrow("الصرف");
+      await revertPayrollPayment(db, run.id);
+      await revertPayrollRun(db, run.id);
+      [a] = await db.select().from(s.employeeAdvances).where(eq(s.employeeAdvances.id, adv.id));
+      expect(Number(a.repaidAmount)).toBe(0);
+      expect(await db.select().from(s.journalEntries).where(eq(s.journalEntries.id, entry.id))).toHaveLength(0);
+    });
+
+    it("معادلة السطر: الغياب على 30 يوماً، وسقف التأمينات، ونصف شهر قبل خمس سنوات", () => {
+      const base = { basic: 50_000, housing: 10_000, otherAllowances: 0, absenceDays: 0, additions: 0, deductions: 0, commissions: 0, advanceDeduction: 0, isSaudi: true, gosiSubject: true, serviceYears: 2 };
+      const c = computePayrollLine(base);
+      expect(c.gosiEmployee).toBe(4387.5);
+      expect(c.eosbAccrual).toBe(2500);
+      expect(computePayrollLine({ ...base, gosiSubject: false }).gosiEmployer).toBe(0);
+      expect(computePayrollLine({ ...base, isSaudi: false }).gosiEmployee).toBe(0);
     });
   });
 });
