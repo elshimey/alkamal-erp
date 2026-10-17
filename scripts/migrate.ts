@@ -2,7 +2,8 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
 
-const url = process.env.DATABASE_URL ?? "postgres://erp:erp@localhost:5432/alkamal_erp";
+// الترحيل يحتاج اتصالاً مباشراً لا يمر بمجمّع الاتصالات إن وُجد
+const url = process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL ?? "postgres://erp:erp@localhost:5432/alkamal_erp";
 
 async function main() {
   const client = postgres(url, { max: 1, onnotice: () => {} });
