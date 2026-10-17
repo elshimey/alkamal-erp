@@ -15,6 +15,7 @@ const NAV: { title: string; items: { href: string; label: string; icon: IconName
       { href: "/drivers", label: "السائقون", icon: "driver", entity: "drivers" },
       { href: "/assignments", label: "الإسناد والتسليم", icon: "handover", entity: "vehicles" },
       { href: "/fleet-documents", label: "وثائق الأسطول", icon: "document", entity: "fleet_documents" },
+      { href: "/maintenance", label: "الصيانة", icon: "wrench", entity: "maintenance" },
     ],
   },
   {
@@ -53,7 +54,7 @@ const NAV: { title: string; items: { href: string; label: string; icon: IconName
   },
 ];
 
-const COMING = ["الصيانة", "الرواتب", "التقارير"];
+const COMING = ["الرواتب", "التقارير"];
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();

@@ -1019,3 +1019,115 @@ export const paymentAllocations = pgTable(
     check("payment_allocations_positive", sql`${t.amount} > 0`),
   ],
 );
+
+// ───────────── الصيانة ─────────────
+
+export const maintenanceType = pgEnum("maintenance_type", ["consumable", "electrical", "body_paint", "mechanical", "tires", "other"]);
+export const maintenanceProvider = pgEnum("maintenance_provider", ["internal", "external"]);
+export const maintenanceStatus = pgEnum("maintenance_status", ["draft", "approved", "completed"]);
+export const maintenanceLineKind = pgEnum("maintenance_line_kind", ["part", "labor"]);
+export const breakdownStatus = pgEnum("breakdown_status", ["pending_supervisor", "pending_approval", "approved", "in_progress", "completed", "rejected"]);
+export const breakdownPriority = pgEnum("breakdown_priority", ["low", "normal", "urgent"]);
+
+// خطة الصيانة الدورية: التنبيه حسب المدة فقط (القرار 13)
+export const maintenancePlans = pgTable(
+  "maintenance_plans",
+  {
+    id: id(),
+    vehicleId: ref("vehicle_id").notNull().references(() => vehicles.id, { onDelete: "cascade" }),
+    type: maintenanceType("type").notNull(),
+    title: text("title").notNull(),
+    intervalDays: integer("interval_days").notNull(),
+    lastDoneDate: date("last_done_date"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("maintenance_plans_vehicle_title_uq").on(t.vehicleId, t.title),
+    check("maintenance_plans_interval", sql`${t.intervalDays} between 1 and 3650`),
+  ],
+);
+
+// طلب العطل: من السائق أو المكتب، ويتحول إلى أمر صيانة بعد الاعتماد
+export const breakdownRequests = pgTable(
+  "breakdown_requests",
+  {
+    id: id(),
+    number: varchar("number", { length: 30 }).notNull().unique(),
+    vehicleId: ref("vehicle_id").notNull().references(() => vehicles.id),
+    driverId: ref("driver_id").references(() => drivers.id),
+    reportDate: date("report_date").notNull(),
+    description: text("description").notNull(),
+    priority: breakdownPriority("priority").notNull().default("normal"),
+    estimatedCost: money("estimated_cost"),
+    status: breakdownStatus("status").notNull().default("pending_supervisor"),
+    rejectReason: text("reject_reason"),
+    reviewedBy: ref("reviewed_by").references(() => users.id),
+    approvedBy: ref("approved_by").references(() => users.id),
+    createdBy: ref("created_by").references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [index("breakdown_requests_status_idx").on(t.status), check("breakdown_requests_cost", sql`${t.estimatedCost} is null or ${t.estimatedCost} >= 0`)],
+);
+
+export const maintenanceOrders = pgTable(
+  "maintenance_orders",
+  {
+    id: id(),
+    number: varchar("number", { length: 30 }).notNull().unique(),
+    vehicleId: ref("vehicle_id").notNull().references(() => vehicles.id),
+    orderDate: date("order_date").notNull(),
+    type: maintenanceType("type").notNull(),
+    provider: maintenanceProvider("provider").notNull(),
+    // الورشة الخارجية (دائنة)، أو الصندوق الذي تُشترى منه القطع للورشة الداخلية
+    supplierId: ref("supplier_id").references(() => parties.id),
+    supplierInvoiceNo: varchar("supplier_invoice_no", { length: 60 }),
+    cashAccountId: ref("cash_account_id").references(() => accounts.id),
+    odometer: integer("odometer"),
+    breakdownRequestId: ref("breakdown_request_id").references(() => breakdownRequests.id),
+    planId: ref("plan_id").references(() => maintenancePlans.id),
+    currencyCode: varchar("currency_code", { length: 3 }).notNull().default("SAR").references(() => currencies.code),
+    exchangeRate: numeric("exchange_rate", { precision: 18, scale: 6 }).notNull().default("1"),
+    subtotal: money("subtotal").notNull().default("0"),
+    vatTotal: money("vat_total").notNull().default("0"),
+    total: money("total").notNull().default("0"),
+    status: maintenanceStatus("status").notNull().default("draft"),
+    completedDate: date("completed_date"),
+    notes: text("notes"),
+    journalEntryId: ref("journal_entry_id").references(() => journalEntries.id),
+    approvedBy: ref("approved_by").references(() => users.id),
+    createdBy: ref("created_by").references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("maintenance_orders_vehicle_idx").on(t.vehicleId, t.orderDate),
+    uniqueIndex("maintenance_orders_request_uq").on(t.breakdownRequestId).where(sql`${t.breakdownRequestId} is not null`),
+    uniqueIndex("maintenance_orders_supplier_no_uq").on(t.supplierId, t.supplierInvoiceNo).where(sql`${t.supplierInvoiceNo} is not null`),
+    check(
+      "maintenance_orders_provider_refs",
+      sql`case ${t.provider} when 'external' then ${t.supplierId} is not null when 'internal' then ${t.supplierId} is null end`,
+    ),
+    check("maintenance_orders_completed", sql`${t.completedDate} is null or ${t.completedDate} >= ${t.orderDate}`),
+  ],
+);
+
+// بند أمر الصيانة: قطعة غيار أو شغل يد؛ بند واحد على الأقل إلزامي (العيب 8)
+export const maintenanceLines = pgTable(
+  "maintenance_lines",
+  {
+    id: id(),
+    orderId: ref("order_id").notNull().references(() => maintenanceOrders.id, { onDelete: "cascade" }),
+    lineNo: smallint("line_no").notNull(),
+    kind: maintenanceLineKind("kind").notNull(),
+    description: text("description").notNull(),
+    quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull().default("1"),
+    unitPrice: money("unit_price").notNull(),
+    amount: money("amount").notNull(),
+    vatRate: numeric("vat_rate", { precision: 5, scale: 2 }).notNull().default("0"),
+    vatAmount: money("vat_amount").notNull().default("0"),
+  },
+  (t) => [
+    index("maintenance_lines_order_idx").on(t.orderId),
+    check("maintenance_lines_amounts", sql`${t.quantity} > 0 and ${t.unitPrice} >= 0 and ${t.amount} >= 0 and ${t.vatAmount} >= 0`),
+  ],
+);

@@ -78,7 +78,7 @@ export interface PurchaseInvoiceInput {
 
 /** سطور قيد فاتورة المورد: مدين التكلفة وضريبة المدخلات، دائن ذمة المورد. */
 export function purchasePostingLines(
-  inv: { number: string; supplierInvoiceNo: string; supplierId: number; currencyCode: string; exchangeRate: number; payableAccountId: number },
+  inv: { number: string; supplierInvoiceNo: string; supplierId: number | null; currencyCode: string; exchangeRate: number; payableAccountId: number },
   lines: { accountId: number; costCenterId: number | null; description: string; amount: number; vatAmount: number }[],
   inputVatAccountId: number,
   inputTaxCodeId: number | null,
@@ -108,6 +108,11 @@ export async function createPurchaseInvoice(db: Db, input: PurchaseInvoiceInput)
       .from(s.purchaseInvoices)
       .where(and(eq(s.purchaseInvoices.supplierId, input.supplierId), eq(s.purchaseInvoices.supplierInvoiceNo, supplierInvoiceNo)));
     if (dup) throw new Error(`فاتورة المورد ${supplierInvoiceNo} مسجلة مسبقاً (${dup.number})`);
+    const [onOrder] = await tx
+      .select({ number: s.maintenanceOrders.number })
+      .from(s.maintenanceOrders)
+      .where(and(eq(s.maintenanceOrders.supplierId, input.supplierId), eq(s.maintenanceOrders.supplierInvoiceNo, supplierInvoiceNo)));
+    if (onOrder) throw new Error(`فاتورة المورد ${supplierInvoiceNo} مسجلة على أمر الصيانة ${onOrder.number}`);
     const payableAccountId = await payableAccountFor(tx, input.supplierId);
     const currency = input.currencyCode ?? "SAR";
     const rate = input.exchangeRate ?? (await rateOn(tx, currency, input.invoiceDate));

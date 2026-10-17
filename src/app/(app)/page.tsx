@@ -90,6 +90,11 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     { show: can(user.perms, "payments", "view") && alerts.dueWeek > 0, tone: "amber", icon: "cash", text: `مستحق للموردين خلال 7 أيام: ${money(alerts.dueWeek)} ر.س`, href: "/payments" },
     { show: can(user.perms, "payments", "view") && alerts.negativeCustody > 0, tone: "blue", icon: "driver", text: `${alerts.negativeCustody} سائق صرف من جيبه (عهدة بالسالب)`, href: "/expenses" },
     { show: can(user.perms, "purchase_invoices", "approve") && alerts.draftPurchases > 0, tone: "blue", icon: "invoice", text: `${alerts.draftPurchases} فاتورة مورد مسودة لم تُرحّل`, href: "/purchases" },
+    { show: can(user.perms, "maintenance", "update") && alerts.pendingBreakdowns > 0, tone: "red", icon: "wrench", text: `${alerts.pendingBreakdowns} بلاغ عطل بانتظار المراجعة أو الاعتماد`, href: "/maintenance/requests" },
+    { show: can(user.perms, "maintenance", "create") && alerts.approvedBreakdowns > 0, tone: "amber", icon: "wrench", text: `${alerts.approvedBreakdowns} عطل معتمد لم يُفتح له أمر صيانة`, href: "/maintenance/requests" },
+    { show: can(user.perms, "maintenance", "view") && alerts.plansDue > 0, tone: "amber", icon: "calendar", text: `${alerts.plansDue} صيانة دورية متأخرة أو مستحقة خلال 7 أيام`, href: "/maintenance/plans" },
+    { show: can(user.perms, "maintenance", "view") && alerts.openMaintenance > 0, tone: "blue", icon: "wrench", text: `${alerts.openMaintenance} مركبة في الورشة (أمر صيانة تحت التنفيذ)`, href: "/maintenance?status=approved" },
+    { show: can(user.perms, "maintenance", "approve") && alerts.draftMaintenance > 0, tone: "blue", icon: "wrench", text: `${alerts.draftMaintenance} أمر صيانة مسودة لم يُعتمد`, href: "/maintenance?status=draft" },
     { show: canFleet && alerts.unassigned > 0, tone: "blue", icon: "handover", text: `${alerts.unassigned} مركبة عاملة بلا سائق مسند`, href: "/assignments" },
   ];
   const activeAlerts = alertList.filter((a) => a.show);

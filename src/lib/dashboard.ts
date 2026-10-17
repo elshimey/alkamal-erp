@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import type { Db } from "@/db";
+import { PLAN_ALERT_DAYS } from "@/data/maintenance";
 
 // مؤشرات اللوحة الرئيسية. الأرقام المالية من القيود المرحّلة فقط (بالريال)،
 // وأرقام التشغيل من البوالص نفسها.
@@ -283,7 +284,13 @@ export async function alertCounts(db: Db, today: string) {
           (select coalesce(sum((total - paid_amount) * exchange_rate), 0) from purchase_invoices
             where status = 'posted' and paid_amount < total and due_date between ${today} and ${today}::date + 7) as due_week,
           (select count(*) from drivers d where d.status = 'active' and (select coalesce(sum(l.debit_base - l.credit_base), 0) from journal_lines l
-            join journal_entries e on e.id = l.entry_id and e.status = 'posted' where l.account_id = d.custody_account_id) < 0)::int as negative_custody`,
+            join journal_entries e on e.id = l.entry_id and e.status = 'posted' where l.account_id = d.custody_account_id) < 0)::int as negative_custody,
+          (select count(*) from breakdown_requests where status in ('pending_supervisor', 'pending_approval'))::int as pending_breakdowns,
+          (select count(*) from breakdown_requests where status = 'approved')::int as approved_breakdowns,
+          (select count(*) from maintenance_orders where status = 'approved')::int as open_maintenance,
+          (select count(*) from maintenance_orders where status = 'draft')::int as draft_maintenance,
+          (select count(*) from maintenance_plans where is_active
+            and coalesce(last_done_date + interval_days, ${today}::date) <= ${today}::date + ${PLAN_ALERT_DAYS}::int)::int as plans_due`,
   );
   return {
     toApprove: n(r.to_approve),
@@ -302,5 +309,10 @@ export async function alertCounts(db: Db, today: string) {
     overduePurchases: n(r.overdue_purchases),
     dueWeek: n(r.due_week),
     negativeCustody: n(r.negative_custody),
+    pendingBreakdowns: n(r.pending_breakdowns),
+    approvedBreakdowns: n(r.approved_breakdowns),
+    openMaintenance: n(r.open_maintenance),
+    draftMaintenance: n(r.draft_maintenance),
+    plansDue: n(r.plans_due),
   };
 }

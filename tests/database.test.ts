@@ -14,6 +14,7 @@ import { addSubAccount } from "@/lib/accounts";
 import { activeContract, createContract, createLocation, createParty, createRoute, priceTrip, setContractStatus } from "@/lib/operations";
 import { createInvoice, createReceipt, invoicingQueue, issueInvoice, revertInvoice, revertReceipt } from "@/lib/invoices";
 import { createExpense, approveExpense, createPayment, createPurchaseInvoice, custodyBalances, postPurchaseInvoice, rejectExpense, revertExpense, revertPayment, revertPurchaseInvoice, supplierBalances } from "@/lib/purchases";
+import { addMaintenanceLines, approveBreakdownRequest, approveMaintenanceOrder, completeMaintenanceOrder, createBreakdownRequest, createMaintenanceOrder, deleteMaintenanceOrder, planSchedule, rejectBreakdownRequest, revertMaintenanceOrder, reviewBreakdownRequest, savePlan } from "@/lib/maintenance";
 import { alertCounts, financials, operations, periodRange, receivablesAging, vehicleProfit } from "@/lib/dashboard";
 import { addExpense, addFuel, approveWaybill, createWaybill, deleteWaybill, recordStage, rejectWaybill, revertWaybill } from "@/lib/waybills";
 
@@ -569,6 +570,73 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       await expect(createExpense(db, { expenseDate: `${YEAR}-09-04`, payer: "cash", cashAccountId: acc["110101"], accountId: acc["110101"], description: "x", amount: 50 })).rejects.toThrow("ليس حساب تكلفة");
       const cashExp = await createExpense(db, { expenseDate: `${YEAR}-09-04`, payer: "cash", cashAccountId: acc["110101"], accountId: office.id, description: "ضيافة", amount: 50, approve: true });
       expect(cashExp.number).toMatch(/^EX-/);
+    });
+
+    it("طلب العطل: المشرف يعتمد ما دون الحد، وما فوقه ينتظر المدير، ويتحول إلى أمر صيانة", async () => {
+      const small = await createBreakdownRequest(db, { vehicleId: vehicle.id, driverId: driver.id, reportDate: `${YEAR}-09-10`, description: "تسريب زيت", estimatedCost: 800 });
+      expect(small).toMatchObject({ number: `BR-${YEAR}-000001`, status: "pending_supervisor" });
+      expect((await reviewBreakdownRequest(db, small.id, { limit: 5000 })).status).toBe("approved");
+      const big = await createBreakdownRequest(db, { vehicleId: vehicle.id, reportDate: `${YEAR}-09-10`, description: "عمرة مكينة" });
+      await expect(reviewBreakdownRequest(db, big.id)).rejects.toThrow("التكلفة التقديرية");
+      expect((await reviewBreakdownRequest(db, big.id, { estimatedCost: 18000, limit: 5000 })).status).toBe("pending_approval");
+      await expect(createMaintenanceOrder(db, { vehicleId: vehicle.id, orderDate: `${YEAR}-09-11`, type: "mechanical", provider: "internal", breakdownRequestId: big.id })).rejects.toThrow("غير معتمد");
+      await approveBreakdownRequest(db, big.id);
+      await rejectBreakdownRequest(db, big.id, "يؤجل للعام القادم");
+      const [r] = await db.select().from(s.breakdownRequests).where(eq(s.breakdownRequests.id, big.id));
+      expect(r.status).toBe("rejected");
+
+      const order = await createMaintenanceOrder(db, { vehicleId: vehicle.id, orderDate: `${YEAR}-09-11`, type: "mechanical", provider: "internal", breakdownRequestId: small.id });
+      const [r2] = await db.select().from(s.breakdownRequests).where(eq(s.breakdownRequests.id, small.id));
+      expect(r2.status).toBe("in_progress");
+      await deleteMaintenanceOrder(db, order.id, { reason: "أُدخل خطأ" });
+      const [r3] = await db.select().from(s.breakdownRequests).where(eq(s.breakdownRequests.id, small.id));
+      expect(r3.status).toBe("approved");
+    });
+
+    it("أمر الصيانة الخارجي: بند إلزامي، قيد على المركبة دائن للورشة، والمركبة في الصيانة حتى الإكمال", async () => {
+      const ws = (await createParty(db, { nameAr: "ورشة الصيانة السريعة", roles: ["workshop"] })).id;
+      const plan = await savePlan(db, { vehicleId: vehicle.id, type: "consumable", title: "تغيير زيت", intervalDays: 30, lastDoneDate: `${YEAR}-08-01` });
+      expect((await planSchedule(db, `${YEAR}-09-05`)).find((p) => p.id === plan.id)).toMatchObject({ due: `${YEAR}-08-31`, days: -5 });
+
+      const o = await createMaintenanceOrder(db, { vehicleId: vehicle.id, orderDate: `${YEAR}-09-12`, type: "consumable", provider: "external", supplierId: ws, supplierInvoiceNo: "Q-77", planId: plan.id, odometer: 4500 });
+      await expect(approveMaintenanceOrder(db, o.id)).rejects.toThrow("بنداً واحداً");
+      await addMaintenanceLines(db, o.id, [
+        { kind: "part", description: "زيت مكينة", quantity: 4, unitPrice: 75 },
+        { kind: "part", description: "فلتر", unitPrice: 60 },
+        { kind: "labor", description: "أجرة", unitPrice: 100, vatRate: 0 },
+      ]);
+      const [row] = await db.select().from(s.maintenanceOrders).where(eq(s.maintenanceOrders.id, o.id));
+      expect([Number(row.subtotal), Number(row.vatTotal), Number(row.total)]).toEqual([460, 54, 514]);
+
+      const entry = await approveMaintenanceOrder(db, o.id);
+      const jl = await linesOf(entry.id);
+      expect(jl.filter((l) => l.code === "5107").reduce((a, l) => a + l.debit, 0)).toBe(460);
+      expect(jl.filter((l) => l.code === "5107").every((l) => l.cc === vehicle.costCenterId)).toBe(true);
+      expect(jl.filter((l) => l.code === "1108").reduce((a, l) => a + l.debit, 0)).toBe(54);
+      expect(jl.filter((l) => l.code === "2104").reduce((a, l) => a + l.credit, 0)).toBe(514);
+      let [v] = await db.select().from(s.vehicles).where(eq(s.vehicles.id, vehicle.id));
+      expect(v.status).toBe("maintenance");
+      await expect(createPurchaseInvoice(db, { supplierId: ws, supplierInvoiceNo: "Q-77", invoiceDate: `${YEAR}-09-12`, lines: [{ accountId: jl[0].account, vehicleId: vehicle.id, description: "x", amount: 1 }] })).rejects.toThrow("أمر الصيانة");
+
+      await revertMaintenanceOrder(db, o.id);
+      [v] = await db.select().from(s.vehicles).where(eq(s.vehicles.id, vehicle.id));
+      expect(v.status).toBe("active");
+      await approveMaintenanceOrder(db, o.id);
+      await completeMaintenanceOrder(db, o.id, { completedDate: `${YEAR}-09-13`, odometer: 6000 });
+      [v] = await db.select().from(s.vehicles).where(eq(s.vehicles.id, vehicle.id));
+      expect(v).toMatchObject({ status: "active", odometer: 6000 });
+      expect((await planSchedule(db, `${YEAR}-09-13`)).find((p) => p.id === plan.id)).toMatchObject({ lastDoneDate: `${YEAR}-09-13`, due: `${YEAR}-10-13` });
+    });
+
+    it("الورشة الداخلية: القطع من الصندوق، والإطارات على حسابها", async () => {
+      const o = await createMaintenanceOrder(db, { vehicleId: vehicle.id, orderDate: `${YEAR}-09-14`, type: "tires", provider: "internal" });
+      await addMaintenanceLines(db, o.id, [{ kind: "part", description: "إطار", quantity: 2, unitPrice: 900 }]);
+      await expect(approveMaintenanceOrder(db, o.id)).rejects.toThrow("الصندوق");
+      const entry = await approveMaintenanceOrder(db, o.id, { cashAccountId: acc["110101"] });
+      const jl = await linesOf(entry.id);
+      expect(jl.find((l) => l.code === "5108")).toMatchObject({ debit: 1800, cc: vehicle.costCenterId });
+      expect(jl.filter((l) => l.code === "110101").reduce((a, l) => a + l.credit, 0)).toBe(2070);
+      await completeMaintenanceOrder(db, o.id, { completedDate: `${YEAR}-09-14` });
     });
   });
 });
