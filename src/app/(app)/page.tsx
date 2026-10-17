@@ -2,7 +2,12 @@ import Link from "next/link";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { requireUser } from "@/lib/auth";
-import { Card, PageHeader } from "@/components/ui";
+import { can } from "@/lib/permissions";
+import { todayRiyadh } from "@/lib/dates";
+import { EXPIRY_ALERT_DAYS, expiringDocuments } from "@/lib/fleet";
+import { DOCUMENT_TYPES } from "@/data/fleet";
+import { ExpiryBadge } from "@/components/expiry-badge";
+import { Card, PageHeader, Table, Td } from "@/components/ui";
 
 export default async function Dashboard({ searchParams }: { searchParams: Promise<{ denied?: string }> }) {
   const user = await requireUser();
@@ -10,14 +15,17 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const [counts] = (await db.execute(sql`
     select
       (select count(*) from vehicles)::int as vehicles,
+      (select count(*) from drivers where status = 'active')::int as drivers,
       (select count(*) from accounts)::int as accounts,
       (select count(*) from users where is_active)::int as users,
       (select count(*) from journal_entries where status = 'posted')::int as entries
-  `)) as unknown as { vehicles: number; accounts: number; users: number; entries: number }[];
+  `)) as unknown as { vehicles: number; drivers: number; accounts: number; users: number; entries: number }[];
 
+  const today = todayRiyadh();
+  const due = can(user.perms, "fleet_documents", "view") ? await expiringDocuments(db, today) : [];
   const stats = [
     { label: "المركبات", value: counts.vehicles, href: "/vehicles" },
-    { label: "الحسابات في الشجرة", value: counts.accounts, href: "/accounts" },
+    { label: "السائقون النشطون", value: counts.drivers, href: "/drivers" },
     { label: "المستخدمون النشطون", value: counts.users, href: "/users" },
     { label: "القيود المرحّلة", value: counts.entries },
   ];
@@ -45,6 +53,25 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           );
         })}
       </div>
+      {due.length > 0 && (
+        <section className="mt-8">
+          <h2 className="mb-3 font-semibold text-gray-800">
+            وثائق منتهية أو تنتهي خلال {EXPIRY_ALERT_DAYS} يوماً ({due.length})
+          </h2>
+          <Table head={["صاحب الوثيقة", "النوع", "الانتهاء", "الحالة"]}>
+            {due.map(({ doc, plate, driverName }) => (
+              <tr key={doc.id}>
+                <Td className="font-medium">{plate ?? driverName}</Td>
+                <Td>{DOCUMENT_TYPES[doc.type]}</Td>
+                <Td className="ltr-nums">{doc.expiryDate}</Td>
+                <Td>
+                  <ExpiryBadge expiryDate={doc.expiryDate} today={today} />
+                </Td>
+              </tr>
+            ))}
+          </Table>
+        </section>
+      )}
     </>
   );
 }

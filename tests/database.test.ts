@@ -9,7 +9,7 @@ import * as s from "@/db/schema";
 import type { Db } from "@/db";
 import { ensureAdminUser, seedReferenceData } from "@/lib/seed";
 import { createJournalEntry } from "@/lib/ledger";
-import { createVehicle } from "@/lib/fleet";
+import { assignVehicle, createDriver, createVehicle, driverOnDate, expiringDocuments, releaseAssignment } from "@/lib/fleet";
 import { addSubAccount } from "@/lib/accounts";
 
 const url = process.env.TEST_DATABASE_URL;
@@ -188,5 +188,60 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     const [parent] = await db.select().from(s.accounts).where(eq(s.accounts.id, acc["1102"]));
     expect(parent.isPostable).toBe(false);
     await expect(addSubAccount(db, acc["3101"], "فرعي")).rejects.toThrow();
+  });
+
+  describe("السائقون والإسناد والوثائق", () => {
+    let vehicleId: number;
+    let driverA: number;
+    let driverB: number;
+
+    beforeAll(async () => {
+      const v = await createVehicle(db, { plate: "د هـ و 5678", chassis: "CH-2", odometer: 1000 });
+      vehicleId = v.id;
+    });
+
+    it("السائق ينشئ موظفه وحساب رواتبه وحساب عهدته", async () => {
+      const d = await createDriver(db, { nameAr: "سائق أول", mobile: "0500000010" });
+      driverA = d.id;
+      expect(d.payableAccountCode).toBe("210701");
+      expect(d.custodyAccountCode).toBe("110501");
+      const [emp] = await db.select().from(s.employees).where(eq(s.employees.id, d.employeeId));
+      expect(emp.jobTitle).toBe("سائق");
+      const [custodyParent] = await db.select().from(s.accounts).where(eq(s.accounts.code, "1105"));
+      expect(custodyParent.isPostable).toBe(false);
+      driverB = (await createDriver(db, { nameAr: "سائق ثانٍ" })).id;
+    });
+
+    it("مركبة واحدة لسائق واحد في نفس الوقت", async () => {
+      await assignVehicle(db, { vehicleId, driverId: driverA, fromDate: `${YEAR}-06-01`, odometerStart: 1200 });
+      await expect(assignVehicle(db, { vehicleId, driverId: driverB, fromDate: `${YEAR}-06-02` })).rejects.toThrow("مسندة");
+      const [v] = await db.select().from(s.vehicles).where(eq(s.vehicles.id, vehicleId));
+      expect(v.odometer).toBe(1200);
+    });
+
+    it("التسليم يغلق الإسناد ويحدّث العداد، ويُعرف من كان يقود في تاريخ معيّن", async () => {
+      const [open] = await db.select().from(s.vehicleAssignments).where(eq(s.vehicleAssignments.driverId, driverA));
+      await expect(
+        releaseAssignment(db, { assignmentId: open.id, toDate: `${YEAR}-06-10`, odometerEnd: 1100 }),
+      ).rejects.toThrow();
+      await releaseAssignment(db, { assignmentId: open.id, toDate: `${YEAR}-06-10`, odometerEnd: 3500 });
+      await assignVehicle(db, { vehicleId, driverId: driverB, fromDate: `${YEAR}-06-11` });
+      const [v] = await db.select().from(s.vehicles).where(eq(s.vehicles.id, vehicleId));
+      expect(v.odometer).toBe(3500);
+      expect(await driverOnDate(db, vehicleId, `${YEAR}-06-05`)).toBe(driverA);
+      expect(await driverOnDate(db, vehicleId, `${YEAR}-06-20`)).toBe(driverB);
+      expect(await driverOnDate(db, vehicleId, `${YEAR}-05-20`)).toBeNull();
+    });
+
+    it("تنبيه الوثائق قبل 30 يوماً من الانتهاء", async () => {
+      await db.insert(s.fleetDocuments).values([
+        { vehicleId, type: "insurance", expiryDate: `${YEAR}-07-15` },
+        { driverId: driverA, type: "license", expiryDate: `${YEAR}-09-30` },
+      ]);
+      const due = await expiringDocuments(db, `${YEAR}-07-01`);
+      expect(due.map((d) => d.doc.type)).toEqual(["insurance"]);
+      expect(due[0].plate).toBe("د هـ و 5678");
+      await expect(db.insert(s.fleetDocuments).values({ type: "other", expiryDate: `${YEAR}-01-01` })).rejects.toThrow();
+    });
   });
 });
