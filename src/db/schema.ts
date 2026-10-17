@@ -307,7 +307,7 @@ export const journalEntries = pgTable(
 );
 
 // سطر القيد: القلب الذي تُبنى منه كل التقارير.
-// أبعاد السائق والبوليصة والعقد والمسار تُضاف مع وحدات الأسطول والتشغيل.
+// أبعاد البوليصة والعقد والمسار تُضاف مع وحدة التشغيل.
 export const journalLines = pgTable(
   "journal_lines",
   {
@@ -332,12 +332,14 @@ export const journalLines = pgTable(
     taxCodeId: ref("tax_code_id").references(() => taxCodes.id),
     partyId: ref("party_id").references(() => parties.id),
     costCenterId: ref("cost_center_id").references(() => costCenters.id),
+    driverId: ref("driver_id").references((): AnyPgColumn => drivers.id),
   },
   (t) => [
     uniqueIndex("journal_lines_entry_line_uq").on(t.entryId, t.lineNo),
     index("journal_lines_account_idx").on(t.accountId),
     index("journal_lines_cost_center_idx").on(t.costCenterId),
     index("journal_lines_party_idx").on(t.partyId),
+    index("journal_lines_driver_idx").on(t.driverId),
     check(
       "journal_lines_amounts_valid",
       sql`${t.debit} >= 0 and ${t.credit} >= 0 and (${t.debit} = 0) <> (${t.credit} = 0)
@@ -381,3 +383,108 @@ export const vehicles = pgTable("vehicles", {
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
+
+// ───────────────────────── الموظفون والسائقون ─────────────────────────
+
+export const employeeStatus = pgEnum("employee_status", ["active", "on_leave", "terminated"]);
+
+export const employees = pgTable("employees", {
+  id: id(),
+  nameAr: text("name_ar").notNull(),
+  nationalId: varchar("national_id", { length: 20 }).unique(),
+  jobTitle: text("job_title"),
+  hireDate: date("hire_date"),
+  basicSalary: money("basic_salary").notNull().default("0"),
+  allowances: money("allowances").notNull().default("0"),
+  bankName: text("bank_name"),
+  iban: varchar("iban", { length: 34 }),
+  // حساب الرواتب المستحقة الخاص به (فرعي تحت 2107)، وإليه تُقيد العمولات والخصومات
+  payableAccountId: ref("payable_account_id").unique().references(() => accounts.id),
+  status: employeeStatus("status").notNull().default("active"),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+export const commissionClass = pgEnum("commission_class", ["domestic", "international"]);
+export const appLanguage = pgEnum("app_language", ["ar", "ur", "hi", "en"]);
+
+export const drivers = pgTable("drivers", {
+  id: id(),
+  // السائق مرتبط بموظف إلزامياً لأن العمولة تُقيد لحساب راتبه
+  employeeId: ref("employee_id").notNull().unique().references(() => employees.id),
+  mobile: varchar("mobile", { length: 20 }),
+  nationality: text("nationality"),
+  appLanguage: appLanguage("app_language").notNull().default("ar"),
+  residencyNumber: varchar("residency_number", { length: 20 }),
+  licenseNumber: varchar("license_number", { length: 30 }),
+  transportCardNumber: varchar("transport_card_number", { length: 30 }),
+  birthDate: date("birth_date"),
+  commissionClass: commissionClass("commission_class").notNull().default("domestic"),
+  // حساب عهدته (فرعي تحت 1105)
+  custodyAccountId: ref("custody_account_id").notNull().unique().references(() => accounts.id),
+  custodyLimit: money("custody_limit"),
+  userId: ref("user_id").unique().references(() => users.id, { onDelete: "set null" }),
+  status: employeeStatus("status").notNull().default("active"),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+// من كان يقود المركبة ومتى؛ إسناد مفتوح واحد على الأكثر لكل مركبة ولكل سائق
+export const vehicleAssignments = pgTable(
+  "vehicle_assignments",
+  {
+    id: id(),
+    vehicleId: ref("vehicle_id").notNull().references(() => vehicles.id),
+    driverId: ref("driver_id").notNull().references(() => drivers.id),
+    fromDate: date("from_date").notNull(),
+    toDate: date("to_date"),
+    odometerStart: integer("odometer_start"),
+    odometerEnd: integer("odometer_end"),
+    notes: text("notes"),
+    createdBy: ref("created_by").references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("vehicle_assignments_open_vehicle_uq").on(t.vehicleId).where(sql`${t.toDate} is null`),
+    uniqueIndex("vehicle_assignments_open_driver_uq").on(t.driverId).where(sql`${t.toDate} is null`),
+    index("vehicle_assignments_vehicle_idx").on(t.vehicleId, t.fromDate),
+    check("vehicle_assignments_dates", sql`${t.toDate} is null or ${t.toDate} >= ${t.fromDate}`),
+    check(
+      "vehicle_assignments_odometer",
+      sql`${t.odometerEnd} is null or ${t.odometerStart} is null or ${t.odometerEnd} >= ${t.odometerStart}`,
+    ),
+  ],
+);
+
+export const fleetDocumentType = pgEnum("fleet_document_type", [
+  "registration",
+  "periodic_inspection",
+  "operating_card",
+  "insurance",
+  "authorization",
+  "license",
+  "residency",
+  "other",
+]);
+
+export const fleetDocuments = pgTable(
+  "fleet_documents",
+  {
+    id: id(),
+    // صاحب الوثيقة: مركبة أو سائق
+    vehicleId: ref("vehicle_id").references(() => vehicles.id, { onDelete: "cascade" }),
+    driverId: ref("driver_id").references(() => drivers.id, { onDelete: "cascade" }),
+    type: fleetDocumentType("type").notNull(),
+    number: varchar("number", { length: 40 }),
+    issueDate: date("issue_date"),
+    expiryDate: date("expiry_date").notNull(),
+    authority: text("authority"),
+    cost: money("cost"),
+    notes: text("notes"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("fleet_documents_expiry_idx").on(t.expiryDate),
+    check("fleet_documents_one_owner", sql`(${t.vehicleId} is null) <> (${t.driverId} is null)`),
+  ],
+);

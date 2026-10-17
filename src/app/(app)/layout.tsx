@@ -6,6 +6,9 @@ import { logout } from "../login/actions";
 const NAV: { href: string; label: string; entity?: Entity }[] = [
   { href: "/", label: "الرئيسية" },
   { href: "/vehicles", label: "المركبات", entity: "vehicles" },
+  { href: "/drivers", label: "السائقون", entity: "drivers" },
+  { href: "/assignments", label: "الإسناد والتسليم", entity: "vehicles" },
+  { href: "/fleet-documents", label: "وثائق الأسطول", entity: "fleet_documents" },
   { href: "/accounts", label: "شجرة الحسابات", entity: "accounts" },
   { href: "/cost-centers", label: "مراكز التكلفة", entity: "cost_centers" },
   { href: "/users", label: "المستخدمون", entity: "users" },
