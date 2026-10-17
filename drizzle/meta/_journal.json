@@ -29,6 +29,13 @@
       "when": 1792244256200,
       "tag": "0003_operations_master_data",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792245996340,
+      "tag": "0004_waybills",
+      "breakpoints": true
     }
   ]
 }

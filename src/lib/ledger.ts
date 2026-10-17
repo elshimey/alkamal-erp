@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
 
@@ -15,6 +15,8 @@ export interface LineInput {
   costCenterId?: number | null;
   partyId?: number | null;
   taxCodeId?: number | null;
+  driverId?: number | null;
+  waybillId?: number | null;
 }
 
 export interface EntryInput {
@@ -65,9 +67,14 @@ export async function nextDocumentNumber(tx: Tx | Db, docType: string, prefix: s
 }
 
 export async function createJournalEntry(db: Db, input: EntryInput) {
+  return db.transaction((tx) => createJournalEntryTx(tx, input));
+}
+
+/** ينشئ القيد داخل معاملة قائمة، ليُحفظ مع المستند المصدر أو يُلغى معه. */
+export async function createJournalEntryTx(tx: Tx, input: EntryInput) {
   const errors = validateLines(input.lines);
   if (errors.length) throw new LedgerError(errors);
-  return db.transaction(async (tx) => {
+  {
     const year = Number(input.entryDate.slice(0, 4));
     const number = await nextDocumentNumber(tx, "journal_entry", "JE", year);
     const [entry] = await tx
@@ -94,6 +101,8 @@ export async function createJournalEntry(db: Db, input: EntryInput) {
         costCenterId: l.costCenterId ?? null,
         partyId: l.partyId ?? null,
         taxCodeId: l.taxCodeId ?? null,
+        driverId: l.driverId ?? null,
+        waybillId: l.waybillId ?? null,
       })),
     );
     if (input.post) {
@@ -103,7 +112,13 @@ export async function createJournalEntry(db: Db, input: EntryInput) {
         .where(eq(s.journalEntries.id, entry.id));
     }
     return entry;
-  });
+  }
+}
+
+/** إلغاء قيد مستند (الإرجاع لمسودة): يُرجَع القيد لمسودة ثم يُحذف. الفترة المقفلة تمنع ذلك. */
+export async function deleteEntryTx(tx: Tx, entryId: number) {
+  await tx.update(s.journalEntries).set({ status: "draft" }).where(and(eq(s.journalEntries.id, entryId), eq(s.journalEntries.status, "posted")));
+  await tx.delete(s.journalEntries).where(eq(s.journalEntries.id, entryId));
 }
 
 export class LedgerError extends Error {

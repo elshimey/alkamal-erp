@@ -19,6 +19,7 @@ const PATHS = {
   ),
   handover: <path d="M4 8h15l-3.5-3.5M20 16H5l3.5 3.5" />,
   document: <path d="M6 3h9l4 4v14H6Zm8 0v5h5M9 13h7m-7 4h5" />,
+  waybill: <path d="M9 3h6v3H9ZM7 4.5H5V21h14V4.5h-2M8.5 11h7m-7 4h4.5" />,
   people: (
     <>
       <circle cx="9" cy="8" r="3.5" />

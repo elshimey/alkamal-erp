@@ -52,3 +52,28 @@ export async function countryOptions() {
   const rows = await db.select().from(s.locations).where(eq(s.locations.level, "country")).orderBy(asc(s.locations.nameAr));
   return rows.map((r) => ({ value: String(r.id), label: r.nameAr }));
 }
+
+export async function partyOptions(role: (typeof s.partyRoleType.enumValues)[number]) {
+  const rows = await db
+    .select({ id: s.parties.id, nameAr: s.parties.nameAr })
+    .from(s.parties)
+    .innerJoin(s.partyRoles, eq(s.partyRoles.partyId, s.parties.id))
+    .where(eq(s.partyRoles.role, role))
+    .orderBy(asc(s.parties.nameAr));
+  return rows.map((r) => ({ value: String(r.id), label: r.nameAr }));
+}
+
+export async function driverOptions() {
+  const rows = await db
+    .select({ id: s.drivers.id, nameAr: s.employees.nameAr })
+    .from(s.drivers)
+    .innerJoin(s.employees, eq(s.employees.id, s.drivers.employeeId))
+    .where(eq(s.drivers.status, "active"))
+    .orderBy(asc(s.employees.nameAr));
+  return rows.map((r) => ({ value: String(r.id), label: r.nameAr }));
+}
+
+export async function chargeTypeOptions() {
+  const rows = await db.select().from(s.chargeTypes).where(eq(s.chargeTypes.isActive, true)).orderBy(asc(s.chargeTypes.id));
+  return rows.map((r) => ({ value: String(r.id), label: r.nameAr }));
+}

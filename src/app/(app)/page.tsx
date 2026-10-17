@@ -20,15 +20,16 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       (select count(*) from drivers where status = 'active')::int as drivers,
       (select count(*) from accounts)::int as accounts,
       (select count(*) from users where is_active)::int as users,
+      (select count(*) from waybills where status = 'delivered')::int as pending,
       (select count(*) from journal_entries where status = 'posted')::int as entries
-  `)) as unknown as { vehicles: number; drivers: number; accounts: number; users: number; entries: number }[];
+  `)) as unknown as { vehicles: number; drivers: number; accounts: number; users: number; pending: number; entries: number }[];
 
   const today = todayRiyadh();
   const due = can(user.perms, "fleet_documents", "view") ? await expiringDocuments(db, today) : [];
   const stats: { label: string; value: number; icon: IconName; href?: string }[] = [
     { label: "المركبات", value: counts.vehicles, icon: "truck", href: "/vehicles" },
     { label: "السائقون النشطون", value: counts.drivers, icon: "driver", href: "/drivers" },
-    { label: "المستخدمون النشطون", value: counts.users, icon: "user", href: "/users" },
+    { label: "بوالص بانتظار الاعتماد", value: counts.pending, icon: "waybill", href: "/waybills?status=delivered" },
     { label: "القيود المرحّلة", value: counts.entries, icon: "ledger" },
   ];
   const now = new Date();
@@ -44,7 +45,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
             <p className="text-sm text-brand-500">{gregorian}</p>
             <h1 className="mt-1 text-3xl font-semibold">أهلاً، {user.name}</h1>
             <p className="mt-2 max-w-xl text-sm leading-relaxed text-white/60">
-              لوحة البداية. تظهر هنا مؤشرات التشغيل والربحية عند إضافة وحدات البوالص والفواتير.
+              لوحة البداية. تظهر هنا مؤشرات الربحية عند إضافة وحدة الفواتير.
             </p>
           </div>
           <div className="flex items-center gap-2 rounded-full bg-white/[0.06] px-4 py-2 text-xs text-white/70">
