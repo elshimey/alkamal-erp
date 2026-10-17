@@ -11,6 +11,7 @@ import { ensureAdminUser, seedReferenceData } from "@/lib/seed";
 import { createJournalEntry } from "@/lib/ledger";
 import { assignVehicle, createDriver, createVehicle, driverOnDate, expiringDocuments, releaseAssignment } from "@/lib/fleet";
 import { addSubAccount } from "@/lib/accounts";
+import { activeContract, createContract, createLocation, createParty, createRoute, priceTrip, setContractStatus } from "@/lib/operations";
 
 const url = process.env.TEST_DATABASE_URL;
 const YEAR = 2026;
@@ -242,6 +243,48 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(due.map((d) => d.doc.type)).toEqual(["insurance"]);
       expect(due[0].plate).toBe("د هـ و 5678");
       await expect(db.insert(s.fleetDocuments).values({ type: "other", expiryDate: `${YEAR}-01-01` })).rejects.toThrow();
+    });
+  });
+
+  describe("العملاء والمسارات والعقود", () => {
+    it("المسار دولي إذا اختلفت الدولتان، والعقد يسعّر الرحلة", async () => {
+      const countries = await db.select().from(s.locations);
+      const sa = countries.find((c) => c.countryCode === "SA")!;
+      const kw = countries.find((c) => c.countryCode === "KW")!;
+      const dammam = await createLocation(db, { parentId: sa.id, nameAr: "الدمام" });
+      const riyadh = await createLocation(db, { parentId: sa.id, nameAr: "الرياض" });
+      const kuwait = await createLocation(db, { parentId: kw.id, nameAr: "مدينة الكويت" });
+      expect(dammam.level).toBe("city");
+      expect(kuwait.countryCode).toBe("KW");
+      const local = await createRoute(db, { fromLocationId: dammam.id, toLocationId: riyadh.id, distanceKm: 400, driverCommission: 150 });
+      const intl = await createRoute(db, { fromLocationId: dammam.id, toLocationId: kuwait.id, distanceKm: 450 });
+      expect(local.isInternational).toBe(false);
+      expect(intl.isInternational).toBe(true);
+
+      const supplierOnly = await createParty(db, { nameAr: "مورد", roles: ["supplier"] });
+      await expect(
+        createContract(db, { customerId: supplierOnly.id, number: "X", fromDate: `${YEAR}-01-01`, toDate: `${YEAR}-12-31` }),
+      ).rejects.toThrow("ليست عميلاً");
+
+      const customer = await createParty(db, { nameAr: "شركة المراعي", roles: ["customer"] });
+      const c1 = await createContract(db, { customerId: customer.id, number: "C-1", fromDate: `${YEAR}-01-01`, toDate: `${YEAR}-12-31` });
+      await expect(setContractStatus(db, c1.id, "active")).rejects.toThrow("بند تسعير");
+      await db.insert(s.contractRates).values({ contractId: c1.id, method: "route_fixed", routeId: local.id, price: "2800" });
+      await setContractStatus(db, c1.id, "active");
+
+      const c2 = await createContract(db, { customerId: customer.id, number: "C-2", fromDate: `${YEAR}-06-01`, toDate: `${YEAR + 1}-05-31` });
+      await db.insert(s.contractRates).values({ contractId: c2.id, method: "route_fixed", routeId: local.id, price: "2900" });
+      await expect(setContractStatus(db, c2.id, "active")).rejects.toThrow("تتداخل");
+
+      expect((await activeContract(db, customer.id, `${YEAR}-03-01`))?.number).toBe("C-1");
+      expect(await activeContract(db, customer.id, `${YEAR + 1}-03-01`)).toBeNull();
+      const price = await priceTrip(db, customer.id, `${YEAR}-03-01`, { routeId: local.id });
+      expect(price?.amount).toBe(2800);
+      expect(await priceTrip(db, customer.id, `${YEAR}-03-01`, { routeId: intl.id })).toBeNull();
+
+      await expect(
+        db.insert(s.contractRates).values({ contractId: c1.id, method: "per_km_vehicle_type", price: "2" }),
+      ).rejects.toThrow();
     });
   });
 });

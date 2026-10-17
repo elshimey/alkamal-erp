@@ -83,6 +83,25 @@ export async function seedReferenceData(db: Db, year = new Date().getFullYear())
     )
     .onConflictDoNothing();
 
+  await db
+    .insert(s.locations)
+    .values([
+      { level: "country", nameAr: "السعودية", countryCode: "SA" },
+      { level: "country", nameAr: "الكويت", countryCode: "KW" },
+    ])
+    .onConflictDoNothing();
+
+  await db
+    .insert(s.chargeTypes)
+    .values(
+      ["انتظار", "تحميل", "تخليص", "مبيت", "أخرى"].map((nameAr) => ({
+        nameAr,
+        revenueAccountId: byCode.get("4103"),
+        costAccountId: byCode.get("5104"),
+      })),
+    )
+    .onConflictDoNothing({ target: s.chargeTypes.nameAr });
+
   await seedCoreRoles(db);
 }
 

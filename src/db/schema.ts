@@ -488,3 +488,117 @@ export const fleetDocuments = pgTable(
     check("fleet_documents_one_owner", sql`(${t.vehicleId} is null) <> (${t.driverId} is null)`),
   ],
 );
+
+// ───────────────────────── التشغيل: المواقع والمسارات والعقود ─────────────────────────
+
+export const locationLevel = pgEnum("location_level", ["country", "city", "site"]);
+
+// هرمي: دولة ← مدينة ← موقع (مصنع، ميناء، منفذ حدودي...)
+export const locations = pgTable(
+  "locations",
+  {
+    id: id(),
+    parentId: ref("parent_id").references((): AnyPgColumn => locations.id),
+    level: locationLevel("level").notNull(),
+    nameAr: text("name_ar").notNull(),
+    // رمز الدولة (SA، KW) للدولة، ويُورَّث للمدن والمواقع لمعرفة الرحلة الدولية
+    countryCode: varchar("country_code", { length: 2 }).notNull(),
+    isBorderCrossing: boolean("is_border_crossing").notNull().default(false),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("locations_parent_name_uq").on(sql`coalesce(${t.parentId}, 0)`, t.nameAr),
+    check("locations_country_root", sql`(${t.level} = 'country') = (${t.parentId} is null)`),
+  ],
+);
+
+export const routes = pgTable(
+  "routes",
+  {
+    id: id(),
+    fromLocationId: ref("from_location_id").notNull().references(() => locations.id),
+    toLocationId: ref("to_location_id").notNull().references(() => locations.id),
+    distanceKm: integer("distance_km"),
+    isInternational: boolean("is_international").notNull().default(false),
+    // العمولة الافتراضية للسائق، وتُعدَّل على البوليصة قبل الاعتماد
+    driverCommission: money("driver_commission").notNull().default("0"),
+    estimatedDieselLiters: integer("estimated_diesel_liters"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("routes_from_to_uq").on(t.fromLocationId, t.toLocationId),
+    check("routes_distinct_ends", sql`${t.fromLocationId} <> ${t.toLocationId}`),
+  ],
+);
+
+export const contractStatus = pgEnum("contract_status", ["draft", "active", "expired", "suspended"]);
+
+export const contracts = pgTable(
+  "contracts",
+  {
+    id: id(),
+    customerId: ref("customer_id").notNull().references(() => parties.id),
+    number: varchar("number", { length: 30 }).notNull().unique(),
+    fromDate: date("from_date").notNull(),
+    toDate: date("to_date").notNull(),
+    currencyCode: varchar("currency_code", { length: 3 }).notNull().default("SAR").references(() => currencies.code),
+    creditLimit: money("credit_limit"),
+    paymentTermsDays: smallint("payment_terms_days").notNull().default(30),
+    status: contractStatus("status").notNull().default("draft"),
+    notes: text("notes"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("contracts_customer_idx").on(t.customerId, t.status),
+    check("contracts_dates", sql`${t.toDate} >= ${t.fromDate}`),
+  ],
+);
+
+export const pricingMethod = pgEnum("pricing_method", [
+  "per_km_vehicle_type", // ريال/كم حسب نوع المركبة
+  "specific_vehicle", // سعر لمركبة محددة على مسار
+  "route_fixed", // مسار بسعر ثابت
+  "car_transport", // نقل سيارة مقطوع
+  "per_quantity", // بالكمية (طن، كرتون...)
+]);
+
+export const contractRates = pgTable(
+  "contract_rates",
+  {
+    id: id(),
+    contractId: ref("contract_id").notNull().references(() => contracts.id, { onDelete: "cascade" }),
+    method: pricingMethod("method").notNull(),
+    routeId: ref("route_id").references(() => routes.id),
+    vehicleTypeId: ref("vehicle_type_id").references(() => vehicleTypes.id),
+    vehicleId: ref("vehicle_id").references(() => vehicles.id),
+    price: money("price").notNull(),
+    // الوحدة لطريقة الكمية (طن، كرتون، رحلة...)
+    unit: text("unit"),
+    notes: text("notes"),
+  },
+  (t) => [
+    index("contract_rates_contract_idx").on(t.contractId),
+    check("contract_rates_price_positive", sql`${t.price} > 0`),
+    check(
+      "contract_rates_method_refs",
+      sql`case ${t.method}
+        when 'per_km_vehicle_type' then ${t.vehicleTypeId} is not null
+        when 'specific_vehicle' then ${t.vehicleId} is not null and ${t.routeId} is not null
+        when 'route_fixed' then ${t.routeId} is not null
+        when 'car_transport' then ${t.routeId} is not null
+        when 'per_quantity' then ${t.unit} is not null
+      end`,
+    ),
+  ],
+);
+
+// أنواع الرسوم الإضافية على البوليصة (انتظار، تحميل، تخليص، مبيت...)
+export const chargeTypes = pgTable("charge_types", {
+  id: id(),
+  nameAr: text("name_ar").notNull().unique(),
+  revenueAccountId: ref("revenue_account_id").references(() => accounts.id),
+  costAccountId: ref("cost_account_id").references(() => accounts.id),
+  isActive: boolean("is_active").notNull().default(true),
+});

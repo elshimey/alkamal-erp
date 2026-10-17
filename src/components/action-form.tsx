@@ -10,7 +10,7 @@ export function SubmitButton({ children, variant = "primary" }: { children: Reac
   const pending = useContext(PendingContext);
   const styles =
     variant === "primary"
-      ? "bg-brand-600 text-white hover:bg-brand-700"
+      ? "bg-brand-600 font-semibold text-brand-900 hover:bg-brand-500"
       : "border border-gray-300 bg-white text-gray-700 hover:bg-gray-50";
   return (
     <button
