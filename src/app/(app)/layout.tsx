@@ -21,9 +21,19 @@ const NAV: { title: string; items: { href: string; label: string; icon: IconName
     title: "التشغيل والمبيعات",
     items: [
       { href: "/waybills", label: "البوالص", icon: "waybill", entity: "waybills" },
+      { href: "/invoices", label: "الفواتير", icon: "invoice", entity: "sales_invoices" },
+      { href: "/receipts", label: "سندات القبض", icon: "cash", entity: "receipts" },
       { href: "/parties", label: "جهات الاتصال", icon: "people", entity: "parties" },
       { href: "/routes", label: "المواقع والمسارات", icon: "route", entity: "routes" },
       { href: "/contracts", label: "العقود والأسعار", icon: "contract", entity: "contracts" },
+    ],
+  },
+  {
+    title: "المشتريات والمصروفات",
+    items: [
+      { href: "/purchases", label: "فواتير الموردين", icon: "invoice", entity: "purchase_invoices" },
+      { href: "/expenses", label: "المصروفات", icon: "fuel", entity: "expenses" },
+      { href: "/payments", label: "سندات الصرف", icon: "cash", entity: "payments" },
     ],
   },
   {
@@ -31,6 +41,7 @@ const NAV: { title: string; items: { href: string; label: string; icon: IconName
     items: [
       { href: "/accounts", label: "شجرة الحسابات", icon: "tree", entity: "accounts" },
       { href: "/cost-centers", label: "مراكز التكلفة", icon: "target", entity: "cost_centers" },
+      { href: "/exchange-rates", label: "أسعار الصرف", icon: "exchange", entity: "accounts" },
     ],
   },
   {
@@ -42,7 +53,7 @@ const NAV: { title: string; items: { href: string; label: string; icon: IconName
   },
 ];
 
-const COMING = ["الفواتير والتحصيل", "المصروفات", "الصيانة", "الرواتب", "التقارير"];
+const COMING = ["الصيانة", "الرواتب", "التقارير"];
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
@@ -53,7 +64,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="flex min-h-screen">
-      <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col overflow-y-auto bg-asphalt-900 text-white md:flex">
+      <aside className="sticky top-0 hidden print:hidden h-screen w-64 shrink-0 flex-col overflow-y-auto bg-asphalt-900 text-white md:flex">
         <div className="road-line absolute inset-y-0 end-0 opacity-70" />
         <div className="border-b border-white/5 px-5 py-5">
           <Logo light />
@@ -70,7 +81,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </nav>
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 flex items-center justify-between gap-4 border-b border-black/5 bg-white/85 px-6 py-3 backdrop-blur">
+        <header className="sticky top-0 z-30 flex print:hidden items-center justify-between gap-4 border-b border-black/5 bg-white/85 px-6 py-3 backdrop-blur">
           <MobileNav groups={groups} />
           <div className="ms-auto flex items-center gap-4 text-sm">
             <Link href="/account" className="flex items-center gap-2 text-gray-700 hover:text-brand-700">
@@ -88,7 +99,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             </form>
           </div>
         </header>
-        <main className="flex-1 p-6 lg:p-8">{children}</main>
+        <main className="flex-1 p-6 lg:p-8 print:p-0">{children}</main>
       </div>
     </div>
   );
