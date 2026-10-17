@@ -2,7 +2,9 @@
 
 /* هوية «الكمال للنقليات»: أسفلت الطريق + أصفر إشارات المرور، مع خط الطريق المتقطع كعنصر متكرر */
 @theme {
-  --font-sans: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, "Noto Sans Arabic", system-ui, sans-serif;
+  --font-sans: var(--font-body), "Segoe UI", Tahoma, "Noto Sans Arabic", system-ui, sans-serif;
+  /* خط العناوين والأرقام الكبيرة */
+  --font-display: var(--font-heading), var(--font-body), system-ui, sans-serif;
 
   /* أصفر الإشارة: للأزرار والتمييز */
   --color-brand-50: #fff8e6;
@@ -14,15 +16,26 @@
   /* الأسفلت: للقائمة الجانبية والعناوين */
   --color-brand-900: #1b2126;
 
+  --color-asphalt-600: #3d4952;
   --color-asphalt-700: #303a42;
   --color-asphalt-800: #232b31;
   --color-asphalt-900: #1b2126;
   --color-concrete: #f3f1eb;
+
+  --animate-page-in: page-in 0.38s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  --animate-rise: rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
 
 body {
   background: var(--color-concrete);
   color: #1f2428;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  letter-spacing: 0;
 }
 
 /* الأرقام والرموز تبقى من اليسار لليمين داخل النص العربي */
@@ -40,4 +53,90 @@ body {
 .road-line-h {
   background-image: repeating-linear-gradient(to left, var(--color-brand-600) 0 22px, transparent 22px 40px);
   height: 4px;
+}
+/* الخط «يتحرك» كأنك تقود: عند المرور على القائمة، وفي شريط الانتقال واللوحات */
+.road-moving-v {
+  animation: road-v 1.1s linear infinite;
+}
+.road-moving-h {
+  animation: road-h 0.9s linear infinite;
+}
+aside:hover > .road-line {
+  animation: road-v 1.1s linear infinite;
+}
+
+/* الصفحة تدخل من اليمين إلى اليسار: اتجاه السير في الواجهة العربية */
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes road-v {
+  to {
+    background-position-y: 34px;
+  }
+}
+@keyframes road-h {
+  to {
+    background-position-x: -40px;
+  }
+}
+/* الشاحنة تعبر من اليمين إلى اليسار */
+@keyframes drive-across {
+  from {
+    inset-inline-start: -90px;
+  }
+  to {
+    inset-inline-start: calc(100% + 10px);
+  }
+}
+@keyframes bump {
+  50% {
+    transform: translateY(-1px);
+  }
+}
+@keyframes wheel {
+  to {
+    transform: rotate(-360deg);
+  }
+}
+
+.drive-across {
+  animation: drive-across 14s linear infinite;
+}
+.truck-bump {
+  animation: bump 0.35s ease-in-out infinite;
+}
+.spin-wheel {
+  animation: wheel 0.8s linear infinite;
+  transform-origin: center;
+}
+/* تتابع ظهور البطاقات: كل عنصر يتأخر قليلاً عن سابقه */
+.stagger {
+  animation-delay: calc(var(--i, 0) * 70ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

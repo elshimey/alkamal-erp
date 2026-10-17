@@ -1,5 +1,11 @@
 import type { Metadata } from "next";
+import { IBM_Plex_Sans_Arabic, Readex_Pro } from "next/font/google";
+import { RouteProgress } from "@/components/route-progress";
 import "./globals.css";
+
+// الخطوط تُحمَّل مع البرنامج نفسه (بلا طلبات خارجية عند الفتح)
+const body = IBM_Plex_Sans_Arabic({ subsets: ["arabic", "latin"], weight: ["400", "500", "600", "700"], variable: "--font-body" });
+const display = Readex_Pro({ subsets: ["arabic", "latin"], weight: ["500", "600", "700"], variable: "--font-heading" });
 
 export const metadata: Metadata = {
   title: "الكمال للنقليات – نظام الإدارة",
@@ -8,14 +14,11 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="ar" dir="rtl">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
-        {/* eslint-disable-next-line @next/next/no-page-custom-font */}
-        <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet" />
-      </head>
-      <body className="min-h-screen font-sans antialiased">{children}</body>
+    <html lang="ar" dir="rtl" className={`${body.variable} ${display.variable}`}>
+      <body className="min-h-screen font-sans antialiased">
+        <RouteProgress />
+        {children}
+      </body>
     </html>
   );
 }
