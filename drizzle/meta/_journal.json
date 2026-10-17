@@ -50,6 +50,13 @@
       "when": 1792248183591,
       "tag": "0006_purchases_expenses_payments",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792249126170,
+      "tag": "0007_maintenance",
+      "breakpoints": true
     }
   ]
 }
