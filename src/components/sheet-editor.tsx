@@ -4,6 +4,7 @@
 // الصفوف المحفوظة تُزال، والصفوف المرفوضة تبقى مع سبب الرفض لتصحيحها.
 
 import { useRef, useState, useTransition, type ClipboardEvent, type KeyboardEvent } from "react";
+import { Truck } from "./icons";
 import { parseDelimited, toCsv, type SheetResult } from "@/lib/sheet";
 
 export interface SheetColumn {
@@ -143,7 +144,14 @@ export function SheetEditor({
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <button type="button" onClick={save} disabled={pending} className="rounded-lg bg-brand-600 px-4 py-2 font-semibold text-brand-900 hover:bg-brand-500 disabled:opacity-60">
-          {pending ? "جارٍ الحفظ…" : "حفظ الكل"}
+          {pending ? (
+            <span className="flex items-center gap-2">
+              <Truck className="w-7" spinning />
+              جارٍ الحفظ…
+            </span>
+          ) : (
+            "حفظ الكل"
+          )}
         </button>
         <button type="button" onClick={() => setRows((p) => [...p, ...Array.from({ length: 5 }, () => emptyRow(columns))])} className="rounded-lg border border-gray-300 bg-white px-3 py-2 hover:bg-gray-50">
           + 5 صفوف
@@ -167,18 +175,18 @@ export function SheetEditor({
         />
         <span className="text-xs text-gray-400">انسخ الصفوف من Excel والصقها في أي خلية</span>
       </div>
-      <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+      <div className="overflow-x-auto rounded-2xl border border-black/[0.06] bg-white shadow-[0_4px_16px_-8px_rgba(27,33,38,0.08)]">
         <table ref={tableRef} className="w-full border-collapse text-sm">
-          <thead className="bg-gray-50 text-xs text-gray-600">
+          <thead className="bg-asphalt-900 text-xs text-white/85">
             <tr>
               <th className="w-10 border-b border-gray-200 px-2 py-2">#</th>
               {columns.map((c) => (
-                <th key={c.key} className="border-b border-s border-gray-200 px-2 py-2 text-start font-medium whitespace-nowrap" style={{ minWidth: c.width ?? "8rem" }}>
+                <th key={c.key} className="border-s border-white/10 px-2 py-2.5 text-start font-medium whitespace-nowrap" style={{ minWidth: c.width ?? "8rem" }}>
                   {c.label}
-                  {c.required && <span className="text-red-500"> *</span>}
+                  {c.required && <span className="text-brand-500"> *</span>}
                 </th>
               ))}
-              <th className="w-8 border-b border-gray-200" />
+              <th className="w-8" />
             </tr>
           </thead>
           <tbody>

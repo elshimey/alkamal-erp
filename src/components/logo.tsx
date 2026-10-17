@@ -14,7 +14,7 @@ export function Logo({ light = false }: { light?: boolean }) {
     <div className="flex items-center gap-3">
       <LogoMark />
       <div className="leading-tight">
-        <div className={`text-lg font-bold ${light ? "text-white" : "text-brand-900"}`}>الكمال للنقليات</div>
+        <div className={`font-display text-lg font-semibold ${light ? "text-white" : "text-brand-900"}`}>الكمال للنقليات</div>
         <div className={`text-[11px] tracking-wide ${light ? "text-white/55" : "text-gray-500"}`}>نظام إدارة النقل والحسابات</div>
       </div>
     </div>

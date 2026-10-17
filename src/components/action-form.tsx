@@ -1,5 +1,6 @@
 "use client";
 
+import { Truck } from "./icons";
 import { createContext, startTransition, useActionState, useContext, useEffect, useRef, type ReactNode } from "react";
 
 export type FormState = { error?: string; ok?: string } | undefined;
@@ -16,9 +17,16 @@ export function SubmitButton({ children, variant = "primary" }: { children: Reac
     <button
       type="submit"
       disabled={pending}
-      className={`rounded-lg px-4 py-2 text-sm font-medium transition disabled:opacity-60 ${styles}`}
+      className={`rounded-lg px-4 py-2 text-sm font-medium shadow-sm transition active:scale-[0.98] disabled:opacity-70 ${styles}`}
     >
-      {pending ? "جارٍ الحفظ…" : children}
+      {pending ? (
+        <span className="flex items-center gap-2">
+          <Truck className="w-7" spinning />
+          جارٍ الحفظ…
+        </span>
+      ) : (
+        children
+      )}
     </button>
   );
 }
