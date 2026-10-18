@@ -1206,6 +1206,8 @@ export const payrollLines = pgTable(
     deductions: money("deductions").notNull().default("0"),
     // للعرض فقط: العمولات قُيدت لحسابه عند اعتماد البوالص
     commissions: money("commissions").notNull().default("0"),
+    // للعرض فقط: المخالفات قُيدت على حسابه عند تسجيلها، ويخصمها المسير من الصافي
+    violations: money("violations").notNull().default("0"),
     advanceDeduction: money("advance_deduction").notNull().default("0"),
     gosiEmployee: money("gosi_employee").notNull().default("0"),
     gosiEmployer: money("gosi_employer").notNull().default("0"),
@@ -1219,5 +1221,46 @@ export const payrollLines = pgTable(
       "payroll_lines_amounts",
       sql`${t.basic} >= 0 and ${t.housing} >= 0 and ${t.otherAllowances} >= 0 and ${t.absenceDays} >= 0 and ${t.additions} >= 0 and ${t.deductions} >= 0 and ${t.advanceDeduction} >= 0`,
     ),
+  ],
+);
+
+// ───────────────────────── المخالفات المرورية ─────────────────────────
+
+// على السائق: تُخصم من راتبه (مدين حساب رواتبه). على الشركة: مصروف على مركز تكلفة المركبة.
+export const violationChargeTo = pgEnum("violation_charge_to", ["driver", "company"]);
+// مسجلة (بقيدها) ← مسددة للجهة (بقيد السداد)
+export const violationStatus = pgEnum("violation_status", ["posted", "paid"]);
+
+export const trafficViolations = pgTable(
+  "traffic_violations",
+  {
+    id: id(),
+    number: varchar("number", { length: 30 }).notNull().unique(),
+    violationDate: date("violation_date").notNull(),
+    // رقم المخالفة لدى المرور، لمنع تسجيلها مرتين
+    reference: varchar("reference", { length: 40 }).unique(),
+    vehicleId: ref("vehicle_id").notNull().references(() => vehicles.id),
+    // يُستنتج من سجل الإسناد في تاريخ المخالفة
+    driverId: ref("driver_id").references(() => drivers.id),
+    violationType: text("violation_type").notNull(),
+    location: text("location"),
+    amount: money("amount").notNull(),
+    chargeTo: violationChargeTo("charge_to").notNull(),
+    status: violationStatus("status").notNull().default("posted"),
+    journalEntryId: ref("journal_entry_id").references(() => journalEntries.id),
+    // المسير الذي خصمها من الراتب (للمخالفة على السائق)
+    payrollRunId: ref("payroll_run_id").references(() => payrollRuns.id, { onDelete: "set null" }),
+    paymentDate: date("payment_date"),
+    cashAccountId: ref("cash_account_id").references(() => accounts.id),
+    paymentEntryId: ref("payment_entry_id").references(() => journalEntries.id),
+    notes: text("notes"),
+    createdBy: ref("created_by").references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("traffic_violations_vehicle_idx").on(t.vehicleId, t.violationDate),
+    index("traffic_violations_driver_idx").on(t.driverId, t.violationDate),
+    check("traffic_violations_amount", sql`${t.amount} > 0`),
+    check("traffic_violations_driver", sql`${t.chargeTo} <> 'driver' or ${t.driverId} is not null`),
   ],
 );

@@ -54,6 +54,7 @@ const PATHS = {
   lock: <path d="M6 11h12v10H6Zm2.5 0V8a3.5 3.5 0 0 1 7 0v3" />,
   logout: <path d="M14 4h5v16h-5M10 8l-4 4 4 4m-4-4h10" />,
   calendar: <path d="M4 6h16v15H4Zm0 5h16M8 3v5m8-5v5" />,
+  ticket: <path d="M4 6h16v4a2 2 0 0 0 0 4v4H4v-4a2 2 0 0 0 0-4Zm10 0v12m-6-8h3m-3 4h3" />,
   alert: <path d="M12 3 2 20h20Zm0 6v5m0 3v.5" />,
   invoice: <path d="M6 3h12v18l-3-2-3 2-3-2-3 2Zm3 5h6m-6 4h6m-6 4h3" />,
   cash: <path d="M3 7h18v10H3Zm9 2.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5ZM6 10v4m12-4v4" />,

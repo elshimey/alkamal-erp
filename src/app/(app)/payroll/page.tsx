@@ -21,6 +21,7 @@ export default async function PayrollPage() {
       count: sql<number>`count(${s.payrollLines.id})::int`,
       gross: sql<string>`coalesce(sum(${s.payrollLines.basic} + ${s.payrollLines.housing} + ${s.payrollLines.otherAllowances}), 0)`,
       commissions: sql<string>`coalesce(sum(${s.payrollLines.commissions}), 0)`,
+      violations: sql<string>`coalesce(sum(${s.payrollLines.violations}), 0)`,
       net: sql<string>`coalesce(sum(greatest(${s.payrollLines.net}, 0)), 0)`,
     })
     .from(s.payrollRuns)
@@ -33,7 +34,7 @@ export default async function PayrollPage() {
     <>
       <PageHeader
         title="الرواتب"
-        description="مسير لكل شهر: يُبنى تلقائياً من رواتب الموظفين وعمولات البوالص المعتمدة وأقساط السلف، ثم تعدّل الغياب والإضافات، فتعتمد قيد الاستحقاق، ثم تصرف بالصافي من البنك."
+        description="مسير لكل شهر: يُبنى تلقائياً من رواتب الموظفين وعمولات البوالص المعتمدة وأقساط السلف ومخالفات السائقين، ثم تعدّل الغياب والإضافات، فتعتمد قيد الاستحقاق، ثم تصرف بالصافي من البنك."
       />
       <PayrollTabs active="runs" />
       {can(user.perms, "payroll", "create") && (
@@ -46,9 +47,9 @@ export default async function PayrollPage() {
           </ActionForm>
         </Card>
       )}
-      <Table head={["الرقم", "الشهر", "الموظفون", "الرواتب والبدلات", "العمولات", "الصافي للصرف", "الحالة"]}>
-        {runs.length === 0 && <EmptyRow cols={7}>لا توجد مسيرات بعد</EmptyRow>}
-        {runs.map(({ r, count, gross, commissions, net }) => (
+      <Table head={["الرقم", "الشهر", "الموظفون", "الرواتب والبدلات", "العمولات", "المخالفات", "الصافي للصرف", "الحالة"]}>
+        {runs.length === 0 && <EmptyRow cols={8}>لا توجد مسيرات بعد</EmptyRow>}
+        {runs.map(({ r, count, gross, commissions, violations, net }) => (
           <tr key={r.id}>
             <Td className="ltr-nums font-medium">
               <Link href={`/payroll/${r.id}`} className="text-brand-700 hover:underline">
@@ -59,6 +60,7 @@ export default async function PayrollPage() {
             <Td className="ltr-nums">{count}</Td>
             <Td className="ltr-nums">{fmt(gross)}</Td>
             <Td className="ltr-nums">{fmt(commissions)}</Td>
+            <Td className="ltr-nums text-red-600">{Number(violations) ? fmt(violations) : "—"}</Td>
             <Td className="ltr-nums font-semibold">{fmt(net)}</Td>
             <Td>
               <Badge tone={PAYROLL_STATUS[r.status].tone}>{PAYROLL_STATUS[r.status].label}</Badge>

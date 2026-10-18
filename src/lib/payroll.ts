@@ -232,6 +232,27 @@ async function commissionsFor(tx: Tx, accountIds: number[], start: string, end: 
   return out;
 }
 
+/** مخالفات السائقين غير المخصومة حتى آخر الشهر: يحجزها المسير المسودة لنفسه حتى لا تُخصم مرتين. */
+async function claimViolations(tx: Tx, runId: number, driverIds: number[], end: string) {
+  await tx.update(s.trafficViolations).set({ payrollRunId: null }).where(eq(s.trafficViolations.payrollRunId, runId));
+  const out = new Map<number, number>();
+  if (!driverIds.length) return out;
+  const rows = await tx
+    .update(s.trafficViolations)
+    .set({ payrollRunId: runId })
+    .where(
+      and(
+        eq(s.trafficViolations.chargeTo, "driver"),
+        isNull(s.trafficViolations.payrollRunId),
+        inArray(s.trafficViolations.driverId, driverIds),
+        lte(s.trafficViolations.violationDate, end),
+      ),
+    )
+    .returning({ driverId: s.trafficViolations.driverId, amount: s.trafficViolations.amount });
+  for (const r of rows) out.set(r.driverId!, r2((out.get(r.driverId!) ?? 0) + num(r.amount)));
+  return out;
+}
+
 const serviceYears = (hireDate: string | null, asOf: string) =>
   hireDate ? (Date.parse(asOf) - Date.parse(hireDate)) / (365.25 * 86_400_000) : null;
 
@@ -250,6 +271,7 @@ async function buildLines(tx: Tx, runId: number, month: string, keep: Map<number
   const ids = emps.map((x) => x.e.id);
   const commissions = await commissionsFor(tx, emps.map((x) => x.e.payableAccountId).filter((v): v is number => v != null), start, end);
   const advances = await advanceDue(tx, ids);
+  const violations = await claimViolations(tx, runId, emps.map((x) => x.driverId).filter((v): v is number => v != null), end);
   // سائق بلا مركبة بعد: تُحمَّل تكلفته على الإدارة العامة
   const [adm] = await tx.select({ id: s.costCenters.id }).from(s.costCenters).where(eq(s.costCenters.code, "ADM"));
   await tx.delete(s.payrollLines).where(eq(s.payrollLines.runId, runId));
@@ -266,6 +288,7 @@ async function buildLines(tx: Tx, runId: number, month: string, keep: Map<number
       additions: num(k?.additions),
       deductions: num(k?.deductions),
       commissions: commissions.get(e.payableAccountId ?? -1) ?? 0,
+      violations: driverId ? (violations.get(driverId) ?? 0) : 0,
       advanceDeduction,
     };
     const c = computePayrollLine({ ...base, isSaudi: e.isSaudi, gosiSubject: e.gosiSubject, serviceYears: serviceYears(e.hireDate, end) });
@@ -349,7 +372,7 @@ export async function adjustPayrollLines(db: Db, runId: number, rows: PayrollAdj
   });
 }
 
-/** قيد الاستحقاق لسطور المسير (بدون العمولات لأنها مقيدة من البوالص). */
+/** قيد الاستحقاق لسطور المسير (بدون العمولات والمخالفات لأنها مقيدة على ذمة الموظف عند تسجيلها). */
 export async function payrollPostingLines(tx: Tx, run: { number: string; month: string }, lines: (LineRow & { name: string; payableAccountId: number | null })[]) {
   const acc = {
     driver: await accountIdByCode(tx, PAYROLL_ACCOUNTS.driverSalaries),
@@ -404,6 +427,31 @@ export async function approvePayrollRun(db: Db, runId: number, opts: { userId?: 
     const lines = await runLines(tx, runId);
     if (!lines.length) throw new Error("المسير بلا سطور");
     const { end } = monthRange(run.month);
+    // مخالفة سُجلت أو حُذفت بعد بناء المسير: يجب تحديثه حتى يطابق الخصم المحجوز
+    const claimed = await tx
+      .select({ driverId: s.trafficViolations.driverId, total: sql<string>`sum(${s.trafficViolations.amount})` })
+      .from(s.trafficViolations)
+      .where(eq(s.trafficViolations.payrollRunId, runId))
+      .groupBy(s.trafficViolations.driverId);
+    const byDriver = new Map(claimed.map((c) => [c.driverId, num(c.total)]));
+    const lineDrivers = lines.map((l) => l.driverId).filter((v): v is number => v != null);
+    const [late] = lineDrivers.length
+      ? await tx
+          .select({ id: s.trafficViolations.id })
+          .from(s.trafficViolations)
+          .where(
+            and(
+              eq(s.trafficViolations.chargeTo, "driver"),
+              isNull(s.trafficViolations.payrollRunId),
+              inArray(s.trafficViolations.driverId, lineDrivers),
+              lte(s.trafficViolations.violationDate, end),
+            ),
+          )
+          .limit(1)
+      : [];
+    if (late || lines.some((l) => l.driverId && r2(byDriver.get(l.driverId) ?? 0) !== r2(num(l.violations)))) {
+      throw new Error("سُجلت مخالفات بعد إعداد المسير؛ اضغط «تحديث المسير» ثم اعتمده");
+    }
     const entry = await createJournalEntryTx(tx, {
       entryDate: end,
       description: `مسير رواتب ${monthLabel(run.month)} – ${run.number}`,
@@ -536,6 +584,6 @@ export async function bankTransferRows(db: Db, runId: number) {
 
 /** إجماليات المسير للعرض. */
 export function payrollTotals(lines: LineRow[]) {
-  const keys = ["basic", "housing", "otherAllowances", "absenceDeduction", "additions", "deductions", "commissions", "advanceDeduction", "gosiEmployee", "gosiEmployer", "eosbAccrual", "net"] as const;
+  const keys = ["basic", "housing", "otherAllowances", "absenceDeduction", "additions", "deductions", "commissions", "violations", "advanceDeduction", "gosiEmployee", "gosiEmployer", "eosbAccrual", "net"] as const;
   return Object.fromEntries(keys.map((k) => [k, r2(lines.reduce((t, l) => t + num(l[k]), 0))])) as Record<(typeof keys)[number], number>;
 }

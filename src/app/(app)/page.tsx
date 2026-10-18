@@ -100,6 +100,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     { show: can(user.perms, "payroll", "approve") && alerts.draftPayroll > 0, tone: "blue", icon: "cash", text: `${alerts.draftPayroll} مسير رواتب مسودة لم يُعتمد`, href: "/payroll" },
     { show: can(user.perms, "payroll", "approve") && alerts.unpaidPayroll > 0, tone: "amber", icon: "cash", text: `${alerts.unpaidPayroll} مسير معتمد لم تُصرف رواتبه`, href: "/payroll" },
     { show: can(user.perms, "payroll", "approve") && alerts.pendingAdvances > 0, tone: "blue", icon: "cash", text: `${alerts.pendingAdvances} سلفة بانتظار الصرف`, href: "/payroll/advances" },
+    { show: can(user.perms, "violations", "approve") && alerts.unpaidViolations > 0, tone: "amber", icon: "ticket", text: `${alerts.unpaidViolations} مخالفة مرورية لم تُسدد للمرور`, href: "/violations?status=posted" },
     { show: canFleet && alerts.unassigned > 0, tone: "blue", icon: "handover", text: `${alerts.unassigned} مركبة عاملة بلا سائق مسند`, href: "/assignments" },
   ];
   const activeAlerts = alertList.filter((a) => a.show);
