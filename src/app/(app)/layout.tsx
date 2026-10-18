@@ -6,20 +6,25 @@ import { Logo } from "@/components/logo";
 import { MobileNav, NavLinks, type NavGroup } from "@/components/nav-links";
 import { logout } from "../login/actions";
 
-const NAV: { title: string; items: { href: string; label: string; icon: IconName; entity?: Entity }[] }[] = [
-  { title: "عام", items: [{ href: "/", label: "الرئيسية", icon: "home" }] },
+const NAV: { title: string; icon: IconName; items: { href: string; label: string; icon: IconName; entity?: Entity }[] }[] = [
+  { title: "عام",
+    icon: "home", items: [{ href: "/", label: "الرئيسية", icon: "home" }] },
   {
     title: "الأسطول",
+    icon: "truck",
     items: [
       { href: "/vehicles", label: "المركبات", icon: "truck", entity: "vehicles" },
       { href: "/drivers", label: "السائقون", icon: "driver", entity: "drivers" },
       { href: "/assignments", label: "الإسناد والتسليم", icon: "handover", entity: "vehicles" },
       { href: "/fleet-documents", label: "وثائق الأسطول", icon: "document", entity: "fleet_documents" },
-      { href: "/maintenance", label: "الصيانة", icon: "wrench", entity: "maintenance" },
+      { href: "/maintenance", label: "أوامر الصيانة", icon: "wrench", entity: "maintenance" },
+      { href: "/maintenance/requests", label: "طلبات العطل", icon: "alert", entity: "maintenance" },
+      { href: "/maintenance/plans", label: "الصيانة الدورية", icon: "calendar", entity: "maintenance" },
     ],
   },
   {
     title: "التشغيل والمبيعات",
+    icon: "waybill",
     items: [
       { href: "/waybills", label: "البوالص", icon: "waybill", entity: "waybills" },
       { href: "/invoices", label: "الفواتير", icon: "invoice", entity: "sales_invoices" },
@@ -31,6 +36,7 @@ const NAV: { title: string; items: { href: string; label: string; icon: IconName
   },
   {
     title: "المشتريات والمصروفات",
+    icon: "invoice",
     items: [
       { href: "/purchases", label: "فواتير الموردين", icon: "invoice", entity: "purchase_invoices" },
       { href: "/expenses", label: "المصروفات", icon: "fuel", entity: "expenses" },
@@ -39,13 +45,16 @@ const NAV: { title: string; items: { href: string; label: string; icon: IconName
   },
   {
     title: "الموظفون والرواتب",
+    icon: "people",
     items: [
       { href: "/employees", label: "الموظفون", icon: "people", entity: "employees" },
       { href: "/payroll", label: "مسيرات الرواتب", icon: "cash", entity: "payroll" },
+      { href: "/payroll/advances", label: "السلف", icon: "handover", entity: "payroll" },
     ],
   },
   {
     title: "المحاسبة",
+    icon: "ledger",
     items: [
       { href: "/accounts", label: "شجرة الحسابات", icon: "tree", entity: "accounts" },
       { href: "/cost-centers", label: "مراكز التكلفة", icon: "target", entity: "cost_centers" },
@@ -54,6 +63,7 @@ const NAV: { title: string; items: { href: string; label: string; icon: IconName
   },
   {
     title: "الإدارة",
+    icon: "shield",
     items: [
       { href: "/users", label: "المستخدمون", icon: "user", entity: "users" },
       { href: "/roles", label: "الأدوار والصلاحيات", icon: "shield", entity: "roles" },
@@ -67,6 +77,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const user = await requireUser();
   const groups: NavGroup[] = NAV.map((g) => ({
     title: g.title,
+    icon: g.icon,
     items: g.items.filter((n) => !n.entity || can(user.perms, n.entity, "view")).map(({ href, label, icon }) => ({ href, label, icon })),
   })).filter((g) => g.items.length);
 
@@ -79,7 +90,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </div>
         <nav className="flex flex-1 flex-col p-3 pt-4">
           <NavLinks groups={groups} />
-          <div className="px-3 pb-1.5 text-[11px] font-medium text-white/30">قريباً</div>
+          <div className="mt-4 px-3 pb-1.5 text-[11px] font-medium text-white/30">قريباً</div>
           {COMING.map((c) => (
             <span key={c} className="flex cursor-default items-center gap-3 px-3 py-1.5 text-sm text-white/25">
               <Icon name="lock" className="size-4" />
