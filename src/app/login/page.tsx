@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
+import { PasswordInput } from "@/components/password-input";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Field, Input } from "@/components/ui";
 import { Logo, LogoMark } from "@/components/logo";
@@ -51,7 +52,7 @@ export default async function LoginPage() {
               <Input name="login" autoComplete="username" required dir="ltr" className="py-2.5" />
             </Field>
             <Field label="كلمة المرور">
-              <Input name="password" type="password" autoComplete="current-password" required dir="ltr" className="py-2.5" />
+              <PasswordInput name="password" autoComplete="current-password" required dir="ltr" className="py-2.5" />
             </Field>
             <SubmitButton>دخول</SubmitButton>
           </ActionForm>
