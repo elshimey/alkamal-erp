@@ -19,6 +19,7 @@ import { adjustPayrollLines, approvePayrollRun, bankTransferRows, createAdvance,
 import { computePayrollLine } from "@/data/payroll";
 import { accountLedger, balanceSheet, costCenterProfit, incomeStatement, previousRange, trialBalance, vatReturn } from "@/lib/reports";
 import { alertCounts, financials, operations, periodRange, receivablesAging, vehicleProfit } from "@/lib/dashboard";
+import { createDriverExpense, createDriverLogin, driverBalances, driverBreakdowns, driverForUser, driverTrips, isDriverOnly, nextStages, recordDriverStage, reportBreakdown, startTrip, tripDetail } from "@/lib/driver-app";
 import { addExpense, addFuel, approveWaybill, createWaybill, deleteWaybill, recordStage, rejectWaybill, revertWaybill } from "@/lib/waybills";
 
 const url = process.env.TEST_DATABASE_URL;
@@ -746,6 +747,79 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(c.eosbAccrual).toBe(2500);
       expect(computePayrollLine({ ...base, gosiSubject: false }).gosiEmployer).toBe(0);
       expect(computePayrollLine({ ...base, isSaudi: false }).gosiEmployee).toBe(0);
+    });
+  });
+  describe("تطبيق السائق", () => {
+    const D = "2026-10-05";
+    let customerId: number;
+    let routeId: number;
+    let me: NonNullable<Awaited<ReturnType<typeof driverForUser>>>;
+    let otherDriverId: number;
+    let userId: number;
+
+    beforeAll(async () => {
+      const [sa] = await db.select().from(s.locations).where(eq(s.locations.countryCode, "SA"));
+      const a = await createLocation(db, { parentId: sa.id, nameAr: "الخبر" });
+      const b = await createLocation(db, { parentId: sa.id, nameAr: "الأحساء" });
+      routeId = (await createRoute(db, { fromLocationId: a.id, toLocationId: b.id, distanceKm: 160, driverCommission: 120 })).id;
+      customerId = (await createParty(db, { nameAr: "عميل التطبيق", roles: ["customer"] })).id;
+      const c = await createContract(db, { customerId, number: "C-APP", fromDate: `${YEAR}-01-01`, toDate: `${YEAR}-12-31` });
+      await db.insert(s.contractRates).values({ contractId: c.id, method: "route_fixed", routeId, price: "1800" });
+      await setContractStatus(db, c.id, "active");
+      const v = await createVehicle(db, { plate: "ت ط ب 777", chassis: "CH-APP", odometer: 10000 });
+      const d = await createDriver(db, { nameAr: "سائق التطبيق", mobile: "0555000777", appLanguage: "ur" });
+      await assignVehicle(db, { vehicleId: v.id, driverId: d.id, fromDate: `${YEAR}-10-01` });
+      otherDriverId = (await createDriver(db, { nameAr: "سائق آخر" })).id;
+      userId = (await createDriverLogin(db, { driverId: d.id, login: "0555000777", password: "driver-pass-1" })).id;
+      me = (await driverForUser(db, userId))!;
+    });
+
+    it("حساب الدخول يُربط بالسائق بدور السائق فقط، ويرى مركبته ولغته", async () => {
+      expect(me.vehicle?.plate).toBe("ت ط ب 777");
+      expect(me.appLanguage).toBe("ur");
+      const roles = await db.select({ key: s.roles.key }).from(s.userRoles).innerJoin(s.roles, eq(s.roles.id, s.userRoles.roleId)).where(eq(s.userRoles.userId, userId));
+      expect(isDriverOnly(roles)).toBe(true);
+      expect(isDriverOnly([{ key: "driver" }, { key: "accountant" }])).toBe(false);
+      await expect(createDriverLogin(db, { driverId: me.id, login: "x-other", password: "driver-pass-1" })).rejects.toThrow("مسبقاً");
+      await expect(createDriverLogin(db, { driverId: otherDriverId, login: "0555000777", password: "driver-pass-1" })).rejects.toThrow("مستخدم");
+    });
+
+    it("الرحلة تبدأ بالتحميل وتمشي بالمراحل حتى التسليم، والحدود للدولي فقط", async () => {
+      const w = await startTrip(db, me, { date: D, customerId, routeId, shipper: "مصنع", consignee: "مستودع", odometer: 10100, userId });
+      expect(w.amount).toBe("1800.000");
+      let d = await tripDetail(db, me.id, w.id);
+      expect(d.trip.status).toBe("in_transit");
+      expect(d.next).toEqual(["in_transit", "delivery"]);
+      await expect(recordDriverStage(db, me.id, w.id, "border", {})).rejects.toThrow("غير متاحة");
+      await expect(tripDetail(db, otherDriverId, w.id)).rejects.toThrow("ليست لك");
+      await expect(recordDriverStage(db, otherDriverId, w.id, "delivery", {})).rejects.toThrow("ليست لك");
+      await recordDriverStage(db, me.id, w.id, "delivery", { odometer: 10270, userId });
+      d = await tripDetail(db, me.id, w.id);
+      expect(d.trip.status).toBe("delivered");
+      expect(d.next).toEqual([]);
+      expect((await driverTrips(db, me.id, { open: true })).map((x) => x.lastStage)).toEqual(["delivery"]);
+      await approveWaybill(db, w.id);
+      expect(await driverTrips(db, me.id, { open: true })).toHaveLength(0);
+      expect(nextStages({ status: "in_transit", isInternational: true }, ["loading"])).toEqual(["in_transit", "border", "delivery"]);
+      expect(nextStages({ status: "in_transit", isInternational: true }, ["loading", "border"])).toEqual(["delivery"]);
+    });
+
+    it("مصروف السائق ينتظر الاعتماد ثم يُخصم من عهدته، والرصيد يجمع العمولة والمستحق", async () => {
+      const e = await createDriverExpense(db, me, { date: D, type: "road", description: "وجبة وموقف", amount: 100, vatAmount: 15, userId });
+      expect(e.status).toBe("pending");
+      let b = await driverBalances(db, me, D);
+      expect(b.pendingExpenses).toBe(115);
+      expect(b.custody).toBe(0);
+      expect(b.monthCommission).toBe(120);
+      expect(b.payable).toBe(120);
+      await approveExpense(db, e.id);
+      b = await driverBalances(db, me, D);
+      expect(b.custody).toBe(-115);
+      expect(b.pendingCount).toBe(0);
+      expect(b.movements.map((m) => m.credit).sort()).toEqual([100, 15].sort());
+      const r = await reportBreakdown(db, me, { date: D, description: "صوت في الفرامل", priority: "urgent", userId });
+      expect(r.vehicleId).toBe(me.vehicle!.id);
+      expect((await driverBreakdowns(db, me.id))[0].r.status).toBe("pending_supervisor");
     });
   });
 });
