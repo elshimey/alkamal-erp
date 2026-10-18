@@ -19,6 +19,7 @@ const NAV: { title: string; icon: IconName; items: { href: string; label: string
       { href: "/drivers", label: "السائقون", icon: "driver", entity: "drivers" },
       { href: "/assignments", label: "الإسناد والتسليم", icon: "handover", entity: "vehicles" },
       { href: "/fleet-documents", label: "وثائق الأسطول", icon: "document", entity: "fleet_documents" },
+      { href: "/violations", label: "المخالفات المرورية", icon: "ticket", entity: "violations" },
       { href: "/maintenance", label: "أوامر الصيانة", icon: "wrench", entity: "maintenance" },
       { href: "/maintenance/requests", label: "طلبات العطل", icon: "alert", entity: "maintenance" },
       { href: "/maintenance/plans", label: "الصيانة الدورية", icon: "calendar", entity: "maintenance" },

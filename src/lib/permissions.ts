@@ -145,11 +145,13 @@ export const CORE_ROLES: CoreRole[] = [
     key: "accountant",
     nameAr: "المحاسب",
     description:
-      "المبيعات، المشتريات والمصاريف، المحاسبة، الرواتب، التقارير المالية؛ الترحيل والإرجاع لمسودة وإقفال الفترة. عرض التشغيل والأسطول دون تعديل",
+      "المبيعات، المشتريات والمصاريف، المحاسبة، الرواتب، المخالفات المرورية، التقارير المالية؛ الترحيل والإرجاع لمسودة وإقفال الفترة. عرض التشغيل والأسطول دون تعديل",
     permissions: [
       ...grant(entitiesOf("sales", "purchases", "accounting", "payroll"), FINANCE_WORK),
+      // المخالفات لها قيد عند التسجيل والسداد وتُخصم في الرواتب، فيديرها المحاسب
+      ...grant(["violations"], FINANCE_WORK),
       ...grant(["financial_reports"], ["view", "export"]),
-      ...grant(entitiesOf("fleet", "operations", "maintenance"), ["view"]),
+      ...grant(entitiesOf("fleet", "operations", "maintenance").filter((e) => e !== "violations"), ["view"]),
       ...grant(["operational_reports"], ["view"]),
       ...special("view_prices"),
     ],

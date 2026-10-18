@@ -294,6 +294,7 @@ export async function alertCounts(db: Db, today: string) {
           (select count(*) from payroll_runs where status = 'draft')::int as draft_payroll,
           (select count(*) from payroll_runs where status = 'approved')::int as unpaid_payroll,
           (select count(*) from employee_advances where status = 'pending')::int as pending_advances,
+          (select count(*) from traffic_violations where status = 'posted')::int as unpaid_violations,
           (select count(*) from payroll_runs where month = date_trunc('month', ${today}::date - interval '1 month')::date)::int as last_month_run`,
   );
   return {
@@ -321,6 +322,7 @@ export async function alertCounts(db: Db, today: string) {
     draftPayroll: n(r.draft_payroll),
     unpaidPayroll: n(r.unpaid_payroll),
     pendingAdvances: n(r.pending_advances),
+    unpaidViolations: n(r.unpaid_violations),
     lastMonthRunMissing: n(r.last_month_run) === 0,
   };
 }

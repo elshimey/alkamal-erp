@@ -47,11 +47,14 @@ export function ActionForm({
   children,
   className = "",
   resetOnSuccess = true,
+  id,
 }: {
   action: (state: FormState, data: FormData) => Promise<FormState>;
   children: ReactNode;
   className?: string;
   resetOnSuccess?: boolean;
+  /** لربط حقول خارج النموذج به عبر الخاصية form (مثل مربعات الاختيار في جدول) */
+  id?: string;
 }) {
   const [state, formAction, pending] = useActionState(action, undefined);
   const formRef = useRef<HTMLFormElement>(null);
@@ -63,6 +66,7 @@ export function ActionForm({
     <PendingContext.Provider value={pending}>
       <form
         ref={formRef}
+        id={id}
         className={className}
         onSubmit={(e) => {
           e.preventDefault();

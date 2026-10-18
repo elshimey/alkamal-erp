@@ -40,6 +40,8 @@ export interface PayrollInputs {
   additions: number;
   deductions: number;
   commissions: number;
+  /** مخالفات على السائق قُيدت على حسابه عند تسجيلها */
+  violations?: number;
   advanceDeduction: number;
   isSaudi: boolean;
   gosiSubject: boolean;
@@ -57,7 +59,7 @@ export function computePayrollLine(i: PayrollInputs) {
   // نظام العمل: نصف شهر عن كل سنة من الخمس الأولى، وشهر كامل عما بعدها
   const eosbAccrual = i.serviceYears == null ? 0 : r2(i.serviceYears >= 5 ? wage / 12 : wage / 24);
   const earnings = r2(wage + i.additions - absenceDeduction - i.deductions);
-  const net = r2(earnings - gosiEmployee - i.advanceDeduction + i.commissions);
+  const net = r2(earnings - gosiEmployee - i.advanceDeduction + i.commissions - (i.violations ?? 0));
   return { absenceDeduction, gosiEmployee, gosiEmployer, eosbAccrual, earnings, net };
 }
 

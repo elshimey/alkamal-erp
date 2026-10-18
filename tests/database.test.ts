@@ -15,7 +15,8 @@ import { activeContract, createContract, createLocation, createParty, createRout
 import { createInvoice, createReceipt, invoicingQueue, issueInvoice, revertInvoice, revertReceipt } from "@/lib/invoices";
 import { createExpense, approveExpense, createPayment, createPurchaseInvoice, custodyBalances, postPurchaseInvoice, rejectExpense, revertExpense, revertPayment, revertPurchaseInvoice, supplierBalances } from "@/lib/purchases";
 import { addMaintenanceLines, approveBreakdownRequest, approveMaintenanceOrder, completeMaintenanceOrder, createBreakdownRequest, createMaintenanceOrder, deleteMaintenanceOrder, planSchedule, rejectBreakdownRequest, revertMaintenanceOrder, reviewBreakdownRequest, savePlan } from "@/lib/maintenance";
-import { adjustPayrollLines, approvePayrollRun, bankTransferRows, createAdvance, createEmployee, createPayrollRun, payAdvance, payPayrollRun, revertAdvance, revertPayrollPayment, revertPayrollRun, updateEmployee } from "@/lib/payroll";
+import { adjustPayrollLines, approvePayrollRun, bankTransferRows, createAdvance, createEmployee, createPayrollRun, payAdvance, payPayrollRun, refreshPayrollRun, revertAdvance, revertPayrollPayment, revertPayrollRun, updateEmployee } from "@/lib/payroll";
+import { createViolation, deleteViolation, listViolations, payViolations, revertViolationPayment, violationSummary } from "@/lib/violations";
 import { computePayrollLine } from "@/data/payroll";
 import { accountLedger, balanceSheet, costCenterProfit, incomeStatement, previousRange, trialBalance, vatReturn } from "@/lib/reports";
 import { alertCounts, financials, operations, periodRange, receivablesAging, vehicleProfit } from "@/lib/dashboard";
@@ -820,6 +821,96 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       const r = await reportBreakdown(db, me, { date: D, description: "صوت في الفرامل", priority: "urgent", userId });
       expect(r.vehicleId).toBe(me.vehicle!.id);
       expect((await driverBreakdowns(db, me.id))[0].r.status).toBe("pending_supervisor");
+    });
+  });
+
+  describe("المخالفات المرورية", () => {
+    it("تُقيد على السائق المسند أو على الشركة، وتُخصم في المسير مرة واحدة، وتُسدد للمرور بقيد واحد", async () => {
+      const linesOf = async (entryId: number) => {
+        const rows = await db.select({ l: s.journalLines, code: s.accounts.code }).from(s.journalLines).innerJoin(s.accounts, eq(s.accounts.id, s.journalLines.accountId)).where(eq(s.journalLines.entryId, entryId));
+        return rows.map(({ l, code }) => ({ code, debit: Number(l.debitBase), credit: Number(l.creditBase), cc: l.costCenterId, driver: l.driverId, account: l.accountId }));
+      };
+      const balance = async (accountId: number) => {
+        const [r] = await db
+          .select({ b: sql<string>`coalesce(sum(${s.journalLines.creditBase} - ${s.journalLines.debitBase}), 0)` })
+          .from(s.journalLines)
+          .innerJoin(s.journalEntries, eq(s.journalEntries.id, s.journalLines.entryId))
+          .where(sql`${s.journalEntries.status} = 'posted' and ${s.journalLines.accountId} = ${accountId}`);
+        return Number(r.b);
+      };
+      const v = await createVehicle(db, { plate: "م خ ل 909", chassis: "CH-VIO" });
+      const d = await createDriver(db, { nameAr: "سائق المخالفات" });
+      const [drv] = await db.select().from(s.drivers).where(eq(s.drivers.id, d.id));
+      await updateEmployee(db, drv.employeeId, { basicSalary: 3000, hireDate: `${YEAR}-01-01` });
+      await assignVehicle(db, { vehicleId: v.id, driverId: d.id, fromDate: `${YEAR}-12-01` });
+      const [emp] = await db.select().from(s.employees).where(eq(s.employees.id, drv.employeeId));
+      const driverPayable = emp.payableAccountId!;
+      const payable2108 = acc["2108"];
+      const before2108 = await balance(payable2108);
+
+      // السائق يُعرف من الإسناد
+      const v1 = await createViolation(db, { violationDate: `${YEAR}-12-05`, vehicleId: v.id, reference: "TR-1001", violationType: "تجاوز السرعة", amount: 500, chargeTo: "driver" });
+      expect(v1.driverId).toBe(d.id);
+      expect(await linesOf(v1.journalEntryId)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ account: driverPayable, debit: 500, driver: d.id }),
+          expect.objectContaining({ code: "2108", credit: 500 }),
+        ]),
+      );
+      await expect(createViolation(db, { violationDate: `${YEAR}-12-07`, vehicleId: v.id, reference: "TR-1001", violationType: "وقوف", amount: 100, chargeTo: "driver" })).rejects.toThrow("مسجل مسبقاً");
+      await expect(createViolation(db, { violationDate: `${YEAR}-11-20`, vehicleId: v.id, violationType: "وقوف", amount: 100, chargeTo: "driver" })).rejects.toThrow("لا يوجد سائق");
+
+      // على الشركة: مصروف على مركز تكلفة المركبة
+      const v2 = await createViolation(db, { violationDate: `${YEAR}-12-06`, vehicleId: v.id, violationType: "حمولة زائدة", location: "ميزان الخرج", amount: 300, chargeTo: "company" });
+      expect((await linesOf(v2.journalEntryId)).find((l) => l.code === "5113")).toMatchObject({ debit: 300, cc: v.costCenterId });
+
+      // المسير يخصمها، ومخالفة لاحقة تمنع الاعتماد حتى التحديث
+      const run = await createPayrollRun(db, { month: `${YEAR}-12` });
+      let [line] = await db.select().from(s.payrollLines).where(sql`${s.payrollLines.runId} = ${run.id} and ${s.payrollLines.employeeId} = ${drv.employeeId}`);
+      expect(Number(line.violations)).toBe(500);
+      expect(Number(line.net)).toBe(2500);
+      const v3 = await createViolation(db, { violationDate: `${YEAR}-12-10`, vehicleId: v.id, violationType: "قطع إشارة", amount: 200, chargeTo: "driver" });
+      await expect(approvePayrollRun(db, run.id)).rejects.toThrow("تحديث المسير");
+      await refreshPayrollRun(db, run.id);
+      [line] = await db.select().from(s.payrollLines).where(sql`${s.payrollLines.runId} = ${run.id} and ${s.payrollLines.employeeId} = ${drv.employeeId}`);
+      expect(Number(line.violations)).toBe(700);
+      expect(Number(line.net)).toBe(2300);
+      await approvePayrollRun(db, run.id);
+      // ذمة السائق بعد الاعتماد = الصافي بالضبط (الخصم قُيد عند التسجيل ولم يتكرر)
+      expect(await balance(driverPayable)).toBe(2300);
+      await expect(deleteViolation(db, v1.id, { reason: "خطأ" })).rejects.toThrow("أرجعه لمسودة");
+      expect((await listViolations(db, { driverId: d.id, chargeTo: "driver" })).map((x) => x.run)).toEqual([run.number, run.number]);
+
+      // السداد للمرور
+      await expect(payViolations(db, [v1.id, v2.id], { paymentDate: `${YEAR}-12-05`, cashAccountId: acc["110101"] })).rejects.toThrow("قبل تاريخ");
+      const pay = await payViolations(db, [v1.id, v2.id], { paymentDate: `${YEAR}-12-15`, cashAccountId: acc["110101"] });
+      const pl = await linesOf(pay.id);
+      expect(pl.filter((l) => l.code === "2108").reduce((a, l) => a + l.debit, 0)).toBe(800);
+      expect(pl.find((l) => l.code === "110101")).toMatchObject({ credit: 800 });
+      expect(await balance(payable2108)).toBe(before2108 + 200);
+      await expect(payViolations(db, [v1.id], { paymentDate: `${YEAR}-12-16`, cashAccountId: acc["110101"] })).rejects.toThrow("مسددة مسبقاً");
+      await expect(deleteViolation(db, v2.id, { reason: "خطأ" })).rejects.toThrow("ألغِ السداد");
+      expect(await revertViolationPayment(db, v2.id)).toBe(2);
+      expect(await balance(payable2108)).toBe(before2108 + 1000);
+      const sum = await violationSummary(db);
+      expect(sum.unpaidCount).toBeGreaterThanOrEqual(3);
+
+      // الحذف يلغي القيد ويُسجل، والمسير المعاد لمسودة يسمح بحذف ما خصمه
+      await deleteViolation(db, v2.id, { reason: "مكررة" });
+      expect(await db.select().from(s.journalEntries).where(eq(s.journalEntries.id, v2.journalEntryId))).toHaveLength(0);
+      await revertPayrollRun(db, run.id);
+      await deleteViolation(db, v3.id, { reason: "أُلغيت من المرور" });
+      await expect(approvePayrollRun(db, run.id)).rejects.toThrow("تحديث المسير");
+      await refreshPayrollRun(db, run.id);
+      [line] = await db.select().from(s.payrollLines).where(sql`${s.payrollLines.runId} = ${run.id} and ${s.payrollLines.employeeId} = ${drv.employeeId}`);
+      expect(Number(line.violations)).toBe(500);
+      const logs = await db.select().from(s.deletionLog).where(eq(s.deletionLog.entity, "traffic_violation"));
+      expect(logs).toHaveLength(2);
+    });
+
+    it("معادلة السطر تطرح المخالفات من الصافي", () => {
+      const base = { basic: 3000, housing: 0, otherAllowances: 0, absenceDays: 0, additions: 0, deductions: 0, commissions: 150, advanceDeduction: 0, isSaudi: false, gosiSubject: false, serviceYears: 1 };
+      expect(computePayrollLine({ ...base, violations: 400 }).net).toBe(computePayrollLine(base).net - 400);
     });
   });
 });
