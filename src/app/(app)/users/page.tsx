@@ -4,6 +4,7 @@ import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { MIN_PASSWORD_LENGTH } from "@/lib/password";
+import { PasswordInput } from "@/components/password-input";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Badge, Card, Field, Input, PageHeader, Table, Td } from "@/components/ui";
 import { createUser, setUserActive } from "./actions";
@@ -33,7 +34,7 @@ export default async function UsersPage() {
               <Input name="login" required dir="ltr" autoComplete="off" />
             </Field>
             <Field label="كلمة المرور الأولى" hint={`${MIN_PASSWORD_LENGTH} أحرف على الأقل، ويغيّرها المستخدم من صفحة حسابه`}>
-              <Input name="password" type="password" required minLength={MIN_PASSWORD_LENGTH} dir="ltr" autoComplete="new-password" />
+              <PasswordInput name="password" required minLength={MIN_PASSWORD_LENGTH} dir="ltr" autoComplete="new-password" />
             </Field>
             <fieldset className="col-span-full">
               <legend className="mb-2 text-sm font-medium text-gray-700">الأدوار</legend>
