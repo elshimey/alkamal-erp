@@ -47,6 +47,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const range = periodRange(period, today);
 
   const canFinance = can(user.perms, "accounts", "view");
+  const canReports = can(user.perms, "financial_reports", "view");
   const canOps = can(user.perms, "waybills", "view");
   const canFleet = can(user.perms, "vehicles", "view");
   const canSales = can(user.perms, "sales_invoices", "view");
@@ -153,8 +154,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
           <Kpi i={0} label="الإيرادات المفوترة" value={cur.revenue} prev={prev.revenue} icon="chart" href="/invoices" unit="ر.س" note={ops ? `قيمة رحلات الفترة ${money(ops.value)}` : undefined} />
           <Kpi i={1} label="تكاليف التشغيل" value={cur.directCost} prev={prev.directCost} icon="truck" href="/waybills?status=approved" unit="ر.س" invert />
-          <Kpi i={2} label="مجمل الربح" value={cur.gross} prev={prev.gross} icon="target" unit="ر.س" note={`هامش ${margin}%`} />
-          <Kpi i={3} label="صافي الربح" value={cur.net} prev={prev.net} icon="ledger" href="/accounts" unit="ر.س" note={`بعد مصروفات إدارية ${money(cur.admin)}`} />
+          <Kpi i={2} label="مجمل الربح" value={cur.gross} prev={prev.gross} icon="target" href={canReports ? "/reports/income" : undefined} unit="ر.س" note={`هامش ${margin}%`} />
+          <Kpi i={3} label="صافي الربح" value={cur.net} prev={prev.net} icon="ledger" href={canReports ? "/reports/income" : "/accounts"} unit="ر.س" note={`بعد مصروفات إدارية ${money(cur.admin)}`} />
         </div>
       )}
 
@@ -226,7 +227,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
 
           {/* ربحية المركبات */}
           {vehicles && (
-            <Panel i={7} title="ربحية المركبات" icon="truck" href="/vehicles" more="المركبات" sub={PERIODS[period]}>
+            <Panel i={7} title="ربحية المركبات" icon="truck" href={canReports ? "/reports/cost-centers" : "/vehicles"} more={canReports ? "تقرير الربحية" : "المركبات"} sub={PERIODS[period]}>
               {vehicles.length === 0 ? (
                 <Empty>تظهر بعد اعتماد البوالص وإصدار فواتيرها.</Empty>
               ) : (
@@ -289,7 +290,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
 
           {/* الوضع المالي */}
           {bal && (
-            <Panel i={5} title="الوضع المالي الآن" icon="cash">
+            <Panel i={5} title="الوضع المالي الآن" icon="cash" href={canReports ? "/reports/balance-sheet" : undefined} more={canReports ? "المركز المالي" : undefined}>
               <dl className="flex flex-col divide-y divide-gray-100 text-sm">
                 <Line label="النقدية في الصناديق والبنوك" value={bal.cash} strong href="/receipts" />
                 <Line label="مستحق من العملاء" value={bal.receivable} href="/invoices" />
