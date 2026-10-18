@@ -62,6 +62,19 @@ const NAV: { title: string; icon: IconName; items: { href: string; label: string
     ],
   },
   {
+    title: "التقارير",
+    icon: "chart",
+    items: [
+      { href: "/reports", label: "كل التقارير", icon: "chart", entity: "financial_reports" },
+      { href: "/reports/trial-balance", label: "ميزان المراجعة", icon: "ledger", entity: "financial_reports" },
+      { href: "/reports/income", label: "قائمة الدخل", icon: "chart", entity: "financial_reports" },
+      { href: "/reports/balance-sheet", label: "المركز المالي", icon: "tree", entity: "financial_reports" },
+      { href: "/reports/ledger", label: "كشف حساب", icon: "document", entity: "financial_reports" },
+      { href: "/reports/cost-centers", label: "ربحية المركبات", icon: "truck", entity: "financial_reports" },
+      { href: "/reports/vat", label: "إقرار الضريبة", icon: "invoice", entity: "financial_reports" },
+    ],
+  },
+  {
     title: "الإدارة",
     icon: "shield",
     items: [
@@ -70,8 +83,6 @@ const NAV: { title: string; icon: IconName; items: { href: string; label: string
     ],
   },
 ];
-
-const COMING = ["التقارير"];
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
@@ -90,13 +101,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </div>
         <nav className="flex flex-1 flex-col p-3 pt-4">
           <NavLinks groups={groups} />
-          <div className="mt-4 px-3 pb-1.5 text-[11px] font-medium text-white/30">قريباً</div>
-          {COMING.map((c) => (
-            <span key={c} className="flex cursor-default items-center gap-3 px-3 py-1.5 text-sm text-white/25">
-              <Icon name="lock" className="size-4" />
-              {c}
-            </span>
-          ))}
         </nav>
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">

@@ -17,6 +17,7 @@ import { createExpense, approveExpense, createPayment, createPurchaseInvoice, cu
 import { addMaintenanceLines, approveBreakdownRequest, approveMaintenanceOrder, completeMaintenanceOrder, createBreakdownRequest, createMaintenanceOrder, deleteMaintenanceOrder, planSchedule, rejectBreakdownRequest, revertMaintenanceOrder, reviewBreakdownRequest, savePlan } from "@/lib/maintenance";
 import { adjustPayrollLines, approvePayrollRun, bankTransferRows, createAdvance, createEmployee, createPayrollRun, payAdvance, payPayrollRun, revertAdvance, revertPayrollPayment, revertPayrollRun, updateEmployee } from "@/lib/payroll";
 import { computePayrollLine } from "@/data/payroll";
+import { accountLedger, balanceSheet, costCenterProfit, incomeStatement, previousRange, trialBalance, vatReturn } from "@/lib/reports";
 import { alertCounts, financials, operations, periodRange, receivablesAging, vehicleProfit } from "@/lib/dashboard";
 import { addExpense, addFuel, approveWaybill, createWaybill, deleteWaybill, recordStage, rejectWaybill, revertWaybill } from "@/lib/waybills";
 
@@ -708,6 +709,34 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       [a] = await db.select().from(s.employeeAdvances).where(eq(s.employeeAdvances.id, adv.id));
       expect(Number(a.repaidAmount)).toBe(0);
       expect(await db.select().from(s.journalEntries).where(eq(s.journalEntries.id, entry.id))).toHaveLength(0);
+    });
+
+    it("التقارير: الميزان متوازن، والمركز المالي يتطابق، وكشف الحساب يطابق الميزان، والدخل من القيود", async () => {
+      const from = `${YEAR}-01-01`;
+      const to = `${YEAR}-12-31`;
+      const tb = await trialBalance(db, { from, to });
+      expect(tb.totals.debit).toBe(tb.totals.credit);
+      expect(tb.totals.closingDebit).toBe(tb.totals.closingCredit);
+      expect(tb.totals.debit).toBeGreaterThan(0);
+      const bs = await balanceSheet(db, to);
+      expect(bs.difference).toBe(0);
+      const inc = await incomeStatement(db, { from, to, ...Object.fromEntries(Object.entries(previousRange(from, to)).map(([k, v]) => [k === "from" ? "compareFrom" : "compareTo", v])) });
+      const pl = tb.rows.filter((r) => r.account.level === 1 && /^[4-7]/.test(r.account.code)).reduce((t, r) => t + r.closing - r.opening, 0);
+      expect(inc.current.net).toBeCloseTo(-pl, 2);
+      expect(inc.previous?.net).toBe(0);
+      expect(bs.sections.find((x) => x.key === "equity")!.lines.at(-1)!.amount).toBeCloseTo(inc.current.net, 2);
+      const custody = tb.rows.find((r) => r.account.id === driver.custodyAccountId)!;
+      const ledger = await accountLedger(db, { accountId: driver.custodyAccountId, from, to });
+      expect(ledger.closing).toBe(custody.closing);
+      expect(ledger.lines.at(-1)?.balance).toBe(custody.closing);
+      const parent = tb.rows.find((r) => r.account.code === "1105")!;
+      expect((await accountLedger(db, { accountId: parent.account.id, from, to })).closing).toBe(parent.closing);
+      const vat = await vatReturn(db, from, to);
+      expect(vat.output).toBe(-tb.rows.find((r) => r.account.code === "2109")!.closing);
+      expect(vat.net).toBe(vat.output - vat.input);
+      const cc = await costCenterProfit(db, from, to);
+      expect(cc.find((c) => c.id === vehicle.costCenterId)!.direct).toBeGreaterThan(0);
+      expect(previousRange(`${YEAR}-04-01`, `${YEAR}-06-30`)).toEqual({ from: `${YEAR}-01-01`, to: `${YEAR}-03-31` });
     });
 
     it("معادلة السطر: الغياب على 30 يوماً، وسقف التأمينات، ونصف شهر قبل خمس سنوات", () => {
