@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { isDriverOnly } from "@/lib/driver-app";
 import { requireUser } from "@/lib/auth";
 import { can, type Entity } from "@/lib/permissions";
 import { Icon, type IconName } from "@/components/icons";
@@ -86,6 +88,8 @@ const NAV: { title: string; icon: IconName; items: { href: string; label: string
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
+  // السائق يعمل من تطبيقه فقط
+  if (isDriverOnly(user.roles)) redirect("/driver");
   const groups: NavGroup[] = NAV.map((g) => ({
     title: g.title,
     icon: g.icon,

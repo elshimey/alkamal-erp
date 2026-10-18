@@ -6,6 +6,7 @@ import { db } from "@/db";
 import * as s from "@/db/schema";
 import { createSession, destroySession } from "@/lib/auth";
 import { verifyPassword } from "@/lib/password";
+import { isDriverOnly } from "@/lib/driver-app";
 import type { FormState } from "@/components/action-form";
 
 export async function login(_: FormState, data: FormData): Promise<FormState> {
@@ -18,7 +19,8 @@ export async function login(_: FormState, data: FormData): Promise<FormState> {
   if (!valid) return { error: "اسم الدخول أو كلمة المرور غير صحيحة" };
 
   await createSession(user.id);
-  redirect("/");
+  const roles = await db.select({ key: s.roles.key }).from(s.userRoles).innerJoin(s.roles, eq(s.roles.id, s.userRoles.roleId)).where(eq(s.userRoles.userId, user.id));
+  redirect(isDriverOnly(roles) ? "/driver" : "/");
 }
 
 export async function logout() {

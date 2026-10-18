@@ -7,7 +7,17 @@ export type FormState = { error?: string; ok?: string } | undefined;
 
 const PendingContext = createContext(false);
 
-export function SubmitButton({ children, variant = "primary" }: { children: ReactNode; variant?: "primary" | "secondary" }) {
+export function SubmitButton({
+  children,
+  variant = "primary",
+  pendingLabel = "جارٍ الحفظ…",
+  className = "",
+}: {
+  children: ReactNode;
+  variant?: "primary" | "secondary";
+  pendingLabel?: string;
+  className?: string;
+}) {
   const pending = useContext(PendingContext);
   const styles =
     variant === "primary"
@@ -17,12 +27,12 @@ export function SubmitButton({ children, variant = "primary" }: { children: Reac
     <button
       type="submit"
       disabled={pending}
-      className={`rounded-lg px-4 py-2 text-sm font-medium shadow-sm transition active:scale-[0.98] disabled:opacity-70 ${styles}`}
+      className={`rounded-lg px-4 py-2 text-sm font-medium shadow-sm transition active:scale-[0.98] disabled:opacity-70 ${styles} ${className}`}
     >
       {pending ? (
-        <span className="flex items-center gap-2">
+        <span className="flex items-center justify-center gap-2">
           <Truck className="w-7" spinning />
-          جارٍ الحفظ…
+          {pendingLabel}
         </span>
       ) : (
         children

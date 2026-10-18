@@ -5,6 +5,9 @@ import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
 import { createDriver } from "@/lib/fleet";
 import { cell, saveSheetRows, type SheetRow } from "@/lib/sheet-server";
+import { createDriverLogin } from "@/lib/driver-app";
+import { errorMessage } from "@/lib/errors";
+import type { FormState } from "@/components/action-form";
 
 const LANGS = ["ar", "ur", "hi", "en"] as const;
 
@@ -29,4 +32,16 @@ export async function saveDrivers(rows: SheetRow[]) {
   });
   revalidatePath("/drivers");
   return result;
+}
+
+export async function createDriverLoginAction(_: FormState, data: FormData): Promise<FormState> {
+  await requirePermission("users", "create");
+  try {
+    const login = String(data.get("login") ?? "");
+    await createDriverLogin(db, { driverId: Number(data.get("driverId")), login, password: String(data.get("password") ?? "") });
+    revalidatePath("/drivers");
+    return { ok: `أُنشئ حساب الدخول «${login.trim()}»؛ يفتح السائق التطبيق من /driver` };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
 }

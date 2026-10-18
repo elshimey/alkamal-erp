@@ -5,8 +5,10 @@ import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { SheetEditor } from "@/components/sheet-editor";
-import { Badge, Card, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
-import { saveDrivers } from "./actions";
+import { Badge, Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
+import { ActionForm, SubmitButton } from "@/components/action-form";
+import { MIN_PASSWORD_LENGTH } from "@/lib/password";
+import { createDriverLoginAction, saveDrivers } from "./actions";
 
 const LANG = { ar: "عربي", ur: "أوردو", hi: "هندي", en: "إنجليزي" } as const;
 const STATUS = {
@@ -24,12 +26,14 @@ export default async function DriversPage() {
       name: s.employees.nameAr,
       custodyCode: custody.code,
       plate: s.vehicles.plate,
+      login: s.users.login,
     })
     .from(s.drivers)
     .innerJoin(s.employees, eq(s.employees.id, s.drivers.employeeId))
     .innerJoin(custody, eq(custody.id, s.drivers.custodyAccountId))
     .leftJoin(s.vehicleAssignments, and(eq(s.vehicleAssignments.driverId, s.drivers.id), isNull(s.vehicleAssignments.toDate)))
     .leftJoin(s.vehicles, eq(s.vehicles.id, s.vehicleAssignments.vehicleId))
+    .leftJoin(s.users, eq(s.users.id, s.drivers.userId))
     .orderBy(asc(s.employees.nameAr));
 
   return (
@@ -60,9 +64,40 @@ export default async function DriversPage() {
           />
         </Card>
       )}
-      <Table head={["الاسم", "الجوال", "الجنسية", "لغة التطبيق", "العمولة", "المركبة الحالية", "حساب العهدة", "الحالة"]}>
-        {rows.length === 0 && <EmptyRow cols={8}>لا يوجد سائقون بعد</EmptyRow>}
-        {rows.map(({ d, name, custodyCode, plate }) => (
+      {can(user.perms, "users", "create") && rows.some((r) => !r.login) && (
+        <Card title="حساب دخول لتطبيق السائق" className="mb-6">
+          <p className="mb-4 text-sm text-gray-500">
+            يدخل السائق بهذا الحساب من جواله على الرابط <a href="/driver" dir="ltr" className="font-medium text-brand-700 hover:underline" style={{ unicodeBidi: "isolate" }}>/driver</a>، ويرى رحلاته ومصاريفه وعهدته بلغته فقط.
+          </p>
+          <ActionForm action={createDriverLoginAction} className="grid items-end gap-4 sm:grid-cols-4">
+            <Field label="السائق">
+              <Select name="driverId" required defaultValue="">
+                <option value="" disabled>
+                  اختر السائق
+                </option>
+                {rows
+                  .filter((r) => !r.login)
+                  .map(({ d, name }) => (
+                    <option key={d.id} value={d.id}>
+                      {name}
+                      {d.mobile ? ` (${d.mobile})` : ""}
+                    </option>
+                  ))}
+              </Select>
+            </Field>
+            <Field label="اسم الدخول" hint="الجوال مثلاً">
+              <Input name="login" required dir="ltr" />
+            </Field>
+            <Field label="كلمة المرور" hint={`${MIN_PASSWORD_LENGTH} أحرف على الأقل`}>
+              <Input name="password" type="text" required minLength={MIN_PASSWORD_LENGTH} dir="ltr" autoComplete="off" />
+            </Field>
+            <SubmitButton>إنشاء الحساب</SubmitButton>
+          </ActionForm>
+        </Card>
+      )}
+      <Table head={["الاسم", "الجوال", "الجنسية", "لغة التطبيق", "العمولة", "المركبة الحالية", "حساب العهدة", "دخول التطبيق", "الحالة"]}>
+        {rows.length === 0 && <EmptyRow cols={9}>لا يوجد سائقون بعد</EmptyRow>}
+        {rows.map(({ d, name, custodyCode, plate, login }) => (
           <tr key={d.id}>
             <Td className="font-medium">{name}</Td>
             <Td className="ltr-nums">{d.mobile ?? "—"}</Td>
@@ -71,6 +106,7 @@ export default async function DriversPage() {
             <Td>{d.commissionClass === "domestic" ? "داخلي" : "خارجي"}</Td>
             <Td>{plate ?? <span className="text-gray-400">بلا مركبة</span>}</Td>
             <Td className="ltr-nums text-gray-500">{custodyCode}</Td>
+            <Td className="ltr-nums">{login ?? <span className="text-gray-400">—</span>}</Td>
             <Td>
               <Badge tone={STATUS[d.status].tone}>{STATUS[d.status].label}</Badge>
             </Td>
