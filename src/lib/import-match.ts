@@ -55,7 +55,7 @@ export interface ImportIssue {
   rows: number[];
   message: string;
   // بيانات غير موجودة في النظام تحتاج إنشاءها أولاً
-  missing?: { kind: "customer" | "account" | "vehicleType" | "costCenter" | "currency" | "taxCode"; value: string };
+  missing?: { kind: "customer" | "account" | "vehicleType" | "costCenter" | "currency" | "taxCode" | "invoice"; value: string };
 }
 
 export interface ImportReport {
@@ -75,4 +75,5 @@ export const MISSING_LABELS: Record<NonNullable<ImportIssue["missing"]>["kind"],
   costCenter: { label: "مراكز تكلفة أو مركبات غير موجودة", href: "/cost-centers", action: "أضف المركبة أو مركز التكلفة" },
   currency: { label: "عملات غير معرفة", href: "/exchange-rates", action: "استخدم رمز عملة معرف" },
   taxCode: { label: "معدلات ضريبة غير معروفة", href: "/settings", action: "استخدم 15% أو صفر أو معفى" },
+  invoice: { label: "فواتير غير موجودة أو غير مُصدرة", href: "/invoices", action: "تأكد من رقم الفاتورة وأصدرها أولاً" },
 };

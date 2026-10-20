@@ -136,8 +136,8 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
             {allocations.length === 0 ? (
               <p className="text-sm text-gray-500">
                 لا توجد. سجّل القبض من{" "}
-                <Link href="/receipts" className="text-brand-700 underline">
-                  سندات القبض
+                <Link href={`/receipts/new?customer=${i.customerId}&invoice=${i.id}`} className="text-brand-700 underline">
+                  تسجيل دفعة لهذه الفاتورة
                 </Link>
                 .
               </p>

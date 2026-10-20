@@ -1,10 +1,11 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
 import type { ImportSpec } from "@/data/import-specs";
 import { createManualInvoiceTx } from "@/lib/invoices";
 import { createVehicle } from "@/lib/fleet";
 import { createParty } from "@/lib/operations";
+import { createReceipt } from "@/lib/receipts";
 import { lineVat, round2 } from "@/lib/invoice-posting";
 import { errorMessage } from "@/lib/errors";
 import { normText, type ImportIssue, type ImportReport } from "@/lib/import-match";
@@ -124,7 +125,7 @@ async function lookups(tx: Tx) {
   return { idx, defaultTax: vat ?? null, accounts, customers, currencies, outTax, costCenters, vehicles, vehicleTypes };
 }
 
-type Ctx = Awaited<ReturnType<typeof lookups>>;
+type Ctx = Awaited<ReturnType<typeof lookups>> & { post?: boolean };
 
 function resolve<T>(found: T | undefined | null, raw: string, kind: Missing["kind"], label: string): T {
   if (found === null) throw new Error(`${label} «${raw}» يطابق أكثر من سجل؛ استخدم الرقم أو الرمز`);
@@ -238,10 +239,64 @@ async function importCustomer(tx: Tx, [r]: ImportRow[], ctx: Ctx) {
   return nameAr;
 }
 
+// ───────────── سندات القبض ─────────────
+
+const METHODS: [RegExp, "cash" | "transfer" | "cheque" | "card"][] = [
+  [/^(نقد|نقدي|نقدا|كاش|cash)$/, "cash"],
+  [/^(تحويل|تحويل بنكي|حواله|bank transfer|transfer)$/, "transfer"],
+  [/^(شيك|cheque|check)$/, "cheque"],
+  [/^(بطاقه|شبكه|مدي|card|pos)$/, "card"],
+];
+
+async function importReceipt(tx: Tx, [r]: ImportRow[], ctx: Ctx, userId?: number) {
+  const custRaw = required(r, "customer", "العميل");
+  const customerId = resolve(ctx.idx.customers.find(custRaw), custRaw, "customer", "العميل");
+  const receiptDate = toDate(required(r, "receiptDate", "التاريخ"), "التاريخ");
+  const amount = toNumber(required(r, "amount", "المبلغ"), "المبلغ", { positive: true });
+  const cashRaw = required(r, "cashAccount", "تم الدفع من خلال");
+  const cash = resolve(ctx.idx.accounts.find(cashRaw), cashRaw, "account", "الحساب");
+  if (!/^110[12]/.test(cash.code)) throw new Error(`الحساب ${cash.code} ${cash.nameAr} ليس صندوقاً أو بنكاً`);
+  const curRaw = v(r, "currency") || "SAR";
+  const currencyCode = resolve(ctx.idx.currencies.find(curRaw), curRaw, "currency", "العملة");
+  const kindRaw = normText(v(r, "kind"));
+  const kind = /مقدم|advance|prepayment/.test(kindRaw) ? "advance" : "invoice_payment";
+  const methodRaw = normText(v(r, "method"));
+  const method = methodRaw ? METHODS.find(([re]) => re.test(methodRaw))?.[1] : "transfer";
+  if (!method) throw new Error(`طريقة الدفع «${v(r, "method")}»: نقد أو تحويل أو شيك أو بطاقة`);
+  let invoiceId: number | null = null;
+  const invRaw = v(r, "invoice");
+  if (invRaw) {
+    if (kind === "advance") throw new Error("الدفعة المقدمة لا تُربط بفاتورة؛ احذف رقم الفاتورة أو غيّر النوع");
+    const [inv] = await tx
+      .select({ id: s.salesInvoices.id, customerId: s.salesInvoices.customerId, status: s.salesInvoices.status })
+      .from(s.salesInvoices)
+      .where(or(eq(s.salesInvoices.number, invRaw), eq(s.salesInvoices.reference, invRaw)));
+    if (!inv || inv.status !== "issued") throw new MissingRef({ kind: "invoice", value: invRaw }, `الفاتورة «${invRaw}» غير موجودة أو لم تُصدر`);
+    if (inv.customerId !== customerId) throw new Error(`الفاتورة «${invRaw}» لعميل آخر`);
+    invoiceId = inv.id;
+  }
+  const receipt = await createReceipt(tx, {
+    kind,
+    receiptDate,
+    customerId,
+    amount,
+    currencyCode,
+    method,
+    cashAccountId: cash.id,
+    invoiceId,
+    reference: v(r, "reference") || null,
+    notes: v(r, "notes") || null,
+    post: ctx.post,
+    userId,
+  });
+  return receipt.number;
+}
+
 const IMPORTERS: Record<string, (tx: Tx, rows: ImportRow[], ctx: Ctx, userId?: number) => Promise<string>> = {
   "sales-invoices": importInvoice,
   vehicles: importVehicle,
   customers: importCustomer,
+  receipts: importReceipt,
 };
 
 /** يجمع الصفوف في سجلات: بنود الفاتورة الواحدة معاً (ولو تباعدت في الملف)، وغيرها صف لكل سجل. */
@@ -257,7 +312,7 @@ function groupRows(spec: ImportSpec, rows: ImportRow[]) {
   return [...groups.values(), ...loose];
 }
 
-export async function runImport(db: Db, spec: ImportSpec, rows: ImportRow[], opts: { dryRun: boolean; userId?: number }): Promise<ImportReport> {
+export async function runImport(db: Db, spec: ImportSpec, rows: ImportRow[], opts: { dryRun: boolean; userId?: number; post?: boolean }): Promise<ImportReport> {
   const importer = IMPORTERS[spec.entity];
   if (!importer) return { dryRun: opts.dryRun, total: 0, ok: 0, issues: [], error: "هذا البند لا يدعم الاستيراد" };
   if (rows.length > 5000) return { dryRun: opts.dryRun, total: 0, ok: 0, issues: [], error: "الملف أكبر من المسموح (5000 صف)؛ قسّمه على أكثر من ملف" };
@@ -265,7 +320,7 @@ export async function runImport(db: Db, spec: ImportSpec, rows: ImportRow[], opt
   const report: ImportReport = { dryRun: opts.dryRun, total: groups.length, ok: 0, issues: [], created: [] };
   try {
     await db.transaction(async (tx) => {
-      const ctx = await lookups(tx);
+      const ctx: Ctx = { ...(await lookups(tx)), post: opts.post };
       for (const group of groups) {
         try {
           const label = await tx.transaction((sp) => importer(sp, group, ctx, opts.userId));
@@ -312,6 +367,17 @@ export async function templateLists(db: Db, spec: ImportSpec): Promise<TemplateL
       { title: "اسم الحساب", values: assets.map((a) => a.nameAr) },
       { title: "أنواع المركبات", values: ctx.vehicleTypes.map((t) => t.nameAr).sort(), field: "vehicleType" },
       { title: "الملكية", values: ["مملوكة", "مستأجرة"], field: "ownership" },
+    ];
+  }
+  if (spec.entity === "receipts") {
+    const cash = ctx.accounts.filter((a) => /^110[12]/.test(a.code)).sort((a, b) => a.code.localeCompare(b.code));
+    return [
+      { title: "العملاء", values: ctx.customers.map((c) => c.nameAr).sort(), field: "customer" },
+      { title: "الصناديق والبنوك (الرقم)", values: cash.map((a) => a.code), field: "cashAccount" },
+      { title: "اسم الحساب", values: cash.map((a) => a.nameAr) },
+      { ...currencies, field: "currency" },
+      { title: "النوع", values: ["دفعة عن فواتير", "دفعة مقدمة"], field: "kind" },
+      { title: "طريقة الدفع", values: ["نقد", "تحويل", "شيك", "بطاقة"], field: "method" },
     ];
   }
   if (spec.entity === "customers") {

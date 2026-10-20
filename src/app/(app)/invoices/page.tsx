@@ -28,6 +28,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
   const sp = await searchParams;
   const canCreate = can(user.perms, "sales_invoices", "create");
   const canIssue = can(user.perms, "sales_invoices", "approve");
+  const canReceive = can(user.perms, "receipts", "create");
   const today = todayRiyadh();
   const filter = parseDocFilter(sp, Object.keys(STATUSES), today);
   const view = sp.view === "sheet" ? "sheet" : "table";
@@ -202,6 +203,16 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
                 <Link href={`/invoices/${openDoc.i.id}`} className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
                   {openDoc.i.status === "draft" ? "تعديل" : "فتح الفاتورة"}
                 </Link>
+                {openDoc.i.status === "issued" && Number(openDoc.i.paidAmount) < Number(openDoc.i.total) && canReceive && (
+                  <Link href={`/receipts/new?customer=${openDoc.i.customerId}&invoice=${openDoc.i.id}`} className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-brand-900 shadow-sm hover:bg-brand-500">
+                    تسجيل دفعة
+                  </Link>
+                )}
+                {openDoc.i.status === "issued" && can(user.perms, "sales_invoices", "create") && (
+                  <Link href={`/notes/sales/new?kind=sales_credit&party=${openDoc.i.customerId}&invoice=${openDoc.i.id}`} className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
+                    إشعار دائن
+                  </Link>
+                )}
                 {openDoc.i.status === "draft" && canIssue && (
                   <ActionForm action={issue.bind(null, openDoc.i.id)} resetOnSuccess={false}>
                     <SubmitButton>إصدار وترحيل القيد</SubmitButton>

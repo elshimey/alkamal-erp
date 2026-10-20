@@ -109,6 +109,31 @@ export const IMPORT_SPECS: Record<string, ImportSpec> = {
       { nameAr: "شركة مثال للتجارة", nameEn: "Example Trading Co.", kind: "منشأة", vatNumber: "300000000000003", crNumber: "1010000000", mobile: "0500000000", email: "info@example.com", country: "SA", currency: "SAR" },
     ],
   },
+
+  receipts: {
+    entity: "receipts",
+    title: "استيراد سندات القبض",
+    noun: "سند",
+    permission: "receipts",
+    backHref: "/receipts",
+    intro: "كل صف سند قبض. اكتب رقم الفاتورة ليُخصص المبلغ عليها، أو اتركه فارغاً ليوزع على أقدم فواتير العميل، أو اختر «دفعة مقدمة».",
+    fields: [
+      { key: "customer", label: "العميل", en: "Customer", required: true, rule: MUST_MATCH, aliases: ["اسم العميل", "contact", "customer name"], width: 26 },
+      { key: "receiptDate", label: "التاريخ", en: "Date", required: true, rule: "مثل 2026-10-05 أو 05/10/2026", aliases: ["تاريخ السند", "payment date"], width: 13 },
+      { key: "amount", label: "المبلغ", en: "Amount", required: true, rule: "أكبر من صفر", aliases: ["المبلغ المستلم", "amount received"], width: 12 },
+      { key: "cashAccount", label: "تم الدفع من خلال", en: "Paid through", required: true, rule: "رقم أو اسم الصندوق/البنك مثل 110101", aliases: ["الحساب", "الصندوق", "البنك", "paid through account", "account"], width: 22 },
+      { key: "currency", label: "العملة", en: "Currency", rule: "فارغ = SAR", width: 9 },
+      { key: "kind", label: "النوع", en: "Type", rule: "دفعة عن فواتير أو دفعة مقدمة، فارغ = عن فواتير", aliases: ["نوع الدفعة"], width: 16 },
+      { key: "invoice", label: "رقم الفاتورة", en: "Invoice number", rule: "رقم الفاتورة في النظام أو رقمها المستورد", aliases: ["الفاتورة", "invoice", "invoice no"], width: 18 },
+      { key: "method", label: "طريقة الدفع", en: "Method", rule: "نقد، تحويل، شيك، بطاقة؛ فارغ = تحويل", aliases: ["payment method"], width: 12 },
+      { key: "reference", label: "المرجع", en: "Reference", aliases: ["رقم المرجع", "reference number"], width: 14 },
+      { key: "notes", label: "الوصف", en: "Description", aliases: ["البيان", "ملاحظات", "notes"], width: 24 },
+    ],
+    samples: [
+      { customer: "شركة مثال للتجارة", receiptDate: "2026-10-10", amount: "3450", cashAccount: "110201", currency: "SAR", kind: "دفعة عن فواتير", invoice: "INV-001", method: "تحويل", reference: "TRX-889", notes: "سداد فاتورة أكتوبر" },
+      { customer: "شركة مثال للتجارة", receiptDate: "2026-10-12", amount: "5000", cashAccount: "110101", currency: "SAR", kind: "دفعة مقدمة", invoice: "", method: "نقد", reference: "", notes: "" },
+    ],
+  },
 };
 
 export const DELETE_ROW_MARK = "احذف الصف";

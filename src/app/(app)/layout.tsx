@@ -47,7 +47,9 @@ const NAV: { title: string; icon: IconName; items: { href: string; label: string
     items: [
       { href: "/waybills", label: "البوالص", icon: "waybill", entity: "waybills" },
       { href: "/invoices", label: "الفواتير", icon: "invoice", entity: "sales_invoices" },
-      { href: "/receipts", label: "سندات القبض", icon: "cash", entity: "receipts" },
+      { href: "/customers", label: "العملاء", icon: "people", entity: "parties" },
+      { href: "/receipts", label: "سندات العملاء", icon: "cash", entity: "receipts" },
+      { href: "/notes/sales", label: "إشعارات العملاء", icon: "document", entity: "sales_invoices" },
       { href: "/parties", label: "جهات الاتصال", icon: "people", entity: "parties" },
       { href: "/routes", label: "المواقع والمسارات", icon: "route", entity: "routes" },
       { href: "/contracts", label: "العقود والأسعار", icon: "contract", entity: "contracts" },
@@ -60,6 +62,7 @@ const NAV: { title: string; icon: IconName; items: { href: string; label: string
       { href: "/purchases", label: "فواتير الموردين", icon: "invoice", entity: "purchase_invoices" },
       { href: "/expenses", label: "المصروفات", icon: "fuel", entity: "expenses" },
       { href: "/payments", label: "سندات الصرف", icon: "cash", entity: "payments" },
+      { href: "/notes/purchase", label: "إشعارات الموردين", icon: "document", entity: "purchase_invoices" },
     ],
   },
   {

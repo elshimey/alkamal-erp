@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import { IMPORT_SPECS } from "@/data/import-specs";
 import { requirePermission } from "@/lib/auth";
+import { can } from "@/lib/permissions";
 import { errorMessage } from "@/lib/errors";
 import { matchColumns, type ImportReport } from "@/lib/import-match";
 import { runImport, type ImportRow } from "@/lib/importers";
@@ -38,7 +39,9 @@ export async function parseImportFile(entity: string, form: FormData): Promise<P
 export async function runImportAction(entity: string, rows: ImportRow[], dryRun: boolean): Promise<ImportReport> {
   const spec = specOf(entity);
   const user = await requirePermission(spec.permission, "create");
-  const report = await runImport(db, spec, rows, { dryRun, userId: user.id });
+  // السندات تُرحّل مباشرة لمن يملك اعتمادها، وغيرها يُستورد مسودات
+  const post = spec.entity === "receipts" && can(user.perms, "receipts", "approve");
+  const report = await runImport(db, spec, rows, { dryRun, userId: user.id, post });
   if (!dryRun && report.ok) revalidatePath(spec.backHref);
   return report;
 }
