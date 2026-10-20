@@ -9,7 +9,7 @@ import * as s from "@/db/schema";
 import type { Db } from "@/db";
 import { ensureAdminUser, seedReferenceData } from "@/lib/seed";
 import { createJournalEntry } from "@/lib/ledger";
-import { getCompany, invoiceReadiness, saveCompany } from "@/lib/company";
+import { getCompany, getInvoiceTemplate, invoiceReadiness, saveCompany, saveInvoiceTemplate } from "@/lib/company";
 import { assignVehicle, createDriver, createVehicle, driverOnDate, expiringDocuments, releaseAssignment } from "@/lib/fleet";
 import { addSubAccount } from "@/lib/accounts";
 import { activeContract, createContract, createLocation, createParty, createRoute, priceTrip, setContractStatus } from "@/lib/operations";
@@ -69,6 +69,15 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     expect(c.nameAr).toBe("الكمال للنقليات");
     expect(await db.select().from(s.companyProfile)).toHaveLength(1);
     expect(invoiceReadiness(c).missing).toContain("الشعار");
+  });
+
+  it("قالب الفاتورة: صف واحد يُحفظ ويُقرأ مع الافتراضي", async () => {
+    expect((await getInvoiceTemplate(db)).layout).toBe("classic");
+    await expect(saveInvoiceTemplate(db, { showBank: true })).rejects.toThrow("اسم البنك");
+    await saveInvoiceTemplate(db, { layout: "band", accent: "navy", terms: "السداد خلال 30 يوماً" });
+    await saveInvoiceTemplate(db, { layout: "minimal", accent: "navy" });
+    expect(await getInvoiceTemplate(db)).toMatchObject({ layout: "minimal", accent: "navy", terms: "", showQr: true });
+    expect(await db.select().from(s.invoiceTemplate)).toHaveLength(1);
   });
 
   it("المركبة تنشئ مركز تكلفتها", async () => {

@@ -25,6 +25,7 @@ const SECTIONS: { title: string; items: Item[] }[] = [
     title: "إعدادات المنشأة",
     items: [
       { href: "/settings/company", title: "بيانات المنشأة", description: "الشعار والاسم والرقم الضريبي والسجل والعنوان الوطني.", icon: "building", entity: "settings" },
+      { href: "/settings/invoice-template", title: "قالب الفاتورة", description: "شكل الفاتورة ولونها ولغتها، والحساب البنكي والشروط.", icon: "invoice", entity: "settings" },
       { href: "/users", title: "المستخدمون", description: "إضافة أعضاء الفريق وتفعيل حساباتهم.", icon: "people", entity: "users" },
       { href: "/roles", title: "الأدوار والصلاحيات", description: "ما يراه ويفعله كل دور في كل شاشة.", icon: "shield", entity: "roles" },
     ],
@@ -48,7 +49,6 @@ const SECTIONS: { title: string; items: Item[] }[] = [
   {
     title: "قيد الإعداد",
     items: [
-      { title: "قوالب الفواتير", description: "تخصيص شكل الفاتورة وألوانها وما يظهر فيها.", icon: "invoice", badge: "قريباً" },
       { title: "الفاتورة الإلكترونية (زاتكا)", description: "الربط مع منصة فاتورة لهيئة الزكاة والضريبة.", icon: "shield", badge: "قريباً" },
     ],
   },

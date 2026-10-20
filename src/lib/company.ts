@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import type { Db } from "@/db";
 import * as s from "@/db/schema";
+import { normalizeTemplate, validateTemplate, type InvoiceTemplate } from "@/lib/invoice-template";
 
 export type CompanyProfile = typeof s.companyProfile.$inferSelect;
 export const DEFAULT_COMPANY_NAME = "الكمال للنقليات";
@@ -80,4 +81,17 @@ export function invoiceReadiness(c: CompanyProfile) {
   ];
   const missing = need.filter(([, v]) => !v).map(([k]) => k);
   return { missing, percent: Math.round(((need.length - missing.length) / need.length) * 100) };
+}
+
+export async function getInvoiceTemplate(db: Db): Promise<InvoiceTemplate> {
+  const [row] = await db.select().from(s.invoiceTemplate).where(eq(s.invoiceTemplate.id, 1));
+  return normalizeTemplate(row?.options);
+}
+
+export async function saveInvoiceTemplate(db: Db, raw: unknown, userId?: number) {
+  const options = normalizeTemplate(raw);
+  validateTemplate(options);
+  const values = { options, updatedBy: userId ?? null, updatedAt: new Date() };
+  await db.insert(s.invoiceTemplate).values({ id: 1, ...values }).onConflictDoUpdate({ target: s.invoiceTemplate.id, set: values });
+  return options;
 }
