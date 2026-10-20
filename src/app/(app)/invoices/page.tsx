@@ -3,7 +3,8 @@ import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { invoicingQueue, listSalesInvoices, salesInvoiceDoc } from "@/lib/invoices";
-import { getCompany, invoiceReadiness } from "@/lib/company";
+import { getCompany, getInvoiceTemplate, invoiceReadiness } from "@/lib/company";
+import { invoiceQrSvg } from "@/lib/zatca-qr";
 import { listHref, parseDocFilter, type DocListParams } from "@/lib/doc-filters";
 import { todayRiyadh } from "@/lib/dates";
 import { INVOICE_STATUS, ZATCA_STATUS, paymentState } from "@/data/sales";
@@ -30,12 +31,14 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
   const filter = parseDocFilter(sp, Object.keys(STATUSES), today);
   const view = sp.view === "sheet" ? "sheet" : "table";
   const openId = view === "table" ? Number(sp.open) || null : null;
-  const [queue, invoices, openDoc, company] = await Promise.all([
+  const [queue, invoices, openDoc, company, template] = await Promise.all([
     canCreate ? invoicingQueue(db) : Promise.resolve([]),
     listSalesInvoices(db, filter),
     openId ? salesInvoiceDoc(db, openId) : Promise.resolve(null),
     getCompany(db),
+    getInvoiceTemplate(db),
   ]);
+  const qrSvg = openDoc ? await invoiceQrSvg(company, openDoc.i) : null;
 
   const state = (i: (typeof invoices)[number]["i"]) => {
     const total = Number(i.total);
@@ -206,7 +209,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
             <ReadinessBar company={company} />
             <div className="p-4 sm:p-6">
               <div className="mx-auto max-w-3xl">
-                <TaxInvoiceDocument company={company} invoice={openDoc.i} customer={openDoc.customer} lines={openDoc.lines} compact />
+                <TaxInvoiceDocument company={company} invoice={openDoc.i} customer={openDoc.customer} lines={openDoc.lines} qrSvg={qrSvg} template={template} compact />
               </div>
             </div>
           </section>

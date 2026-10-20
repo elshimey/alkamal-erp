@@ -1293,3 +1293,15 @@ export const companyProfile = pgTable(
   },
   (t) => [check("company_profile_single", sql`${t.id} = 1`)],
 );
+
+// قالب الفاتورة المطبوعة (صف واحد)؛ الخيارات في JSON تُقرأ عبر normalizeTemplate
+export const invoiceTemplate = pgTable(
+  "invoice_template",
+  {
+    id: integer("id").primaryKey().default(1),
+    options: jsonb("options").notNull().default({}),
+    updatedBy: ref("updated_by").references(() => users.id),
+    updatedAt: updatedAt(),
+  },
+  (t) => [check("invoice_template_single", sql`${t.id} = 1`)],
+);

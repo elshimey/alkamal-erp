@@ -6,7 +6,8 @@ import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { todayRiyadh } from "@/lib/dates";
-import { getCompany } from "@/lib/company";
+import { getCompany, getInvoiceTemplate } from "@/lib/company";
+import { invoiceQrSvg } from "@/lib/zatca-qr";
 import { INVOICE_STATUS, PAYMENT_METHODS, ZATCA_STATUS, paymentState } from "@/data/sales";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { AutoPrint, PrintButton } from "@/components/print-button";
@@ -32,7 +33,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   const { i, customer } = row;
   const draft = i.status === "draft";
 
-  const [lines, allocations, available, company] = await Promise.all([
+  const [lines, allocations, available, company, template] = await Promise.all([
     db.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, id)).orderBy(asc(s.salesInvoiceLines.lineNo)),
     db
       .select({ a: s.receiptAllocations, r: s.receipts })
@@ -55,7 +56,9 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
           .orderBy(asc(s.waybills.waybillDate))
       : Promise.resolve([]),
     getCompany(db),
+    getInvoiceTemplate(db),
   ]);
+  const qrSvg = await invoiceQrSvg(company, i);
   const total = Number(i.total);
   const paid = Number(i.paidAmount);
   const pay = paymentState(total, paid);
@@ -95,6 +98,8 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
           invoice={i}
           customer={customer}
           lines={lines}
+          qrSvg={qrSvg}
+          template={template}
           lineAction={
             canUpdate
               ? (l) => (
