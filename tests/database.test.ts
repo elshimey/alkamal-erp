@@ -9,6 +9,7 @@ import * as s from "@/db/schema";
 import type { Db } from "@/db";
 import { ensureAdminUser, seedReferenceData } from "@/lib/seed";
 import { createJournalEntry } from "@/lib/ledger";
+import { getCompany, invoiceReadiness, saveCompany } from "@/lib/company";
 import { assignVehicle, createDriver, createVehicle, driverOnDate, expiringDocuments, releaseAssignment } from "@/lib/fleet";
 import { addSubAccount } from "@/lib/accounts";
 import { activeContract, createContract, createLocation, createParty, createRoute, priceTrip, setContractStatus } from "@/lib/operations";
@@ -54,6 +55,19 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     const rows = await db.select().from(s.accounts);
     expect(rows.length).toBe(115);
     expect(rows.filter((r) => r.parentId === null).length).toBe(7);
+  });
+
+  it("بيانات المنشأة: صف واحد، والرقم الضريبي والعنوان الوطني بقواعد الهيئة", async () => {
+    expect((await getCompany(db)).nameAr).toBe("الكمال للنقليات");
+    const base = { nameAr: "شركة الكمال", nameEn: null, vatNumber: null, crNumber: null, buildingNo: null, street: null, district: null, city: null, postalCode: null, additionalNo: null, phone: null, email: null, website: null, logo: null };
+    await expect(saveCompany(db, { ...base, vatNumber: "123456789012345" })).rejects.toThrow("يبدأ بـ 3");
+    await expect(saveCompany(db, { ...base, postalCode: "123" })).rejects.toThrow("5 أرقام");
+    await expect(saveCompany(db, { ...base, logo: "data:text/html;base64,AAAA" })).rejects.toThrow("الشعار");
+    await saveCompany(db, { ...base, vatNumber: "310123456700003", crNumber: "2050197412" });
+    const c = await saveCompany(db, { ...base, nameAr: "  الكمال للنقليات  ", vatNumber: "310123456700003", city: "الدمام" });
+    expect(c.nameAr).toBe("الكمال للنقليات");
+    expect(await db.select().from(s.companyProfile)).toHaveLength(1);
+    expect(invoiceReadiness(c).missing).toContain("الشعار");
   });
 
   it("المركبة تنشئ مركز تكلفتها", async () => {
