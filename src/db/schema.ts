@@ -964,6 +964,10 @@ export const purchaseInvoiceLines = pgTable(
     lineNo: smallint("line_no").notNull(),
     accountId: ref("account_id").notNull().references(() => accounts.id),
     costCenterId: ref("cost_center_id").references(() => costCenters.id),
+    // صنف مخزني يدخل المستودع عند الترحيل (الحساب حينها حساب المخزون)
+    productId: ref("product_id").references((): AnyPgColumn => products.id),
+    warehouseId: ref("warehouse_id").references((): AnyPgColumn => warehouses.id),
+    quantity: numeric("quantity", { precision: 12, scale: 3 }),
     description: text("description").notNull(),
     amount: money("amount").notNull(),
     taxCodeId: ref("tax_code_id").references(() => taxCodes.id),
@@ -1218,6 +1222,9 @@ export const maintenanceLines = pgTable(
     orderId: ref("order_id").notNull().references(() => maintenanceOrders.id, { onDelete: "cascade" }),
     lineNo: smallint("line_no").notNull(),
     kind: maintenanceLineKind("kind").notNull(),
+    // قطعة تُصرف من المستودع بمتوسط التكلفة بدل شرائها على الأمر
+    productId: ref("product_id").references((): AnyPgColumn => products.id),
+    warehouseId: ref("warehouse_id").references((): AnyPgColumn => warehouses.id),
     description: text("description").notNull(),
     quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull().default("1"),
     unitPrice: money("unit_price").notNull(),
@@ -1463,4 +1470,109 @@ export const assetDepreciation = pgTable(
     entryId: ref("entry_id").notNull().references(() => journalEntries.id),
   },
   (t) => [uniqueIndex("asset_depreciation_period_uq").on(t.assetId, t.periodEnd), check("asset_depreciation_amount", sql`${t.amount} > 0`)],
+);
+
+// ───────────── المخزون وقطع الغيار ─────────────
+
+// صنف مخزني (قطع غيار، إطارات، زيوت) يُتابع بالكمية والتكلفة، أو خدمة بلا مخزون
+export const productKind = pgEnum("product_kind", ["stock", "service"]);
+
+export const products = pgTable(
+  "products",
+  {
+    id: id(),
+    code: varchar("code", { length: 40 }).notNull().unique(),
+    nameAr: text("name_ar").notNull(),
+    nameEn: text("name_en"),
+    kind: productKind("kind").notNull().default("stock"),
+    category: text("category"),
+    unit: varchar("unit", { length: 20 }).notNull().default("حبة"),
+    barcode: varchar("barcode", { length: 60 }),
+    purchasePrice: money("purchase_price").notNull().default("0"),
+    salePrice: money("sale_price").notNull().default("0"),
+    reorderLevel: numeric("reorder_level", { precision: 12, scale: 3 }).notNull().default("0"),
+    // حساب المخزون للصنف المخزني، أو حساب المصروف الافتراضي للخدمة
+    accountId: ref("account_id").notNull().references(() => accounts.id),
+    isActive: boolean("is_active").notNull().default(true),
+    notes: text("notes"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("products_name_idx").on(t.nameAr), check("products_prices", sql`${t.purchasePrice} >= 0 and ${t.salePrice} >= 0 and ${t.reorderLevel} >= 0`)],
+);
+
+export const warehouses = pgTable("warehouses", {
+  id: id(),
+  code: varchar("code", { length: 20 }).notNull().unique(),
+  nameAr: text("name_ar").notNull(),
+  location: text("location"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: createdAt(),
+});
+
+// مستند مخزني: تسوية (زيادة أو نقص)، تحويل بين مستودعين، أو جرد
+export const stockDocKind = pgEnum("stock_doc_kind", ["adjustment", "transfer", "count"]);
+export const stockDocStatus = pgEnum("stock_doc_status", ["draft", "posted"]);
+
+export const stockDocs = pgTable(
+  "stock_docs",
+  {
+    id: id(),
+    number: varchar("number", { length: 30 }).notNull().unique(),
+    kind: stockDocKind("kind").notNull(),
+    docDate: date("doc_date").notNull(),
+    warehouseId: ref("warehouse_id").notNull().references(() => warehouses.id),
+    toWarehouseId: ref("to_warehouse_id").references(() => warehouses.id),
+    // الحساب المقابل لفرق القيمة (التسوية والجرد)
+    offsetAccountId: ref("offset_account_id").references(() => accounts.id),
+    costCenterId: ref("cost_center_id").references(() => costCenters.id),
+    reason: text("reason"),
+    status: stockDocStatus("status").notNull().default("draft"),
+    journalEntryId: ref("journal_entry_id").references(() => journalEntries.id),
+    createdBy: ref("created_by").references(() => users.id),
+    postedBy: ref("posted_by").references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("stock_docs_date_idx").on(t.docDate),
+    check("stock_docs_transfer", sql`(${t.kind} = 'transfer') = (${t.toWarehouseId} is not null) and (${t.toWarehouseId} is null or ${t.toWarehouseId} <> ${t.warehouseId})`),
+  ],
+);
+
+export const stockDocLines = pgTable(
+  "stock_doc_lines",
+  {
+    id: id(),
+    docId: ref("doc_id").notNull().references(() => stockDocs.id, { onDelete: "cascade" }),
+    productId: ref("product_id").notNull().references(() => products.id),
+    // التسوية: موجبة زيادة وسالبة نقص؛ التحويل: موجبة؛ الجرد: الفرق بعد الترحيل
+    quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull().default("0"),
+    // الجرد: الرصيد في النظام عند الإنشاء والكمية المعدودة
+    systemQty: numeric("system_qty", { precision: 12, scale: 3 }),
+    countedQty: numeric("counted_qty", { precision: 12, scale: 3 }),
+    unitCost: numeric("unit_cost", { precision: 18, scale: 4 }).notNull().default("0"),
+  },
+  (t) => [index("stock_doc_lines_doc_idx").on(t.docId)],
+);
+
+// حركة المخزون: الكمية موجبة دخولاً وسالبة خروجاً، والقيمة بالريال بالتكلفة
+export const stockMoves = pgTable(
+  "stock_moves",
+  {
+    id: id(),
+    productId: ref("product_id").notNull().references(() => products.id),
+    warehouseId: ref("warehouse_id").notNull().references(() => warehouses.id),
+    moveDate: date("move_date").notNull(),
+    quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull(),
+    value: money("value").notNull(),
+    // purchase_invoice | maintenance_order | stock_doc
+    sourceType: varchar("source_type", { length: 30 }).notNull(),
+    sourceId: ref("source_id").notNull(),
+    description: text("description"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("stock_moves_product_idx").on(t.productId, t.warehouseId),
+    index("stock_moves_source_idx").on(t.sourceType, t.sourceId),
+    check("stock_moves_qty", sql`${t.quantity} <> 0`),
+  ],
 );

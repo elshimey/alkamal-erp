@@ -7,6 +7,7 @@ import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { cashAccounts } from "@/lib/invoices";
+import { productOptions } from "@/lib/inventory";
 import { todayRiyadh } from "@/lib/dates";
 import { LINE_KINDS, MAINTENANCE_PROVIDERS, MAINTENANCE_STATUS, MAINTENANCE_TYPES, maintenanceAccountCode } from "@/data/maintenance";
 import { ActionForm, SubmitButton } from "@/components/action-form";
@@ -41,9 +42,11 @@ export default async function MaintenanceOrderPage({ params }: { params: Promise
     .where(eq(s.maintenanceOrders.id, id));
   if (!row) notFound();
   const { o } = row;
-  const [lines, cashes] = await Promise.all([
+  const [lines, cashes, products, warehouses] = await Promise.all([
     db.select().from(s.maintenanceLines).where(eq(s.maintenanceLines.orderId, id)).orderBy(asc(s.maintenanceLines.lineNo)),
     cashAccounts(db),
+    productOptions(db),
+    db.select({ id: s.warehouses.id, nameAr: s.warehouses.nameAr }).from(s.warehouses).where(eq(s.warehouses.isActive, true)).orderBy(asc(s.warehouses.code)),
   ]);
   const draft = o.status === "draft";
   const canEdit = draft && can(user.perms, "maintenance", "update");
@@ -85,7 +88,10 @@ export default async function MaintenanceOrderPage({ params }: { params: Promise
           <tr key={l.id}>
             <Td className="ltr-nums">{l.lineNo}</Td>
             <Td>{LINE_KINDS[l.kind]}</Td>
-            <Td>{l.description}</Td>
+            <Td>
+              {l.description}
+              {l.warehouseId && <span className="ms-2 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] text-brand-800">من المخزون</span>}
+            </Td>
             <Td className="ltr-nums">{Number(l.quantity)}</Td>
             <Td className="ltr-nums">{fmt(l.unitPrice)}</Td>
             <Td className="ltr-nums">{fmt(l.amount)}</Td>
@@ -117,6 +123,7 @@ export default async function MaintenanceOrderPage({ params }: { params: Promise
           </div>
           <div className="mt-2 text-xs text-gray-500">
             مدين حساب <span className="ltr-nums">{maintenanceAccountCode(o.type)}</span> على مركز تكلفة {row.plate}، دائن {row.supplier ?? row.cash ?? "الصندوق عند الاعتماد"}
+            {lines.some((l) => l.warehouseId) && "، والقطع المصروفة من المستودع دائن المخزون 1110"}
           </div>
         </dl>
       </div>
@@ -130,12 +137,15 @@ export default async function MaintenanceOrderPage({ params }: { params: Promise
               initialRows={3}
               columns={[
                 { key: "kind", label: "النوع", type: "select", required: true, options: Object.entries(LINE_KINDS).map(([value, label]) => ({ value, label })), width: "8rem" },
-                { key: "description", label: "الوصف", required: true, width: "16rem" },
+                { key: "productId", label: "الصنف", type: "select", options: products.map((p) => ({ value: String(p.id), label: `${p.code} ${p.nameAr}` })), width: "12rem" },
+                { key: "warehouseId", label: "يُصرف من", type: "select", options: warehouses.map((w) => ({ value: String(w.id), label: w.nameAr })), width: "9rem" },
+                { key: "description", label: "الوصف", width: "14rem" },
                 { key: "quantity", label: "الكمية", type: "number", width: "5rem", placeholder: "1" },
-                { key: "unitPrice", label: "سعر الوحدة", type: "number", required: true, width: "7rem" },
+                { key: "unitPrice", label: "سعر الوحدة", type: "number", width: "7rem", placeholder: "متوسط التكلفة" },
                 { key: "vat", label: "الضريبة", type: "select", options: [{ value: "15", label: "15%" }, { value: "0", label: "بدون" }], width: "5rem", placeholder: "15%" },
               ]}
             />
+            <p className="mt-2 text-xs text-gray-500">لصرف قطعة من المخزون اختر الصنف والمستودع واترك السعر؛ تُحمّل بمتوسط تكلفتها ولا تدخل في ذمة الورشة.</p>
           </Card>
         )}
         {draft && can(user.perms, "maintenance", "approve") && (

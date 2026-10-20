@@ -1,5 +1,8 @@
 import Link from "next/link";
+import { eq } from "drizzle-orm";
 import { db } from "@/db";
+import * as s from "@/db/schema";
+import { productOptions } from "@/lib/inventory";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { vehicleOptions } from "@/lib/lookups";
@@ -33,12 +36,14 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
   const filter = parseDocFilter(sp, Object.keys(STATUSES), today);
   const view = sp.view === "sheet" ? "sheet" : "table";
   const openId = view === "table" ? Number(sp.open) || null : null;
-  const [suppliers, accounts, vehicles, list, openDoc] = await Promise.all([
+  const [suppliers, accounts, vehicles, list, openDoc, products, warehouses] = await Promise.all([
     canCreate ? supplierOptions(db) : Promise.resolve([]),
     canCreate ? expenseAccountOptions(db) : Promise.resolve([]),
     canCreate ? vehicleOptions() : Promise.resolve([]),
     listPurchaseInvoices(db, filter),
     openId ? purchaseInvoiceDoc(db, openId) : Promise.resolve(null),
+    canCreate ? productOptions(db).then((r) => r.map((p) => ({ value: String(p.id), label: `${p.code} ${p.nameAr}` }))) : Promise.resolve([]),
+    canCreate ? db.select({ id: s.warehouses.id, nameAr: s.warehouses.nameAr }).from(s.warehouses).where(eq(s.warehouses.isActive, true)).then((r) => r.map((w) => ({ value: String(w.id), label: w.nameAr }))) : Promise.resolve([]),
   ]);
 
   const state = (i: (typeof list)[number]["i"]) => {
@@ -81,7 +86,10 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
                     { key: "date", label: "التاريخ", type: "date", required: true, placeholder: today },
                     { key: "supplierId", label: "المورد", type: "select", required: true, options: suppliers, width: "11rem" },
                     { key: "supplierInvoiceNo", label: "رقم فاتورته", required: true, ltr: true, width: "7rem" },
-                    { key: "accountId", label: "الحساب", type: "select", required: true, options: accounts, width: "14rem" },
+                    { key: "productId", label: "الصنف", type: "select", options: products, width: "11rem" },
+                    { key: "warehouseId", label: "المستودع", type: "select", options: warehouses, width: "8rem" },
+                    { key: "quantity", label: "الكمية", type: "number", width: "5rem" },
+                    { key: "accountId", label: "الحساب", type: "select", options: accounts, width: "14rem", placeholder: "حساب الصنف" },
                     { key: "vehicleId", label: "المركبة", type: "select", options: vehicles, width: "8rem" },
                     { key: "description", label: "البيان", width: "12rem" },
                     { key: "amount", label: "المبلغ قبل الضريبة", type: "number", required: true, width: "7rem" },

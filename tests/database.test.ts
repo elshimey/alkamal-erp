@@ -29,6 +29,7 @@ import { createNote, postNote, revertNote } from "@/lib/notes";
 import { listCustomers } from "@/lib/customers";
 import { createManualEntry, deleteManualEntry, listEntries, postManualEntry, reclassCandidates, reclassify, revertManualEntry, updateManualEntry } from "@/lib/journal";
 import { createCashAccount, listCashAccounts, normalizeIban } from "@/lib/banks";
+import { averageCost, createProduct, createStockDoc, createWarehouse, listProducts, onHand, postStockDoc, productCard, revertStockDoc, saveCount, stockDoc } from "@/lib/inventory";
 import { createAsset, deleteAsset, disposeAsset, listAssets, runDepreciation, undoLastDepreciation } from "@/lib/assets";
 import { IMPORT_SPECS } from "@/data/import-specs";
 import { addExpense, addFuel, approveWaybill, createWaybill, deleteWaybill, recordStage, rejectWaybill, revertWaybill } from "@/lib/waybills";
@@ -1292,6 +1293,107 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(vrep.issues).toHaveLength(2);
       const [tv] = await db.select().from(s.trafficViolations).where(eq(s.trafficViolations.reference, "TV-IMP-1"));
       expect(Number(tv.amount)).toBe(300);
+    });
+  });
+  describe("المخزون وقطع الغيار", () => {
+    let wh1: number;
+    let wh2: number;
+    let oil: number;
+    let sup: number;
+    const linesOf = (entryId: number) => db.select().from(s.journalLines).where(eq(s.journalLines.entryId, entryId));
+    const buy = async (no: string, quantity: number, amount: number, post = true) => {
+      const pi = await createPurchaseInvoice(db, { supplierId: sup, supplierInvoiceNo: no, invoiceDate: `${YEAR}-08-01`, lines: [{ productId: oil, warehouseId: wh1, quantity, description: "", amount, vatRate: 15 }] });
+      if (post) await postPurchaseInvoice(db, pi.id);
+      return pi;
+    };
+
+    it("الأصناف: المخزني على حساب المخزون والخدمة على مصروفها، والرمز لا يتكرر", async () => {
+      [wh1] = (await db.select().from(s.warehouses)).map((w) => w.id);
+      wh2 = (await createWarehouse(db, { nameAr: "مستودع الورشة" })).id;
+      const p = await createProduct(db, { code: "OIL-1", nameAr: "زيت محرك", kind: "stock", unit: "جالون", purchasePrice: 90, reorderLevel: 5 });
+      oil = p.id;
+      expect(p.accountId).toBe(acc["1110"]);
+      const svc = await createProduct(db, { nameAr: "شغل يد", kind: "service" });
+      expect([svc.code, svc.accountId]).toEqual(["S-0002", acc["5107"]]);
+      await expect(createProduct(db, { code: "OIL-1", nameAr: "مكرر", kind: "stock" })).rejects.toThrow("مستخدم");
+      await expect(createProduct(db, { nameAr: "خطأ", kind: "stock", accountId: acc["5107"] })).rejects.toThrow("مخزون");
+      sup = (await createParty(db, { nameAr: "مورد قطع الغيار", roles: ["supplier"] })).id;
+    });
+
+    it("فاتورة المورد بصنف مخزني تُدخل الكمية بتكلفتها ومتوسط مرجح، والإرجاع يُخرجها", async () => {
+      await expect(createPurchaseInvoice(db, { supplierId: sup, supplierInvoiceNo: "X", invoiceDate: `${YEAR}-08-01`, lines: [{ productId: oil, description: "", amount: 10 }] })).rejects.toThrow("المستودع والكمية");
+      const a = await buy("ST-1", 10, 1000);
+      const [pa] = await db.select().from(s.purchaseInvoices).where(eq(s.purchaseInvoices.id, a.id));
+      const jl = await linesOf(pa.journalEntryId!);
+      expect(Number(jl.find((l) => l.accountId === acc["1110"])!.debit)).toBe(1000);
+      await buy("ST-2", 10, 1200);
+      expect(await onHand(db, oil, wh1)).toBe(20);
+      expect(await averageCost(db, oil)).toBe(110);
+      const draft = await buy("ST-3", 5, 500, false);
+      expect(await onHand(db, oil, wh1)).toBe(20);
+      await postPurchaseInvoice(db, draft.id);
+      await revertPurchaseInvoice(db, draft.id);
+      expect(await onHand(db, oil, wh1)).toBe(20);
+    });
+
+    it("أمر الصيانة يصرف القطعة من المستودع بمتوسط التكلفة على مركز المركبة ولا يمس ذمة الورشة", async () => {
+      const [vehicle] = await db.select().from(s.vehicles).where(eq(s.vehicles.costCenterId, vehicleCc));
+      const o = await createMaintenanceOrder(db, { vehicleId: vehicle.id, orderDate: `${YEAR}-08-05`, type: "mechanical", provider: "internal" });
+      await expect(addMaintenanceLines(db, o.id, [{ kind: "part", productId: oil, warehouseId: wh1, description: "", quantity: 50, unitPrice: 0 }])).rejects.toThrow("رصيد");
+      await addMaintenanceLines(db, o.id, [{ kind: "part", productId: oil, warehouseId: wh1, description: "", quantity: 5, unitPrice: 0 }]);
+      const e = await approveMaintenanceOrder(db, o.id);
+      const jl = await linesOf(e.id);
+      expect(jl).toHaveLength(2);
+      expect(jl.find((l) => l.accountId === acc["5107"])).toMatchObject({ debit: "550.000", costCenterId: vehicleCc });
+      expect(Number(jl.find((l) => l.accountId === acc["1110"])!.credit)).toBe(550);
+      expect(await onHand(db, oil, wh1)).toBe(15);
+      const [mo] = await db.select().from(s.maintenanceOrders).where(eq(s.maintenanceOrders.id, o.id));
+      expect(Number(mo.total)).toBe(550);
+      // لا يُرجع الاستلام بعد الصرف منه إن نقص الرصيد
+      const [st2] = await db.select().from(s.purchaseInvoices).where(eq(s.purchaseInvoices.supplierInvoiceNo, "ST-2"));
+      await createStockDoc(db, { kind: "transfer", docDate: `${YEAR}-08-06`, warehouseId: wh1, toWarehouseId: wh2, lines: [{ productId: oil, quantity: 8 }], post: true });
+      await expect(revertPurchaseInvoice(db, st2.id)).rejects.toThrow("أرجع الصرف");
+      expect([await onHand(db, oil, wh1), await onHand(db, oil, wh2)]).toEqual([7, 8]);
+      await revertMaintenanceOrder(db, o.id);
+      expect(await onHand(db, oil, wh1)).toBe(12);
+    });
+
+    it("التسوية بالنقص والجرد يرحّلان الفروقات مقابل المصروف، والإرجاع يعكسها", async () => {
+      await expect(createStockDoc(db, { kind: "adjustment", docDate: `${YEAR}-08-10`, warehouseId: wh1, lines: [{ productId: oil, quantity: -2 }] })).rejects.toThrow("سبب");
+      const adj = await createStockDoc(db, { kind: "adjustment", docDate: `${YEAR}-08-10`, warehouseId: wh1, reason: "تالف", lines: [{ productId: oil, quantity: -2 }], post: true });
+      const d1 = (await stockDoc(db, adj.id))!;
+      const jl = await linesOf(d1.d.journalEntryId!);
+      expect(Number(jl.find((l) => l.accountId === acc["6113"])!.debit)).toBe(220);
+      expect(await onHand(db, oil, wh1)).toBe(10);
+      const cnt = await createStockDoc(db, { kind: "count", docDate: `${YEAR}-08-31`, warehouseId: wh1, lines: [] });
+      const doc = (await stockDoc(db, cnt.id))!;
+      const line = doc.lines.find((l) => l.l.productId === oil)!;
+      expect(Number(line.l.systemQty)).toBe(10);
+      await saveCount(db, cnt.id, { [line.l.id]: 11 });
+      await postStockDoc(db, cnt.id);
+      expect(await onHand(db, oil, wh1)).toBe(11);
+      const after = (await stockDoc(db, cnt.id))!;
+      expect(Number(after.lines.find((l) => l.l.productId === oil)!.l.quantity)).toBe(1);
+      expect(Number((await linesOf(after.d.journalEntryId!)).find((l) => l.accountId === acc["1110"])!.debit)).toBe(110);
+      await revertStockDoc(db, cnt.id);
+      expect(await onHand(db, oil, wh1)).toBe(10);
+      const [row] = (await listProducts(db, { q: "OIL-1" })).filter((r) => r.p.id === oil);
+      expect(row).toMatchObject({ qty: 18, avgCost: 110 });
+      expect((await productCard(db, oil, wh1)).at(-1)!.balance).toBe(10);
+    });
+
+    it("استيراد الأصناف برصيد افتتاحي مقابل الأرباح المبقاة", async () => {
+      const rows = [
+        { row: 5, values: { code: "TYR-1", nameAr: "إطار 315/80", kind: "مخزني", unit: "حبة", purchasePrice: "900", openingQty: "4" } },
+        { row: 6, values: { nameAr: "غسيل", kind: "خدمة" } },
+        { row: 7, values: { code: "TYR-1", nameAr: "مكرر" } },
+      ];
+      const report = await runImport(db, IMPORT_SPECS.products, rows as { row: number; values: Record<string, string> }[], { dryRun: false });
+      expect(report.ok).toBe(2);
+      expect(report.issues).toHaveLength(1);
+      const [tyre] = await db.select().from(s.products).where(eq(s.products.code, "TYR-1"));
+      expect(await onHand(db, tyre.id, wh1)).toBe(4);
+      expect(await averageCost(db, tyre.id)).toBe(900);
     });
   });
 });
