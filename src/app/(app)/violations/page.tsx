@@ -10,7 +10,7 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { SheetEditor } from "@/components/sheet-editor";
 import { Badge, Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { pay, remove, revertPayment, saveViolations } from "./actions";
-import { RowCheck, SelectAll, SelectionTotal } from "./selection";
+import { RowCheck, SelectAll, SelectionTotal } from "@/components/row-selection";
 
 const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const PAY_FORM = "pay-violations";
@@ -140,7 +140,7 @@ export default async function ViolationsPage({ searchParams }: { searchParams: P
       {canPay && unpaid.length > 0 && (
         <Card title="سداد المخالفات للمرور" className="mb-4">
           <ActionForm id={PAY_FORM} action={pay} className="flex flex-wrap items-end gap-3">
-            <SelectionTotal form={PAY_FORM} />
+            <SelectionTotal form={PAY_FORM} noun="مخالفة" />
             <Field label="تاريخ السداد">
               <Input type="date" name="paymentDate" defaultValue={today} className="w-40" />
             </Field>

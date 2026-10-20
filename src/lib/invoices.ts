@@ -5,6 +5,8 @@ import { createJournalEntryTx, deleteEntryTx, nextDocumentNumber } from "@/lib/l
 import { invoicePostingLines, lineVat, round2 } from "@/lib/invoice-posting";
 import { rateOn } from "@/lib/waybills";
 import { SALES_ACCOUNTS } from "@/data/sales";
+import type { DocFilter } from "@/lib/doc-filters";
+import { docOrder, docWhere } from "@/lib/doc-query";
 
 // الفاتورة التجميعية: عدة بوالص معتمدة لعميل واحد، سطر لكل بوليصة. هنا يُقيد الإيراد (القرار 3).
 
@@ -327,6 +329,96 @@ export async function deleteInvoice(db: Db, invoiceId: number, opts: { reason: s
     const lines = await tx.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, invoiceId));
     await tx.insert(s.deletionLog).values({ entity: "sales_invoice", entityId: String(invoiceId), snapshot: { invoice: inv, lines }, reason: opts.reason.trim(), userId: opts.userId });
     await tx.delete(s.salesInvoices).where(eq(s.salesInvoices.id, invoiceId));
+  });
+}
+
+// ───────────── قائمة الفواتير والتعديل من الشيت ─────────────
+
+const salesCols = {
+  id: s.salesInvoices.id,
+  number: s.salesInvoices.number,
+  date: s.salesInvoices.invoiceDate,
+  due: s.salesInvoices.dueDate,
+  total: s.salesInvoices.total,
+  paid: s.salesInvoices.paidAmount,
+  status: s.salesInvoices.status,
+  party: s.parties.nameAr,
+  search: [s.salesInvoices.notes],
+};
+
+export async function listSalesInvoices(db: Db | Tx, f: DocFilter, limit = 500) {
+  return db
+    .select({
+      i: s.salesInvoices,
+      customer: s.parties.nameAr,
+      waybills: sql<number>`(select count(*) from sales_invoice_lines l where l.invoice_id = ${s.salesInvoices.id} and l.kind = 'waybill')::int`,
+    })
+    .from(s.salesInvoices)
+    .innerJoin(s.parties, eq(s.parties.id, s.salesInvoices.customerId))
+    .where(docWhere(salesCols, f, "issued"))
+    .orderBy(...docOrder(salesCols, f.sort))
+    .limit(limit);
+}
+
+/** الفاتورة بعميلها وسطورها، لعرضها ضريبيةً في المعاينة والصفحة والطباعة. */
+export async function salesInvoiceDoc(db: Db | Tx, id: number) {
+  const [row] = await db
+    .select({ i: s.salesInvoices, customer: s.parties })
+    .from(s.salesInvoices)
+    .innerJoin(s.parties, eq(s.parties.id, s.salesInvoices.customerId))
+    .where(eq(s.salesInvoices.id, id));
+  if (!row) return null;
+  const lines = await db.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, id)).orderBy(asc(s.salesInvoiceLines.lineNo));
+  return { ...row, lines };
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+export interface DraftInvoicePatch {
+  invoiceDate?: string;
+  dueDate?: string;
+  notes?: string | null;
+}
+
+/**
+ * تعديل مسودة من الشيت. تغيير التاريخ يعيد سعر الصرف وسطور البوالص بسعر اليوم الجديد،
+ * ويُزاح الاستحقاق بنفس المدة ما لم يُحدد.
+ */
+export async function updateDraftInvoice(db: Db, id: number, patch: DraftInvoicePatch) {
+  return db.transaction(async (tx) => {
+    const inv = await lockInvoice(tx, id);
+    if (inv.status !== "draft") throw new Error(`الفاتورة ${inv.number} مُصدرة؛ أرجعها لمسودة لتعديلها`);
+    const invoiceDate = patch.invoiceDate ?? inv.invoiceDate;
+    for (const d of [patch.invoiceDate, patch.dueDate]) if (d !== undefined && !ISO_DATE.test(d)) throw new Error(`تاريخ غير صحيح: ${d}`);
+    const dateChanged = invoiceDate !== inv.invoiceDate;
+    if (dateChanged && invoiceDate.slice(0, 4) !== inv.invoiceDate.slice(0, 4)) throw new Error("لا تُنقل الفاتورة لسنة أخرى؛ احذفها وأنشئها بالتاريخ الجديد");
+    const dueDate = patch.dueDate ?? (dateChanged ? addDays(invoiceDate, Math.round((Date.parse(inv.dueDate) - Date.parse(inv.invoiceDate)) / 86_400_000)) : inv.dueDate);
+    if (dueDate < invoiceDate) throw new Error("تاريخ الاستحقاق قبل تاريخ الفاتورة");
+
+    let exchangeRate = inv.exchangeRate;
+    if (dateChanged) {
+      const lines = await tx.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, id)).orderBy(asc(s.salesInvoiceLines.lineNo));
+      const waybillIds = [...new Set(lines.filter((l) => l.kind === "waybill").map((l) => l.waybillId!))];
+      if (waybillIds.length) {
+        const [late] = await tx
+          .select({ number: s.waybills.number, date: s.waybills.waybillDate })
+          .from(s.waybills)
+          .where(and(inArray(s.waybills.id, waybillIds), sql`${s.waybills.waybillDate} > ${invoiceDate}`))
+          .limit(1);
+        if (late) throw new Error(`تاريخ الفاتورة قبل البوليصة ${late.number} (${late.date})`);
+      }
+      const rate = await rateOn(tx, inv.currencyCode, invoiceDate);
+      if (rate !== num(inv.exchangeRate)) {
+        exchangeRate = String(rate);
+        await tx.delete(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, id));
+        await insertLines(tx, id, await buildLines(tx, waybillIds, inv.currencyCode, rate));
+      }
+    }
+    await tx
+      .update(s.salesInvoices)
+      .set({ invoiceDate, dueDate, exchangeRate, notes: patch.notes === undefined ? inv.notes : patch.notes?.trim() || null, updatedAt: new Date() })
+      .where(eq(s.salesInvoices.id, id));
+    if (dateChanged) await recomputeTotals(tx, id);
   });
 }
 
