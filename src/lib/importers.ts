@@ -9,6 +9,8 @@ import { createReceipt } from "@/lib/receipts";
 import { createManualEntry } from "@/lib/journal";
 import { createViolation } from "@/lib/violations";
 import { createProduct, openingStockTx } from "@/lib/inventory";
+import { addMaintenanceLines, createBreakdownRequest, createMaintenanceOrder, savePlan } from "@/lib/maintenance";
+import { MAINTENANCE_TYPES, type MaintenanceType } from "@/data/maintenance";
 import { lineVat, round2 } from "@/lib/invoice-posting";
 import { errorMessage } from "@/lib/errors";
 import { todayRiyadh } from "@/lib/dates";
@@ -378,6 +380,82 @@ async function importProduct(tx: Tx, [r]: ImportRow[], _ctx: Ctx, userId?: numbe
   return product.code;
 }
 
+/** نوع الصيانة بالاسم العربي (أو جزء منه) أو بالمفتاح. */
+function maintenanceType(raw: string): MaintenanceType {
+  const t = normText(raw);
+  if (!t) return "mechanical";
+  for (const [k, label] of Object.entries(MAINTENANCE_TYPES)) if (k === raw.trim() || normText(label).includes(t) || t.includes(normText(label.split(" ")[0]))) return k as MaintenanceType;
+  if (/اطار|بنشر|tire/.test(t)) return "tires";
+  if (/زيت|فلتر/.test(t)) return "consumable";
+  throw new Error(`نوع الصيانة «${raw}» غير معروف`);
+}
+
+async function importMaintenanceOrder(tx: Tx, rows: ImportRow[], ctx: Ctx, userId?: number) {
+  const [r] = rows;
+  const plate = required(r, "vehicle", "المركبة");
+  const vehicleId = resolve(ctx.idx.vehicles.find(plate), plate, "costCenter", "المركبة");
+  const workshop = v(r, "workshop");
+  const found = workshop ? ctx.idx.parties.find(workshop) : undefined;
+  if (workshop && found == null) throw new Error(found === null ? `الورشة «${workshop}» تطابق أكثر من جهة` : `الورشة «${workshop}» غير موجودة؛ أضفها من شاشة الموردين أولاً`);
+  const supplierId = found ?? null;
+  const cashRaw = v(r, "cashAccount");
+  const cash = cashRaw ? resolve(ctx.idx.accounts.find(cashRaw), cashRaw, "account", "الصندوق") : null;
+  const odometer = v(r, "odometer") ? toNumber(v(r, "odometer"), "قراءة العداد", { min: 0 }) : null;
+  const order = await createMaintenanceOrder(tx, {
+    vehicleId,
+    orderDate: toDate(required(r, "orderDate", "التاريخ"), "التاريخ"),
+    type: maintenanceType(v(r, "type")),
+    provider: supplierId ? "external" : "internal",
+    supplierId,
+    supplierInvoiceNo: v(r, "supplierInvoiceNo") || null,
+    cashAccountId: cash?.id ?? null,
+    odometer: odometer != null ? Math.round(odometer) : null,
+    notes: v(r, "notes") || null,
+    userId,
+  });
+  await addMaintenanceLines(
+    tx,
+    order.id,
+    rows.map((x) => {
+      const vat = normText(v(x, "vat"));
+      return {
+        kind: /شغل|يد|labor|عمل/.test(normText(v(x, "lineKind"))) ? ("labor" as const) : ("part" as const),
+        description: required(x, "description", "الوصف"),
+        quantity: v(x, "quantity") ? toNumber(v(x, "quantity"), "الكمية", { positive: true }) : 1,
+        unitPrice: toNumber(required(x, "unitPrice", "سعر الوحدة"), "سعر الوحدة", { min: 0 }),
+        vatRate: !vat || /15/.test(vat) ? 15 : /^0|بدون|صفر|معفي|no/.test(vat) ? 0 : 15,
+      };
+    }),
+  );
+  return order.number;
+}
+
+async function importBreakdown(tx: Tx, [r]: ImportRow[], ctx: Ctx, userId?: number) {
+  const plate = required(r, "vehicle", "المركبة");
+  const p = normText(v(r, "priority"));
+  const req = await createBreakdownRequest(tx, {
+    vehicleId: resolve(ctx.idx.vehicles.find(plate), plate, "costCenter", "المركبة"),
+    reportDate: toDate(required(r, "reportDate", "التاريخ"), "التاريخ"),
+    description: required(r, "description", "وصف العطل"),
+    priority: /عاجل|urgent/.test(p) ? "urgent" : /منخفض|low/.test(p) ? "low" : "normal",
+    estimatedCost: v(r, "estimatedCost") ? toNumber(v(r, "estimatedCost"), "التكلفة التقديرية", { min: 0 }) : null,
+    userId,
+  });
+  return req.number;
+}
+
+async function importPlan(tx: Tx, [r]: ImportRow[], ctx: Ctx) {
+  const plate = required(r, "vehicle", "المركبة");
+  const plan = await savePlan(tx, {
+    vehicleId: resolve(ctx.idx.vehicles.find(plate), plate, "costCenter", "المركبة"),
+    type: maintenanceType(v(r, "type")),
+    title: required(r, "title", "اسم الصيانة"),
+    intervalDays: Math.round(toNumber(required(r, "intervalDays", "كل (يوم)"), "كل (يوم)", { positive: true })),
+    lastDoneDate: v(r, "lastDone") ? toDate(v(r, "lastDone"), "آخر تنفيذ") : null,
+  });
+  return `${plate}: ${plan.title}`;
+}
+
 const IMPORTERS: Record<string, (tx: Tx, rows: ImportRow[], ctx: Ctx, userId?: number) => Promise<string>> = {
   "sales-invoices": importInvoice,
   vehicles: importVehicle,
@@ -386,6 +464,9 @@ const IMPORTERS: Record<string, (tx: Tx, rows: ImportRow[], ctx: Ctx, userId?: n
   "journal-entries": importJournal,
   violations: importViolation,
   products: importProduct,
+  "maintenance-orders": importMaintenanceOrder,
+  "breakdown-requests": importBreakdown,
+  "maintenance-plans": importPlan,
 };
 
 /** يجمع الصفوف في سجلات: بنود الفاتورة الواحدة معاً (ولو تباعدت في الملف)، وغيرها صف لكل سجل. */
@@ -489,6 +570,24 @@ export async function templateLists(db: Db, spec: ImportSpec): Promise<TemplateL
       { title: "النوع", values: ["مخزني", "خدمة"], field: "kind" },
       { title: "المستودعات", values: (await db.select({ n: s.warehouses.nameAr }).from(s.warehouses)).map((w) => w.n), field: "warehouse" },
     ];
+  }
+  if (spec.entity === "maintenance-orders" || spec.entity === "breakdown-requests" || spec.entity === "maintenance-plans") {
+    const lists: TemplateList[] = [{ title: "المركبات (اللوحة)", values: ctx.vehicles.map((x) => x.plate).sort(), field: "vehicle" }];
+    if (spec.entity !== "breakdown-requests") lists.push({ title: "أنواع الصيانة", values: Object.values(MAINTENANCE_TYPES), field: "type" });
+    if (spec.entity === "maintenance-orders") {
+      const workshops = await db
+        .select({ n: s.parties.nameAr })
+        .from(s.parties)
+        .innerJoin(s.partyRoles, and(eq(s.partyRoles.partyId, s.parties.id), or(eq(s.partyRoles.role, "workshop"), eq(s.partyRoles.role, "supplier"))));
+      lists.push(
+        { title: "الورش والموردون", values: [...new Set(workshops.map((w) => w.n))].sort(), field: "workshop" },
+        { title: "الصناديق (الرقم)", values: ctx.accounts.filter((a) => /^1101/.test(a.code)).map((a) => a.code).sort(), field: "cashAccount" },
+        { title: "نوع البند", values: ["قطعة غيار", "شغل يد"], field: "lineKind" },
+        { title: "الضريبة", values: ["15%", "بدون"], field: "vat" },
+      );
+    }
+    if (spec.entity === "breakdown-requests") lists.push({ title: "الأولوية", values: ["منخفضة", "عادية", "عاجلة"], field: "priority" });
+    return lists;
   }
   if (spec.entity === "customers") {
     return [

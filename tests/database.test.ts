@@ -16,7 +16,7 @@ import { activeContract, createContract, createLocation, createParty, createRout
 import { createInvoice, createReceipt, invoicingQueue, issueInvoice, listSalesInvoices, revertInvoice, revertReceipt, updateDraftInvoice } from "@/lib/invoices";
 import { parseDocFilter } from "@/lib/doc-filters";
 import { createExpense, approveExpense, createPayment, createPurchaseInvoice, custodyBalances, deletePurchaseInvoice, listPurchaseInvoices, postPurchaseInvoice, updateDraftPurchase, rejectExpense, revertExpense, revertPayment, revertPurchaseInvoice, supplierBalances } from "@/lib/purchases";
-import { addMaintenanceLines, approveBreakdownRequest, approveMaintenanceOrder, completeMaintenanceOrder, createBreakdownRequest, createMaintenanceOrder, deleteMaintenanceOrder, planSchedule, rejectBreakdownRequest, revertMaintenanceOrder, reviewBreakdownRequest, savePlan } from "@/lib/maintenance";
+import { addMaintenanceLines, approveBreakdownRequest, approveMaintenanceOrder, completeMaintenanceOrder, createBreakdownRequest, createMaintenanceOrder, deleteMaintenanceOrder, planSchedule, rejectBreakdownRequest, revertMaintenanceOrder, reviewBreakdownRequest, savePlan, listOrders, orderDoc, updateDraftOrder, createOrdersFrom, listRequests, requestDoc } from "@/lib/maintenance";
 import { adjustPayrollLines, approvePayrollRun, bankTransferRows, createAdvance, createEmployee, createPayrollRun, payAdvance, payPayrollRun, refreshPayrollRun, revertAdvance, revertPayrollPayment, revertPayrollRun, updateEmployee } from "@/lib/payroll";
 import { createViolation, deleteViolation, listViolations, payViolations, revertViolationPayment, violationSummary } from "@/lib/violations";
 import { computePayrollLine } from "@/data/payroll";
@@ -1424,5 +1424,56 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     expect((find(after, "expenses")?.out ?? 0) - (find(before, "expenses")?.out ?? 0)).toBe(200);
     const office = after.accounts.find((a) => a.code === "110102")!;
     expect(office.in - (before.accounts.find((a) => a.code === "110102")?.in ?? 0)).toBe(300);
+  });
+
+  it("الصيانة بآلية الفواتير: بحث وفلترة، تعديل المسودة، أوامر من الخطط والبلاغات، واستيراد الأوامر ببنودها", async () => {
+    const v = await createVehicle(db, { plate: "ص ي ن 4321", chassis: "CH-MNT" });
+    const ws = await createParty(db, { nameAr: "ورشة المنطقة الصناعية", roles: ["workshop"] });
+    const day = `${YEAR}-07-15`;
+
+    const plan = await savePlan(db, { vehicleId: v.id, type: "consumable", title: "زيت وفلاتر", intervalDays: 45 });
+    const [fromPlan] = await createOrdersFrom(db, { plans: [plan.id] }, { orderDate: day });
+    await expect(createOrdersFrom(db, { plans: [plan.id] }, { orderDate: day })).rejects.toThrow("أمر مفتوح");
+    const req = await createBreakdownRequest(db, { vehicleId: v.id, reportDate: day, description: "صوت في القير", estimatedCost: 900 });
+    await reviewBreakdownRequest(db, req.id, { limit: 5000 });
+    const [fromReq] = await createOrdersFrom(db, { requests: [req.id] }, { orderDate: day });
+    expect((await requestDoc(db, req.id))?.order?.number).toBe(fromReq);
+    expect((await listRequests(db, { q: "القير" })).map((x) => x.r.id)).toEqual([req.id]);
+
+    const mine = await listOrders(db, { vehicleId: v.id });
+    expect(mine.map((x) => x.o.number).sort()).toEqual([fromPlan, fromReq].sort());
+    expect(mine.every((x) => x.o.status === "draft" && x.lines === 0)).toBe(true);
+    const planOrder = mine.find((x) => x.o.number === fromPlan)!.o;
+    expect(planOrder).toMatchObject({ type: "consumable", planId: plan.id, provider: "internal" });
+
+    await updateDraftOrder(db, planOrder.id, { odometer: "120500", notes: " بعد الرحلة " });
+    expect((await orderDoc(db, planOrder.id))?.o).toMatchObject({ odometer: 120500, notes: "بعد الرحلة" });
+    await expect(updateDraftOrder(db, planOrder.id, { odometer: "-3" })).rejects.toThrow("العداد");
+
+    const spec = IMPORT_SPECS["maintenance-orders"];
+    const rows = [
+      { ref: "A", orderDate: "16/07/" + YEAR, vehicle: "ص ي ن 4321", type: "ميكانيكا", workshop: "ورشة المنطقة الصناعية", supplierInvoiceNo: "IND-55", lineKind: "قطعة غيار", description: "كلتش", quantity: "1", unitPrice: "1500", vat: "15%" },
+      { ref: "A", orderDate: "16/07/" + YEAR, vehicle: "ص ي ن 4321", type: "ميكانيكا", workshop: "ورشة المنطقة الصناعية", supplierInvoiceNo: "IND-55", lineKind: "شغل يد", description: "تركيب", unitPrice: "300", vat: "بدون" },
+      { ref: "B", orderDate: `${YEAR}-07-16`, vehicle: "غير موجودة", description: "x", unitPrice: "1" },
+      { ref: "C", orderDate: `${YEAR}-07-16`, vehicle: "ص ي ن 4321", workshop: "ورشة لا وجود لها", description: "x", unitPrice: "1" },
+    ].map((values, i) => ({ row: i + 5, values: values as Record<string, string> }));
+    const dry = await runImport(db, spec, rows, { dryRun: true });
+    expect(dry).toMatchObject({ total: 3, ok: 1 });
+    expect(dry.issues.map((x) => x.rows)).toEqual([[7], [8]]);
+    expect((await listOrders(db, { vehicleId: v.id })).length).toBe(2);
+    const real = await runImport(db, spec, rows.slice(0, 2), { dryRun: false });
+    expect(real.ok).toBe(1);
+    const [imported] = await listOrders(db, { q: "IND-55" });
+    expect(imported).toMatchObject({ supplier: "ورشة المنطقة الصناعية", lines: 2 });
+    expect([Number(imported.o.subtotal), Number(imported.o.vatTotal), Number(imported.o.total)]).toEqual([1800, 225, 2025]);
+    expect(imported.o.supplierId).toBe(ws.id);
+    expect((await listOrders(db, { vehicleId: v.id, sort: "amount_desc" }))[0].o.id).toBe(imported.o.id);
+
+    const reqImport = await runImport(db, IMPORT_SPECS["breakdown-requests"], [{ row: 5, values: { reportDate: day, vehicle: "ص ي ن 4321", description: "إضاءة خلفية", priority: "عاجلة" } }], { dryRun: false });
+    expect(reqImport.ok).toBe(1);
+    expect((await listRequests(db, { vehicleId: v.id, priority: "urgent" })).length).toBe(1);
+    const planImport = await runImport(db, IMPORT_SPECS["maintenance-plans"], [{ row: 5, values: { vehicle: "ص ي ن 4321", title: "فحص إطارات", type: "إطارات", intervalDays: "30" } }], { dryRun: false });
+    expect(planImport.ok).toBe(1);
+    expect((await planSchedule(db, day)).find((p) => p.vehicleId === v.id && p.title === "فحص إطارات")?.type).toBe("tires");
   });
 });
