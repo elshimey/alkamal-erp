@@ -9,6 +9,7 @@ import { listHref, parseDocFilter, type DocListParams } from "@/lib/doc-filters"
 import { todayRiyadh } from "@/lib/dates";
 import { NOTE_KINDS, NOTE_SIDES, NOTE_STATUS, type NoteKind, type NoteSide } from "@/data/sales";
 import { ActionForm, SubmitButton } from "@/components/action-form";
+import { BulkPdfButton } from "@/components/bulk-pdf";
 import { DocToolbar } from "@/components/doc-toolbar";
 import { Icon } from "@/components/icons";
 import { NoteDocument } from "@/components/note-document";
@@ -56,6 +57,9 @@ export default async function NotesPage({ params, searchParams }: { params: Prom
       </PageHeader>
 
       <DocToolbar base={base} params={sp} statuses={kinds} allStatuses="كل الأنواع" pay={false} views={false} sorts={SORTS} noun="إشعار" exportName={cfg.title} count={list.length} />
+      <div className="mb-2 flex justify-end">
+        <BulkPdfButton kind="notes" ids={list.map((x) => x.n.id)} />
+      </div>
 
       {openDoc ? (
         <div className="grid items-start gap-4 lg:grid-cols-[minmax(17rem,22rem)_1fr]">

@@ -288,6 +288,8 @@ export const journalEntries = pgTable(
     sourceId: ref("source_id"),
     status: journalStatus("status").notNull().default("draft"),
     fiscalPeriodId: ref("fiscal_period_id").references(() => fiscalPeriods.id),
+    // مرجع القيد اليدوي (رقمه في الملف المستورد أو المستند الورقي)
+    reference: varchar("reference", { length: 60 }),
     createdBy: ref("created_by").references(() => users.id),
     approvedBy: ref("approved_by").references(() => users.id),
     postedAt: timestamp("posted_at", { withTimezone: true }),
@@ -1396,4 +1398,69 @@ export const invoiceTemplate = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [check("invoice_template_single", sql`${t.id} = 1`)],
+);
+
+// ───────────── الحسابات البنكية ─────────────
+
+// بيانات البنك لحساب تفصيلي تحت 1102؛ الرصيد من القيود المرحّلة
+export const bankAccounts = pgTable("bank_accounts", {
+  id: id(),
+  accountId: ref("account_id").notNull().unique().references(() => accounts.id),
+  bankName: text("bank_name").notNull(),
+  accountNumber: varchar("account_number", { length: 40 }),
+  iban: varchar("iban", { length: 34 }),
+  swift: varchar("swift", { length: 11 }),
+  branch: text("branch"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: createdAt(),
+});
+
+// ───────────── الأصول الثابتة والإهلاك ─────────────
+
+export const assetStatus = pgEnum("asset_status", ["active", "disposed"]);
+
+// الأصل الثابت بالقسط الثابت: (التكلفة − الخردة) ÷ العمر بالأشهر، يبدأ من شهر الاقتناء
+export const fixedAssets = pgTable(
+  "fixed_assets",
+  {
+    id: id(),
+    number: varchar("number", { length: 30 }).notNull().unique(),
+    nameAr: text("name_ar").notNull(),
+    assetAccountId: ref("asset_account_id").notNull().references(() => accounts.id),
+    accumulatedAccountId: ref("accumulated_account_id").notNull().references(() => accounts.id),
+    expenseAccountId: ref("expense_account_id").notNull().references(() => accounts.id),
+    costCenterId: ref("cost_center_id").references(() => costCenters.id),
+    vehicleId: ref("vehicle_id").references(() => vehicles.id),
+    acquisitionDate: date("acquisition_date").notNull(),
+    // بداية الإهلاك (أول الشهر)؛ غالباً شهر الاقتناء
+    depreciationStart: date("depreciation_start").notNull(),
+    cost: money("cost").notNull(),
+    salvageValue: money("salvage_value").notNull().default("0"),
+    usefulLifeMonths: integer("useful_life_months").notNull(),
+    // إهلاك سابق مُرحّل خارج النظام (عند إدخال أصل قديم)
+    openingDepreciation: money("opening_depreciation").notNull().default("0"),
+    // قيد الاقتناء إن سُجل من هنا (مدين الأصل / دائن الحساب المقابل)
+    acquisitionEntryId: ref("acquisition_entry_id").references(() => journalEntries.id),
+    status: assetStatus("status").notNull().default("active"),
+    disposalDate: date("disposal_date"),
+    notes: text("notes"),
+    createdBy: ref("created_by").references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check("fixed_assets_amounts", sql`${t.cost} > 0 and ${t.salvageValue} >= 0 and ${t.salvageValue} < ${t.cost} and ${t.usefulLifeMonths} between 1 and 600 and ${t.openingDepreciation} >= 0`),
+  ],
+);
+
+export const assetDepreciation = pgTable(
+  "asset_depreciation",
+  {
+    id: id(),
+    assetId: ref("asset_id").notNull().references(() => fixedAssets.id, { onDelete: "cascade" }),
+    // آخر يوم في الشهر المهلَك
+    periodEnd: date("period_end").notNull(),
+    amount: money("amount").notNull(),
+    entryId: ref("entry_id").notNull().references(() => journalEntries.id),
+  },
+  (t) => [uniqueIndex("asset_depreciation_period_uq").on(t.assetId, t.periodEnd), check("asset_depreciation_amount", sql`${t.amount} > 0`)],
 );

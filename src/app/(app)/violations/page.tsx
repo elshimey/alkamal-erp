@@ -11,40 +11,56 @@ import { SheetEditor } from "@/components/sheet-editor";
 import { Badge, Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { pay, remove, revertPayment, saveViolations } from "./actions";
 import { RowCheck, SelectAll, SelectionTotal } from "@/components/row-selection";
+import { violationDoc } from "@/lib/violations";
+import { getCompany, getInvoiceTemplate } from "@/lib/company";
+import { listHref, parseDocFilter, type DocListParams } from "@/lib/doc-filters";
+import { BulkPdfButton } from "@/components/bulk-pdf";
+import { DocToolbar } from "@/components/doc-toolbar";
+import { Icon } from "@/components/icons";
+import { ImportLink } from "@/components/import-link";
+import { ViolationDocument } from "@/components/violation-document";
 
 const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const PAY_FORM = "pay-violations";
-const TABS = [
-  { key: undefined, label: "الكل" },
-  { key: "posted", label: "غير مسددة للمرور" },
-  { key: "paid", label: "مسددة" },
-] as const;
+const STATUSES = { posted: "غير مسددة للمرور", paid: "مسددة" };
+const BASE = "/violations";
 
-export default async function ViolationsPage({ searchParams }: { searchParams: Promise<{ status?: string; charge?: string; vehicle?: string; driver?: string }> }) {
+export default async function ViolationsPage({ searchParams }: { searchParams: Promise<DocListParams & { charge?: string; vehicle?: string; driver?: string }> }) {
   const user = await requirePermission("violations", "view");
   const sp = await searchParams;
+  const df = parseDocFilter(sp, Object.keys(STATUSES), todayRiyadh());
   const filter: ViolationFilter = {
+    q: df.q,
+    from: df.from,
+    to: df.to,
     status: sp.status === "posted" || sp.status === "paid" ? sp.status : undefined,
     chargeTo: sp.charge === "driver" || sp.charge === "company" ? sp.charge : undefined,
     vehicleId: Number(sp.vehicle) || undefined,
     driverId: Number(sp.driver) || undefined,
   };
   const today = todayRiyadh();
-  const [vehicles, drivers, cashes, list, sum] = await Promise.all([vehicleOptions(), driverOptions(), cashAccounts(db), listViolations(db, filter), violationSummary(db)]);
+  const openId = Number(sp.open) || null;
+  const [vehicles, drivers, cashes, list, sum, openDoc, company, template] = await Promise.all([
+    vehicleOptions(),
+    driverOptions(),
+    cashAccounts(db),
+    listViolations(db, filter),
+    violationSummary(db),
+    openId ? violationDoc(db, openId) : Promise.resolve(null),
+    getCompany(db),
+    getInvoiceTemplate(db),
+  ]);
   const canPay = can(user.perms, "violations", "approve");
   const unpaid = list.filter((x) => x.v.status === "posted");
-  const qs = (patch: Record<string, string | undefined>) => {
-    const p = new URLSearchParams(Object.entries({ ...sp, ...patch }).filter((e): e is [string, string] => !!e[1]));
-    const q = p.toString();
-    return q ? `/violations?${q}` : "/violations";
-  };
 
   return (
     <>
       <PageHeader
         title="المخالفات المرورية"
         description="تُسجل المخالفة على المركبة ويُعرف السائق من سجل الإسناد في تاريخها. على السائق تُخصم من راتبه في المسير، وعلى الشركة تُقيد مصروفاً على المركبة. القيد يُنشأ فور الحفظ."
-      />
+      >
+        {can(user.perms, "violations", "create") && <ImportLink entity="violations" />}
+      </PageHeader>
 
       <div className="mb-6 grid gap-4 sm:grid-cols-3">
         {[
@@ -100,42 +116,55 @@ export default async function ViolationsPage({ searchParams }: { searchParams: P
         </Card>
       )}
 
-      <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
-        {TABS.map((t) => (
-          <Link
-            key={t.label}
-            href={qs({ status: t.key })}
-            className={`rounded-full px-3.5 py-1.5 transition ${t.key === filter.status ? "bg-asphalt-900 font-semibold text-brand-500" : "bg-white text-gray-600 shadow-sm hover:bg-brand-50"}`}
-          >
-            {t.label}
-          </Link>
-        ))}
-        <form className="ms-auto flex flex-wrap items-center gap-2">
-          {filter.status && <input type="hidden" name="status" value={filter.status} />}
-          <Select name="charge" defaultValue={filter.chargeTo ?? ""} className="w-32">
-            <option value="">على الكل</option>
-            <option value="driver">على السائق</option>
-            <option value="company">على الشركة</option>
-          </Select>
-          <Select name="vehicle" defaultValue={filter.vehicleId ?? ""} className="w-36">
-            <option value="">كل المركبات</option>
-            {vehicles.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </Select>
-          <Select name="driver" defaultValue={filter.driverId ?? ""} className="w-40">
-            <option value="">كل السائقين</option>
-            {drivers.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </Select>
-          <button className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50">تصفية</button>
-        </form>
-      </div>
+      <DocToolbar base={BASE} params={sp} statuses={STATUSES} allStatuses="كل الحالات" pay={false} views={false} sorts={{}} noun="مخالفة" exportName="المخالفات" count={list.length} placeholder="ابحث بالرقم أو اللوحة أو السائق أو النوع" />
+      <form className="mb-4 flex flex-wrap items-center gap-2 text-sm print:hidden">
+        {(["q", "period", "status"] as const).map((k) => sp[k] && <input key={k} type="hidden" name={k} value={sp[k]} />)}
+        <Select name="charge" defaultValue={filter.chargeTo ?? ""} className="w-32">
+          <option value="">على الكل</option>
+          <option value="driver">على السائق</option>
+          <option value="company">على الشركة</option>
+        </Select>
+        <Select name="vehicle" defaultValue={filter.vehicleId ?? ""} className="w-36">
+          <option value="">كل المركبات</option>
+          {vehicles.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </Select>
+        <Select name="driver" defaultValue={filter.driverId ?? ""} className="w-40">
+          <option value="">كل السائقين</option>
+          {drivers.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </Select>
+        <button className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50">تصفية</button>
+        <span className="ms-auto">
+          <BulkPdfButton kind="violations" ids={list.map((x) => x.v.id)} />
+        </span>
+      </form>
+
+      {openDoc && (
+        <section className="animate-flyout mb-6 rounded-2xl bg-gray-100/70 shadow-inner">
+          <div className="flex flex-wrap items-center gap-3 rounded-t-2xl border-b border-gray-200 bg-white px-5 py-3">
+            <Link href={listHref(BASE, sp, { open: undefined })} scroll={false} aria-label="إغلاق المعاينة" className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100">
+              <Icon name="close" className="size-4" />
+            </Link>
+            <span className="ltr-nums font-display text-lg font-semibold text-brand-900">{openDoc.v.number}</span>
+            <Badge tone={openDoc.v.status === "paid" ? "green" : "red"}>{openDoc.v.status === "paid" ? "مسددة" : "غير مسددة"}</Badge>
+            <Link href={`/print/violations?ids=${openDoc.v.id}`} target="_blank" className="ms-auto rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
+              طباعة
+            </Link>
+          </div>
+          <div className="p-4 sm:p-6">
+            <div className="mx-auto max-w-3xl">
+              <ViolationDocument company={company} doc={openDoc} template={template} compact />
+            </div>
+          </div>
+        </section>
+      )}
 
       {canPay && unpaid.length > 0 && (
         <Card title="سداد المخالفات للمرور" className="mb-4">
@@ -165,10 +194,12 @@ export default async function ViolationsPage({ searchParams }: { searchParams: P
       <Table head={[canPay && unpaid.length ? <SelectAll key="all" form={PAY_FORM} /> : "", "الرقم", "التاريخ", "المركبة", "المخالفة", "على", "المبلغ", "الخصم من الراتب", "الحالة", ""]}>
         {list.length === 0 && <EmptyRow cols={10}>لا توجد مخالفات</EmptyRow>}
         {list.map(({ v, plate, driver, entry, run, runStatus }) => (
-          <tr key={v.id}>
+          <tr key={v.id} className={v.id === openId ? "bg-brand-50/70" : undefined}>
             <Td>{canPay && v.status === "posted" && <RowCheck form={PAY_FORM} id={v.id} amount={v.amount} />}</Td>
             <Td className="font-medium whitespace-nowrap">
-              <span className="ltr-nums">{v.number}</span>
+              <Link href={listHref(BASE, sp, { open: String(v.id) })} scroll={false} className="ltr-nums text-brand-700 hover:underline">
+                {v.number}
+              </Link>
               {v.reference && <div className="ltr-nums text-xs font-normal text-gray-400">{v.reference}</div>}
             </Td>
             <Td className="ltr-nums whitespace-nowrap">{v.violationDate}</Td>

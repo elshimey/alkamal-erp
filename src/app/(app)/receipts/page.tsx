@@ -8,6 +8,7 @@ import { listHref, parseDocFilter, type DocListParams } from "@/lib/doc-filters"
 import { todayRiyadh } from "@/lib/dates";
 import { RECEIPT_KINDS, RECEIPT_STATUS } from "@/data/sales";
 import { ActionForm, SubmitButton } from "@/components/action-form";
+import { BulkPdfButton } from "@/components/bulk-pdf";
 import { DocToolbar } from "@/components/doc-toolbar";
 import { Icon } from "@/components/icons";
 import { ImportLink } from "@/components/import-link";
@@ -75,6 +76,9 @@ export default async function ReceiptsPage({ searchParams }: { searchParams: Pro
         exportName="سندات-العملاء"
         count={list.length}
       />
+      <div className="mb-2 flex justify-end">
+        <BulkPdfButton kind="receipts" ids={list.map((x) => x.r.id)} />
+      </div>
 
       {openDoc ? (
         <div className="grid items-start gap-4 lg:grid-cols-[minmax(17rem,22rem)_1fr]">

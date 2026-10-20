@@ -27,6 +27,9 @@ import { runImport } from "@/lib/importers";
 import { applyAdvance, customerCredit, postReceipt } from "@/lib/receipts";
 import { createNote, postNote, revertNote } from "@/lib/notes";
 import { listCustomers } from "@/lib/customers";
+import { createManualEntry, deleteManualEntry, listEntries, postManualEntry, reclassCandidates, reclassify, revertManualEntry, updateManualEntry } from "@/lib/journal";
+import { createCashAccount, listCashAccounts, normalizeIban } from "@/lib/banks";
+import { createAsset, deleteAsset, disposeAsset, listAssets, runDepreciation, undoLastDepreciation } from "@/lib/assets";
 import { IMPORT_SPECS } from "@/data/import-specs";
 import { addExpense, addFuel, approveWaybill, createWaybill, deleteWaybill, recordStage, rejectWaybill, revertWaybill } from "@/lib/waybills";
 
@@ -1170,6 +1173,125 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(Number(cr.appliedAmount)).toBe(0);
       const jl2 = await db.select().from(s.journalLines).where(eq(s.journalLines.entryId, cr.journalEntryId!));
       expect(Number(jl2.find((l) => l.accountId === acc["2101"])!.credit)).toBe(100);
+    });
+  });
+  describe("المحاسبة: القيود والبنوك والأصول", () => {
+    const linesOf = (entryId: number) => db.select().from(s.journalLines).where(eq(s.journalLines.entryId, entryId));
+
+    it("القيد اليدوي: مسودة تُعدّل ثم تُرحّل وتُرجع وتُحذف مع سجل الحذف", async () => {
+      await expect(createManualEntry(db, { entryDate: `${YEAR}-07-01`, description: "غير متوازن", lines: [{ accountId: acc["110101"], debit: 100 }, { accountId: acc["3104"], credit: 90 }] })).rejects.toThrow();
+      await expect(createManualEntry(db, { entryDate: `${YEAR}-07-01`, description: "بلا مركز", lines: [{ accountId: acc["5110"], debit: 100 }, { accountId: acc["110101"], credit: 100 }], post: true })).rejects.toThrow("مركز");
+      const e = await createManualEntry(db, { entryDate: `${YEAR}-07-01`, description: "تمويل من الشريك", reference: "JV-1", lines: [{ accountId: acc["110101"], debit: 500 }, { accountId: acc["3104"], credit: 500 }] });
+      expect((await db.select().from(s.journalEntries).where(eq(s.journalEntries.id, e.id)))[0]).toMatchObject({ status: "draft", reference: "JV-1" });
+      await updateManualEntry(db, e.id, { entryDate: `${YEAR}-07-02`, description: "تمويل من الشريك", reference: "JV-1", lines: [{ accountId: acc["110101"], debit: 800 }, { accountId: acc["3104"], credit: 800 }] });
+      expect((await linesOf(e.id)).map((l) => Number(l.debit) + Number(l.credit))).toEqual([800, 800]);
+      await postManualEntry(db, e.id);
+      await expect(updateManualEntry(db, e.id, { entryDate: `${YEAR}-07-02`, description: "x", lines: [{ accountId: acc["110101"], debit: 1 }, { accountId: acc["3104"], credit: 1 }] })).rejects.toThrow();
+      const found = await listEntries(db, { q: "JV-1" });
+      expect(found.map((x) => x.e.id)).toContain(e.id);
+      expect(found.find((x) => x.e.id === e.id)).toMatchObject({ total: "800.000", lines: 2 });
+      await revertManualEntry(db, e.id);
+      await deleteManualEntry(db, e.id, { reason: "تجربة" });
+      expect(await db.select().from(s.journalEntries).where(eq(s.journalEntries.id, e.id))).toHaveLength(0);
+      const [log] = await db.select().from(s.deletionLog).where(eq(s.deletionLog.entityId, String(e.id)));
+      expect(log.reason).toBe("تجربة");
+    });
+
+    it("إعادة التصنيف المجمّع: قيد تصحيح يعكس السطور ويقيدها على الحساب والمركز الجديد", async () => {
+      const v2 = await createVehicle(db, { plate: "ر س ت 4321", chassis: "CH-RC" });
+      const mk = (amount: number) => createManualEntry(db, { entryDate: `${YEAR}-07-05`, description: "ديزل", lines: [{ accountId: acc["5110"], debit: amount, costCenterId: vehicleCc, description: "خطأ حساب" }, { accountId: acc["110101"], credit: amount }], post: true });
+      await mk(100);
+      await mk(250);
+      const cands = await reclassCandidates(db, { accountId: acc["5110"], q: "خطأ حساب" });
+      expect(cands).toHaveLength(2);
+      const fix = await reclassify(db, { lineIds: cands.map((c) => c.id), targetAccountId: acc["6110"], targetCostCenterId: v2.costCenterId, date: `${YEAR}-07-06` });
+      const jl = await linesOf(fix.id);
+      const sum = (code: string, side: "debit" | "credit") => jl.filter((l) => l.accountId === acc[code]).reduce((t, l) => t + Number(l[side]), 0);
+      expect(sum("5110", "credit")).toBe(350);
+      expect(sum("6110", "debit")).toBe(350);
+      expect(jl.filter((l) => l.accountId === acc["6110"]).every((l) => l.costCenterId === v2.costCenterId)).toBe(true);
+      await expect(reclassify(db, { lineIds: [cands[0].id], targetAccountId: acc["5110"], date: `${YEAR}-07-06` })).rejects.toThrow("نفسه");
+    });
+
+    it("الحسابات البنكية: آيبان بخانة تحقق، وحساب فرعي برصيد افتتاحي مقابل الأرباح المبقاة", async () => {
+      expect(normalizeIban("sa03 8000 0000 6080 1016 7519")).toBe("SA0380000000608010167519");
+      expect(() => normalizeIban("SA0380000000608010167518")).toThrow("التحقق");
+      expect(() => normalizeIban("SA038000000060801016751")).toThrow("24");
+      await expect(createCashAccount(db, { kind: "bank", nameAr: "بنك بلا اسم" })).rejects.toThrow("اسم البنك");
+      const a = await createCashAccount(db, { kind: "bank", nameAr: "الأهلي – جاري", bankName: "البنك الأهلي", iban: "SA0380000000608010167519", openingBalance: 25000, openingDate: `${YEAR}-07-01` });
+      expect(a.code.startsWith("1102")).toBe(true);
+      const row = (await listCashAccounts(db)).find((r) => r.a.id === a.id)!;
+      expect(row.balance).toBe(25000);
+      expect(row.bank?.iban).toBe("SA0380000000608010167519");
+      const [eq3103] = await db.select({ c: sql<string>`sum(${s.journalLines.credit})` }).from(s.journalLines).where(eq(s.journalLines.accountId, acc["3103"]));
+      expect(Number(eq3103.c)).toBeGreaterThanOrEqual(25000);
+    });
+
+    it("الأصول الثابتة: إهلاك شهري على مركز المركبة، وإعادة بناء الشهر لأصل متأخر، والاستبعاد بربح", async () => {
+      const [vehicle] = await db.select().from(s.vehicles).where(eq(s.vehicles.costCenterId, vehicleCc));
+      await expect(createAsset(db, { nameAr: "شاحنة", assetAccountId: acc["120101"], acquisitionDate: `${YEAR}-07-10`, cost: 120000, usefulLifeMonths: 60 })).rejects.toThrow("مركبة");
+      await expect(createAsset(db, { nameAr: "x", assetAccountId: acc["5110"], acquisitionDate: `${YEAR}-07-10`, cost: 1, usefulLifeMonths: 6 })).rejects.toThrow("حساب أصل");
+      const truck = await createAsset(db, { nameAr: "شاحنة أكتروس", assetAccountId: acc["120101"], vehicleId: vehicle.id, acquisitionDate: `${YEAR}-07-10`, cost: 120000, usefulLifeMonths: 60, offsetAccountId: acc["3104"] });
+      expect(truck.costCenterId).toBe(vehicleCc);
+      expect(truck.depreciationStart).toBe(`${YEAR}-07-01`);
+      const [acq] = await db.select().from(s.journalEntries).where(eq(s.journalEntries.id, (await db.select().from(s.fixedAssets).where(eq(s.fixedAssets.id, truck.id)))[0].acquisitionEntryId!));
+      expect(acq.status).toBe("posted");
+
+      const first = await runDepreciation(db, `${YEAR}-08-15`);
+      expect(first.map((x) => [x.periodEnd, x.amount])).toEqual([[`${YEAR}-07-31`, 2000], [`${YEAR}-08-31`, 2000]]);
+      expect(await runDepreciation(db, `${YEAR}-08-31`)).toEqual([]);
+
+      // أصل إداري أُضيف لاحقاً بتاريخ أغسطس: يُعاد بناء قيد أغسطس شاملاً الأصلين
+      const laptop = await createAsset(db, { nameAr: "أجهزة حاسب", assetAccountId: acc["120105"], acquisitionDate: `${YEAR}-08-03`, cost: 12000, usefulLifeMonths: 12 });
+      const second = await runDepreciation(db, `${YEAR}-09-30`);
+      expect(second.map((x) => [x.periodEnd, x.amount])).toEqual([[`${YEAR}-08-31`, 3000], [`${YEAR}-09-30`, 3000]]);
+      const aug = await db.select().from(s.assetDepreciation).where(eq(s.assetDepreciation.periodEnd, `${YEAR}-08-31`));
+      expect(new Set(aug.map((d) => d.entryId)).size).toBe(1);
+      const augLines = await linesOf(aug[0].entryId);
+      expect(augLines.find((l) => l.accountId === acc["5110"])!.costCenterId).toBe(vehicleCc);
+      expect(Number(augLines.find((l) => l.accountId === acc["6110"])!.debit)).toBe(1000);
+      expect(Number(augLines.find((l) => l.accountId === acc["120201"])!.credit)).toBe(2000);
+
+      let reg = await listAssets(db);
+      expect(reg.find((r) => r.a.id === truck.id)).toMatchObject({ accumulated: 6000, book: 114000, monthly: 2000 });
+      await expect(deleteAsset(db, laptop.id, { reason: "خطأ" })).rejects.toThrow("إهلاك");
+
+      expect(await undoLastDepreciation(db)).toBe(`${YEAR}-09-30`);
+      reg = await listAssets(db);
+      expect(reg.find((r) => r.a.id === truck.id)!.accumulated).toBe(4000);
+
+      await expect(disposeAsset(db, truck.id, { date: `${YEAR}-07-31`, proceeds: 0 })).rejects.toThrow("بعد تاريخ");
+      const d = await disposeAsset(db, truck.id, { date: `${YEAR}-09-15`, proceeds: 120000, proceedsAccountId: acc["110101"] });
+      expect([d.book, d.result]).toEqual([116000, 4000]);
+      const dl = await linesOf(d.entry.id);
+      expect(Number(dl.find((l) => l.accountId === acc["120101"])!.credit)).toBe(120000);
+      expect(Number(dl.find((l) => l.accountId === acc["120201"])!.debit)).toBe(4000);
+      expect(Number(dl.find((l) => l.accountId === acc["4202"])!.credit)).toBe(4000);
+      // المستبعد لا يُهلك بعد شهر استبعاده
+      const again = await runDepreciation(db, `${YEAR}-10-31`);
+      const sep = await db.select().from(s.assetDepreciation).where(eq(s.assetDepreciation.periodEnd, `${YEAR}-10-31`));
+      expect(sep.map((x) => x.assetId)).toEqual([laptop.id]);
+      expect(again.at(-1)!.amount).toBe(1000);
+    });
+
+    it("استيراد القيود والمخالفات من Excel", async () => {
+      const row = (o: Record<string, string>, i: number) => ({ row: i + 5, values: { reference: "IMP-1", entryDate: `${YEAR}-07-20`, description: "قيد مستورد", ...o } });
+      const rows = [row({ account: "110101", debit: "300" }, 0), row({ account: "3104", credit: "300" }, 1), row({ reference: "IMP-2", account: "110101", debit: "10" }, 2), row({ reference: "IMP-2", account: "3104", credit: "9" }, 3)];
+      const report = await runImport(db, IMPORT_SPECS["journal-entries"], rows, { dryRun: false, post: true });
+      expect(report.ok).toBe(1);
+      expect(report.issues).toHaveLength(1);
+      const [imp] = await db.select().from(s.journalEntries).where(eq(s.journalEntries.reference, "IMP-1"));
+      expect(imp.status).toBe("posted");
+      const dup = await runImport(db, IMPORT_SPECS["journal-entries"], rows.slice(0, 2), { dryRun: false });
+      expect(dup.ok).toBe(0);
+
+      const [vehicle] = await db.select().from(s.vehicles).where(eq(s.vehicles.costCenterId, vehicleCc));
+      const vr = (o: Record<string, string>, i: number) => ({ row: i + 5, values: { violationDate: `${YEAR}-07-21`, vehicle: vehicle.plate, violationType: "تجاوز سرعة", amount: "300", chargeTo: "الشركة", ...o } });
+      const vrep = await runImport(db, IMPORT_SPECS.violations, [vr({ reference: "TV-IMP-1" }, 0), vr({ vehicle: "لا توجد" }, 1), vr({ chargeTo: "؟" }, 2)], { dryRun: false });
+      expect(vrep.ok).toBe(1);
+      expect(vrep.issues).toHaveLength(2);
+      const [tv] = await db.select().from(s.trafficViolations).where(eq(s.trafficViolations.reference, "TV-IMP-1"));
+      expect(Number(tv.amount)).toBe(300);
     });
   });
 });
