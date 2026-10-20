@@ -13,8 +13,9 @@ import { getCompany, invoiceReadiness, saveCompany } from "@/lib/company";
 import { assignVehicle, createDriver, createVehicle, driverOnDate, expiringDocuments, releaseAssignment } from "@/lib/fleet";
 import { addSubAccount } from "@/lib/accounts";
 import { activeContract, createContract, createLocation, createParty, createRoute, priceTrip, setContractStatus } from "@/lib/operations";
-import { createInvoice, createReceipt, invoicingQueue, issueInvoice, revertInvoice, revertReceipt } from "@/lib/invoices";
-import { createExpense, approveExpense, createPayment, createPurchaseInvoice, custodyBalances, postPurchaseInvoice, rejectExpense, revertExpense, revertPayment, revertPurchaseInvoice, supplierBalances } from "@/lib/purchases";
+import { createInvoice, createReceipt, invoicingQueue, issueInvoice, listSalesInvoices, revertInvoice, revertReceipt, updateDraftInvoice } from "@/lib/invoices";
+import { parseDocFilter } from "@/lib/doc-filters";
+import { createExpense, approveExpense, createPayment, createPurchaseInvoice, custodyBalances, deletePurchaseInvoice, listPurchaseInvoices, postPurchaseInvoice, updateDraftPurchase, rejectExpense, revertExpense, revertPayment, revertPurchaseInvoice, supplierBalances } from "@/lib/purchases";
 import { addMaintenanceLines, approveBreakdownRequest, approveMaintenanceOrder, completeMaintenanceOrder, createBreakdownRequest, createMaintenanceOrder, deleteMaintenanceOrder, planSchedule, rejectBreakdownRequest, revertMaintenanceOrder, reviewBreakdownRequest, savePlan } from "@/lib/maintenance";
 import { adjustPayrollLines, approvePayrollRun, bankTransferRows, createAdvance, createEmployee, createPayrollRun, payAdvance, payPayrollRun, refreshPayrollRun, revertAdvance, revertPayrollPayment, revertPayrollRun, updateEmployee } from "@/lib/payroll";
 import { createViolation, deleteViolation, listViolations, payViolations, revertViolationPayment, violationSummary } from "@/lib/violations";
@@ -475,6 +476,30 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(row.status).toBe("issued");
     });
 
+    it("قائمة الفواتير بالبحث والفلترة، وتعديل المسودة من الورقة بقواعدها", async () => {
+      const today = `${YEAR}-10-17`;
+      const f = (sp: Record<string, string>) => parseDocFilter(sp, ["draft", "issued"], today);
+      const [inv] = await listSalesInvoices(db, f({ q: "النخيل" }));
+      expect(inv?.i.number).toBe(`INV-${YEAR}-000001`);
+      expect(inv.waybills).toBe(3);
+      expect(await listSalesInvoices(db, f({ status: "draft" }))).toHaveLength(0);
+      expect(await listSalesInvoices(db, f({ pay: "overdue" }))).toHaveLength(1);
+      expect(await listSalesInvoices(db, f({ period: "month" }))).toHaveLength(0);
+      await expect(updateDraftInvoice(db, inv.i.id, { notes: "x" })).rejects.toThrow("مُصدرة");
+
+      await revertInvoice(db, inv.i.id);
+      await updateDraftInvoice(db, inv.i.id, { invoiceDate: `${YEAR}-09-01`, notes: "  دفعة أغسطس " });
+      let [row] = await db.select().from(s.salesInvoices).where(eq(s.salesInvoices.id, inv.i.id));
+      expect([row.invoiceDate, row.dueDate, row.notes, Number(row.total)]).toEqual([`${YEAR}-09-01`, `${YEAR}-10-01`, "دفعة أغسطس", 7131.15]);
+      await expect(updateDraftInvoice(db, inv.i.id, { invoiceDate: `${YEAR}-01-01` })).rejects.toThrow("قبل البوليصة");
+      await expect(updateDraftInvoice(db, inv.i.id, { dueDate: `${YEAR}-08-01` })).rejects.toThrow("الاستحقاق قبل");
+      await expect(updateDraftInvoice(db, inv.i.id, { invoiceDate: `${YEAR + 1}-01-02` })).rejects.toThrow("سنة أخرى");
+      await updateDraftInvoice(db, inv.i.id, { invoiceDate: `${YEAR}-08-31`, dueDate: `${YEAR}-09-30`, notes: "" });
+      await issueInvoice(db, inv.i.id);
+      [row] = await db.select().from(s.salesInvoices).where(eq(s.salesInvoices.id, inv.i.id));
+      expect([row.status, row.invoiceDate, row.dueDate, row.notes]).toEqual(["issued", `${YEAR}-08-31`, `${YEAR}-09-30`, null]);
+    });
+
     it("سند القبض يرحّل ويُخصص على أقدم فاتورة، ويمنع إرجاع الفاتورة المسددة", async () => {
       const [inv] = await db.select().from(s.salesInvoices).where(eq(s.salesInvoices.customerId, customerId));
       const r1 = await createReceipt(db, { receiptDate: `${YEAR}-09-05`, customerId, amount: 5000, method: "transfer", cashAccountId: acc["110101"], collector: "أحمد", post: true });
@@ -536,6 +561,15 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(sum("1108", "debit")).toBe(120);
       expect(sum("2104", "credit")).toBe(1120);
       expect((await supplierBalances(db)).find((b) => b.id === workshopId)?.balance).toBe(1120);
+
+      // الورقة: المرحّلة لا تُعدّل، والمسودة تقبل رقمها وتاريخها بلا تكرار
+      await expect(updateDraftPurchase(db, inv.id, { notes: "x" })).rejects.toThrow("مرحّلة");
+      const draft = await createPurchaseInvoice(db, { supplierId: workshopId, supplierInvoiceNo: "W-2", invoiceDate: `${YEAR}-08-22`, lines: [{ accountId: maint.id, vehicleId: vehicle.id, description: "فلتر", amount: 50 }] });
+      await expect(updateDraftPurchase(db, draft.id, { supplierInvoiceNo: "W-1" })).rejects.toThrow("مسجلة مسبقاً");
+      await updateDraftPurchase(db, draft.id, { supplierInvoiceNo: "W-2b", invoiceDate: `${YEAR}-08-25` });
+      const [found] = await listPurchaseInvoices(db, parseDocFilter({ q: "w-2B" }, ["draft", "posted"], `${YEAR}-08-31`));
+      expect([found?.i.id, found.i.invoiceDate, found.i.dueDate, found.firstLine]).toEqual([draft.id, `${YEAR}-08-25`, `${YEAR}-09-24`, "فلتر"]);
+      await deletePurchaseInvoice(db, draft.id, { reason: "اختبار" });
 
       // سداد جزئي ثم كامل، والإرجاع ممنوع بعد السداد
       const p1 = await createPayment(db, { paymentDate: `${YEAR}-09-01`, kind: "supplier", partyId: workshopId, amount: 500, method: "transfer", cashAccountId: acc["110101"], post: true });

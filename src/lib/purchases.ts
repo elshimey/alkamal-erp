@@ -4,6 +4,8 @@ import * as s from "@/db/schema";
 import { createJournalEntryTx, deleteEntryTx, nextDocumentNumber, type LineInput } from "@/lib/ledger";
 import { lineVat, round2 } from "@/lib/invoice-posting";
 import { rateOn } from "@/lib/waybills";
+import type { DocFilter } from "@/lib/doc-filters";
+import { docOrder, docWhere } from "@/lib/doc-query";
 import { PAYABLE_BY_ROLE, PURCHASE_ACCOUNTS, SUPPLIER_ROLES, isExpenseAccount } from "@/data/purchases";
 
 // المشتريات والمصروفات وسندات الصرف. كل مستند يُرحّل قيده عند الاعتماد، وكل مدين يقابله دائن
@@ -217,6 +219,90 @@ export async function deletePurchaseInvoice(db: Db, id: number, opts: { reason: 
     const lines = await tx.select().from(s.purchaseInvoiceLines).where(eq(s.purchaseInvoiceLines.invoiceId, id));
     await tx.insert(s.deletionLog).values({ entity: "purchase_invoice", entityId: String(id), snapshot: { invoice: inv, lines }, reason: opts.reason.trim(), userId: opts.userId });
     await tx.delete(s.purchaseInvoices).where(eq(s.purchaseInvoices.id, id));
+  });
+}
+
+// ───────────── قائمة فواتير الموردين والتعديل من الشيت ─────────────
+
+const purchaseCols = {
+  id: s.purchaseInvoices.id,
+  number: s.purchaseInvoices.number,
+  date: s.purchaseInvoices.invoiceDate,
+  due: s.purchaseInvoices.dueDate,
+  total: s.purchaseInvoices.total,
+  paid: s.purchaseInvoices.paidAmount,
+  status: s.purchaseInvoices.status,
+  party: s.parties.nameAr,
+  search: [s.purchaseInvoices.supplierInvoiceNo, s.purchaseInvoices.notes],
+};
+
+export async function listPurchaseInvoices(db: Db | Tx, f: DocFilter, limit = 500) {
+  return db
+    .select({
+      i: s.purchaseInvoices,
+      supplier: s.parties.nameAr,
+      lines: sql<number>`(select count(*) from purchase_invoice_lines l where l.invoice_id = ${s.purchaseInvoices.id})::int`,
+      firstLine: sql<string | null>`(select l.description from purchase_invoice_lines l where l.invoice_id = ${s.purchaseInvoices.id} order by l.line_no limit 1)`,
+    })
+    .from(s.purchaseInvoices)
+    .innerJoin(s.parties, eq(s.parties.id, s.purchaseInvoices.supplierId))
+    .where(docWhere(purchaseCols, f, "posted"))
+    .orderBy(...docOrder(purchaseCols, f.sort))
+    .limit(limit);
+}
+
+/** فاتورة المورد بجهتها وسطورها وحساباتها، للمعاينة والصفحة. */
+export async function purchaseInvoiceDoc(db: Db | Tx, id: number) {
+  const [row] = await db
+    .select({ i: s.purchaseInvoices, supplier: s.parties, payable: s.accounts.nameAr, payableCode: s.accounts.code, entry: s.journalEntries.number })
+    .from(s.purchaseInvoices)
+    .innerJoin(s.parties, eq(s.parties.id, s.purchaseInvoices.supplierId))
+    .innerJoin(s.accounts, eq(s.accounts.id, s.purchaseInvoices.payableAccountId))
+    .leftJoin(s.journalEntries, eq(s.journalEntries.id, s.purchaseInvoices.journalEntryId))
+    .where(eq(s.purchaseInvoices.id, id));
+  if (!row) return null;
+  const lines = await db
+    .select({ l: s.purchaseInvoiceLines, code: s.accounts.code, account: s.accounts.nameAr, cc: s.costCenters.nameAr })
+    .from(s.purchaseInvoiceLines)
+    .innerJoin(s.accounts, eq(s.accounts.id, s.purchaseInvoiceLines.accountId))
+    .leftJoin(s.costCenters, eq(s.costCenters.id, s.purchaseInvoiceLines.costCenterId))
+    .where(eq(s.purchaseInvoiceLines.invoiceId, id))
+    .orderBy(asc(s.purchaseInvoiceLines.lineNo));
+  return { ...row, lines };
+}
+
+export interface DraftPurchasePatch {
+  supplierInvoiceNo?: string;
+  invoiceDate?: string;
+  dueDate?: string;
+  notes?: string | null;
+}
+
+/** تعديل مسودة فاتورة مورد من الشيت؛ تغيير التاريخ يعيد سعر الصرف لغير الريال. */
+export async function updateDraftPurchase(db: Db, id: number, patch: DraftPurchasePatch) {
+  return db.transaction(async (tx) => {
+    const inv = await lockPurchase(tx, id);
+    if (inv.status !== "draft") throw new Error(`الفاتورة ${inv.number} مرحّلة؛ أرجعها لمسودة لتعديلها`);
+    for (const d of [patch.invoiceDate, patch.dueDate]) if (d !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(d)) throw new Error(`تاريخ غير صحيح: ${d}`);
+    const invoiceDate = patch.invoiceDate ?? inv.invoiceDate;
+    const dateChanged = invoiceDate !== inv.invoiceDate;
+    if (dateChanged && invoiceDate.slice(0, 4) !== inv.invoiceDate.slice(0, 4)) throw new Error("لا تُنقل الفاتورة لسنة أخرى؛ احذفها وأدخلها بالتاريخ الجديد");
+    const dueDate = patch.dueDate ?? (dateChanged ? addDays(invoiceDate, Math.round((Date.parse(inv.dueDate) - Date.parse(inv.invoiceDate)) / 86_400_000)) : inv.dueDate);
+    if (dueDate < invoiceDate) throw new Error("تاريخ الاستحقاق قبل تاريخ الفاتورة");
+    const supplierInvoiceNo = patch.supplierInvoiceNo === undefined ? inv.supplierInvoiceNo : patch.supplierInvoiceNo.trim();
+    if (!supplierInvoiceNo) throw new Error("رقم فاتورة المورد إلزامي");
+    if (supplierInvoiceNo !== inv.supplierInvoiceNo) {
+      const [dup] = await tx
+        .select({ number: s.purchaseInvoices.number })
+        .from(s.purchaseInvoices)
+        .where(and(eq(s.purchaseInvoices.supplierId, inv.supplierId), eq(s.purchaseInvoices.supplierInvoiceNo, supplierInvoiceNo)));
+      if (dup) throw new Error(`فاتورة المورد ${supplierInvoiceNo} مسجلة مسبقاً (${dup.number})`);
+    }
+    const exchangeRate = dateChanged ? String(await rateOn(tx, inv.currencyCode, invoiceDate)) : inv.exchangeRate;
+    await tx
+      .update(s.purchaseInvoices)
+      .set({ supplierInvoiceNo, invoiceDate, dueDate, exchangeRate, notes: patch.notes === undefined ? inv.notes : patch.notes?.trim() || null, updatedAt: new Date() })
+      .where(eq(s.purchaseInvoices.id, id));
   });
 }
 

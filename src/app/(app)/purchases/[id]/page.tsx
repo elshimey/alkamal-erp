@@ -8,7 +8,9 @@ import { can } from "@/lib/permissions";
 import { PURCHASE_STATUS } from "@/data/purchases";
 import { PAYMENT_METHODS, paymentState } from "@/data/sales";
 import { ActionForm, SubmitButton } from "@/components/action-form";
+import { PurchaseInvoiceDocument } from "@/components/purchase-invoice";
 import { Badge, Card, Input, PageHeader, Table, Td } from "@/components/ui";
+import { purchaseInvoiceDoc } from "@/lib/purchases";
 import { post, remove, revert } from "../actions";
 
 const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -17,23 +19,8 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
   const user = await requirePermission("purchase_invoices", "view");
   const id = Number((await params).id);
   if (!Number.isInteger(id)) notFound();
-  const [row] = await db
-    .select({ i: s.purchaseInvoices, supplier: s.parties.nameAr, payable: s.accounts.nameAr, payableCode: s.accounts.code, entry: s.journalEntries.number })
-    .from(s.purchaseInvoices)
-    .innerJoin(s.parties, eq(s.parties.id, s.purchaseInvoices.supplierId))
-    .innerJoin(s.accounts, eq(s.accounts.id, s.purchaseInvoices.payableAccountId))
-    .leftJoin(s.journalEntries, eq(s.journalEntries.id, s.purchaseInvoices.journalEntryId))
-    .where(eq(s.purchaseInvoices.id, id));
-  if (!row) notFound();
-  const { i } = row;
-  const [lines, allocations] = await Promise.all([
-    db
-      .select({ l: s.purchaseInvoiceLines, code: s.accounts.code, account: s.accounts.nameAr, cc: s.costCenters.nameAr })
-      .from(s.purchaseInvoiceLines)
-      .innerJoin(s.accounts, eq(s.accounts.id, s.purchaseInvoiceLines.accountId))
-      .leftJoin(s.costCenters, eq(s.costCenters.id, s.purchaseInvoiceLines.costCenterId))
-      .where(eq(s.purchaseInvoiceLines.invoiceId, id))
-      .orderBy(asc(s.purchaseInvoiceLines.lineNo)),
+  const [doc, allocations] = await Promise.all([
+    purchaseInvoiceDoc(db, id),
     db
       .select({ a: s.paymentAllocations, p: s.payments })
       .from(s.paymentAllocations)
@@ -41,6 +28,9 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
       .where(eq(s.paymentAllocations.invoiceId, id))
       .orderBy(asc(s.payments.paymentDate)),
   ]);
+  if (!doc) notFound();
+  const { i } = doc;
+  const row = { ...doc, supplier: doc.supplier.nameAr };
   const total = Number(i.total);
   const paid = Number(i.paidAmount);
   const pay = paymentState(total, paid);
@@ -69,41 +59,8 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
         </div>
       </PageHeader>
 
-      <Table head={["#", "الحساب", "المركبة / المركز", "البيان", "المبلغ", "الضريبة", "الإجمالي"]}>
-        {lines.map(({ l, code, account, cc }) => (
-          <tr key={l.id}>
-            <Td className="ltr-nums">{l.lineNo}</Td>
-            <Td>
-              <span className="ltr-nums text-gray-500">{code}</span> {account}
-            </Td>
-            <Td>{cc ?? "—"}</Td>
-            <Td>{l.description}</Td>
-            <Td className="ltr-nums">{fmt(l.amount)}</Td>
-            <Td className="ltr-nums">{fmt(l.vatAmount)}</Td>
-            <Td className="ltr-nums font-medium">{fmt(Number(l.amount) + Number(l.vatAmount))}</Td>
-          </tr>
-        ))}
-      </Table>
-      <div className="mt-4 mb-6 flex justify-end">
-        <dl className="w-full max-w-xs rounded-2xl bg-white p-4 text-sm shadow-sm">
-          <div className="flex justify-between py-1">
-            <dt className="text-gray-500">قبل الضريبة</dt>
-            <dd className="ltr-nums">{fmt(i.subtotal)}</dd>
-          </div>
-          <div className="flex justify-between py-1">
-            <dt className="text-gray-500">ضريبة المدخلات</dt>
-            <dd className="ltr-nums">{fmt(i.vatTotal)}</dd>
-          </div>
-          <div className="flex justify-between border-t border-gray-100 pt-2 font-semibold text-brand-900">
-            <dt>الإجمالي</dt>
-            <dd className="ltr-nums">
-              {fmt(total)} {i.currencyCode}
-            </dd>
-          </div>
-          <div className="mt-2 text-xs text-gray-500">
-            دائنة لحساب <span className="ltr-nums">{row.payableCode}</span> {row.payable}
-          </div>
-        </dl>
+      <div className="mb-6">
+        <PurchaseInvoiceDocument doc={doc} />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">

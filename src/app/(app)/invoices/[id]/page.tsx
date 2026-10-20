@@ -6,20 +6,21 @@ import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { todayRiyadh } from "@/lib/dates";
-import { COMPANY } from "@/data/company";
+import { getCompany } from "@/lib/company";
 import { INVOICE_STATUS, PAYMENT_METHODS, ZATCA_STATUS, paymentState } from "@/data/sales";
 import { ActionForm, SubmitButton } from "@/components/action-form";
-import { LogoMark } from "@/components/logo";
-import { PrintButton } from "@/components/print-button";
+import { AutoPrint, PrintButton } from "@/components/print-button";
+import { TaxInvoiceDocument } from "@/components/tax-invoice";
 import { Badge, Card, Input, PageHeader, Table, Td } from "@/components/ui";
 import { addWaybills, issue, remove, removeLine, revert } from "../actions";
 
 const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-export default async function InvoicePage({ params }: { params: Promise<{ id: string }> }) {
+export default async function InvoicePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ print?: string }> }) {
   const user = await requirePermission("sales_invoices", "view");
   const id = Number((await params).id);
   if (!Number.isInteger(id)) notFound();
+  const print = (await searchParams).print === "1";
   const [row] = await db
     .select({ i: s.salesInvoices, customer: s.parties, contract: s.contracts.number, entry: s.journalEntries.number })
     .from(s.salesInvoices)
@@ -31,7 +32,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
   const { i, customer } = row;
   const draft = i.status === "draft";
 
-  const [lines, allocations, available] = await Promise.all([
+  const [lines, allocations, available, company] = await Promise.all([
     db.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, id)).orderBy(asc(s.salesInvoiceLines.lineNo)),
     db
       .select({ a: s.receiptAllocations, r: s.receipts })
@@ -53,6 +54,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
           )
           .orderBy(asc(s.waybills.waybillDate))
       : Promise.resolve([]),
+    getCompany(db),
   ]);
   const total = Number(i.total);
   const paid = Number(i.paidAmount);
@@ -79,7 +81,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
               </ActionForm>
             )}
             <Link href="/invoices" className="text-sm text-brand-700 hover:underline">
-              ← الفواتير
+              ← فواتير المبيعات
             </Link>
           </div>
         </PageHeader>
@@ -87,107 +89,24 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
       </div>
 
       {/* الفاتورة كما تُطبع */}
-      <article className="mb-6 rounded-2xl border border-black/[0.06] bg-white p-8 shadow-[0_4px_16px_-8px_rgba(27,33,38,0.08)] print:border-0 print:p-0 print:shadow-none">
-        <header className="flex flex-wrap items-start justify-between gap-6 border-b-4 border-brand-600 pb-5">
-          <div className="flex items-center gap-3">
-            <LogoMark size={48} />
-            <div>
-              <div className="font-display text-xl font-semibold text-brand-900">{COMPANY.nameAr}</div>
-              <div className="text-xs text-gray-500">{COMPANY.address}</div>
-              {COMPANY.vatNumber && <div className="ltr-nums text-xs text-gray-500">الرقم الضريبي {COMPANY.vatNumber}</div>}
-              {COMPANY.crNumber && <div className="ltr-nums text-xs text-gray-500">السجل التجاري {COMPANY.crNumber}</div>}
-            </div>
-          </div>
-          <div className="text-end">
-            <div className="font-display text-2xl font-semibold text-brand-900">فاتورة ضريبية{draft ? " (مسودة)" : ""}</div>
-            <div className="ltr-nums mt-1 text-sm text-gray-600">{i.number}</div>
-            <div className="mt-1 text-xs text-gray-500">
-              التاريخ <span className="ltr-nums">{i.invoiceDate}</span> · الاستحقاق <span className="ltr-nums">{i.dueDate}</span>
-            </div>
-          </div>
-        </header>
-        <section className="grid gap-4 py-5 text-sm sm:grid-cols-2">
-          <div>
-            <div className="text-xs text-gray-500">العميل</div>
-            <div className="font-semibold text-gray-800">{customer.nameAr}</div>
-            {customer.vatNumber && <div className="ltr-nums text-xs text-gray-500">الرقم الضريبي {customer.vatNumber}</div>}
-            {customer.nationalAddress && <div className="text-xs text-gray-500">{customer.nationalAddress}</div>}
-          </div>
-          <div className="sm:text-end">
-            <div className="text-xs text-gray-500">العملة</div>
-            <div className="font-semibold text-gray-800">
-              {i.currencyCode}
-              {i.currencyCode !== "SAR" && <span className="ltr-nums ms-2 text-xs font-normal text-gray-500">سعر الصرف {Number(i.exchangeRate)}</span>}
-            </div>
-          </div>
-        </section>
-        <table className="w-full text-sm">
-          <thead className="bg-asphalt-900 text-white/85 print:bg-gray-100 print:text-gray-800">
-            <tr>
-              {["#", "البيان", "المبلغ", "الضريبة %", "الضريبة", "الإجمالي", ""].map((h, k) => (
-                <th key={k} className="px-3 py-2.5 text-start font-medium">
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {lines.map((l) => (
-              <tr key={l.id} className={l.kind === "expense" ? "text-gray-600" : ""}>
-                <td className="ltr-nums px-3 py-2">{l.lineNo}</td>
-                <td className="px-3 py-2">
-                  {l.kind === "waybill" && l.waybillId ? (
-                    <Link href={`/waybills/${l.waybillId}`} className="hover:text-brand-700 print:no-underline">
-                      نقل · {l.description}
-                    </Link>
-                  ) : (
-                    <span className="ps-4">↳ {l.description}</span>
-                  )}
-                </td>
-                <td className="ltr-nums px-3 py-2">{fmt(l.amount)}</td>
-                <td className="ltr-nums px-3 py-2">{Number(l.vatRate)}%</td>
-                <td className="ltr-nums px-3 py-2">{fmt(l.vatAmount)}</td>
-                <td className="ltr-nums px-3 py-2 font-medium">{fmt(Number(l.amount) + Number(l.vatAmount))}</td>
-                <td className="px-3 py-2 print:hidden">
-                  {canUpdate && (
-                    <form action={removeLine.bind(null, id, l.id)}>
-                      <button className="text-xs text-red-600 hover:underline">إزالة</button>
-                    </form>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div className="mt-5 flex justify-end">
-          <dl className="w-full max-w-xs text-sm">
-            {[
-              ["الإجمالي قبل الضريبة", i.subtotal],
-              ["ضريبة القيمة المضافة", i.vatTotal],
-            ].map(([k, v]) => (
-              <div key={k} className="flex justify-between border-b border-gray-100 py-1.5">
-                <dt className="text-gray-500">{k}</dt>
-                <dd className="ltr-nums">{fmt(v)}</dd>
-              </div>
-            ))}
-            <div className="flex justify-between py-2 text-base font-semibold text-brand-900">
-              <dt>الإجمالي المستحق</dt>
-              <dd className="ltr-nums">
-                {fmt(total)} {i.currencyCode}
-              </dd>
-            </div>
-            {!draft && paid > 0 && (
-              <div className="flex justify-between py-1 text-gray-600">
-                <dt>المسدد / المتبقي</dt>
-                <dd className="ltr-nums">
-                  {fmt(paid)} / {fmt(total - paid)}
-                </dd>
-              </div>
-            )}
-          </dl>
-        </div>
-        {i.notes && <p className="mt-4 text-sm text-gray-600">{i.notes}</p>}
-      </article>
+      <div className="mb-6">
+        <TaxInvoiceDocument
+          company={company}
+          invoice={i}
+          customer={customer}
+          lines={lines}
+          lineAction={
+            canUpdate
+              ? (l) => (
+                  <form action={removeLine.bind(null, id, l.id)}>
+                    <button className="text-xs text-red-600 hover:underline">إزالة</button>
+                  </form>
+                )
+              : undefined
+          }
+        />
+      </div>
+      {print && <AutoPrint />}
 
       <div className="grid gap-6 lg:grid-cols-2 print:hidden">
         {canUpdate && available.length > 0 && (

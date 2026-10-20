@@ -78,6 +78,11 @@ const PATHS = {
   exchange: <path d="M4 8h13l-3-3m6 11H7l3 3" />,
   fuel: <path d="M5 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16M4 21h12M7 8h6m2 2 3 2v6a1.5 1.5 0 0 0 3 0V9l-3-3" />,
   chart: <path d="M4 20V4m0 16h16M8 16v-4m4 4V8m4 8v-6" />,
+  search: <path d="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm9 16-4-4" />,
+  list: <path d="M4 5h16v14H4Zm0 4.5h16M4 14h16M9 9.5V19" />,
+  grid: <path d="M4 4h16v16H4Zm0 5.3h16M4 14.7h16M9.3 4v16m5.4-16v16" />,
+  close: <path d="M6 6l12 12M18 6 6 18" />,
+  expand: <path d="M4 9V4h5m6 0h5v5m0 6v5h-5m-6 0H4v-5" />,
   wrench: <path d="M14.5 6.5a4 4 0 0 0 5 5L12 19a2.1 2.1 0 0 1-3-3l7.5-7.5a4 4 0 0 1-2-2Z" />,
 } satisfies Record<string, ReactNode>;
 

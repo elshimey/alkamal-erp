@@ -76,7 +76,7 @@ export function Badge({ children, tone = "gray" }: { children: ReactNode; tone?:
     amber: "bg-amber-100 text-amber-800",
     red: "bg-red-100 text-red-700",
   };
-  return <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${tones[tone]}`}>{children}</span>;
+  return <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap ${tones[tone]}`}>{children}</span>;
 }
 
 export function EmptyRow({ cols, children }: { cols: number; children: ReactNode }) {

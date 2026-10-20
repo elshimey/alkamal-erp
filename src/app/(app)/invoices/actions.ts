@@ -6,7 +6,8 @@ import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
 import { todayRiyadh } from "@/lib/dates";
-import { addWaybillsToInvoice, createAllInvoices, createInvoice, deleteInvoice, issueInvoice, removeInvoiceLine, revertInvoice } from "@/lib/invoices";
+import { addWaybillsToInvoice, createAllInvoices, createInvoice, deleteInvoice, issueInvoice, removeInvoiceLine, revertInvoice, updateDraftInvoice, type DraftInvoicePatch } from "@/lib/invoices";
+import type { SheetChange, DocSheetResult } from "@/components/doc-sheet";
 import type { FormState } from "@/components/action-form";
 
 const refresh = (id?: number) => {
@@ -91,4 +92,47 @@ export async function remove(id: number, _: FormState, fd: FormData): Promise<Fo
   }
   refresh();
   redirect("/invoices");
+}
+
+/** إصدار مجموعة مسودات من الجدول؛ كل فاتورة بقيدها، وما فشل يُذكر سببه. */
+export async function issueMany(_: FormState, fd: FormData): Promise<FormState> {
+  const user = await requirePermission("sales_invoices", "approve");
+  const ids = fd.getAll("ids").map(Number).filter(Number.isInteger);
+  if (!ids.length) return { error: "حدد الفواتير المراد إصدارها" };
+  const done: string[] = [];
+  const errors: string[] = [];
+  for (const id of ids) {
+    try {
+      done.push((await issueInvoice(db, id, user.id)).number);
+    } catch (err) {
+      errors.push(errorMessage(err));
+    }
+  }
+  refresh();
+  return { ok: done.length ? `صدرت ${done.length} فاتورة ورُحّلت قيودها` : undefined, error: errors.length ? errors.join("\n") : undefined };
+}
+
+const SHEET_FIELDS = { invoiceDate: "invoiceDate", dueDate: "dueDate", notes: "notes" } as const;
+
+/** حفظ تعديلات ورقة الفواتير: كل صف بقواعد المسودة نفسها، والأخطاء تعود لصفوفها. */
+export async function saveInvoiceSheet(payload: string): Promise<DocSheetResult> {
+  await requirePermission("sales_invoices", "update");
+  const changes = JSON.parse(payload) as SheetChange[];
+  const errors: Record<number, string> = {};
+  let saved = 0;
+  for (const { id, values } of changes) {
+    const patch: DraftInvoicePatch = {};
+    for (const [key, v] of Object.entries(values)) {
+      const field = SHEET_FIELDS[key as keyof typeof SHEET_FIELDS];
+      if (field) patch[field] = v;
+    }
+    try {
+      await updateDraftInvoice(db, Number(id), patch);
+      saved++;
+    } catch (err) {
+      errors[id] = errorMessage(err);
+    }
+  }
+  refresh();
+  return { ok: saved ? `حُفظت تعديلات ${saved} فاتورة` : undefined, errors };
 }

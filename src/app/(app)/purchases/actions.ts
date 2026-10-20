@@ -8,7 +8,8 @@ import { can } from "@/lib/permissions";
 import { errorMessage } from "@/lib/errors";
 import { cell, type SheetRow } from "@/lib/sheet-server";
 import type { SheetResult } from "@/lib/sheet";
-import { createPurchaseInvoice, deletePurchaseInvoice, postPurchaseInvoice, revertPurchaseInvoice, type PurchaseLineInput } from "@/lib/purchases";
+import { createPurchaseInvoice, deletePurchaseInvoice, postPurchaseInvoice, revertPurchaseInvoice, updateDraftPurchase, type DraftPurchasePatch, type PurchaseLineInput } from "@/lib/purchases";
+import type { DocSheetResult, SheetChange } from "@/components/doc-sheet";
 import type { FormState } from "@/components/action-form";
 
 const refresh = (id?: number) => {
@@ -96,4 +97,48 @@ export async function remove(id: number, _: FormState, fd: FormData): Promise<Fo
   }
   refresh();
   redirect("/purchases");
+}
+
+/** ترحيل مجموعة مسودات من الجدول؛ كل فاتورة بقيدها، وما فشل يُذكر سببه. */
+export async function postMany(_: FormState, fd: FormData): Promise<FormState> {
+  const user = await requirePermission("purchase_invoices", "approve");
+  const ids = fd.getAll("ids").map(Number).filter(Number.isInteger);
+  if (!ids.length) return { error: "حدد الفواتير المراد ترحيلها" };
+  let done = 0;
+  const errors: string[] = [];
+  for (const id of ids) {
+    try {
+      await postPurchaseInvoice(db, id, user.id);
+      done++;
+    } catch (err) {
+      errors.push(errorMessage(err));
+    }
+  }
+  refresh();
+  return { ok: done ? `رُحّلت ${done} فاتورة` : undefined, error: errors.length ? errors.join("\n") : undefined };
+}
+
+const SHEET_FIELDS = { supplierInvoiceNo: "supplierInvoiceNo", invoiceDate: "invoiceDate", dueDate: "dueDate", notes: "notes" } as const;
+
+/** حفظ تعديلات ورقة فواتير الموردين بقواعد المسودة نفسها. */
+export async function savePurchaseSheet(payload: string): Promise<DocSheetResult> {
+  await requirePermission("purchase_invoices", "update");
+  const changes = JSON.parse(payload) as SheetChange[];
+  const errors: Record<number, string> = {};
+  let saved = 0;
+  for (const { id, values } of changes) {
+    const patch: DraftPurchasePatch = {};
+    for (const [key, v] of Object.entries(values)) {
+      const field = SHEET_FIELDS[key as keyof typeof SHEET_FIELDS];
+      if (field) patch[field] = v;
+    }
+    try {
+      await updateDraftPurchase(db, Number(id), patch);
+      saved++;
+    } catch (err) {
+      errors[id] = errorMessage(err);
+    }
+  }
+  refresh();
+  return { ok: saved ? `حُفظت تعديلات ${saved} فاتورة` : undefined, errors };
 }
