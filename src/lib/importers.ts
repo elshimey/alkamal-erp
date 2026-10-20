@@ -6,6 +6,8 @@ import { createManualInvoiceTx } from "@/lib/invoices";
 import { createVehicle } from "@/lib/fleet";
 import { createParty } from "@/lib/operations";
 import { createReceipt } from "@/lib/receipts";
+import { createManualEntry } from "@/lib/journal";
+import { createViolation } from "@/lib/violations";
 import { lineVat, round2 } from "@/lib/invoice-posting";
 import { errorMessage } from "@/lib/errors";
 import { normText, type ImportIssue, type ImportReport } from "@/lib/import-match";
@@ -92,7 +94,7 @@ async function lookups(tx: Tx) {
     tx.select().from(s.currencies),
     tx.select().from(s.taxCodes).where(eq(s.taxCodes.isActive, true)),
     tx.select().from(s.costCenters),
-    tx.select({ plate: s.vehicles.plate, chassis: s.vehicles.chassis, costCenterId: s.vehicles.costCenterId }).from(s.vehicles),
+    tx.select({ id: s.vehicles.id, plate: s.vehicles.plate, chassis: s.vehicles.chassis, costCenterId: s.vehicles.costCenterId }).from(s.vehicles),
     tx.select().from(s.vehicleTypes),
   ]);
   const idx = {
@@ -105,6 +107,7 @@ async function lookups(tx: Tx) {
     plates: new Set(vehicles.map((x) => normText(x.plate))),
     chassis: new Set(vehicles.map((x) => normText(x.chassis))),
     vehicleTypes: new Index<number>(),
+    vehicles: new Index<number>(),
   };
   for (const a of accounts) idx.accounts.add([a.code, a.nameAr, a.nameEn, `${a.code} ${a.nameAr}`], a);
   for (const c of customers) idx.customers.add([c.nameAr, c.nameEn], c.id);
@@ -121,6 +124,7 @@ async function lookups(tx: Tx) {
   if (exempt) idx.taxCodes.add(["معفى", "معفي", "exempt", "exempted"], exempt);
   for (const c of costCenters) idx.costCenters.add([c.code, c.nameAr], c.id);
   for (const x of vehicles) idx.costCenters.add([x.plate], x.costCenterId);
+  for (const x of vehicles) idx.vehicles.add([x.plate], x.id);
   for (const t of vehicleTypes) idx.vehicleTypes.add([t.nameAr], t.id);
   return { idx, defaultTax: vat ?? null, accounts, customers, currencies, outTax, costCenters, vehicles, vehicleTypes };
 }
@@ -292,11 +296,66 @@ async function importReceipt(tx: Tx, [r]: ImportRow[], ctx: Ctx, userId?: number
   return receipt.number;
 }
 
+// ───────────── القيود اليومية ─────────────
+
+async function importJournal(tx: Tx, rows: ImportRow[], ctx: Ctx, userId?: number) {
+  const [first] = rows;
+  const reference = required(first, "reference", "رقم القيد");
+  const entryDate = toDate(required(first, "entryDate", "التاريخ"), "التاريخ");
+  for (const r of rows.slice(1)) if (v(r, "entryDate") && toDate(v(r, "entryDate"), "التاريخ") !== entryDate) throw new Error(`سطور القيد ${reference} بتواريخ مختلفة`);
+  const [dup] = await tx.select({ number: s.journalEntries.number }).from(s.journalEntries).where(eq(s.journalEntries.reference, reference)).limit(1);
+  if (dup) throw new Error(`القيد ${reference} مستورد مسبقاً (${dup.number})`);
+  const lines = rows.map((r) => {
+    const accRaw = required(r, "account", "الحساب");
+    const account = resolve(ctx.idx.accounts.find(accRaw), accRaw, "account", "الحساب");
+    const debit = v(r, "debit") ? toNumber(v(r, "debit"), "مدين", { min: 0 }) : 0;
+    const credit = v(r, "credit") ? toNumber(v(r, "credit"), "دائن", { min: 0 }) : 0;
+    const ccRaw = v(r, "costCenter");
+    const partyRaw = v(r, "party");
+    return {
+      accountId: account.id,
+      description: v(r, "lineDescription") || null,
+      debit,
+      credit,
+      costCenterId: ccRaw ? resolve(ctx.idx.costCenters.find(ccRaw), ccRaw, "costCenter", "مركز التكلفة") : null,
+      partyId: partyRaw ? resolve(ctx.idx.parties.find(partyRaw), partyRaw, "customer", "الجهة") : null,
+    };
+  });
+  const description = rows.map((r) => v(r, "description")).find(Boolean) || `قيد مستورد ${reference}`;
+  const entry = await createManualEntry(tx, { entryDate, description, reference, lines, post: ctx.post, userId });
+  return entry.number;
+}
+
+// ───────────── المخالفات المرورية ─────────────
+
+async function importViolation(tx: Tx, [r]: ImportRow[], ctx: Ctx, userId?: number) {
+  const violationDate = toDate(required(r, "violationDate", "تاريخ المخالفة"), "تاريخ المخالفة");
+  const plate = required(r, "vehicle", "المركبة");
+  const vehicleId = resolve(ctx.idx.vehicles.find(plate), plate, "costCenter", "المركبة");
+  const charge = normText(required(r, "chargeTo", "على من"));
+  const chargeTo = /سائق|driver/.test(charge) ? "driver" : /شركه|company|منشاه/.test(charge) ? "company" : null;
+  if (!chargeTo) throw new Error(`على من «${v(r, "chargeTo")}»: اكتب السائق أو الشركة`);
+  const violation = await createViolation(tx, {
+    violationDate,
+    vehicleId,
+    reference: v(r, "reference") || null,
+    violationType: required(r, "violationType", "نوع المخالفة"),
+    location: v(r, "location") || null,
+    amount: toNumber(required(r, "amount", "المبلغ"), "المبلغ", { positive: true }),
+    chargeTo,
+    notes: v(r, "notes") || null,
+    userId,
+  });
+  return violation.number;
+}
+
 const IMPORTERS: Record<string, (tx: Tx, rows: ImportRow[], ctx: Ctx, userId?: number) => Promise<string>> = {
   "sales-invoices": importInvoice,
   vehicles: importVehicle,
   customers: importCustomer,
   receipts: importReceipt,
+  "journal-entries": importJournal,
+  violations: importViolation,
 };
 
 /** يجمع الصفوف في سجلات: بنود الفاتورة الواحدة معاً (ولو تباعدت في الملف)، وغيرها صف لكل سجل. */
@@ -378,6 +437,21 @@ export async function templateLists(db: Db, spec: ImportSpec): Promise<TemplateL
       { ...currencies, field: "currency" },
       { title: "النوع", values: ["دفعة عن فواتير", "دفعة مقدمة"], field: "kind" },
       { title: "طريقة الدفع", values: ["نقد", "تحويل", "شيك", "بطاقة"], field: "method" },
+    ];
+  }
+  if (spec.entity === "journal-entries") {
+    const postable = [...ctx.accounts].sort((a, b) => a.code.localeCompare(b.code));
+    return [
+      { title: "الحسابات (الرقم)", values: postable.map((a) => a.code), field: "account" },
+      { title: "اسم الحساب", values: postable.map((a) => a.nameAr) },
+      { title: "المركبات (اللوحة)", values: ctx.vehicles.map((x) => x.plate).sort(), field: "costCenter" },
+      { title: "مراكز التكلفة (الرمز)", values: ctx.costCenters.map((c) => c.code) },
+    ];
+  }
+  if (spec.entity === "violations") {
+    return [
+      { title: "المركبات (اللوحة)", values: ctx.vehicles.map((x) => x.plate).sort(), field: "vehicle" },
+      { title: "على من", values: ["السائق", "الشركة"], field: "chargeTo" },
     ];
   }
   if (spec.entity === "customers") {

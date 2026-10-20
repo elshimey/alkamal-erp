@@ -10,6 +10,7 @@ import { PURCHASE_STATUS } from "@/data/purchases";
 import { paymentState } from "@/data/sales";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { DocSheet, type DocSheetRow } from "@/components/doc-sheet";
+import { BulkPdfButton } from "@/components/bulk-pdf";
 import { DocToolbar } from "@/components/doc-toolbar";
 import { Icon } from "@/components/icons";
 import { PurchaseInvoiceDocument } from "@/components/purchase-invoice";
@@ -103,6 +104,9 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
       )}
 
       <DocToolbar base={BASE} params={sp} statuses={STATUSES} exportName="فواتير-الموردين" count={list.length} />
+      <div className="mb-2 flex justify-end">
+        <BulkPdfButton kind="purchases" ids={list.map((x) => x.i.id)} />
+      </div>
 
       {view === "sheet" ? (
         <DocSheet
@@ -194,6 +198,9 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
                 <div className="text-xs text-gray-500">{openDoc.supplier.nameAr}</div>
               </div>
               <div className="ms-auto flex flex-wrap items-center gap-2">
+                <Link href={`/print/purchases?ids=${openDoc.i.id}`} target="_blank" className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
+                  طباعة
+                </Link>
                 <Link href={`/purchases/${openDoc.i.id}`} className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
                   فتح الفاتورة
                 </Link>

@@ -10,6 +10,7 @@ import { todayRiyadh } from "@/lib/dates";
 import { INVOICE_STATUS, ZATCA_STATUS, paymentState } from "@/data/sales";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { DocSheet, type DocSheetRow } from "@/components/doc-sheet";
+import { BulkPdfButton } from "@/components/bulk-pdf";
 import { DocToolbar } from "@/components/doc-toolbar";
 import { Icon } from "@/components/icons";
 import { RowCheck, SelectAll, SelectionTotal } from "@/components/row-selection";
@@ -98,6 +99,9 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
       )}
 
       <DocToolbar base={BASE} params={sp} statuses={STATUSES} exportName="فواتير-المبيعات" count={invoices.length} />
+      <div className="mb-2 flex justify-end">
+        <BulkPdfButton kind="invoices" ids={invoices.map((x) => x.i.id)} />
+      </div>
 
       {view === "sheet" ? (
         <DocSheet

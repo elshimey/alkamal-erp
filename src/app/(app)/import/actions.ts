@@ -40,7 +40,7 @@ export async function runImportAction(entity: string, rows: ImportRow[], dryRun:
   const spec = specOf(entity);
   const user = await requirePermission(spec.permission, "create");
   // السندات تُرحّل مباشرة لمن يملك اعتمادها، وغيرها يُستورد مسودات
-  const post = spec.entity === "receipts" && can(user.perms, "receipts", "approve");
+  const post = (spec.entity === "receipts" || spec.entity === "journal-entries") && can(user.perms, spec.permission, "approve");
   const report = await runImport(db, spec, rows, { dryRun, userId: user.id, post });
   if (!dryRun && report.ok) revalidatePath(spec.backHref);
   return report;

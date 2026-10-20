@@ -91,13 +91,15 @@ export function DocToolbar({
           ))}
         </select>
       )}
-      <select aria-label="الترتيب" className={selectCls} value={params.sort ?? Object.keys(sorts)[0]} onChange={(e) => go({ sort: e.target.value === Object.keys(sorts)[0] ? undefined : e.target.value })}>
+{Object.keys(sorts).length > 1 && (
+              <select aria-label="الترتيب" className={selectCls} value={params.sort ?? Object.keys(sorts)[0]} onChange={(e) => go({ sort: e.target.value === Object.keys(sorts)[0] ? undefined : e.target.value })}>
         {Object.entries(sorts).map(([k, v]) => (
           <option key={k} value={k}>
             ترتيب: {v}
           </option>
         ))}
       </select>
+      )}
       {filtered && (
         <Link href={listHref(base, { view: params.view }, {})} scroll={false} className="text-xs text-brand-700 hover:underline">
           مسح الفلاتر

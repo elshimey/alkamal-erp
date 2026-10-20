@@ -134,6 +134,53 @@ export const IMPORT_SPECS: Record<string, ImportSpec> = {
       { customer: "شركة مثال للتجارة", receiptDate: "2026-10-12", amount: "5000", cashAccount: "110101", currency: "SAR", kind: "دفعة مقدمة", invoice: "", method: "نقد", reference: "", notes: "" },
     ],
   },
+
+  "journal-entries": {
+    entity: "journal-entries",
+    title: "استيراد القيود اليومية",
+    noun: "قيد",
+    permission: "journal_entries",
+    backHref: "/journal",
+    groupBy: "reference",
+    intro: "كل صف سطر قيد. السطور التي تحمل رقم القيد نفسه تكوّن قيداً واحداً يجب أن يتوازن مدينه ودائنه.",
+    fields: [
+      { key: "reference", label: "رقم القيد", en: "Journal number", required: true, rule: "يجمع سطور القيد الواحد، ولا يُستورد مرتين", aliases: ["الرقم المرجعي", "reference", "journal no", "رقم المرجع"], width: 14 },
+      { key: "entryDate", label: "التاريخ", en: "Date", required: true, rule: "مثل 2026-10-05 أو 05/10/2026", aliases: ["تاريخ القيد", "journal date"], width: 13 },
+      { key: "description", label: "وصف القيد", en: "Journal description", rule: "يكفي في السطر الأول", aliases: ["البيان", "الوصف", "description", "notes"], width: 26 },
+      { key: "account", label: "الحساب", en: "Account", required: true, rule: "رقم الحساب أو اسمه كما في الشجرة", aliases: ["رمز الحساب", "اسم الحساب", "account code", "account name"], width: 22 },
+      { key: "lineDescription", label: "وصف السطر", en: "Line description", aliases: ["line description", "وصف"], width: 22 },
+      { key: "debit", label: "مدين", en: "Debit", rule: "مدين أو دائن في كل سطر", width: 12 },
+      { key: "credit", label: "دائن", en: "Credit", width: 12 },
+      { key: "costCenter", label: "مركز التكلفة", en: "Cost center", rule: "لوحة المركبة أو رمز المركز", aliases: ["المركبة", "cost center"], width: 16 },
+      { key: "party", label: "الجهة", en: "Contact", rule: "اسم العميل أو المورد كما في النظام", aliases: ["جهة الاتصال", "contact", "العميل", "المورد"], width: 22 },
+    ],
+    samples: [
+      { reference: "JV-001", entryDate: "2026-10-31", description: "استحقاق إيجار المكتب لشهر أكتوبر", account: "6105", lineDescription: "إيجار أكتوبر", debit: "5000", credit: "", costCenter: "", party: "" },
+      { reference: "JV-001", entryDate: "2026-10-31", description: "", account: "110101", lineDescription: "", debit: "", credit: "5000", costCenter: "", party: "" },
+    ],
+  },
+
+  violations: {
+    entity: "violations",
+    title: "استيراد المخالفات المرورية",
+    noun: "مخالفة",
+    permission: "violations",
+    backHref: "/violations",
+    intro: "كل صف مخالفة. السائق يُحدد تلقائياً من سجل الإسناد في تاريخ المخالفة، ورقم المخالفة يمنع تكرارها.",
+    fields: [
+      { key: "violationDate", label: "تاريخ المخالفة", en: "Date", required: true, rule: "مثل 2026-10-05 أو 05/10/2026", aliases: ["التاريخ"], width: 13 },
+      { key: "vehicle", label: "المركبة", en: "Vehicle plate", required: true, rule: "اللوحة كما في النظام", aliases: ["اللوحة", "رقم اللوحة", "plate"], width: 14 },
+      { key: "reference", label: "رقم المخالفة", en: "Violation number", rule: "لا يتكرر", aliases: ["رقم المخالفة لدى المرور", "reference"], width: 16 },
+      { key: "violationType", label: "نوع المخالفة", en: "Type", required: true, aliases: ["المخالفة", "النوع", "type"], width: 20 },
+      { key: "location", label: "الموقع", en: "Location", aliases: ["المكان", "location"], width: 18 },
+      { key: "amount", label: "المبلغ", en: "Amount", required: true, rule: "أكبر من صفر", aliases: ["قيمة المخالفة", "amount"], width: 11 },
+      { key: "chargeTo", label: "على من", en: "Charge to", required: true, rule: "السائق أو الشركة", aliases: ["يتحملها", "charge to"], width: 11 },
+      { key: "notes", label: "ملاحظات", en: "Notes", width: 20 },
+    ],
+    samples: [
+      { violationDate: "2026-10-12", vehicle: "أ ب ج 1234", reference: "TR-55120", violationType: "تجاوز السرعة", location: "طريق الرياض الدمام", amount: "300", chargeTo: "السائق", notes: "" },
+    ],
+  },
 };
 
 export const DELETE_ROW_MARK = "احذف الصف";

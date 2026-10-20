@@ -1,4 +1,5 @@
-import { and, desc, eq, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, inArray, lte, or, sql, type SQL } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
 import { createJournalEntryTx, deleteEntryTx, nextDocumentNumber } from "@/lib/ledger";
@@ -38,7 +39,7 @@ export interface ViolationInput {
   userId?: number;
 }
 
-export async function createViolation(db: Db, input: ViolationInput) {
+export async function createViolation(db: Db | Tx, input: ViolationInput) {
   if (!input.violationType.trim()) throw new Error("نوع المخالفة إلزامي");
   if (!(input.amount > 0)) throw new Error("المبلغ إلزامي");
   return db.transaction(async (tx) => {
@@ -180,6 +181,7 @@ export interface ViolationFilter {
   driverId?: number;
   from?: string;
   to?: string;
+  q?: string;
 }
 
 export async function listViolations(db: Db, f: ViolationFilter = {}, limit = 300) {
@@ -190,6 +192,11 @@ export async function listViolations(db: Db, f: ViolationFilter = {}, limit = 30
   if (f.driverId) where.push(eq(s.trafficViolations.driverId, f.driverId));
   if (f.from) where.push(gte(s.trafficViolations.violationDate, f.from));
   if (f.to) where.push(lte(s.trafficViolations.violationDate, f.to));
+  if (f.q) {
+    const q = `%${f.q.replace(/[%_\\]/g, "\\$&")}%`;
+    const any = or(ilike(s.trafficViolations.number, q), ilike(s.trafficViolations.reference, q), ilike(s.trafficViolations.violationType, q), ilike(s.vehicles.plate, q), ilike(s.employees.nameAr, q), ilike(s.trafficViolations.location, q));
+    if (any) where.push(any);
+  }
   return db
     .select({
       v: s.trafficViolations,
@@ -221,4 +228,30 @@ export async function violationSummary(db: Db | Tx) {
     })
     .from(s.trafficViolations);
   return { unpaidCount: r.unpaidCount, unpaid: num(r.unpaid), undeducted: num(r.undeducted), company: num(r.company) };
+}
+
+/** المخالفة بكل تفاصيلها للمعاينة والطباعة. */
+export async function violationDoc(db: Db | Tx, id: number) {
+  const pay = alias(s.journalEntries, "pay_entry");
+  const [row] = await db
+    .select({
+      v: s.trafficViolations,
+      plate: s.vehicles.plate,
+      driver: s.employees.nameAr,
+      entry: s.journalEntries.number,
+      paymentEntry: pay.number,
+      cashAccount: s.accounts.nameAr,
+      run: s.payrollRuns.number,
+      runStatus: s.payrollRuns.status,
+    })
+    .from(s.trafficViolations)
+    .innerJoin(s.vehicles, eq(s.vehicles.id, s.trafficViolations.vehicleId))
+    .leftJoin(s.drivers, eq(s.drivers.id, s.trafficViolations.driverId))
+    .leftJoin(s.employees, eq(s.employees.id, s.drivers.employeeId))
+    .leftJoin(s.journalEntries, eq(s.journalEntries.id, s.trafficViolations.journalEntryId))
+    .leftJoin(pay, eq(pay.id, s.trafficViolations.paymentEntryId))
+    .leftJoin(s.accounts, eq(s.accounts.id, s.trafficViolations.cashAccountId))
+    .leftJoin(s.payrollRuns, eq(s.payrollRuns.id, s.trafficViolations.payrollRunId))
+    .where(eq(s.trafficViolations.id, id));
+  return row ?? null;
 }

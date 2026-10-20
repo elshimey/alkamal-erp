@@ -22,7 +22,7 @@ export async function listCustomers(db: Db | Tx, f: { q?: string; filter?: Custo
   const advances = ledger(SALES_ACCOUNTS.customerAdvances, sql`l.credit_base - l.debit_base`);
   const receivable = ledger(SALES_ACCOUNTS.receivable, sql`l.debit_base - l.credit_base`);
 
-  const where: (SQL | undefined)[] = [sql`exists (select 1 from party_roles r where r.party_id = ${s.parties.id} and r.role = 'customer')`];
+  const where: (SQL | undefined)[] = [sql`exists (select 1 from party_roles r where r.party_id = parties.id and r.role = 'customer')`];
   if (f.q) {
     const q = `%${f.q.replace(/[%_\\]/g, "\\$&")}%`;
     where.push(or(ilike(s.parties.nameAr, q), ilike(s.parties.nameEn, q), ilike(s.parties.vatNumber, q), ilike(s.parties.mobile, q)));
