@@ -1264,3 +1264,32 @@ export const trafficViolations = pgTable(
     check("traffic_violations_driver", sql`${t.chargeTo} <> 'driver' or ${t.driverId} is not null`),
   ],
 );
+
+// ───────────────────────── بيانات المنشأة ─────────────────────────
+// صف واحد فقط (id = 1): يظهر في رأس الفواتير الضريبية والتقارير المطبوعة
+export const companyProfile = pgTable(
+  "company_profile",
+  {
+    id: integer("id").primaryKey().default(1),
+    nameAr: text("name_ar").notNull(),
+    nameEn: text("name_en"),
+    vatNumber: varchar("vat_number", { length: 15 }),
+    crNumber: varchar("cr_number", { length: 20 }),
+    // العنوان الوطني (مطلوب في الفاتورة الإلكترونية)
+    buildingNo: varchar("building_no", { length: 10 }),
+    street: text("street"),
+    district: text("district"),
+    city: text("city"),
+    postalCode: varchar("postal_code", { length: 10 }),
+    additionalNo: varchar("additional_no", { length: 10 }),
+    country: varchar("country", { length: 2 }).notNull().default("SA"),
+    phone: varchar("phone", { length: 30 }),
+    email: varchar("email", { length: 120 }),
+    website: varchar("website", { length: 120 }),
+    // الشعار مخزن كرابط بيانات (data:image/...) لأن الاستضافة بلا ملفات دائمة
+    logo: text("logo"),
+    updatedBy: ref("updated_by").references(() => users.id),
+    updatedAt: updatedAt(),
+  },
+  (t) => [check("company_profile_single", sql`${t.id} = 1`)],
+);

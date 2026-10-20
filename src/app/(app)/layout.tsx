@@ -8,6 +8,22 @@ import { Logo } from "@/components/logo";
 import { MobileNav, NavLinks, type NavGroup } from "@/components/nav-links";
 import { logout } from "../login/actions";
 
+// الدعم الفني (واتساب واتصال)
+const SUPPORT_PHONE = "966535443598";
+const FOOTER: NavGroup[] = [
+  { title: "الإعدادات", icon: "settings", items: [{ href: "/settings", label: "الإعدادات", icon: "settings" }] },
+  {
+    title: "المساعدة",
+    icon: "help",
+    items: [
+      { href: "/help", label: "دليل استخدام النظام", icon: "book" },
+      { href: `https://wa.me/${SUPPORT_PHONE}?text=${encodeURIComponent("مرحباً، أحتاج مساعدة في نظام الكمال")}`, label: "الدعم الفني (واتساب)", icon: "chat", external: true },
+      { href: `tel:+${SUPPORT_PHONE}`, label: "اتصال بالدعم", icon: "phone", external: true, hint: `+${SUPPORT_PHONE}` },
+      { href: `https://wa.me/${SUPPORT_PHONE}?text=${encodeURIComponent("اقتراح ميزة جديدة لنظام الكمال: ")}`, label: "طلب ميزة جديدة", icon: "sparkle", external: true },
+    ],
+  },
+];
+
 const NAV: { title: string; icon: IconName; items: { href: string; label: string; icon: IconName; entity?: Entity }[] }[] = [
   { title: "عام",
     icon: "home", items: [{ href: "/", label: "الرئيسية", icon: "home" }] },
@@ -77,14 +93,6 @@ const NAV: { title: string; icon: IconName; items: { href: string; label: string
       { href: "/reports/vat", label: "إقرار الضريبة", icon: "invoice", entity: "financial_reports" },
     ],
   },
-  {
-    title: "الإدارة",
-    icon: "shield",
-    items: [
-      { href: "/users", label: "المستخدمون", icon: "user", entity: "users" },
-      { href: "/roles", label: "الأدوار والصلاحيات", icon: "shield", entity: "roles" },
-    ],
-  },
 ];
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -105,12 +113,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <Logo light />
         </div>
         <nav className="flex flex-1 flex-col p-3 pt-4">
-          <NavLinks groups={groups} />
+          <NavLinks groups={groups} footer={FOOTER} />
         </nav>
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-30 flex print:hidden items-center justify-between gap-4 border-b border-black/5 bg-white/85 px-6 py-3 backdrop-blur">
-          <MobileNav groups={groups} />
+          <MobileNav groups={[...groups, FOOTER[0]]} />
           <div className="ms-auto flex items-center gap-4 text-sm">
             <Link href="/account" className="flex items-center gap-2 text-gray-700 hover:text-brand-700">
               <span className="flex size-9 items-center justify-center rounded-full bg-asphalt-900 font-display font-semibold text-brand-500 ring-2 ring-brand-600/40">{user.name.trim()[0]}</span>

@@ -22,6 +22,7 @@
   --color-asphalt-900: #1b2126;
   --color-concrete: #f3f1eb;
 
+  --animate-flyout: flyout 0.18s cubic-bezier(0.2, 0.7, 0.2, 1) both;
   --animate-page-in: page-in 0.38s cubic-bezier(0.2, 0.7, 0.2, 1) both;
   --animate-rise: rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
@@ -66,6 +67,12 @@ aside:hover > .road-line {
 }
 
 /* الصفحة تدخل من اليمين إلى اليسار: اتجاه السير في الواجهة العربية */
+@keyframes flyout {
+  from {
+    opacity: 0;
+    transform: translateX(8px) scale(0.98);
+  }
+}
 @keyframes page-in {
   from {
     opacity: 0;

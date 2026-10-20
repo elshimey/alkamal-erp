@@ -71,6 +71,13 @@
       "when": 1792337580829,
       "tag": "0009_violations",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792509060818,
+      "tag": "0010_company_profile",
+      "breakpoints": true
     }
   ]
 }
