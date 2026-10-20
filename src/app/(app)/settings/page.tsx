@@ -43,6 +43,7 @@ const SECTIONS: { title: string; items: Item[] }[] = [
     items: [
       { href: "/routes", title: "المواقع والمسارات", description: "المدن والمسارات وعمولة السائق لكل مسار.", icon: "route", entity: "routes" },
       { href: "/contracts", title: "العقود والأسعار", description: "أسعار كل عميل وحدّه الائتماني.", icon: "contract", entity: "contracts" },
+      { href: "/settings/hr", title: "الموارد البشرية", description: "نقاط الإنذار والترقية، ومقدم العمولة، ومعايير التقييم وأنواع الإجازات.", icon: "people", entity: "settings" },
       { href: "/vehicles", title: "المركبات", description: "إضافة مركبات الأسطول وبياناتها.", icon: "truck", entity: "vehicles" },
     ],
   },

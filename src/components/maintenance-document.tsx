@@ -10,7 +10,7 @@ const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFrac
 type Order = NonNullable<Awaited<ReturnType<typeof orderDoc>>>;
 type Request = NonNullable<Awaited<ReturnType<typeof requestDoc>>>;
 
-function Frame({ company, template: t, compact, title, en, meta, children, signatures }: { company: CompanyProfile; template: InvoiceTemplate; compact: boolean; title: string; en: string; meta: [string, string][]; children: ReactNode; signatures: string[] }) {
+export function Frame({ company, template: t, compact, title, en, meta, children, signatures }: { company: CompanyProfile; template: InvoiceTemplate; compact: boolean; title: string; en: string; meta: [string, string][]; children: ReactNode; signatures: string[] }) {
   const accent = TEMPLATE_ACCENTS[t.accent];
   const vars = { "--inv-accent": accent.main, "--inv-dark": accent.dark } as CSSProperties;
   return (
@@ -51,7 +51,7 @@ function Frame({ company, template: t, compact, title, en, meta, children, signa
   );
 }
 
-function Facts({ rows }: { rows: [string, ReactNode][] }) {
+export function Facts({ rows }: { rows: [string, ReactNode][] }) {
   return (
     <dl className="divide-y divide-gray-100 rounded-xl border border-gray-200 text-sm">
       {rows

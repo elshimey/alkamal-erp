@@ -77,9 +77,9 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
 
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
         {[
-          { label: "الرواتب والبدلات", value: t.basic + t.housing + t.otherAllowances + t.additions - t.absenceDeduction - t.deductions },
+          { label: "الرواتب والبدلات", value: t.basic + t.housing + t.otherAllowances + t.additions + t.incentives - t.absenceDeduction - t.deductions, hint: t.incentives ? `منها حوافز ${fmt(t.incentives)}` : undefined },
           { label: "عمولات البوالص", value: t.commissions, hint: "مقيدة من البوالص، تُصرف هنا" },
-          { label: "الاستقطاعات", value: t.gosiEmployee + t.advanceDeduction + t.violations, hint: "تأمينات الموظف وأقساط السلف والمخالفات" },
+          { label: "الاستقطاعات", value: t.gosiEmployee + t.advanceDeduction + t.violations + t.penalties, hint: "تأمينات الموظف وأقساط السلف والمخالفات والجزاءات" },
           { label: "الصافي للصرف", value: t.net, strong: true },
         ].map((k) => (
           <div key={k.label} className={`rounded-2xl p-4 shadow-sm ${k.strong ? "bg-asphalt-900 text-white" : "bg-white"}`}>
@@ -90,7 +90,7 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
         ))}
       </div>
 
-      <Table head={["الموظف", "الأساسي", "السكن", "بدلات", "غياب", "إضافات", "خصومات", "العمولات", "مخالفات", "قسط سلفة", "تأمينات", "الصافي"]}>
+      <Table head={["الموظف", "الأساسي", "السكن", "بدلات", "غياب", "إضافات وحوافز", "خصومات وجزاءات", "العمولات", "مخالفات", "قسط سلفة", "تأمينات", "الصافي"]}>
         {lines.map(({ l, name, job, cc }) => (
           <tr key={l.id}>
             <Td className="font-medium">
@@ -101,9 +101,18 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
             <Td className="ltr-nums">{dash(l.basic)}</Td>
             <Td className="ltr-nums">{dash(l.housing)}</Td>
             <Td className="ltr-nums">{dash(l.otherAllowances)}</Td>
-            <Td className="ltr-nums text-red-600">{Number(l.absenceDays) ? `${Number(l.absenceDays)} يوم (${fmt(l.absenceDeduction)})` : "—"}</Td>
-            <Td className="ltr-nums text-green-700">{dash(l.additions)}</Td>
-            <Td className="ltr-nums text-red-600">{dash(l.deductions)}</Td>
+            <Td className="ltr-nums text-red-600">
+              {Number(l.absenceDays) + Number(l.leaveDays) ? `${Number(l.absenceDays) + Number(l.leaveDays)} يوم (${fmt(l.absenceDeduction)})` : "—"}
+              {Number(l.leaveDays) > 0 && <div className="text-[11px] text-gray-500">{Number(l.leaveDays)} من الإجازات والحضور</div>}
+            </Td>
+            <Td className="ltr-nums text-green-700">
+              {dash(l.additions)}
+              {Number(l.incentives) > 0 && <div className="text-[11px]">حافز {fmt(l.incentives)}</div>}
+            </Td>
+            <Td className="ltr-nums text-red-600">
+              {dash(l.deductions)}
+              {Number(l.penalties) > 0 && <div className="text-[11px]">جزاء {fmt(l.penalties)}</div>}
+            </Td>
             <Td className="ltr-nums text-green-700">{dash(l.commissions)}</Td>
             <Td className="ltr-nums text-red-600">{dash(l.violations)}</Td>
             <Td className="ltr-nums text-red-600">{dash(l.advanceDeduction)}</Td>
@@ -117,8 +126,8 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
           <Td className="ltr-nums">{fmt(t.housing)}</Td>
           <Td className="ltr-nums">{fmt(t.otherAllowances)}</Td>
           <Td className="ltr-nums">{fmt(t.absenceDeduction)}</Td>
-          <Td className="ltr-nums">{fmt(t.additions)}</Td>
-          <Td className="ltr-nums">{fmt(t.deductions)}</Td>
+          <Td className="ltr-nums">{fmt(t.additions + t.incentives)}</Td>
+          <Td className="ltr-nums">{fmt(t.deductions + t.penalties)}</Td>
           <Td className="ltr-nums">{fmt(t.commissions)}</Td>
           <Td className="ltr-nums">{fmt(t.violations)}</Td>
           <Td className="ltr-nums">{fmt(t.advanceDeduction)}</Td>
@@ -154,9 +163,9 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
         {draft && can(user.perms, "payroll", "update") && (
           <Card title="تحديث المسير">
             <ActionForm action={refreshRun.bind(null, id)} resetOnSuccess={false}>
-              <SubmitButton variant="secondary">تحديث من الموظفين والعمولات والمخالفات</SubmitButton>
+              <SubmitButton variant="secondary">تحديث من الموظفين والعمولات والمخالفات والموارد البشرية</SubmitButton>
             </ActionForm>
-            <p className="mt-2 text-xs text-gray-500">بعد تعديل راتب أو اعتماد بوالص أو تسجيل مخالفات جديدة. تعديلاتك أعلاه تبقى.</p>
+            <p className="mt-2 text-xs text-gray-500">بعد تعديل راتب أو اعتماد بوالص أو مخالفات أو جزاءات وحوافز وإجازات بدون راتب وغياب. تعديلاتك أعلاه تبقى.</p>
           </Card>
         )}
         {draft && can(user.perms, "payroll", "approve") && (

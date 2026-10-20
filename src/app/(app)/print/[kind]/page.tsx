@@ -11,6 +11,7 @@ import { noteDoc } from "@/lib/notes";
 import { entryDoc } from "@/lib/journal";
 import { violationDoc } from "@/lib/violations";
 import { orderDoc, requestDoc } from "@/lib/maintenance";
+import { custodyDoc } from "@/lib/hr";
 import { invoiceQrSvg } from "@/lib/zatca-qr";
 import { TaxInvoiceDocument } from "@/components/tax-invoice";
 import { PurchaseInvoiceDocument } from "@/components/purchase-invoice";
@@ -19,6 +20,7 @@ import { NoteDocument } from "@/components/note-document";
 import { JournalVoucher } from "@/components/journal-voucher";
 import { ViolationDocument } from "@/components/violation-document";
 import { BreakdownRequestDocument, MaintenanceOrderDocument } from "@/components/maintenance-document";
+import { CustodyDocument } from "@/components/custody-document";
 import { BULK_LIMIT } from "@/components/bulk-pdf";
 import { BatchExporter } from "./exporter";
 
@@ -84,6 +86,14 @@ const KINDS: Record<string, Kind> = {
     render: async (id, c, t) => {
       const d = await requestDoc(db, id);
       return d && { name: d.r.number, node: <BreakdownRequestDocument company={c} doc={d} template={t} /> };
+    },
+  },
+  custody: {
+    title: "إقرارات العُهد",
+    entity: "custody",
+    render: async (id, c, t) => {
+      const d = await custodyDoc(db, id);
+      return d && { name: d.c.number, node: <CustodyDocument company={c} doc={d} template={t} /> };
     },
   },
   violations: {

@@ -54,7 +54,11 @@ export const ENTITIES = {
   fiscal_periods: { label: "الفترات المحاسبية", module: "accounting" },
   fixed_assets: { label: "الأصول والإهلاك", module: "accounting" },
   employees: { label: "الموظفون", module: "payroll" },
-  payroll: { label: "مسيرات الرواتب", module: "payroll" },
+  payroll: { label: "مسيرات الرواتب والسلف ومقدم العمولة", module: "payroll" },
+  custody: { label: "العُهد النقدية والعينية", module: "payroll" },
+  hr_actions: { label: "الإنذارات والجزاءات والحوافز", module: "payroll" },
+  leaves: { label: "الإجازات والحضور", module: "payroll" },
+  evaluations: { label: "التقييم والترقيات", module: "payroll" },
   financial_reports: { label: "التقارير المالية", module: "reports" },
   operational_reports: { label: "التقارير التشغيلية واللوحة", module: "reports" },
 } as const satisfies Record<string, { label: string; module: Module }>;

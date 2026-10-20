@@ -98,6 +98,14 @@ const ar = {
   language: "اللغة",
   logout: "خروج",
   sar: "ريال",
+  advanceTitle: "طلب مقدم عمولة",
+  advanceHint: "الطلب متاح من يوم {open} إلى يوم {close} من كل شهر، ويُخصم من عمولتك في مسير الشهر.",
+  advanceRemaining: "المتاح لك هذا الشهر",
+  advanceClosed: "الطلبات مغلقة الآن؛ تفتح يوم {open}.",
+  advanceAmount: "المبلغ المطلوب",
+  advanceNote: "ملاحظة (اختياري)",
+  advanceSend: "إرسال الطلب",
+  advanceStatus: { pending: "بانتظار الاعتماد", approved: "معتمد", rejected: "مرفوض" },
   install: "أضف التطبيق للشاشة الرئيسية من قائمة المتصفح ليفتح كتطبيق.",
 };
 
@@ -195,6 +203,14 @@ const ur: DriverDict = {
   language: "زبان",
   logout: "لاگ آؤٹ",
   sar: "ریال",
+  advanceTitle: "کمیشن ایڈوانس کی درخواست",
+  advanceHint: "درخواست ہر مہینے کی {open} تاریخ سے {close} تاریخ تک دی جا سکتی ہے، اور مہینے کی تنخواہ میں آپ کے کمیشن سے کٹے گی۔",
+  advanceRemaining: "اس مہینے دستیاب رقم",
+  advanceClosed: "درخواستیں ابھی بند ہیں؛ {open} تاریخ کو کھلیں گی۔",
+  advanceAmount: "مطلوبہ رقم",
+  advanceNote: "نوٹ (اختیاری)",
+  advanceSend: "درخواست بھیجیں",
+  advanceStatus: { pending: "منظوری کا انتظار", approved: "منظور", rejected: "مسترد" },
   install: "براؤزر مینو سے ایپ کو ہوم اسکرین پر شامل کریں۔",
 };
 
@@ -290,6 +306,14 @@ const hi: DriverDict = {
   language: "भाषा",
   logout: "लॉग आउट",
   sar: "रियाल",
+  advanceTitle: "कमीशन एडवांस का अनुरोध",
+  advanceHint: "अनुरोध हर महीने की {open} तारीख से {close} तारीख तक किया जा सकता है, और महीने के वेतन में आपके कमीशन से काटा जाएगा।",
+  advanceRemaining: "इस महीने उपलब्ध राशि",
+  advanceClosed: "अनुरोध अभी बंद हैं; {open} तारीख को खुलेंगे।",
+  advanceAmount: "माँगी गई राशि",
+  advanceNote: "नोट (वैकल्पिक)",
+  advanceSend: "अनुरोध भेजें",
+  advanceStatus: { pending: "स्वीकृति की प्रतीक्षा", approved: "स्वीकृत", rejected: "अस्वीकृत" },
   install: "ब्राउज़र मेनू से ऐप को होम स्क्रीन पर जोड़ें।",
 };
 
@@ -385,6 +409,14 @@ const en: DriverDict = {
   language: "Language",
   logout: "Log out",
   sar: "SAR",
+  advanceTitle: "Commission advance request",
+  advanceHint: "You can request from day {open} to day {close} of each month. It is deducted from your commission in the month's payroll.",
+  advanceRemaining: "Available to you this month",
+  advanceClosed: "Requests are closed now; they open on day {open}.",
+  advanceAmount: "Amount requested",
+  advanceNote: "Note (optional)",
+  advanceSend: "Send request",
+  advanceStatus: { pending: "Awaiting approval", approved: "Approved", rejected: "Rejected" },
   install: "Add the app to your home screen from the browser menu.",
 };
 
