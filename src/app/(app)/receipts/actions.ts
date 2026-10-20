@@ -5,44 +5,78 @@ import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { errorMessage } from "@/lib/errors";
-import { cell, saveSheetRows, type SheetRow } from "@/lib/sheet-server";
-import { createReceipt, deleteReceipt, postReceipt, revertReceipt } from "@/lib/invoices";
+import { applyAdvance, createReceipt, customerCredit, deleteReceipt, openInvoices, postReceipt, revertReceipt, type ReceiptKind } from "@/lib/receipts";
 import { PAYMENT_METHODS } from "@/data/sales";
 import type { FormState } from "@/components/action-form";
 
 const refresh = () => {
   revalidatePath("/receipts");
   revalidatePath("/invoices");
+  revalidatePath("/customers");
   revalidatePath("/");
 };
 
-export async function saveReceipts(rows: SheetRow[]) {
+/** فواتير العميل المفتوحة ورصيده الدائن لنموذج السند. */
+export async function customerOpenItems(customerId: number, currencyCode: string) {
+  await requirePermission("receipts", "create");
+  const [invoices, credit] = await Promise.all([openInvoices(db, customerId, currencyCode), customerCredit(db, customerId)]);
+  return { invoices, credit };
+}
+
+export interface ReceiptPayload {
+  kind: ReceiptKind;
+  customerId: number;
+  cashAccountId: number;
+  currencyCode: string;
+  amount: number;
+  receiptDate: string;
+  method: keyof typeof PAYMENT_METHODS;
+  notes?: string;
+  reference?: string;
+  collector?: string;
+  allocations: { invoiceId: number; amount: number }[];
+  adjustments: { accountId: number; amount: number; description: string }[];
+}
+
+export async function saveReceipt(p: ReceiptPayload): Promise<{ id?: number; error?: string; posted?: boolean }> {
   const user = await requirePermission("receipts", "create");
-  // من يملك الاعتماد يُرحَّل سنده مباشرة، وغيره يبقى مسودة للمراجعة
+  // من يملك الاعتماد يُرحَّل سنده مباشرة، وغيره يبقى مسودة بتوزيعه حتى يُعتمد
   const post = can(user.perms, "receipts", "approve");
-  const result = await saveSheetRows(rows, async (r) => {
-    const amount = cell.number(r.amount, "المبلغ");
-    if (!amount) throw new Error("المبلغ إلزامي");
-    const method = cell.required(r.method, "طريقة الدفع");
-    if (!(method in PAYMENT_METHODS)) throw new Error("طريقة الدفع غير معروفة");
-    await createReceipt(db, {
-      receiptDate: cell.date(r.date, "التاريخ") ?? cell.required("", "التاريخ"),
-      customerId: Number(cell.required(r.customerId, "العميل")),
-      amount,
-      currencyCode: r.currency === "KWD" ? "KWD" : "SAR",
-      exchangeRate: cell.number(r.rate, "سعر الصرف"),
-      method: method as keyof typeof PAYMENT_METHODS,
-      cashAccountId: Number(cell.required(r.cashAccountId, "الصندوق / البنك")),
-      collector: cell.text(r.collector),
-      reference: cell.text(r.reference),
-      invoiceId: r.invoiceId ? Number(r.invoiceId) : null,
-      notes: cell.text(r.notes),
+  try {
+    if (!(p.method in PAYMENT_METHODS)) throw new Error("طريقة الدفع غير معروفة");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(p.receiptDate)) throw new Error("التاريخ مطلوب");
+    const r = await createReceipt(db, {
+      kind: p.kind,
+      receiptDate: p.receiptDate,
+      customerId: Number(p.customerId),
+      amount: Number(p.amount),
+      currencyCode: p.currencyCode,
+      method: p.method,
+      cashAccountId: Number(p.cashAccountId),
+      notes: p.notes?.trim() || null,
+      reference: p.reference?.trim() || null,
+      collector: p.collector?.trim() || null,
+      allocations: p.allocations.map((a) => ({ invoiceId: Number(a.invoiceId), amount: Number(a.amount) })),
+      adjustments: p.adjustments.map((a) => ({ accountId: Number(a.accountId), amount: Number(a.amount), description: a.description })),
       post,
       userId: user.id,
     });
-  });
-  refresh();
-  return result;
+    refresh();
+    return { id: r.id, posted: post };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+}
+
+export async function applyAdvanceAction(receiptId: number, allocations: { invoiceId: number; amount: number }[], date: string): Promise<{ ok?: string; error?: string }> {
+  const user = await requirePermission("receipts", "create");
+  try {
+    const res = await applyAdvance(db, receiptId, allocations, { date, userId: user.id });
+    refresh();
+    return { ok: `طُبق ${res.applied.toLocaleString("en")} بالقيد ${res.entry.number}` };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
 }
 
 export async function post(id: number): Promise<FormState> {

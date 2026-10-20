@@ -11,7 +11,9 @@ export async function saveVehicles(rows: SheetRow[]) {
   const result = await saveSheetRows(rows, async (r) => {
     const year = cell.number(r.year, "سنة الصنع");
     if (year != null && (year < 1980 || year > 2100)) throw new Error("سنة الصنع غير صالحة");
+    const assetAccountId = Number(cell.required(r.assetAccountId, "حساب الأصل"));
     await createVehicle(db, {
+      assetAccountId,
       plate: cell.required(r.plate, "اللوحة"),
       chassis: cell.required(r.chassis, "رقم الشاسيه"),
       vehicleTypeId: r.vehicleTypeId ? Number(r.vehicleTypeId) : null,

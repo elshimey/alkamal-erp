@@ -85,6 +85,20 @@
       "when": 1792511358292,
       "tag": "0011_invoice_template",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1792517843535,
+      "tag": "0012_import_engine",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1792519097721,
+      "tag": "0013_receipts_notes",
+      "breakpoints": true
     }
   ]
 }

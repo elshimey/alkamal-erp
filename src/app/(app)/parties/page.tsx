@@ -6,6 +6,7 @@ import { can } from "@/lib/permissions";
 import { PARTY_ROLES } from "@/data/operations";
 import { SheetEditor } from "@/components/sheet-editor";
 import { Badge, Card, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
+import { ImportLink } from "@/components/import-link";
 import { saveParties } from "./actions";
 
 export default async function PartiesPage() {
@@ -22,7 +23,9 @@ export default async function PartiesPage() {
 
   return (
     <>
-      <PageHeader title="جهات الاتصال" description="العملاء والموردون والناقلون والورش والمحطات في جدول واحد، والدور يحدد الاستخدام." />
+      <PageHeader title="جهات الاتصال" description="العملاء والموردون والناقلون والورش والمحطات في جدول واحد، والدور يحدد الاستخدام.">
+        {can(user.perms, "parties", "create") && <ImportLink entity="customers" label="استيراد العملاء" />}
+      </PageHeader>
       {can(user.perms, "parties", "create") && (
         <Card title="إدخال جهات جديدة" className="mb-6">
           <SheetEditor

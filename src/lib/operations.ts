@@ -8,8 +8,19 @@ import { resolvePrice, type Rate, type Trip } from "@/lib/pricing";
 export type PartyRole = (typeof s.partyRoleType.enumValues)[number];
 
 export async function createParty(
-  db: Db,
-  input: { nameAr: string; kind?: "individual" | "company"; vatNumber?: string | null; crNumber?: string | null; mobile?: string | null; email?: string | null; country?: string; roles: PartyRole[] },
+  db: Db | Tx,
+  input: {
+    nameAr: string;
+    nameEn?: string | null;
+    kind?: "individual" | "company";
+    vatNumber?: string | null;
+    crNumber?: string | null;
+    mobile?: string | null;
+    email?: string | null;
+    country?: string;
+    defaultCurrency?: string;
+    roles: PartyRole[];
+  },
 ) {
   if (!input.roles.length) throw new Error("اختر دوراً واحداً على الأقل (عميل، مورد، ناقل...)");
   return db.transaction(async (tx) => {
@@ -17,12 +28,14 @@ export async function createParty(
       .insert(s.parties)
       .values({
         nameAr: input.nameAr.trim(),
+        nameEn: input.nameEn?.trim() || null,
         kind: input.kind ?? "company",
         vatNumber: input.vatNumber || null,
         crNumber: input.crNumber || null,
         mobile: input.mobile || null,
         email: input.email || null,
         country: input.country ?? "SA",
+        defaultCurrency: input.defaultCurrency ?? "SAR",
       })
       .returning();
     await tx.insert(s.partyRoles).values(input.roles.map((role) => ({ partyId: party.id, role })));

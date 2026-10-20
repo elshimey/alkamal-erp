@@ -214,6 +214,72 @@ export async function createInvoice(db: Db, input: InvoiceInput) {
   });
 }
 
+export interface ManualInvoiceInput {
+  customerId: number;
+  invoiceDate: string;
+  dueDate: string;
+  currencyCode: string;
+  reference: string;
+  notes?: string | null;
+  userId?: number;
+  lines: {
+    description: string;
+    quantity: number;
+    unitPrice: number;
+    discountPercent: number;
+    amount: number;
+    vatAmount: number;
+    vatRate: number;
+    taxCodeId: number | null;
+    accountId: number;
+    costCenterId: number | null;
+  }[];
+}
+
+/** فاتورة مسودة بسطور حرة (المستوردة من Excel أو نظام سابق)، بلا بوالص. */
+export async function createManualInvoiceTx(tx: Tx, input: ManualInvoiceInput) {
+  if (!input.lines.length) throw new Error("الفاتورة بلا بنود");
+  const [dup] = await tx.select({ number: s.salesInvoices.number }).from(s.salesInvoices).where(eq(s.salesInvoices.reference, input.reference));
+  if (dup) throw new Error(`الفاتورة ${input.reference} مستوردة مسبقاً برقم ${dup.number}`);
+  const rate = await rateOn(tx, input.currencyCode, input.invoiceDate);
+  const number = await nextDocumentNumber(tx, "sales_invoice", "INV", Number(input.invoiceDate.slice(0, 4)));
+  const [inv] = await tx
+    .insert(s.salesInvoices)
+    .values({
+      number,
+      reference: input.reference,
+      invoiceDate: input.invoiceDate,
+      dueDate: input.dueDate,
+      customerId: input.customerId,
+      currencyCode: input.currencyCode,
+      exchangeRate: String(rate),
+      notes: input.notes || null,
+      createdBy: input.userId,
+    })
+    .returning();
+  await insertLines(
+    tx,
+    inv.id,
+    input.lines.map((l) => ({
+      invoiceId: inv.id,
+      lineNo: 0,
+      kind: "manual" as const,
+      description: l.description,
+      quantity: String(l.quantity),
+      unitPrice: String(l.unitPrice),
+      discountPercent: l.discountPercent ? String(l.discountPercent) : null,
+      amount: String(l.amount),
+      vatRate: String(l.vatRate),
+      vatAmount: String(l.vatAmount),
+      taxCodeId: l.taxCodeId,
+      accountId: l.accountId,
+      costCenterId: l.costCenterId,
+    })),
+  );
+  await recomputeTotals(tx, inv.id);
+  return inv;
+}
+
 /** فوترة الكل: فاتورة لكل عميل وعملة بكل بوالصه المعتمدة غير المفوترة. */
 export async function createAllInvoices(db: Db, invoiceDate: string, userId?: number) {
   const queue = await invoicingQueue(db, invoiceDate);
@@ -410,7 +476,8 @@ export async function updateDraftInvoice(db: Db, id: number, patch: DraftInvoice
       const rate = await rateOn(tx, inv.currencyCode, invoiceDate);
       if (rate !== num(inv.exchangeRate)) {
         exchangeRate = String(rate);
-        await tx.delete(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, id));
+        // السطور الحرة بعملة الفاتورة أصلاً فلا تتأثر بسعر الصرف
+        await tx.delete(s.salesInvoiceLines).where(and(eq(s.salesInvoiceLines.invoiceId, id), sql`${s.salesInvoiceLines.kind} <> 'manual'`));
         await insertLines(tx, id, await buildLines(tx, waybillIds, inv.currencyCode, rate));
       }
     }
@@ -422,134 +489,8 @@ export async function updateDraftInvoice(db: Db, id: number, patch: DraftInvoice
   });
 }
 
-// ───────────── سندات القبض ─────────────
-
-export interface ReceiptInput {
-  receiptDate: string;
-  customerId: number;
-  amount: number;
-  currencyCode?: string;
-  exchangeRate?: number | null;
-  method: "cash" | "transfer" | "cheque" | "card";
-  cashAccountId: number;
-  collector?: string | null;
-  reference?: string | null;
-  notes?: string | null;
-  // فارغ = يُخصص تلقائياً على أقدم الفواتير المستحقة
-  invoiceId?: number | null;
-  post?: boolean;
-  userId?: number;
-}
-
-export async function createReceipt(db: Db, input: ReceiptInput) {
-  return db.transaction(async (tx) => {
-    const [cash] = await tx.select().from(s.accounts).where(eq(s.accounts.id, input.cashAccountId));
-    if (!cash || !cash.isPostable || !/^110[12]/.test(cash.code)) throw new Error("اختر صندوقاً أو حساب بنك تفصيلياً");
-    const currency = input.currencyCode ?? "SAR";
-    if (cash.currencyCode && cash.currencyCode !== currency) throw new Error(`الحساب ${cash.nameAr} بعملة ${cash.currencyCode}`);
-    const number = await nextDocumentNumber(tx, "receipt", "RC", Number(input.receiptDate.slice(0, 4)));
-    const [r] = await tx
-      .insert(s.receipts)
-      .values({
-        number,
-        receiptDate: input.receiptDate,
-        customerId: input.customerId,
-        amount: String(input.amount),
-        currencyCode: currency,
-        exchangeRate: String(input.exchangeRate ?? (await rateOn(tx, currency, input.receiptDate))),
-        method: input.method,
-        cashAccountId: cash.id,
-        collector: input.collector || null,
-        reference: input.reference || null,
-        notes: input.notes || null,
-        createdBy: input.userId,
-      })
-      .returning();
-    if (input.post) await postReceiptTx(tx, r.id, { invoiceId: input.invoiceId, userId: input.userId });
-    return r;
-  });
-}
-
-export async function postReceipt(db: Db, receiptId: number, opts: { invoiceId?: number | null; userId?: number } = {}) {
-  return db.transaction((tx) => postReceiptTx(tx, receiptId, opts));
-}
-
-async function postReceiptTx(tx: Tx, receiptId: number, opts: { invoiceId?: number | null; userId?: number }) {
-  const [r] = await tx.select().from(s.receipts).where(eq(s.receipts.id, receiptId)).for("update");
-  if (!r) throw new Error("السند غير موجود");
-  if (r.status === "posted") throw new Error(`السند ${r.number} مرحّل مسبقاً`);
-  const amount = num(r.amount);
-  const fx = { currencyCode: r.currencyCode, exchangeRate: num(r.exchangeRate) };
-  const entry = await createJournalEntryTx(tx, {
-    entryDate: r.receiptDate,
-    description: `سند قبض ${r.number}`,
-    source: { type: "receipt", id: r.id },
-    post: true,
-    userId: opts.userId,
-    lines: [
-      { accountId: r.cashAccountId, debit: amount, ...fx, partyId: r.customerId, description: `قبض ${r.number}` },
-      { accountId: await accountId(tx, SALES_ACCOUNTS.receivable), credit: amount, ...fx, partyId: r.customerId, description: `قبض ${r.number}` },
-    ],
-  });
-
-  // التخصيص: على الفاتورة المختارة، وإلا على أقدم الفواتير المستحقة بنفس العملة
-  const open = await tx
-    .select()
-    .from(s.salesInvoices)
-    .where(
-      and(
-        eq(s.salesInvoices.customerId, r.customerId),
-        eq(s.salesInvoices.status, "issued"),
-        eq(s.salesInvoices.currencyCode, r.currencyCode),
-        sql`${s.salesInvoices.paidAmount} < ${s.salesInvoices.total}`,
-        opts.invoiceId ? eq(s.salesInvoices.id, opts.invoiceId) : undefined,
-      ),
-    )
-    .orderBy(asc(s.salesInvoices.dueDate), asc(s.salesInvoices.id))
-    .for("update");
-  if (opts.invoiceId && !open.length) throw new Error("الفاتورة المختارة مسددة أو ليست لهذا العميل بنفس العملة");
-  let left = amount;
-  for (const inv of open) {
-    if (left <= 0) break;
-    const take = round2(Math.min(left, num(inv.total) - num(inv.paidAmount)));
-    await tx.insert(s.receiptAllocations).values({ receiptId: r.id, invoiceId: inv.id, amount: String(take) });
-    await tx.update(s.salesInvoices).set({ paidAmount: String(round2(num(inv.paidAmount) + take)), updatedAt: new Date() }).where(eq(s.salesInvoices.id, inv.id));
-    left = round2(left - take);
-  }
-  await tx.update(s.receipts).set({ status: "posted", journalEntryId: entry.id }).where(eq(s.receipts.id, r.id));
-  // الباقي (إن وُجد) يبقى رصيداً دائناً للعميل يُخصص لاحقاً
-  return { entry, unallocated: left };
-}
-
-/** إرجاع السند لمسودة: يلغي القيد والتخصيصات. */
-export async function revertReceipt(db: Db, receiptId: number) {
-  return db.transaction(async (tx) => {
-    const [r] = await tx.select().from(s.receipts).where(eq(s.receipts.id, receiptId)).for("update");
-    if (!r) throw new Error("السند غير موجود");
-    if (r.status !== "posted") throw new Error("السند ليس مرحّلاً");
-    const allocs = await tx.select().from(s.receiptAllocations).where(eq(s.receiptAllocations.receiptId, receiptId));
-    for (const a of allocs) {
-      await tx
-        .update(s.salesInvoices)
-        .set({ paidAmount: sql`${s.salesInvoices.paidAmount} - ${a.amount}`, updatedAt: new Date() })
-        .where(eq(s.salesInvoices.id, a.invoiceId));
-    }
-    await tx.delete(s.receiptAllocations).where(eq(s.receiptAllocations.receiptId, receiptId));
-    await tx.update(s.receipts).set({ status: "draft", journalEntryId: null }).where(eq(s.receipts.id, receiptId));
-    if (r.journalEntryId) await deleteEntryTx(tx, r.journalEntryId);
-  });
-}
-
-export async function deleteReceipt(db: Db, receiptId: number, opts: { reason: string; userId?: number }) {
-  if (!opts.reason.trim()) throw new Error("اكتب سبب الحذف");
-  return db.transaction(async (tx) => {
-    const [r] = await tx.select().from(s.receipts).where(eq(s.receipts.id, receiptId)).for("update");
-    if (!r) throw new Error("السند غير موجود");
-    if (r.status !== "draft") throw new Error("الحذف متاح للمسودة فقط");
-    await tx.insert(s.deletionLog).values({ entity: "receipt", entityId: String(receiptId), snapshot: r, reason: opts.reason.trim(), userId: opts.userId });
-    await tx.delete(s.receipts).where(eq(s.receipts.id, receiptId));
-  });
-}
+// سندات القبض في src/lib/receipts.ts
+export { createReceipt, deleteReceipt, postReceipt, revertReceipt, type ReceiptInput } from "@/lib/receipts";
 
 /** الصناديق والبنوك التفصيلية لقائمة الاختيار. */
 export async function cashAccounts(db: Db | Tx) {

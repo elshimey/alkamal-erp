@@ -195,6 +195,16 @@ export function TaxInvoiceDocument({
                   <Link href={`/waybills/${l.waybillId}`} className="hover:text-brand-700 print:no-underline">
                     خدمة نقل · {l.description}
                   </Link>
+                ) : l.kind === "manual" ? (
+                  <span>
+                    {l.description}
+                    {l.quantity != null && Number(l.quantity) !== 1 && (
+                      <span className="ltr-nums ms-1.5 text-xs text-gray-500">
+                        ({Number(l.quantity)} × {fmt(l.unitPrice ?? "0")}
+                        {Number(l.discountPercent ?? 0) > 0 && ` − ${Number(l.discountPercent)}%`})
+                      </span>
+                    )}
+                  </span>
                 ) : (
                   <span className="ps-3">↳ {l.description}</span>
                 )}

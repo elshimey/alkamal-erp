@@ -23,6 +23,11 @@ import { computePayrollLine } from "@/data/payroll";
 import { accountLedger, balanceSheet, costCenterProfit, incomeStatement, previousRange, trialBalance, vatReturn } from "@/lib/reports";
 import { alertCounts, financials, operations, periodRange, receivablesAging, vehicleProfit } from "@/lib/dashboard";
 import { createDriverExpense, createDriverLogin, driverBalances, driverBreakdowns, driverForUser, driverTrips, isDriverOnly, nextStages, recordDriverStage, reportBreakdown, startTrip, tripDetail } from "@/lib/driver-app";
+import { runImport } from "@/lib/importers";
+import { applyAdvance, customerCredit, postReceipt } from "@/lib/receipts";
+import { createNote, postNote, revertNote } from "@/lib/notes";
+import { listCustomers } from "@/lib/customers";
+import { IMPORT_SPECS } from "@/data/import-specs";
 import { addExpense, addFuel, approveWaybill, createWaybill, deleteWaybill, recordStage, rejectWaybill, revertWaybill } from "@/lib/waybills";
 
 const url = process.env.TEST_DATABASE_URL;
@@ -968,6 +973,203 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     it("معادلة السطر تطرح المخالفات من الصافي", () => {
       const base = { basic: 3000, housing: 0, otherAllowances: 0, absenceDays: 0, additions: 0, deductions: 0, commissions: 150, advanceDeduction: 0, isSaudi: false, gosiSubject: false, serviceYears: 1 };
       expect(computePayrollLine({ ...base, violations: 400 }).net).toBe(computePayrollLine(base).net - 400);
+    });
+  });
+  describe("الاستيراد من Excel", () => {
+    const rowsOf = (list: Record<string, string>[]) => list.map((values, i) => ({ row: i + 5, values }));
+    const line = (o: Record<string, string>) => ({ customer: "مؤسسة الاستيراد", currency: "SAR", invoiceDate: `${YEAR}-11-03`, description: "نقل", quantity: "1", unitPrice: "1000", account: "4101", ...o });
+
+    it("فواتير البيع: التحقق يكشف العميل غير الموجود، ثم يستورد مسودات بسطور حرة", async () => {
+      const spec = IMPORT_SPECS["sales-invoices"];
+      const rows = rowsOf([
+        line({ reference: "OLD-1", quantity: "2", unitPrice: "500", discount: "10" }),
+        line({ reference: "OLD-2", taxInclusive: "شامل الضريبة", unitPrice: "1150", costCenter: "أ ب ج 1234" }),
+        line({ reference: "OLD-2", description: "رسوم", unitPrice: "100", account: "4103", taxCode: "صفر", taxInclusive: "شامل الضريبة" }),
+        line({ reference: "OLD-3", account: "9999" }),
+      ]);
+      const before = await db.select().from(s.salesInvoices);
+
+      let report = await runImport(db, spec, rows, { dryRun: true });
+      expect(report).toMatchObject({ total: 3, ok: 0 });
+      expect(report.issues.every((i) => i.missing?.kind === "customer")).toBe(true);
+      expect(report.issues[1].rows).toEqual([6, 7]);
+
+      const customers = await runImport(db, IMPORT_SPECS.customers, rowsOf([{ nameAr: "مؤسسة الاستيراد", vatNumber: "300000000000003" }, { nameAr: "مؤسسة الاستيراد" }, { nameAr: "س", vatNumber: "123" }]), { dryRun: false });
+      expect(customers.ok).toBe(1);
+      expect(customers.issues.map((i) => i.message)).toEqual([expect.stringContaining("مسجل مسبقاً"), "الرقم الضريبي 15 رقماً"]);
+
+      report = await runImport(db, spec, rows, { dryRun: true });
+      expect(report.ok).toBe(2);
+      expect(report.issues).toEqual([{ rows: [8], message: "الحساب «9999» غير موجود في النظام", missing: { kind: "account", value: "9999" } }]);
+      // التحقق لا يكتب شيئاً
+      expect(await db.select().from(s.salesInvoices)).toHaveLength(before.length);
+
+      report = await runImport(db, spec, rows, { dryRun: false });
+      expect(report.ok).toBe(2);
+      const [inv1] = await db.select().from(s.salesInvoices).where(eq(s.salesInvoices.reference, "OLD-1"));
+      const n = (i: typeof inv1) => [Number(i.subtotal), Number(i.vatTotal), Number(i.total)];
+      expect(inv1).toMatchObject({ status: "draft", dueDate: `${YEAR}-12-03` });
+      expect(n(inv1)).toEqual([900, 135, 1035]);
+      const [inv2] = await db.select().from(s.salesInvoices).where(eq(s.salesInvoices.reference, "OLD-2"));
+      // شامل الضريبة: 1150 = 1000 + 150، والرسوم بنسبة صفر 100
+      expect(n(inv2)).toEqual([1100, 150, 1250]);
+      const lines2 = await db.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, inv2.id));
+      expect(lines2.map((l) => [l.kind, Number(l.amount), l.costCenterId])).toEqual([
+        ["manual", 1000, vehicleCc],
+        ["manual", 100, null],
+      ]);
+
+      // لا تُستورد الفاتورة مرتين
+      report = await runImport(db, spec, rows.slice(0, 1), { dryRun: true });
+      expect(report.issues[0].message).toContain("مستوردة مسبقاً");
+
+      // الإصدار يرحّل الإيراد على مركز تكلفة المركبة، وتغيير التاريخ لا يمس السطور الحرة
+      await updateDraftInvoice(db, inv2.id, { invoiceDate: `${YEAR}-11-04` });
+      expect(await db.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, inv2.id))).toHaveLength(2);
+      const entry = await issueInvoice(db, inv2.id);
+      const jl = await db.select().from(s.journalLines).where(eq(s.journalLines.entryId, entry.id));
+      expect(jl.find((l) => l.accountId === acc["4101"])).toMatchObject({ costCenterId: vehicleCc });
+      expect(Number(jl.find((l) => l.accountId === acc["4101"])!.credit)).toBe(1000);
+      expect(jl.reduce((t, l) => t + Number(l.debit), 0)).toBe(1250);
+    });
+
+    it("المركبات: حساب الأصل إلزامي ويجب أن يكون أصلاً، واللوحة لا تتكرر", async () => {
+      const report = await runImport(
+        db,
+        IMPORT_SPECS.vehicles,
+        rowsOf([
+          { plate: "ط ي ك 1", chassis: "IMP-1", assetAccount: "الشاحنات (الرؤوس)", ownership: "مستأجرة", year: "2021" },
+          { plate: "ط ي ك 2", chassis: "IMP-2" },
+          { plate: "ط ي ك 3", chassis: "IMP-3", assetAccount: "4101" },
+          { plate: "ط ي ك 1", chassis: "IMP-4", assetAccount: "120101" },
+          { plate: "ط ي ك 5", chassis: "IMP-5", assetAccount: "120102", year: "1900" },
+        ]),
+        { dryRun: false },
+      );
+      expect(report.ok).toBe(1);
+      expect(report.issues.map((i) => i.message)).toEqual([
+        "حساب الأصل مطلوب",
+        expect.stringContaining("ليس حساب أصل"),
+        "اللوحة ط ي ك 1 مسجلة مسبقاً",
+        "سنة الصنع: الحد الأدنى 1980",
+      ]);
+      const [v] = await db.select().from(s.vehicles).where(eq(s.vehicles.plate, "ط ي ك 1"));
+      expect(v).toMatchObject({ assetAccountId: acc["120101"], ownership: "leased", year: 2021 });
+      expect(v.costCenterId).toBeGreaterThan(0);
+    });
+  });
+  describe("سندات العملاء والإشعارات", () => {
+    let cust: number;
+    const invs: { id: number; total: number }[] = [];
+    const paid = async (id: number) => Number((await db.select().from(s.salesInvoices).where(eq(s.salesInvoices.id, id)))[0].paidAmount);
+    const base = { method: "transfer" as const, cashAccountId: 0 };
+
+    beforeAll(async () => {
+      base.cashAccountId = acc["110101"];
+      cust = (await createParty(db, { nameAr: "شركة السندات", roles: ["customer"] })).id;
+      for (const [ref, price, date] of [["RC-A", "1000", "12-01"], ["RC-B", "2000", "12-02"]] as const) {
+        await runImport(db, IMPORT_SPECS["sales-invoices"], [{ row: 5, values: { customer: "شركة السندات", reference: ref, currency: "SAR", invoiceDate: `${YEAR}-${date}`, description: "نقل", quantity: "1", unitPrice: price, account: "4101" } }], { dryRun: false });
+        const [i] = await db.select().from(s.salesInvoices).where(eq(s.salesInvoices.reference, ref));
+        await issueInvoice(db, i.id);
+        invs.push({ id: i.id, total: Number(i.total) });
+      }
+    });
+
+    it("دفعة عن فواتير بتوزيع يدوي وتعديل خصم: الفاتورة الأولى مسددة جزئياً والقيد متوازن", async () => {
+      expect(invs.map((i) => i.total)).toEqual([1150, 2300]);
+      await expect(createReceipt(db, { ...base, receiptDate: `${YEAR}-12-05`, customerId: cust, amount: 500, allocations: [{ invoiceId: invs[0].id, amount: 2000 }], post: true })).rejects.toThrow();
+      const r = await createReceipt(db, {
+        ...base,
+        receiptDate: `${YEAR}-12-05`,
+        customerId: cust,
+        amount: 990,
+        allocations: [{ invoiceId: invs[0].id, amount: 1000 }],
+        adjustments: [{ accountId: acc["4105"], amount: 10, description: "خصم مسموح به" }],
+        post: true,
+      });
+      expect(await paid(invs[0].id)).toBe(1000);
+      expect(await paid(invs[1].id)).toBe(0);
+      const [row] = await db.select().from(s.receipts).where(eq(s.receipts.id, r.id));
+      const jl = await db.select().from(s.journalLines).where(eq(s.journalLines.entryId, row.journalEntryId!));
+      expect(Number(jl.find((l) => l.accountId === acc["4105"])!.debit)).toBe(10);
+      expect(Number(jl.find((l) => l.accountId === acc["1103"])!.credit)).toBe(1000);
+      await revertReceipt(db, r.id);
+      expect(await paid(invs[0].id)).toBe(0);
+      expect(await db.select().from(s.receiptAdjustments).where(eq(s.receiptAdjustments.receiptId, r.id))).toHaveLength(0);
+      // إعادة الترحيل تستخدم التوزيع المحفوظ
+      await postReceipt(db, r.id);
+      expect(await paid(invs[0].id)).toBe(1000);
+    });
+
+    it("دفعة مقدمة ثم تطبيقها على فاتورة، واسترداد لا يتجاوز الرصيد الدائن", async () => {
+      const adv = await createReceipt(db, { ...base, kind: "advance", receiptDate: `${YEAR}-12-06`, customerId: cust, amount: 500, post: true });
+      expect((await customerCredit(db, cust)).advances).toBe(500);
+      await applyAdvance(db, adv.id, [{ invoiceId: invs[0].id, amount: 150 }], { date: `${YEAR}-12-07` });
+      expect(await paid(invs[0].id)).toBe(1150);
+      await applyAdvance(db, adv.id, [{ invoiceId: invs[1].id, amount: 100 }], { date: `${YEAR}-12-07` });
+      expect(await paid(invs[1].id)).toBe(100);
+      await expect(applyAdvance(db, adv.id, [{ invoiceId: invs[1].id, amount: 300 }], { date: `${YEAR}-12-07` })).rejects.toThrow();
+      const credit = await customerCredit(db, cust);
+      expect(credit.advances).toBe(250);
+      await expect(createReceipt(db, { ...base, kind: "refund", receiptDate: `${YEAR}-12-08`, customerId: cust, amount: 400, post: true })).rejects.toThrow();
+      await createReceipt(db, { ...base, kind: "refund", receiptDate: `${YEAR}-12-08`, customerId: cust, amount: 250, post: true });
+      expect((await customerCredit(db, cust)).available).toBe(0);
+      // إرجاع الدفعة المقدمة يلغي تطبيقاتها
+      await revertReceipt(db, adv.id);
+      expect(await paid(invs[0].id)).toBe(1000);
+      await postReceipt(db, adv.id);
+      await applyAdvance(db, adv.id, [{ invoiceId: invs[0].id, amount: 150 }, { invoiceId: invs[1].id, amount: 100 }], { date: `${YEAR}-12-07` });
+    });
+
+    it("إشعار دائن على فاتورة يخفض الإيراد والضريبة ورصيدها، والزائد رصيد دائن للعميل", async () => {
+      await expect(createNote(db, { kind: "sales_credit", noteDate: `${YEAR}-12-09`, partyId: cust, invoiceId: invs[1].id, reason: "", lines: [{ description: "خصم", accountId: acc["4101"], amount: 100, vatRate: 15 }] })).rejects.toThrow("سبب");
+      await expect(createNote(db, { kind: "sales_credit", noteDate: `${YEAR}-12-09`, partyId: cust, invoiceId: invs[1].id, reason: "خصم", lines: [{ description: "خصم", accountId: acc["6113"], amount: 100, vatRate: 15 }] })).rejects.toThrow("لا يصلح");
+      const n = await createNote(db, { kind: "sales_credit", noteDate: `${YEAR}-12-09`, partyId: cust, invoiceId: invs[1].id, reason: "مرتجع جزئي", lines: [{ description: "تخفيض أجرة", accountId: acc["4101"], amount: 2000, vatRate: 15 }], post: true });
+      expect([Number(n.subtotal), Number(n.vatTotal), Number(n.total)]).toEqual([2000, 300, 2300]);
+      // رصيد الفاتورة 2200 فيُطبق منها 2200 ويبقى 100 رصيداً دائناً
+      expect(await paid(invs[1].id)).toBe(2300);
+      const [row] = await db.select().from(s.adjustmentNotes).where(eq(s.adjustmentNotes.id, n.id));
+      expect(Number(row.appliedAmount)).toBe(2200);
+      const jl = await db.select().from(s.journalLines).where(eq(s.journalLines.entryId, row.journalEntryId!));
+      expect(Number(jl.find((l) => l.accountId === acc["4101"])!.debit)).toBe(2000);
+      expect(Number(jl.find((l) => l.accountId === acc["2109"])!.debit)).toBe(300);
+      expect(Number(jl.find((l) => l.accountId === acc["1103"])!.credit)).toBe(2300);
+      expect((await customerCredit(db, cust)).available).toBe(100);
+      const [c] = (await listCustomers(db, { today: `${YEAR}-12-31` })).filter((x) => x.p.id === cust);
+      expect(c).toMatchObject({ outstanding: 0, credit: 100, openCount: 0 });
+      await revertNote(db, n.id);
+      expect(await paid(invs[1].id)).toBe(100);
+      await postNote(db, n.id);
+    });
+
+    it("استيراد سندات القبض: يربط الفاتورة بالرقم المستورد ويرفض الفاتورة غير الموجودة", async () => {
+      await runImport(db, IMPORT_SPECS["sales-invoices"], [{ row: 5, values: { customer: "شركة السندات", reference: "RC-C", currency: "SAR", invoiceDate: `${YEAR}-12-10`, description: "نقل", quantity: "1", unitPrice: "100", account: "4101" } }], { dryRun: false });
+      const [c] = await db.select().from(s.salesInvoices).where(eq(s.salesInvoices.reference, "RC-C"));
+      await issueInvoice(db, c.id);
+      const row = (o: Record<string, string>, i: number) => ({ row: i + 5, values: { customer: "شركة السندات", receiptDate: "15/12/2026", amount: "115", cashAccount: "110101", ...o } });
+      const report = await runImport(db, IMPORT_SPECS.receipts, [row({ invoice: "RC-C", method: "نقد" }, 0), row({ invoice: "NOPE" }, 1), row({ kind: "دفعة مقدمة", cashAccount: "4101" }, 2), row({ kind: "دفعة مقدمة", amount: "50" }, 3)], { dryRun: false, post: true });
+      expect(report.ok).toBe(2);
+      expect(report.issues.map((i) => i.missing?.kind ?? i.message)).toEqual(["invoice", expect.stringContaining("ليس صندوقاً")]);
+      expect(await paid(c.id)).toBe(115);
+    });
+
+    it("إشعار مدين للمورد يخفض ذمته وضريبة المدخلات ورصيد فاتورته", async () => {
+      const sup = (await createParty(db, { nameAr: "مورد الإشعارات", roles: ["supplier"] })).id;
+      const pi = await createPurchaseInvoice(db, { supplierId: sup, supplierInvoiceNo: "N-1", invoiceDate: `${YEAR}-12-01`, lines: [{ accountId: acc["6113"], description: "لوازم", amount: 1000, vatRate: 15 }] });
+      await postPurchaseInvoice(db, pi.id);
+      const n = await createNote(db, { kind: "purchase_debit", noteDate: `${YEAR}-12-03`, partyId: sup, invoiceId: pi.id, reason: "مرتجع", lines: [{ description: "مرتجع لوازم", accountId: acc["6113"], amount: 200, vatRate: 15 }], post: true });
+      const [p] = await db.select().from(s.purchaseInvoices).where(eq(s.purchaseInvoices.id, pi.id));
+      expect(Number(p.paidAmount)).toBe(230);
+      const [row] = await db.select().from(s.adjustmentNotes).where(eq(s.adjustmentNotes.id, n.id));
+      const jl = await db.select().from(s.journalLines).where(eq(s.journalLines.entryId, row.journalEntryId!));
+      expect(Number(jl.find((l) => l.accountId === acc["2101"])!.debit)).toBe(230);
+      expect(Number(jl.find((l) => l.accountId === acc["1108"])!.credit)).toBe(30);
+      // إشعار دائن من المورد يزيد ذمته ولا يمس رصيد الفاتورة
+      const c = await createNote(db, { kind: "purchase_credit", noteDate: `${YEAR}-12-04`, partyId: sup, invoiceId: pi.id, reason: "فرق سعر", lines: [{ description: "فرق", accountId: acc["6113"], amount: 100, vatRate: 0 }], post: true });
+      const [cr] = await db.select().from(s.adjustmentNotes).where(eq(s.adjustmentNotes.id, c.id));
+      expect(Number(cr.appliedAmount)).toBe(0);
+      const jl2 = await db.select().from(s.journalLines).where(eq(s.journalLines.entryId, cr.journalEntryId!));
+      expect(Number(jl2.find((l) => l.accountId === acc["2101"])!.credit)).toBe(100);
     });
   });
 });

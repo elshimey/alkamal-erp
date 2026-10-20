@@ -377,6 +377,8 @@ export const vehicles = pgTable("vehicles", {
   customsDocument: text("customs_document"),
   odometer: integer("odometer").notNull().default(0),
   status: vehicleStatus("status").notNull().default("active"),
+  // حساب الأصل في الشجرة (الشاحنات، المقطورات، السيارات الخفيفة)
+  assetAccountId: ref("asset_account_id").references(() => accounts.id),
   // القرار 8: كل مركبة لها مركز تكلفة واحد يُنشأ تلقائياً عند إضافتها
   costCenterId: ref("cost_center_id")
     .notNull()
@@ -784,6 +786,8 @@ export const salesInvoices = pgTable(
     zatcaStatus: zatcaStatus("zatca_status").notNull().default("not_sent"),
     zatcaResponse: text("zatca_response"),
     notes: text("notes"),
+    // رقم الفاتورة في الملف المستورد أو النظام السابق؛ يمنع استيراد الفاتورة مرتين
+    reference: varchar("reference", { length: 60 }).unique(),
     journalEntryId: ref("journal_entry_id").references(() => journalEntries.id),
     issuedBy: ref("issued_by").references(() => users.id),
     issuedAt: timestamp("issued_at", { withTimezone: true }),
@@ -798,9 +802,9 @@ export const salesInvoices = pgTable(
   ],
 );
 
-export const invoiceLineKind = pgEnum("invoice_line_kind", ["waybill", "expense"]);
+export const invoiceLineKind = pgEnum("invoice_line_kind", ["waybill", "expense", "manual"]);
 
-// سطر لكل بوليصة (والبوليصة لا تُفوتر مرتين)، أو مصروف محمّل على العميل
+// سطر لكل بوليصة (والبوليصة لا تُفوتر مرتين)، أو مصروف محمّل على العميل، أو سطر حر (مستورد من Excel)
 export const salesInvoiceLines = pgTable(
   "sales_invoice_lines",
   {
@@ -811,6 +815,10 @@ export const salesInvoiceLines = pgTable(
     waybillId: ref("waybill_id").references(() => waybills.id),
     waybillExpenseId: ref("waybill_expense_id").references(() => waybillExpenses.id),
     description: text("description").notNull(),
+    // للسطر الحر: الكمية وسعر الوحدة كما وردا، والمبلغ بعد الخصم وقبل الضريبة
+    quantity: numeric("quantity", { precision: 14, scale: 3 }),
+    unitPrice: numeric("unit_price", { precision: 18, scale: 4 }),
+    discountPercent: numeric("discount_percent", { precision: 5, scale: 2 }),
     amount: money("amount").notNull(),
     taxCodeId: ref("tax_code_id").references(() => taxCodes.id),
     vatRate: numeric("vat_rate", { precision: 5, scale: 2 }).notNull().default("0"),
@@ -828,6 +836,7 @@ export const salesInvoiceLines = pgTable(
       sql`case ${t.kind}
         when 'waybill' then ${t.waybillId} is not null and ${t.waybillExpenseId} is null
         when 'expense' then ${t.waybillExpenseId} is not null
+        else ${t.waybillId} is null and ${t.waybillExpenseId} is null
       end`,
     ),
     check("sales_invoice_lines_amounts", sql`${t.amount} >= 0 and ${t.vatAmount} >= 0`),
@@ -836,12 +845,15 @@ export const salesInvoiceLines = pgTable(
 
 export const paymentMethod = pgEnum("payment_method", ["cash", "transfer", "cheque", "card"]);
 export const receiptStatus = pgEnum("receipt_status", ["draft", "posted"]);
+// دفعة عن فواتير، أو دفعة مقدمة (التزام للعميل 2112 حتى تُطبق على فواتيره)، أو استرداد لرصيده
+export const receiptKind = pgEnum("receipt_kind", ["invoice_payment", "advance", "refund"]);
 
 export const receipts = pgTable(
   "receipts",
   {
     id: id(),
     number: varchar("number", { length: 30 }).notNull().unique(),
+    kind: receiptKind("kind").notNull().default("invoice_payment"),
     receiptDate: date("receipt_date").notNull(),
     customerId: ref("customer_id").notNull().references(() => parties.id),
     amount: money("amount").notNull(),
@@ -854,6 +866,8 @@ export const receipts = pgTable(
     collector: text("collector"),
     reference: varchar("reference", { length: 60 }),
     notes: text("notes"),
+    // التوزيع المحدد على الفواتير والتعديلات (خصم مسموح، رسوم بنكية) قبل الترحيل؛ فارغ = الأقدم استحقاقاً
+    plan: jsonb("plan").$type<ReceiptPlan>(),
     status: receiptStatus("status").notNull().default("draft"),
     journalEntryId: ref("journal_entry_id").references(() => journalEntries.id),
     createdBy: ref("created_by").references(() => users.id),
@@ -872,12 +886,33 @@ export const receiptAllocations = pgTable(
     receiptId: ref("receipt_id").notNull().references(() => receipts.id, { onDelete: "cascade" }),
     invoiceId: ref("invoice_id").notNull().references(() => salesInvoices.id),
     amount: money("amount").notNull(),
+    // تطبيق الدفعة المقدمة على الفاتورة له قيده (مدين 2112 دائن العملاء)
+    entryId: ref("entry_id").references(() => journalEntries.id),
   },
   (t) => [
     primaryKey({ columns: [t.receiptId, t.invoiceId] }),
     index("receipt_allocations_invoice_idx").on(t.invoiceId),
     check("receipt_allocations_positive", sql`${t.amount} > 0`),
   ],
+);
+
+export interface ReceiptPlan {
+  invoiceId?: number;
+  allocations?: { invoiceId: number; amount: number }[];
+  adjustments?: { accountId: number; amount: number; description: string }[];
+}
+
+// تعديلات سند القبض: خصم مسموح به أو رسوم بنكية تُسوّى بها الفواتير مع المبلغ المستلم
+export const receiptAdjustments = pgTable(
+  "receipt_adjustments",
+  {
+    id: id(),
+    receiptId: ref("receipt_id").notNull().references(() => receipts.id, { onDelete: "cascade" }),
+    accountId: ref("account_id").notNull().references(() => accounts.id),
+    amount: money("amount").notNull(),
+    description: text("description").notNull(),
+  },
+  (t) => [index("receipt_adjustments_receipt_idx").on(t.receiptId), check("receipt_adjustments_positive", sql`${t.amount} > 0`)],
 );
 
 // ───────────── المشتريات والمصروفات ─────────────
@@ -934,6 +969,63 @@ export const purchaseInvoiceLines = pgTable(
     vatAmount: money("vat_amount").notNull().default("0"),
   },
   (t) => [index("purchase_invoice_lines_invoice_idx").on(t.invoiceId), check("purchase_invoice_lines_amounts", sql`${t.amount} > 0 and ${t.vatAmount} >= 0`)],
+);
+
+// ───────────── الإشعارات الدائنة والمدينة ─────────────
+
+// إشعار دائن للعميل (يخفض الفاتورة والإيراد والضريبة)، إشعار مدين للعميل (يزيدها)،
+// إشعار مدين للمورد (مرتجع أو خصم يخفض ذمته)، إشعار دائن من المورد (يزيدها)
+export const noteKind = pgEnum("note_kind", ["sales_credit", "sales_debit", "purchase_debit", "purchase_credit"]);
+
+export const adjustmentNotes = pgTable(
+  "adjustment_notes",
+  {
+    id: id(),
+    number: varchar("number", { length: 30 }).notNull().unique(),
+    kind: noteKind("kind").notNull(),
+    noteDate: date("note_date").notNull(),
+    partyId: ref("party_id").notNull().references(() => parties.id),
+    salesInvoiceId: ref("sales_invoice_id").references(() => salesInvoices.id),
+    purchaseInvoiceId: ref("purchase_invoice_id").references(() => purchaseInvoices.id),
+    // ذمة المورد حسب دوره (لإشعارات المشتريات)
+    payableAccountId: ref("payable_account_id").references(() => accounts.id),
+    currencyCode: varchar("currency_code", { length: 3 }).notNull().default("SAR").references(() => currencies.code),
+    exchangeRate: numeric("exchange_rate", { precision: 18, scale: 6 }).notNull().default("1"),
+    reason: text("reason").notNull(),
+    subtotal: money("subtotal").notNull().default("0"),
+    vatTotal: money("vat_total").notNull().default("0"),
+    total: money("total").notNull().default("0"),
+    // ما خُصم من رصيد الفاتورة المرتبطة عند الترحيل
+    appliedAmount: money("applied_amount").notNull().default("0"),
+    status: purchaseStatus("status").notNull().default("draft"),
+    journalEntryId: ref("journal_entry_id").references(() => journalEntries.id),
+    createdBy: ref("created_by").references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("adjustment_notes_party_idx").on(t.partyId, t.kind),
+    check(
+      "adjustment_notes_invoice",
+      sql`(${t.kind} in ('sales_credit', 'sales_debit') and ${t.purchaseInvoiceId} is null) or (${t.kind} in ('purchase_debit', 'purchase_credit') and ${t.salesInvoiceId} is null and ${t.payableAccountId} is not null)`,
+    ),
+  ],
+);
+
+export const adjustmentNoteLines = pgTable(
+  "adjustment_note_lines",
+  {
+    id: id(),
+    noteId: ref("note_id").notNull().references(() => adjustmentNotes.id, { onDelete: "cascade" }),
+    lineNo: smallint("line_no").notNull(),
+    description: text("description").notNull(),
+    accountId: ref("account_id").notNull().references(() => accounts.id),
+    costCenterId: ref("cost_center_id").references(() => costCenters.id),
+    amount: money("amount").notNull(),
+    vatRate: numeric("vat_rate", { precision: 5, scale: 2 }).notNull().default("0"),
+    vatAmount: money("vat_amount").notNull().default("0"),
+  },
+  (t) => [index("adjustment_note_lines_note_idx").on(t.noteId), check("adjustment_note_lines_amounts", sql`${t.amount} > 0 and ${t.vatAmount} >= 0`)],
 );
 
 export const directExpensePayer = pgEnum("direct_expense_payer", ["driver_custody", "cash"]);
