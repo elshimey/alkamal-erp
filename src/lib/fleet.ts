@@ -15,10 +15,11 @@ export interface VehicleInput {
   year?: number | null;
   ownership?: "owned" | "leased";
   odometer?: number;
+  assetAccountId?: number | null;
 }
 
 /** يضيف المركبة وينشئ مركز تكلفتها في معاملة واحدة (القرار 8). */
-export async function createVehicle(db: Db, input: VehicleInput) {
+export async function createVehicle(db: Db | Tx, input: VehicleInput) {
   const plate = input.plate.trim();
   return db.transaction(async (tx) => {
     const [cc] = await tx
@@ -36,6 +37,7 @@ export async function createVehicle(db: Db, input: VehicleInput) {
         year: input.year ?? null,
         ownership: input.ownership ?? "owned",
         odometer: input.odometer ?? 0,
+        assetAccountId: input.assetAccountId ?? null,
         costCenterId: cc.id,
       })
       .returning();

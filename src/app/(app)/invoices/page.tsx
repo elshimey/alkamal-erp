@@ -15,6 +15,7 @@ import { Icon } from "@/components/icons";
 import { RowCheck, SelectAll, SelectionTotal } from "@/components/row-selection";
 import { TaxInvoiceDocument } from "@/components/tax-invoice";
 import { Badge, EmptyRow, Input, PageHeader, Table, Td } from "@/components/ui";
+import { ImportLink } from "@/components/import-link";
 import { invoiceAll, invoiceCustomer, issue, issueMany, saveInvoiceSheet } from "./actions";
 
 const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -52,7 +53,9 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
 
   return (
     <>
-      <PageHeader title="فواتير المبيعات" description="فاتورة تجميعية لعدة بوالص معتمدة، سطر لكل بوليصة بمركز تكلفة مركبتها. الإيراد والضريبة يُقيدان عند الإصدار." />
+      <PageHeader title="فواتير المبيعات" description="فاتورة تجميعية لعدة بوالص معتمدة، سطر لكل بوليصة بمركز تكلفة مركبتها. الإيراد والضريبة يُقيدان عند الإصدار.">
+        {canCreate && <ImportLink entity="sales-invoices" />}
+      </PageHeader>
 
       {canCreate && queue.length > 0 && (
         <details className="group mb-5 rounded-2xl border border-brand-500/30 bg-brand-50/60 print:hidden">

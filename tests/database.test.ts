@@ -23,6 +23,8 @@ import { computePayrollLine } from "@/data/payroll";
 import { accountLedger, balanceSheet, costCenterProfit, incomeStatement, previousRange, trialBalance, vatReturn } from "@/lib/reports";
 import { alertCounts, financials, operations, periodRange, receivablesAging, vehicleProfit } from "@/lib/dashboard";
 import { createDriverExpense, createDriverLogin, driverBalances, driverBreakdowns, driverForUser, driverTrips, isDriverOnly, nextStages, recordDriverStage, reportBreakdown, startTrip, tripDetail } from "@/lib/driver-app";
+import { runImport } from "@/lib/importers";
+import { IMPORT_SPECS } from "@/data/import-specs";
 import { addExpense, addFuel, approveWaybill, createWaybill, deleteWaybill, recordStage, rejectWaybill, revertWaybill } from "@/lib/waybills";
 
 const url = process.env.TEST_DATABASE_URL;
@@ -968,6 +970,89 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     it("معادلة السطر تطرح المخالفات من الصافي", () => {
       const base = { basic: 3000, housing: 0, otherAllowances: 0, absenceDays: 0, additions: 0, deductions: 0, commissions: 150, advanceDeduction: 0, isSaudi: false, gosiSubject: false, serviceYears: 1 };
       expect(computePayrollLine({ ...base, violations: 400 }).net).toBe(computePayrollLine(base).net - 400);
+    });
+  });
+  describe("الاستيراد من Excel", () => {
+    const rowsOf = (list: Record<string, string>[]) => list.map((values, i) => ({ row: i + 5, values }));
+    const line = (o: Record<string, string>) => ({ customer: "مؤسسة الاستيراد", currency: "SAR", invoiceDate: `${YEAR}-11-03`, description: "نقل", quantity: "1", unitPrice: "1000", account: "4101", ...o });
+
+    it("فواتير البيع: التحقق يكشف العميل غير الموجود، ثم يستورد مسودات بسطور حرة", async () => {
+      const spec = IMPORT_SPECS["sales-invoices"];
+      const rows = rowsOf([
+        line({ reference: "OLD-1", quantity: "2", unitPrice: "500", discount: "10" }),
+        line({ reference: "OLD-2", taxInclusive: "شامل الضريبة", unitPrice: "1150", costCenter: "أ ب ج 1234" }),
+        line({ reference: "OLD-2", description: "رسوم", unitPrice: "100", account: "4103", taxCode: "صفر", taxInclusive: "شامل الضريبة" }),
+        line({ reference: "OLD-3", account: "9999" }),
+      ]);
+      const before = await db.select().from(s.salesInvoices);
+
+      let report = await runImport(db, spec, rows, { dryRun: true });
+      expect(report).toMatchObject({ total: 3, ok: 0 });
+      expect(report.issues.every((i) => i.missing?.kind === "customer")).toBe(true);
+      expect(report.issues[1].rows).toEqual([6, 7]);
+
+      const customers = await runImport(db, IMPORT_SPECS.customers, rowsOf([{ nameAr: "مؤسسة الاستيراد", vatNumber: "300000000000003" }, { nameAr: "مؤسسة الاستيراد" }, { nameAr: "س", vatNumber: "123" }]), { dryRun: false });
+      expect(customers.ok).toBe(1);
+      expect(customers.issues.map((i) => i.message)).toEqual([expect.stringContaining("مسجل مسبقاً"), "الرقم الضريبي 15 رقماً"]);
+
+      report = await runImport(db, spec, rows, { dryRun: true });
+      expect(report.ok).toBe(2);
+      expect(report.issues).toEqual([{ rows: [8], message: "الحساب «9999» غير موجود في النظام", missing: { kind: "account", value: "9999" } }]);
+      // التحقق لا يكتب شيئاً
+      expect(await db.select().from(s.salesInvoices)).toHaveLength(before.length);
+
+      report = await runImport(db, spec, rows, { dryRun: false });
+      expect(report.ok).toBe(2);
+      const [inv1] = await db.select().from(s.salesInvoices).where(eq(s.salesInvoices.reference, "OLD-1"));
+      const n = (i: typeof inv1) => [Number(i.subtotal), Number(i.vatTotal), Number(i.total)];
+      expect(inv1).toMatchObject({ status: "draft", dueDate: `${YEAR}-12-03` });
+      expect(n(inv1)).toEqual([900, 135, 1035]);
+      const [inv2] = await db.select().from(s.salesInvoices).where(eq(s.salesInvoices.reference, "OLD-2"));
+      // شامل الضريبة: 1150 = 1000 + 150، والرسوم بنسبة صفر 100
+      expect(n(inv2)).toEqual([1100, 150, 1250]);
+      const lines2 = await db.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, inv2.id));
+      expect(lines2.map((l) => [l.kind, Number(l.amount), l.costCenterId])).toEqual([
+        ["manual", 1000, vehicleCc],
+        ["manual", 100, null],
+      ]);
+
+      // لا تُستورد الفاتورة مرتين
+      report = await runImport(db, spec, rows.slice(0, 1), { dryRun: true });
+      expect(report.issues[0].message).toContain("مستوردة مسبقاً");
+
+      // الإصدار يرحّل الإيراد على مركز تكلفة المركبة، وتغيير التاريخ لا يمس السطور الحرة
+      await updateDraftInvoice(db, inv2.id, { invoiceDate: `${YEAR}-11-04` });
+      expect(await db.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, inv2.id))).toHaveLength(2);
+      const entry = await issueInvoice(db, inv2.id);
+      const jl = await db.select().from(s.journalLines).where(eq(s.journalLines.entryId, entry.id));
+      expect(jl.find((l) => l.accountId === acc["4101"])).toMatchObject({ costCenterId: vehicleCc });
+      expect(Number(jl.find((l) => l.accountId === acc["4101"])!.credit)).toBe(1000);
+      expect(jl.reduce((t, l) => t + Number(l.debit), 0)).toBe(1250);
+    });
+
+    it("المركبات: حساب الأصل إلزامي ويجب أن يكون أصلاً، واللوحة لا تتكرر", async () => {
+      const report = await runImport(
+        db,
+        IMPORT_SPECS.vehicles,
+        rowsOf([
+          { plate: "ط ي ك 1", chassis: "IMP-1", assetAccount: "الشاحنات (الرؤوس)", ownership: "مستأجرة", year: "2021" },
+          { plate: "ط ي ك 2", chassis: "IMP-2" },
+          { plate: "ط ي ك 3", chassis: "IMP-3", assetAccount: "4101" },
+          { plate: "ط ي ك 1", chassis: "IMP-4", assetAccount: "120101" },
+          { plate: "ط ي ك 5", chassis: "IMP-5", assetAccount: "120102", year: "1900" },
+        ]),
+        { dryRun: false },
+      );
+      expect(report.ok).toBe(1);
+      expect(report.issues.map((i) => i.message)).toEqual([
+        "حساب الأصل مطلوب",
+        expect.stringContaining("ليس حساب أصل"),
+        "اللوحة ط ي ك 1 مسجلة مسبقاً",
+        "سنة الصنع: الحد الأدنى 1980",
+      ]);
+      const [v] = await db.select().from(s.vehicles).where(eq(s.vehicles.plate, "ط ي ك 1"));
+      expect(v).toMatchObject({ assetAccountId: acc["120101"], ownership: "leased", year: 2021 });
+      expect(v.costCenterId).toBeGreaterThan(0);
     });
   });
 });

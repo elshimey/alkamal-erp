@@ -84,6 +84,9 @@ const PATHS = {
   close: <path d="M6 6l12 12M18 6 6 18" />,
   expand: <path d="M4 9V4h5m6 0h5v5m0 6v5h-5m-6 0H4v-5" />,
   wrench: <path d="M14.5 6.5a4 4 0 0 0 5 5L12 19a2.1 2.1 0 0 1-3-3l7.5-7.5a4 4 0 0 1-2-2Z" />,
+  upload: <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15" />,
+  download: <path d="M12 4v12m0 0-4.5-4.5M12 16l4.5-4.5M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15" />,
+  check: <path d="M5 12.5 10 17l9-10" />,
 } satisfies Record<string, ReactNode>;
 
 export type IconName = keyof typeof PATHS;

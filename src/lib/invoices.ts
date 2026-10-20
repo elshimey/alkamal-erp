@@ -214,6 +214,72 @@ export async function createInvoice(db: Db, input: InvoiceInput) {
   });
 }
 
+export interface ManualInvoiceInput {
+  customerId: number;
+  invoiceDate: string;
+  dueDate: string;
+  currencyCode: string;
+  reference: string;
+  notes?: string | null;
+  userId?: number;
+  lines: {
+    description: string;
+    quantity: number;
+    unitPrice: number;
+    discountPercent: number;
+    amount: number;
+    vatAmount: number;
+    vatRate: number;
+    taxCodeId: number | null;
+    accountId: number;
+    costCenterId: number | null;
+  }[];
+}
+
+/** فاتورة مسودة بسطور حرة (المستوردة من Excel أو نظام سابق)، بلا بوالص. */
+export async function createManualInvoiceTx(tx: Tx, input: ManualInvoiceInput) {
+  if (!input.lines.length) throw new Error("الفاتورة بلا بنود");
+  const [dup] = await tx.select({ number: s.salesInvoices.number }).from(s.salesInvoices).where(eq(s.salesInvoices.reference, input.reference));
+  if (dup) throw new Error(`الفاتورة ${input.reference} مستوردة مسبقاً برقم ${dup.number}`);
+  const rate = await rateOn(tx, input.currencyCode, input.invoiceDate);
+  const number = await nextDocumentNumber(tx, "sales_invoice", "INV", Number(input.invoiceDate.slice(0, 4)));
+  const [inv] = await tx
+    .insert(s.salesInvoices)
+    .values({
+      number,
+      reference: input.reference,
+      invoiceDate: input.invoiceDate,
+      dueDate: input.dueDate,
+      customerId: input.customerId,
+      currencyCode: input.currencyCode,
+      exchangeRate: String(rate),
+      notes: input.notes || null,
+      createdBy: input.userId,
+    })
+    .returning();
+  await insertLines(
+    tx,
+    inv.id,
+    input.lines.map((l) => ({
+      invoiceId: inv.id,
+      lineNo: 0,
+      kind: "manual" as const,
+      description: l.description,
+      quantity: String(l.quantity),
+      unitPrice: String(l.unitPrice),
+      discountPercent: l.discountPercent ? String(l.discountPercent) : null,
+      amount: String(l.amount),
+      vatRate: String(l.vatRate),
+      vatAmount: String(l.vatAmount),
+      taxCodeId: l.taxCodeId,
+      accountId: l.accountId,
+      costCenterId: l.costCenterId,
+    })),
+  );
+  await recomputeTotals(tx, inv.id);
+  return inv;
+}
+
 /** فوترة الكل: فاتورة لكل عميل وعملة بكل بوالصه المعتمدة غير المفوترة. */
 export async function createAllInvoices(db: Db, invoiceDate: string, userId?: number) {
   const queue = await invoicingQueue(db, invoiceDate);
@@ -410,7 +476,8 @@ export async function updateDraftInvoice(db: Db, id: number, patch: DraftInvoice
       const rate = await rateOn(tx, inv.currencyCode, invoiceDate);
       if (rate !== num(inv.exchangeRate)) {
         exchangeRate = String(rate);
-        await tx.delete(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, id));
+        // السطور الحرة بعملة الفاتورة أصلاً فلا تتأثر بسعر الصرف
+        await tx.delete(s.salesInvoiceLines).where(and(eq(s.salesInvoiceLines.invoiceId, id), sql`${s.salesInvoiceLines.kind} <> 'manual'`));
         await insertLines(tx, id, await buildLines(tx, waybillIds, inv.currencyCode, rate));
       }
     }

@@ -377,6 +377,8 @@ export const vehicles = pgTable("vehicles", {
   customsDocument: text("customs_document"),
   odometer: integer("odometer").notNull().default(0),
   status: vehicleStatus("status").notNull().default("active"),
+  // حساب الأصل في الشجرة (الشاحنات، المقطورات، السيارات الخفيفة)
+  assetAccountId: ref("asset_account_id").references(() => accounts.id),
   // القرار 8: كل مركبة لها مركز تكلفة واحد يُنشأ تلقائياً عند إضافتها
   costCenterId: ref("cost_center_id")
     .notNull()
@@ -784,6 +786,8 @@ export const salesInvoices = pgTable(
     zatcaStatus: zatcaStatus("zatca_status").notNull().default("not_sent"),
     zatcaResponse: text("zatca_response"),
     notes: text("notes"),
+    // رقم الفاتورة في الملف المستورد أو النظام السابق؛ يمنع استيراد الفاتورة مرتين
+    reference: varchar("reference", { length: 60 }).unique(),
     journalEntryId: ref("journal_entry_id").references(() => journalEntries.id),
     issuedBy: ref("issued_by").references(() => users.id),
     issuedAt: timestamp("issued_at", { withTimezone: true }),
@@ -798,9 +802,9 @@ export const salesInvoices = pgTable(
   ],
 );
 
-export const invoiceLineKind = pgEnum("invoice_line_kind", ["waybill", "expense"]);
+export const invoiceLineKind = pgEnum("invoice_line_kind", ["waybill", "expense", "manual"]);
 
-// سطر لكل بوليصة (والبوليصة لا تُفوتر مرتين)، أو مصروف محمّل على العميل
+// سطر لكل بوليصة (والبوليصة لا تُفوتر مرتين)، أو مصروف محمّل على العميل، أو سطر حر (مستورد من Excel)
 export const salesInvoiceLines = pgTable(
   "sales_invoice_lines",
   {
@@ -811,6 +815,10 @@ export const salesInvoiceLines = pgTable(
     waybillId: ref("waybill_id").references(() => waybills.id),
     waybillExpenseId: ref("waybill_expense_id").references(() => waybillExpenses.id),
     description: text("description").notNull(),
+    // للسطر الحر: الكمية وسعر الوحدة كما وردا، والمبلغ بعد الخصم وقبل الضريبة
+    quantity: numeric("quantity", { precision: 14, scale: 3 }),
+    unitPrice: numeric("unit_price", { precision: 18, scale: 4 }),
+    discountPercent: numeric("discount_percent", { precision: 5, scale: 2 }),
     amount: money("amount").notNull(),
     taxCodeId: ref("tax_code_id").references(() => taxCodes.id),
     vatRate: numeric("vat_rate", { precision: 5, scale: 2 }).notNull().default("0"),
@@ -828,6 +836,7 @@ export const salesInvoiceLines = pgTable(
       sql`case ${t.kind}
         when 'waybill' then ${t.waybillId} is not null and ${t.waybillExpenseId} is null
         when 'expense' then ${t.waybillExpenseId} is not null
+        else ${t.waybillId} is null and ${t.waybillExpenseId} is null
       end`,
     ),
     check("sales_invoice_lines_amounts", sql`${t.amount} >= 0 and ${t.vatAmount} >= 0`),
