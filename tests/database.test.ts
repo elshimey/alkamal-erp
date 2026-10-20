@@ -21,7 +21,7 @@ import { adjustPayrollLines, approvePayrollRun, bankTransferRows, createAdvance,
 import { createViolation, deleteViolation, listViolations, payViolations, revertViolationPayment, violationSummary } from "@/lib/violations";
 import { computePayrollLine } from "@/data/payroll";
 import { accountLedger, balanceSheet, costCenterProfit, incomeStatement, previousRange, trialBalance, vatReturn } from "@/lib/reports";
-import { alertCounts, financials, operations, periodRange, receivablesAging, vehicleProfit } from "@/lib/dashboard";
+import { alertCounts, cashFlow, financials, operations, periodRange, receivablesAging, vehicleProfit } from "@/lib/dashboard";
 import { createDriverExpense, createDriverLogin, driverBalances, driverBreakdowns, driverForUser, driverTrips, isDriverOnly, nextStages, recordDriverStage, reportBreakdown, startTrip, tripDetail } from "@/lib/driver-app";
 import { runImport } from "@/lib/importers";
 import { applyAdvance, customerCredit, postReceipt } from "@/lib/receipts";
@@ -1395,5 +1395,34 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(await onHand(db, tyre.id, wh1)).toBe(4);
       expect(await averageCost(db, tyre.id)).toBe(900);
     });
+  });
+
+  it("التدفق النقدي في اللوحة: يصنّف بالحساب المقابل ويتجاهل التحويل بين الصناديق", async () => {
+    const day = `${YEAR}-06-30`;
+    const find = (r: Awaited<ReturnType<typeof cashFlow>>, key: string) => r.sections.flatMap((x) => x.items).find((l) => l.key === key);
+    const before = await cashFlow(db, day, day);
+    const entry = (description: string, lines: { accountId: number; debit?: number; credit?: number }[]) => createJournalEntry(db, { entryDate: day, description, post: true, lines });
+    await entry("إيداع الشريك", [
+      { accountId: acc["110101"], debit: 1000 },
+      { accountId: acc["3104"], credit: 1000 },
+    ]);
+    await entry("مصروف نثري", [
+      { accountId: acc["6113"], debit: 200 },
+      { accountId: acc["110101"], credit: 200 },
+    ]);
+    await entry("تحويل بين الصناديق", [
+      { accountId: acc["110102"], debit: 300 },
+      { accountId: acc["110101"], credit: 300 },
+    ]);
+    const after = await cashFlow(db, day, day);
+    expect(after.opening).toBe(before.opening);
+    expect(after.closing - before.closing).toBe(800);
+    expect(after.inflow - before.inflow).toBe(1000);
+    expect(after.outflow - before.outflow).toBe(200);
+    expect((find(after, "owners")?.in ?? 0) - (find(before, "owners")?.in ?? 0)).toBe(1000);
+    expect(after.sections.find((x) => x.key === "financing")?.items.map((l) => l.key)).toContain("owners");
+    expect((find(after, "expenses")?.out ?? 0) - (find(before, "expenses")?.out ?? 0)).toBe(200);
+    const office = after.accounts.find((a) => a.code === "110102")!;
+    expect(office.in - (before.accounts.find((a) => a.code === "110102")?.in ?? 0)).toBe(300);
   });
 });

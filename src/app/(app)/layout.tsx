@@ -26,7 +26,7 @@ const FOOTER: NavGroup[] = [
 
 const NAV: { title: string; icon: IconName; items: { href: string; label: string; icon: IconName; entity?: Entity }[] }[] = [
   { title: "عام",
-    icon: "home", items: [{ href: "/", label: "الرئيسية", icon: "home" }] },
+    icon: "home", items: [{ href: "/", label: "لوحة القيادة", icon: "home" }] },
   {
     title: "الأسطول",
     icon: "truck",

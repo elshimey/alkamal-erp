@@ -5,26 +5,79 @@ import { PLAN_ALERT_DAYS } from "@/data/maintenance";
 // مؤشرات اللوحة الرئيسية. الأرقام المالية من القيود المرحّلة فقط (بالريال)،
 // وأرقام التشغيل من البوالص نفسها.
 
-export type PeriodKey = "month" | "quarter" | "year";
-export const PERIODS: Record<PeriodKey, string> = { month: "هذا الشهر", quarter: "هذا الربع", year: "هذه السنة" };
+export type PeriodKey = "week" | "month" | "quarter" | "year" | "custom";
+export const PERIODS: Record<Exclude<PeriodKey, "custom">, string> = {
+  week: "هذا الأسبوع",
+  month: "هذا الشهر",
+  quarter: "هذا الربع",
+  year: "هذه السنة",
+};
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const utc = (y: number, m: number, d = 1) => new Date(Date.UTC(y, m, d));
+const DAY = 86_400_000;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** بداية ونهاية الفترة الحالية والفترة المماثلة السابقة لها (حتى نفس اليوم للمقارنة العادلة). */
-export function periodRange(key: PeriodKey, today: string) {
+export function periodRange(key: Exclude<PeriodKey, "custom">, today: string) {
   const [y, m, d] = today.split("-").map(Number);
   const mi = m - 1;
+  if (key === "week") {
+    // الأسبوع يبدأ الأحد كما في السعودية، ويُقارن بنفس الأيام من الأسبوع الماضي
+    const t = utc(y, mi, d);
+    const from = new Date(t.getTime() - t.getUTCDay() * DAY);
+    return {
+      from: iso(from),
+      to: today,
+      prevFrom: iso(new Date(from.getTime() - 7 * DAY)),
+      prevTo: iso(new Date(t.getTime() - 7 * DAY)),
+    };
+  }
   const startMonth = key === "month" ? mi : key === "quarter" ? mi - (mi % 3) : 0;
   const span = key === "month" ? 1 : key === "quarter" ? 3 : 12;
   const from = utc(y, startMonth);
   const prevFrom = utc(y, startMonth - span);
   // نفس عدد الأيام المنقضية في الفترة السابقة
-  const elapsed = (utc(y, mi, d).getTime() - from.getTime()) / 86_400_000;
-  const prevEndCap = new Date(utc(y, startMonth).getTime() - 86_400_000);
-  const prevTo = new Date(Math.min(prevFrom.getTime() + elapsed * 86_400_000, prevEndCap.getTime()));
-  return { from: iso(from), to: today, prevFrom: iso(prevFrom), prevTo: iso(prevTo) };
+  const elapsed = (utc(y, mi, d).getTime() - from.getTime()) / DAY;
+  const prevEndCap = new Date(utc(y, startMonth).getTime() - DAY);
+  const prevTo = new Date(Math.min(prevFrom.getTime() + elapsed * DAY, prevEndCap.getTime()));
+  return {
+    from: iso(from),
+    to: today,
+    prevFrom: iso(prevFrom),
+    prevTo: iso(prevTo),
+  };
 }
+
+/** الفترة المختارة من رابط اللوحة: جاهزة (أسبوع/شهر/ربع/سنة) أو مخصصة من تاريخ إلى تاريخ. */
+export function resolvePeriod(sp: { p?: string; from?: string; to?: string }, today: string) {
+  const valid = (v?: string) => (v && ISO_DATE.test(v) && !Number.isNaN(Date.parse(v)) ? v : undefined);
+  const f = valid(sp.from);
+  const t = valid(sp.to);
+  if (sp.p === "custom" && (f || t)) {
+    let from = f ?? t!;
+    let to = t ?? today;
+    if (from > to) [from, to] = [to, from];
+    const days = Math.round((Date.parse(to) - Date.parse(from)) / DAY) + 1;
+    const prevTo = new Date(Date.parse(from) - DAY);
+    return {
+      key: "custom" as PeriodKey,
+      label: `${from} ← ${to}`,
+      from,
+      to,
+      prevFrom: iso(new Date(prevTo.getTime() - (days - 1) * DAY)),
+      prevTo: iso(prevTo),
+    };
+  }
+  const key = sp.p === "week" || sp.p === "quarter" || sp.p === "year" ? sp.p : "month";
+  return {
+    key: key as PeriodKey,
+    label: PERIODS[key],
+    ...periodRange(key, today),
+  };
+}
+
+export type Period = ReturnType<typeof resolvePeriod>;
 
 type Row = Record<string, unknown>;
 const rows = async <T extends Row>(db: Db, q: ReturnType<typeof sql>) => (await db.execute(q)) as unknown as T[];
@@ -51,33 +104,73 @@ function summarize(lines: { code: string; net: number }[]) {
   const revenue = sum("4");
   const directCost = -sum("5");
   const admin = -sum("6");
-  return { revenue: r2(revenue), directCost: r2(directCost), gross: r2(revenue - directCost), admin: r2(admin), net: r2(revenue - directCost - admin) };
+  return {
+    revenue: r2(revenue),
+    directCost: r2(directCost),
+    gross: r2(revenue - directCost),
+    admin: r2(admin),
+    net: r2(revenue - directCost - admin),
+  };
 }
 
 // تجميع تكاليف التشغيل في بنود يفهمها المدير
 const COST_GROUPS: { key: string; label: string; codes: string[] }[] = [
   { key: "fuel", label: "الديزل", codes: ["5101"] },
-  { key: "commission", label: "عمولات السائقين والمناديب", codes: ["5102", "5114"] },
+  {
+    key: "commission",
+    label: "عمولات السائقين والمناديب",
+    codes: ["5102", "5114"],
+  },
   { key: "salaries", label: "رواتب السائقين", codes: ["5103"] },
-  { key: "trip", label: "مصاريف الرحلات والحدود", codes: ["5104", "5106", "5112", "5113"] },
+  {
+    key: "trip",
+    label: "مصاريف الرحلات والحدود",
+    codes: ["5104", "5106", "5112", "5113"],
+  },
   { key: "carriers", label: "الناقلون الخارجيون", codes: ["5105"] },
   { key: "maintenance", label: "الصيانة والإطارات", codes: ["5107", "5108"] },
   { key: "fixed", label: "التأمين والإهلاك", codes: ["5109", "5110", "5111"] },
 ];
 
-export async function financials(db: Db, range: ReturnType<typeof periodRange>) {
+export async function financials(db: Db, range: { from: string; to: string; prevFrom: string; prevTo: string }) {
   const [cur, prev] = await Promise.all([incomeByAccount(db, range.from, range.to), incomeByAccount(db, range.prevFrom, range.prevTo)]);
-  const costs = COST_GROUPS.map((g) => ({ ...g, amount: r2(-cur.filter((l) => g.codes.includes(l.code)).reduce((a, l) => a + l.net, 0)) }));
+  const costs = COST_GROUPS.map((g) => ({
+    ...g,
+    amount: r2(-cur.filter((l) => g.codes.includes(l.code)).reduce((a, l) => a + l.net, 0)),
+  }));
   const known = new Set(COST_GROUPS.flatMap((g) => g.codes));
   const other = -cur.filter((l) => l.code.startsWith("5") && !known.has(l.code)).reduce((a, l) => a + l.net, 0);
-  if (Math.abs(other) > 0.005) costs.push({ key: "other", label: "تكاليف أخرى", codes: [], amount: other });
+  if (Math.abs(other) > 0.005)
+    costs.push({
+      key: "other",
+      label: "تكاليف أخرى",
+      codes: [],
+      amount: other,
+    });
   const revenue = [
-    { label: "النقل الداخلي", amount: cur.find((l) => l.code === "4101")?.net ?? 0 },
-    { label: "النقل الدولي", amount: cur.find((l) => l.code === "4102")?.net ?? 0 },
-    { label: "رسوم ومصاريف مستردة", amount: cur.filter((l) => ["4103", "4104", "4105"].includes(l.code)).reduce((a, l) => a + l.net, 0) },
-    { label: "إيرادات أخرى", amount: cur.filter((l) => l.code.startsWith("42")).reduce((a, l) => a + l.net, 0) },
+    {
+      label: "النقل الداخلي",
+      amount: cur.find((l) => l.code === "4101")?.net ?? 0,
+    },
+    {
+      label: "النقل الدولي",
+      amount: cur.find((l) => l.code === "4102")?.net ?? 0,
+    },
+    {
+      label: "رسوم ومصاريف مستردة",
+      amount: cur.filter((l) => ["4103", "4104", "4105"].includes(l.code)).reduce((a, l) => a + l.net, 0),
+    },
+    {
+      label: "إيرادات أخرى",
+      amount: cur.filter((l) => l.code.startsWith("42")).reduce((a, l) => a + l.net, 0),
+    },
   ];
-  return { current: summarize(cur), previous: summarize(prev), costs: costs.filter((c) => Math.abs(c.amount) > 0.005), revenue };
+  return {
+    current: summarize(cur),
+    previous: summarize(prev),
+    costs: costs.filter((c) => Math.abs(c.amount) > 0.005),
+    revenue,
+  };
 }
 
 /** الإيراد والتكلفة لآخر 6 أشهر. */
@@ -117,7 +210,13 @@ export async function balances(db: Db, today: string) {
         join accounts a on a.id = l.account_id
         where e.entry_date <= ${today}`,
   );
-  return { cash: n(r.cash), receivable: n(r.receivable), custody: n(r.custody), payable: n(r.payable), vat: n(r.vat) };
+  return {
+    cash: n(r.cash),
+    receivable: n(r.receivable),
+    custody: n(r.custody),
+    payable: n(r.payable),
+    vat: n(r.vat),
+  };
 }
 
 /** أعمار الذمم من الفواتير المصدرة غير المسددة (بالريال). */
@@ -133,7 +232,13 @@ export async function receivablesAging(db: Db, today: string) {
         from (select due_date, (total - paid_amount) * exchange_rate as o from sales_invoices
               where status = 'issued' and paid_amount < total) x`,
   );
-  return { overdueCount: n(r.overdue_count), notDue: n(r.not_due), d30: n(r.d30), d60: n(r.d60), d90: n(r.d90) };
+  return {
+    overdueCount: n(r.overdue_count),
+    notDue: n(r.not_due),
+    d30: n(r.d30),
+    d60: n(r.d60),
+    d90: n(r.d90),
+  };
 }
 
 export async function collected(db: Db, from: string, to: string) {
@@ -151,10 +256,7 @@ const sarRate = sql`(case when w.currency_code = 'SAR' then 1 else coalesce((sel
 
 /** قيمة الرحلات المنفذة التي لم تصدر فاتورتها بعد (مسلّمة أو معتمدة). */
 export async function unbilledTrips(db: Db) {
-  const [r] = await rows<{ value: string; count: number }>(
-    db,
-    sql`select coalesce(sum(w.amount * ${sarRate}), 0) as value, count(*)::int as count from waybills w where w.status in ('delivered', 'approved')`,
-  );
+  const [r] = await rows<{ value: string; count: number }>(db, sql`select coalesce(sum(w.amount * ${sarRate}), 0) as value, count(*)::int as count from waybills w where w.status in ('delivered', 'approved')`);
   return { value: n(r.value), count: n(r.count) };
 }
 
@@ -219,7 +321,16 @@ export async function vehicleProfit(db: Db, from: string, to: string) {
     .map((x) => {
       const revenue = n(x.revenue);
       const cost = n(x.cost);
-      return { id: n(x.cc_id), vehicleId: x.vehicle_id ? n(x.vehicle_id) : null, name: x.plate ?? x.name_ar, revenue, cost, fuel: n(x.fuel), trips: n(x.trips), profit: revenue - cost };
+      return {
+        id: n(x.cc_id),
+        vehicleId: x.vehicle_id ? n(x.vehicle_id) : null,
+        name: x.plate ?? x.name_ar,
+        revenue,
+        cost,
+        fuel: n(x.fuel),
+        trips: n(x.trips),
+        profit: revenue - cost,
+      };
     })
     .sort((a, b) => b.profit - a.profit);
 }
@@ -259,7 +370,13 @@ export async function topCustomers(db: Db, from: string, to: string) {
         where i.status = 'issued' and i.invoice_date between ${from} and ${to}
         group by p.id, p.name_ar order by revenue desc limit 5`,
   );
-  return r.map((x) => ({ id: n(x.id), name: x.name_ar, revenue: n(x.revenue), invoices: n(x.invoices), outstanding: n(x.outstanding) }));
+  return r.map((x) => ({
+    id: n(x.id),
+    name: x.name_ar,
+    revenue: n(x.revenue),
+    invoices: n(x.invoices),
+    outstanding: n(x.outstanding),
+  }));
 }
 
 /** ما يحتاج تدخلاً الآن، مرتباً بالأهمية. */
@@ -324,5 +441,211 @@ export async function alertCounts(db: Db, today: string) {
     pendingAdvances: n(r.pending_advances),
     unpaidViolations: n(r.unpaid_violations),
     lastMonthRunMissing: n(r.last_month_run) === 0,
+  };
+}
+
+// ───────────── التدفق النقدي ─────────────
+
+const CASH = sql.raw("(a.code like '1101%' or a.code like '1102%')");
+
+export const CASH_SECTIONS = {
+  operating: "الأنشطة التشغيلية",
+  investing: "الأنشطة الاستثمارية",
+  financing: "الأنشطة التمويلية",
+} as const;
+type CashSection = keyof typeof CASH_SECTIONS;
+
+/** يصنّف الحساب المقابل للنقدية في القيد إلى بند تدفق نقدي (IAS 7). */
+function cashCategory(code: string): {
+  key: string;
+  label: string;
+  section: CashSection;
+  href?: string;
+} {
+  const c4 = code.slice(0, 4);
+  const is = (...codes: string[]) => codes.includes(c4);
+  if (is("1103", "2112") || code.startsWith("4"))
+    return {
+      key: "customers",
+      label: "التحصيل من العملاء",
+      section: "operating",
+      href: "/receipts",
+    };
+  if (is("2101", "2102", "2103", "2104", "2105", "1111", "1110"))
+    return {
+      key: "suppliers",
+      label: "الموردون والناقلون والورش",
+      section: "operating",
+      href: "/payments",
+    };
+  if (is("2107", "2115", "1107", "2203"))
+    return {
+      key: "payroll",
+      label: "الرواتب والسلف",
+      section: "operating",
+      href: "/payroll",
+    };
+  if (is("1105", "1106"))
+    return {
+      key: "custody",
+      label: "عهد السائقين وبطاقات الوقود",
+      section: "operating",
+      href: "/expenses",
+    };
+  if (is("1108", "2109", "2110", "2111"))
+    return {
+      key: "tax",
+      label: "الضريبة والزكاة",
+      section: "operating",
+      href: "/reports/vat",
+    };
+  if (is("2108"))
+    return {
+      key: "violations",
+      label: "المخالفات المرورية",
+      section: "operating",
+      href: "/violations",
+    };
+  if (code.startsWith("5") || code.startsWith("6") || code.startsWith("7") || is("1109", "2106"))
+    return {
+      key: "expenses",
+      label: "مصروفات مدفوعة مباشرة",
+      section: "operating",
+      href: "/expenses",
+    };
+  if (code.startsWith("12"))
+    return {
+      key: "assets",
+      label: "شراء وبيع الأصول الثابتة",
+      section: "investing",
+      href: "/fixed-assets",
+    };
+  if (is("2113", "2114", "2201", "2202"))
+    return {
+      key: "loans",
+      label: "القروض وعقود الإيجار",
+      section: "financing",
+    };
+  if (code.startsWith("31")) return { key: "owners", label: "الشركاء ورأس المال", section: "financing" };
+  return {
+    key: "other",
+    label: "حركات أخرى",
+    section: "operating",
+    href: "/journal",
+  };
+}
+
+/**
+ * التدفق النقدي للفترة من القيود المرحّلة: كل قيد يمس الصناديق أو البنوك يُصنَّف بحساباته المقابلة،
+ * فالطرف الدائن المقابل داخل للنقدية والمدين خارج منها. التحويل بين الصناديق والبنوك لا يظهر لأنه لا يغيّر الرصيد.
+ */
+export async function cashFlow(db: Db, from: string, to: string) {
+  const days = Math.round((Date.parse(to) - Date.parse(from)) / DAY) + 1;
+  const bucket = sql.raw(days <= 35 ? "'YYYY-MM-DD'" : "'YYYY-MM'");
+  const [counter, accounts, series] = await Promise.all([
+    rows<{ code: string; cash_in: string; cash_out: string }>(
+      db,
+      sql`select a.code, sum(greatest(l.credit_base - l.debit_base, 0)) as cash_in, sum(greatest(l.debit_base - l.credit_base, 0)) as cash_out
+          from journal_lines l
+          join accounts a on a.id = l.account_id
+          where not ${CASH} and l.entry_id in (
+            select l.entry_id from journal_lines l
+            join journal_entries e on e.id = l.entry_id and e.status = 'posted'
+            join accounts a on a.id = l.account_id
+            where e.entry_date between ${from} and ${to} and ${CASH})
+          group by a.code`,
+    ),
+    rows<{
+      id: number;
+      code: string;
+      name: string;
+      opening: string;
+      cash_in: string;
+      cash_out: string;
+    }>(
+      db,
+      sql`select a.id, a.code, a.name_ar as name,
+            coalesce(sum(l.debit_base - l.credit_base) filter (where e.entry_date < ${from}), 0) as opening,
+            coalesce(sum(l.debit_base) filter (where e.entry_date between ${from} and ${to}), 0) as cash_in,
+            coalesce(sum(l.credit_base) filter (where e.entry_date between ${from} and ${to}), 0) as cash_out
+          from journal_lines l
+          join journal_entries e on e.id = l.entry_id and e.status = 'posted'
+          join accounts a on a.id = l.account_id
+          where ${CASH} and e.entry_date <= ${to}
+          group by a.id, a.code, a.name_ar
+          order by a.code`,
+    ),
+    rows<{ k: string; cash_in: string; cash_out: string }>(
+      db,
+      sql`select to_char(e.entry_date, ${bucket}) as k,
+            sum(greatest(l.debit_base - l.credit_base, 0)) as cash_in, sum(greatest(l.credit_base - l.debit_base, 0)) as cash_out
+          from journal_lines l
+          join journal_entries e on e.id = l.entry_id and e.status = 'posted'
+          join accounts a on a.id = l.account_id
+          where ${CASH} and e.entry_date between ${from} and ${to}
+            and exists (select 1 from journal_lines x join accounts xa on xa.id = x.account_id
+                        where x.entry_id = e.id and not (xa.code like '1101%' or xa.code like '1102%'))
+          group by 1 order by 1`,
+    ),
+  ]);
+
+  const groups = new Map<
+    string,
+    {
+      key: string;
+      label: string;
+      section: CashSection;
+      href?: string;
+      in: number;
+      out: number;
+    }
+  >();
+  for (const r of counter) {
+    const cat = cashCategory(r.code);
+    const g = groups.get(cat.key) ?? { ...cat, in: 0, out: 0 };
+    g.in += n(r.cash_in);
+    g.out += n(r.cash_out);
+    groups.set(cat.key, g);
+  }
+  const lines = [...groups.values()].map((g) => ({ ...g, in: r2(g.in), out: r2(g.out), net: r2(g.in - g.out) })).filter((g) => g.in || g.out);
+  const sections = (Object.keys(CASH_SECTIONS) as CashSection[]).map((k) => {
+    const items = lines.filter((l) => l.section === k).sort((a, b) => Math.abs(b.net) - Math.abs(a.net));
+    return {
+      key: k,
+      label: CASH_SECTIONS[k],
+      items,
+      net: r2(items.reduce((t, l) => t + l.net, 0)),
+    };
+  });
+  const accts = accounts.map((a) => {
+    const opening = n(a.opening);
+    return {
+      id: a.id,
+      code: a.code,
+      name: a.name,
+      opening: r2(opening),
+      in: r2(n(a.cash_in)),
+      out: r2(n(a.cash_out)),
+      closing: r2(opening + n(a.cash_in) - n(a.cash_out)),
+    };
+  });
+  const opening = r2(accts.reduce((t, a) => t + a.opening, 0));
+  const closing = r2(accts.reduce((t, a) => t + a.closing, 0));
+  const inflow = r2(lines.reduce((t, l) => t + l.in, 0));
+  const outflow = r2(lines.reduce((t, l) => t + l.out, 0));
+  return {
+    opening,
+    closing,
+    inflow,
+    outflow,
+    net: r2(closing - opening),
+    sections,
+    accounts: accts,
+    series: series.map((s) => ({
+      key: s.k,
+      in: n(s.cash_in),
+      out: n(s.cash_out),
+    })),
+    daily: days <= 35,
   };
 }
