@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
+import { receivePurchaseTx, removeMovesTx } from "@/lib/inventory";
 import { createJournalEntryTx, deleteEntryTx, nextDocumentNumber, type LineInput } from "@/lib/ledger";
 import { lineVat, round2 } from "@/lib/invoice-posting";
 import { rateOn } from "@/lib/waybills";
@@ -56,7 +57,11 @@ async function inputVatTaxCode(db: Db | Tx) {
 // ───────────── فواتير الموردين ─────────────
 
 export interface PurchaseLineInput {
-  accountId: number;
+  // يكفي الصنف: المخزني يُقيد على حساب المخزون ويدخل المستودع، والخدمة على حسابها
+  accountId?: number | null;
+  productId?: number | null;
+  warehouseId?: number | null;
+  quantity?: number | null;
   vehicleId?: number | null;
   costCenterId?: number | null;
   description: string;
@@ -123,7 +128,13 @@ export async function createPurchaseInvoice(db: Db, input: PurchaseInvoiceInput)
     const lines: (typeof s.purchaseInvoiceLines.$inferInsert)[] = [];
     for (const [i, l] of input.lines.entries()) {
       if (!(l.amount > 0)) throw new Error(`السطر ${i + 1}: المبلغ إلزامي`);
-      const account = await expenseAccount(tx, l.accountId);
+      const [product] = l.productId ? await tx.select().from(s.products).where(eq(s.products.id, l.productId)) : [];
+      if (l.productId && !product) throw new Error(`السطر ${i + 1}: الصنف غير موجود`);
+      const stock = product?.kind === "stock";
+      if (stock && (!l.warehouseId || !((l.quantity ?? 0) > 0))) throw new Error(`السطر ${i + 1}: حدد المستودع والكمية للصنف ${product.nameAr}`);
+      const accountId = stock ? product.accountId : (l.accountId ?? product?.accountId);
+      if (!accountId) throw new Error(`السطر ${i + 1}: اختر الحساب أو الصنف`);
+      const account = stock ? (await tx.select().from(s.accounts).where(eq(s.accounts.id, accountId)))[0] : await expenseAccount(tx, accountId);
       const costCenterId = l.costCenterId ?? (await vehicleCostCenter(tx, l.vehicleId));
       if (account.requiresCostCenter && !costCenterId) throw new Error(`السطر ${i + 1}: الحساب ${account.nameAr} يتطلب مركبة أو مركز تكلفة`);
       const vatRate = l.vatRate ?? 0;
@@ -133,7 +144,10 @@ export async function createPurchaseInvoice(db: Db, input: PurchaseInvoiceInput)
         lineNo: i + 1,
         accountId: account.id,
         costCenterId,
-        description: l.description.trim() || account.nameAr,
+        productId: product?.id ?? null,
+        warehouseId: stock ? l.warehouseId! : null,
+        quantity: l.quantity ? String(l.quantity) : null,
+        description: l.description.trim() || product?.nameAr || account.nameAr,
         amount: String(round2(l.amount)),
         taxCodeId: vatRate ? (tax?.id ?? null) : null,
         vatRate: String(vatRate),
@@ -193,6 +207,7 @@ async function postPurchaseInvoiceTx(tx: Tx, id: number, userId?: number) {
       tax?.id ?? null,
     ),
   });
+  await receivePurchaseTx(tx, inv);
   await tx.update(s.purchaseInvoices).set({ status: "posted", journalEntryId: entry.id, postedBy: userId ?? null, updatedAt: new Date() }).where(eq(s.purchaseInvoices.id, id));
   return entry;
 }
@@ -206,6 +221,7 @@ export async function revertPurchaseInvoice(db: Db, id: number) {
     const inv = await lockPurchase(tx, id);
     if (inv.status !== "posted") throw new Error("الفاتورة ليست مرحّلة");
     if (num(inv.paidAmount) > 0) throw new Error("على الفاتورة سندات صرف مخصصة؛ أرجع السندات أولاً");
+    await removeMovesTx(tx, "purchase_invoice", id);
     await tx.update(s.purchaseInvoices).set({ status: "draft", journalEntryId: null, postedBy: null, updatedAt: new Date() }).where(eq(s.purchaseInvoices.id, id));
     if (inv.journalEntryId) await deleteEntryTx(tx, inv.journalEntryId);
   });

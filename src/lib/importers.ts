@@ -8,8 +8,10 @@ import { createParty } from "@/lib/operations";
 import { createReceipt } from "@/lib/receipts";
 import { createManualEntry } from "@/lib/journal";
 import { createViolation } from "@/lib/violations";
+import { createProduct, openingStockTx } from "@/lib/inventory";
 import { lineVat, round2 } from "@/lib/invoice-posting";
 import { errorMessage } from "@/lib/errors";
+import { todayRiyadh } from "@/lib/dates";
 import { normText, type ImportIssue, type ImportReport } from "@/lib/import-match";
 import type { TemplateList } from "@/lib/xlsx";
 
@@ -349,6 +351,33 @@ async function importViolation(tx: Tx, [r]: ImportRow[], ctx: Ctx, userId?: numb
   return violation.number;
 }
 
+async function importProduct(tx: Tx, [r]: ImportRow[], _ctx: Ctx, userId?: number) {
+  const kind = /خدم|service/.test(normText(v(r, "kind"))) ? "service" : "stock";
+  const num = (key: string, label: string) => (v(r, key) ? toNumber(v(r, key), label, { min: 0 }) : 0);
+  const product = await createProduct(tx, {
+    code: v(r, "code") || null,
+    nameAr: required(r, "nameAr", "اسم الصنف"),
+    kind,
+    category: v(r, "category") || null,
+    unit: v(r, "unit") || null,
+    barcode: v(r, "barcode") || null,
+    purchasePrice: num("purchasePrice", "سعر الشراء"),
+    salePrice: num("salePrice", "سعر البيع"),
+    reorderLevel: num("reorderLevel", "حد إعادة الطلب"),
+  });
+  const qty = num("openingQty", "الرصيد الافتتاحي");
+  if (qty > 0) {
+    if (kind !== "stock") throw new Error("الخدمة بلا رصيد مخزني");
+    const whName = v(r, "warehouse");
+    const whs = await tx.select().from(s.warehouses);
+    const wh = whName ? whs.find((w) => normText(w.nameAr) === normText(whName) || w.code === whName) : whs[0];
+    if (!wh) throw new Error(`المستودع «${whName}» غير موجود`);
+    if (!(Number(product.purchasePrice) > 0)) throw new Error("اكتب سعر الشراء لتقييم الرصيد الافتتاحي");
+    await openingStockTx(tx, { productId: product.id, warehouseId: wh.id, quantity: qty, unitCost: Number(product.purchasePrice), date: todayRiyadh(), userId });
+  }
+  return product.code;
+}
+
 const IMPORTERS: Record<string, (tx: Tx, rows: ImportRow[], ctx: Ctx, userId?: number) => Promise<string>> = {
   "sales-invoices": importInvoice,
   vehicles: importVehicle,
@@ -356,6 +385,7 @@ const IMPORTERS: Record<string, (tx: Tx, rows: ImportRow[], ctx: Ctx, userId?: n
   receipts: importReceipt,
   "journal-entries": importJournal,
   violations: importViolation,
+  products: importProduct,
 };
 
 /** يجمع الصفوف في سجلات: بنود الفاتورة الواحدة معاً (ولو تباعدت في الملف)، وغيرها صف لكل سجل. */
@@ -452,6 +482,12 @@ export async function templateLists(db: Db, spec: ImportSpec): Promise<TemplateL
     return [
       { title: "المركبات (اللوحة)", values: ctx.vehicles.map((x) => x.plate).sort(), field: "vehicle" },
       { title: "على من", values: ["السائق", "الشركة"], field: "chargeTo" },
+    ];
+  }
+  if (spec.entity === "products") {
+    return [
+      { title: "النوع", values: ["مخزني", "خدمة"], field: "kind" },
+      { title: "المستودعات", values: (await db.select({ n: s.warehouses.nameAr }).from(s.warehouses)).map((w) => w.n), field: "warehouse" },
     ];
   }
   if (spec.entity === "customers") {

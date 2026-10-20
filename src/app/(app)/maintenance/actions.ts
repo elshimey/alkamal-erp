@@ -74,14 +74,18 @@ export async function saveLines(orderId: number, rows: SheetRow[]) {
   await requirePermission("maintenance", "update");
   // كل صف بند مستقل؛ الصف المخالف يبقى في الشيت مع سبب رفضه
   const result = await saveSheetRows(rows, async (r) => {
+    const productId = r.productId ? Number(r.productId) : null;
+    const warehouseId = r.warehouseId ? Number(r.warehouseId) : null;
     const unitPrice = cell.number(r.unitPrice, "السعر");
-    if (unitPrice == null) throw new Error("السعر إلزامي");
+    if (unitPrice == null && !warehouseId) throw new Error("السعر إلزامي (أو اختر الصنف والمستودع للصرف من المخزون)");
     await addMaintenanceLines(db, orderId, [
       {
         kind: r.kind === "labor" ? "labor" : "part",
-        description: cell.required(r.description, "الوصف"),
+        productId,
+        warehouseId,
+        description: cell.text(r.description) ?? "",
         quantity: cell.number(r.quantity, "الكمية") ?? 1,
-        unitPrice,
+        unitPrice: unitPrice ?? 0,
         vatRate: r.vat === "0" ? 0 : 15,
       },
     ]);

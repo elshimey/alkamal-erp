@@ -38,8 +38,12 @@ export async function savePurchases(rows: SheetRow[]): Promise<SheetResult> {
         const r = rows[i];
         const amount = cell.number(r.amount, `السطر ${k + 1}: المبلغ`);
         if (!amount) throw new Error(`السطر ${k + 1}: المبلغ إلزامي`);
+        if (!r.accountId && !r.productId) throw new Error(`السطر ${k + 1}: اختر الحساب أو الصنف`);
         return {
-          accountId: Number(cell.required(r.accountId, "الحساب")),
+          accountId: r.accountId ? Number(r.accountId) : null,
+          productId: r.productId ? Number(r.productId) : null,
+          warehouseId: r.warehouseId ? Number(r.warehouseId) : null,
+          quantity: cell.number(r.quantity, `السطر ${k + 1}: الكمية`),
           vehicleId: r.vehicleId ? Number(r.vehicleId) : null,
           description: cell.text(r.description) ?? "",
           amount,

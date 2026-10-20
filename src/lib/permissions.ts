@@ -47,6 +47,7 @@ export const ENTITIES = {
   expenses: { label: "المصروفات", module: "purchases" },
   payments: { label: "سندات الصرف", module: "purchases" },
   fuel_cards: { label: "بطاقات الوقود", module: "purchases" },
+  inventory: { label: "المخزون والأصناف", module: "purchases" },
   accounts: { label: "شجرة الحسابات", module: "accounting" },
   cost_centers: { label: "مراكز التكلفة", module: "accounting" },
   journal_entries: { label: "القيود", module: "accounting" },

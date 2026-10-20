@@ -181,6 +181,31 @@ export const IMPORT_SPECS: Record<string, ImportSpec> = {
       { violationDate: "2026-10-12", vehicle: "أ ب ج 1234", reference: "TR-55120", violationType: "تجاوز السرعة", location: "طريق الرياض الدمام", amount: "300", chargeTo: "السائق", notes: "" },
     ],
   },
+  products: {
+    entity: "products",
+    title: "استيراد الأصناف والخدمات",
+    noun: "صنف",
+    permission: "inventory",
+    backHref: "/products",
+    intro: "كل صف صنف. الرصيد الافتتاحي (اختياري) يُدخل الكمية للمستودع بتكلفة الشراء مقابل الأرباح المبقاة.",
+    fields: [
+      { key: "code", label: "رمز الصنف", en: "SKU", rule: "لا يتكرر؛ فارغ = يُولّد تلقائياً", aliases: ["الرمز", "sku", "code", "رقم الصنف"], width: 14 },
+      { key: "nameAr", label: "اسم الصنف", en: "Name", required: true, aliases: ["الاسم", "name", "اسم المنتج"], width: 28 },
+      { key: "kind", label: "النوع", en: "Type", rule: "مخزني أو خدمة، فارغ = مخزني", aliases: ["type"], width: 10 },
+      { key: "category", label: "الفئة", en: "Category", aliases: ["التصنيف", "category"], width: 16 },
+      { key: "unit", label: "الوحدة", en: "Unit", rule: "فارغ = حبة", aliases: ["unit"], width: 9 },
+      { key: "purchasePrice", label: "سعر الشراء", en: "Purchase price", aliases: ["التكلفة", "cost", "purchase price"], width: 12 },
+      { key: "salePrice", label: "سعر البيع", en: "Selling price", aliases: ["selling price", "price"], width: 12 },
+      { key: "reorderLevel", label: "حد إعادة الطلب", en: "Reorder level", aliases: ["الحد الأدنى"], width: 12 },
+      { key: "barcode", label: "الباركود", en: "Barcode", width: 16 },
+      { key: "openingQty", label: "الرصيد الافتتاحي", en: "Opening quantity", rule: "للصنف المخزني؛ بتكلفة سعر الشراء", aliases: ["الكمية", "quantity"], width: 12 },
+      { key: "warehouse", label: "المستودع", en: "Warehouse", rule: "فارغ = المستودع الرئيسي", width: 16 },
+    ],
+    samples: [
+      { code: "OIL-15W40", nameAr: "زيت محرك 15W40 – جالون", kind: "مخزني", category: "زيوت", unit: "جالون", purchasePrice: "85", salePrice: "", reorderLevel: "10", barcode: "", openingQty: "40", warehouse: "المستودع الرئيسي" },
+      { code: "", nameAr: "شغل يد ميكانيكا", kind: "خدمة", category: "خدمات الورشة", unit: "ساعة", purchasePrice: "", salePrice: "", reorderLevel: "", barcode: "", openingQty: "", warehouse: "" },
+    ],
+  },
 };
 
 export const DELETE_ROW_MARK = "احذف الصف";

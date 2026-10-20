@@ -75,6 +75,15 @@ const NAV: { title: string; icon: IconName; items: { href: string; label: string
     ],
   },
   {
+    title: "المخزون",
+    icon: "wrench",
+    items: [
+      { href: "/products", label: "الأصناف والخدمات", icon: "list", entity: "inventory" },
+      { href: "/inventory", label: "المخزون والمستودعات", icon: "building", entity: "inventory" },
+      { href: "/inventory/docs", label: "التسويات والتحويل والجرد", icon: "exchange", entity: "inventory" },
+    ],
+  },
+  {
     title: "المحاسبة",
     icon: "ledger",
     items: [

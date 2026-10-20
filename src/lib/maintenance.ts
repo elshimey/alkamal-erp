@@ -1,6 +1,7 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
+import { averageCost, issueForMaintenanceTx, onHand, removeMovesTx } from "@/lib/inventory";
 import { createJournalEntryTx, deleteEntryTx, nextDocumentNumber } from "@/lib/ledger";
 import { lineVat, round2 } from "@/lib/invoice-posting";
 import { payableAccountFor, purchasePostingLines } from "@/lib/purchases";
@@ -9,7 +10,7 @@ import { PURCHASE_ACCOUNTS } from "@/data/purchases";
 import { BREAKDOWN_APPROVAL_LIMIT, maintenanceAccountCode, type MaintenanceType } from "@/data/maintenance";
 
 // الصيانة: طلب العطل ← أمر الصيانة ببنوده ← قيد على مركز تكلفة المركبة عند الاعتماد.
-// القطع تُشترى مباشرة على الأمر بلا مخزون (قرار أحمد): دائنة للورشة الخارجية أو للصندوق.
+// القطع تُشترى على الأمر (دائنة للورشة الخارجية أو للصندوق)، أو تُصرف من المستودع بمتوسط التكلفة.
 
 const num = (v: string | null | undefined) => (v == null ? 0 : Number(v));
 
@@ -187,6 +188,9 @@ async function recomputeTotals(tx: Tx, orderId: number) {
 
 export interface MaintenanceLineInput {
   kind: "part" | "labor";
+  // قطعة من المستودع: تُصرف بمتوسط التكلفة عند الاعتماد ولا تدخل في ذمة الورشة
+  productId?: number | null;
+  warehouseId?: number | null;
   description: string;
   quantity?: number;
   unitPrice: number;
@@ -201,25 +205,40 @@ export async function addMaintenanceLines(db: Db, orderId: number, lines: Mainte
       .select({ max: sql<number>`coalesce(max(${s.maintenanceLines.lineNo}), 0)::int` })
       .from(s.maintenanceLines)
       .where(eq(s.maintenanceLines.orderId, orderId));
-    const rows = lines.map((l, i) => {
-      if (!l.description.trim()) throw new Error("وصف البند إلزامي");
+    const rows = [];
+    for (const [i, l] of lines.entries()) {
+      const [product] = l.productId ? await tx.select().from(s.products).where(eq(s.products.id, l.productId)) : [];
+      if (l.productId && !product) throw new Error("الصنف غير موجود");
+      const fromStock = product?.kind === "stock";
+      if (fromStock && !l.warehouseId) throw new Error(`حدد المستودع الذي تُصرف منه ${product.nameAr}`);
+      const description = l.description.trim() || product?.nameAr || "";
+      if (!description) throw new Error("وصف البند إلزامي");
       const qty = l.quantity ?? 1;
       if (!(qty > 0)) throw new Error("الكمية يجب أن تكون أكبر من صفر");
+      if (fromStock) {
+        const have = await onHand(tx, product.id, l.warehouseId!);
+        if (have < qty) throw new Error(`رصيد ${product.nameAr} في المستودع ${have} ${product.unit} فقط`);
+        const unit = await averageCost(tx, product.id);
+        rows.push({ orderId, lineNo: max + i + 1, kind: "part" as const, productId: product.id, warehouseId: l.warehouseId!, description, quantity: String(qty), unitPrice: String(unit), amount: String(round2(qty * unit)), vatRate: "0", vatAmount: "0" });
+        continue;
+      }
       const vatRate = l.vatRate ?? 15;
       if (vatRate !== 0 && vatRate !== 15) throw new Error("الضريبة 15% أو بدون");
       const amount = round2(qty * l.unitPrice);
-      return {
+      rows.push({
         orderId,
         lineNo: max + i + 1,
         kind: l.kind,
-        description: l.description.trim(),
+        productId: product?.id ?? null,
+        warehouseId: null,
+        description,
         quantity: String(qty),
         unitPrice: String(l.unitPrice),
         amount: String(amount),
         vatRate: String(vatRate),
         vatAmount: String(lineVat(amount, vatRate)),
-      };
-    });
+      });
+    }
     if (rows.length) await tx.insert(s.maintenanceLines).values(rows);
     await recomputeTotals(tx, orderId);
   });
@@ -242,9 +261,13 @@ export async function approveMaintenanceOrder(db: Db, orderId: number, opts: { c
     const lines = await tx.select().from(s.maintenanceLines).where(eq(s.maintenanceLines.orderId, orderId)).orderBy(asc(s.maintenanceLines.lineNo));
     if (!lines.length) throw new Error("أضف بنداً واحداً على الأقل (قطعة غيار أو شغل يد)");
     const [vehicle] = await tx.select().from(s.vehicles).where(eq(s.vehicles.id, o.vehicleId));
-    let creditAccountId: number;
+    const stockLines = lines.filter((l) => l.warehouseId);
+    const bought = lines.filter((l) => !l.warehouseId);
+    let creditAccountId = 0;
     const cashAccountId = opts.cashAccountId ?? o.cashAccountId;
-    if (o.provider === "external") {
+    if (!bought.length) {
+      // كل البنود من المستودع: لا ذمة ولا صندوق
+    } else if (o.provider === "external") {
       creditAccountId = await payableAccountFor(tx, o.supplierId!);
     } else {
       const [cash] = cashAccountId ? await tx.select().from(s.accounts).where(eq(s.accounts.id, cashAccountId)) : [];
@@ -253,13 +276,10 @@ export async function approveMaintenanceOrder(db: Db, orderId: number, opts: { c
     }
     const costAccountId = await accountIdByCode(tx, maintenanceAccountCode(o.type));
     const [tax] = await tx.select().from(s.taxCodes).where(eq(s.taxCodes.code, "VAT15-IN"));
-    const entry = await createJournalEntryTx(tx, {
-      entryDate: o.orderDate,
-      description: `أمر صيانة ${o.number} – ${vehicle.plate}`,
-      source: { type: "maintenance_order", id: o.id },
-      post: true,
-      userId: opts.userId,
-      lines: purchasePostingLines(
+    const issued = await issueForMaintenanceTx(tx, o, stockLines, { accountId: costAccountId, costCenterId: vehicle.costCenterId, plate: vehicle.plate });
+    if (stockLines.length) await recomputeTotals(tx, orderId);
+    const purchased = bought.length
+      ? purchasePostingLines(
         {
           number: o.number,
           supplierInvoiceNo: o.supplierInvoiceNo ?? o.number,
@@ -268,10 +288,19 @@ export async function approveMaintenanceOrder(db: Db, orderId: number, opts: { c
           exchangeRate: num(o.exchangeRate),
           payableAccountId: creditAccountId,
         },
-        lines.map((l) => ({ accountId: costAccountId, costCenterId: vehicle.costCenterId, description: `${l.description} – ${vehicle.plate}`, amount: num(l.amount), vatAmount: num(l.vatAmount) })),
-        await accountIdByCode(tx, PURCHASE_ACCOUNTS.inputVat),
-        tax?.id ?? null,
-      ),
+          bought.map((l) => ({ accountId: costAccountId, costCenterId: vehicle.costCenterId, description: `${l.description} – ${vehicle.plate}`, amount: num(l.amount), vatAmount: num(l.vatAmount) })),
+          await accountIdByCode(tx, PURCHASE_ACCOUNTS.inputVat),
+          tax?.id ?? null,
+        )
+      : [];
+    if (!issued.length && !purchased.length) throw new Error("قيمة الأمر صفر");
+    const entry = await createJournalEntryTx(tx, {
+      entryDate: o.orderDate,
+      description: `أمر صيانة ${o.number} – ${vehicle.plate}`,
+      source: { type: "maintenance_order", id: o.id },
+      post: true,
+      userId: opts.userId,
+      lines: [...purchased, ...issued],
     });
     await tx
       .update(s.maintenanceOrders)
@@ -314,6 +343,7 @@ export async function revertMaintenanceOrder(db: Db, orderId: number) {
   return db.transaction(async (tx) => {
     const o = await lockOrder(tx, orderId);
     if (o.status !== "approved") throw new Error("الإرجاع متاح للأمر المعتمد غير المكتمل");
+    await removeMovesTx(tx, "maintenance_order", orderId);
     await tx.update(s.maintenanceOrders).set({ status: "draft", journalEntryId: null, approvedBy: null }).where(eq(s.maintenanceOrders.id, orderId));
     if (o.journalEntryId) await deleteEntryTx(tx, o.journalEntryId);
     const [{ open }] = await tx
