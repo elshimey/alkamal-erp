@@ -3,7 +3,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
+import { closeYear, openYear, reopenYear, setPeriodStatus, yearClosePreview } from "@/lib/periods";
 import postgres from "postgres";
 import * as s from "@/db/schema";
 import type { Db } from "@/db";
@@ -29,6 +30,8 @@ import { createNote, postNote, revertNote } from "@/lib/notes";
 import { listCustomers } from "@/lib/customers";
 import { createManualEntry, deleteManualEntry, listEntries, postManualEntry, reclassCandidates, reclassify, revertManualEntry, updateManualEntry } from "@/lib/journal";
 import { createCashAccount, listCashAccounts, normalizeIban } from "@/lib/banks";
+import * as rec from "@/lib/reconciliation";
+import { accrualPreview, postRevenueAccrual, undoRevenueAccrual } from "@/lib/accruals";
 import { averageCost, createProduct, createStockDoc, createWarehouse, listProducts, onHand, postStockDoc, productCard, revertStockDoc, saveCount, stockDoc } from "@/lib/inventory";
 import { createAsset, deleteAsset, disposeAsset, listAssets, runDepreciation, undoLastDepreciation } from "@/lib/assets";
 import { IMPORT_SPECS } from "@/data/import-specs";
@@ -532,6 +535,46 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       [row] = await db.select().from(s.salesInvoices).where(eq(s.salesInvoices.id, inv.id));
       expect(Number(row.paidAmount)).toBe(2131.15);
       await expect(createReceipt(db, { receiptDate: `${YEAR}-09-06`, customerId, amount: 1, method: "cash", cashAccountId: acc["1101"] })).rejects.toThrow("تفصيلياً");
+    });
+
+    it("فروق العملة المحققة: تحصيل فاتورة بالدينار بسعر أعلى ربح على 7103، وإرجاع السند يلغيه", async () => {
+      const [inv] = await db
+        .insert(s.salesInvoices)
+        .values({ number: `INV-FX-1`, invoiceDate: `${YEAR}-09-01`, dueDate: `${YEAR}-09-30`, customerId, currencyCode: "KWD", exchangeRate: "12.2", subtotal: "1000", total: "1000", status: "issued" })
+        .returning();
+      const r = await createReceipt(db, { receiptDate: `${YEAR}-09-10`, customerId, amount: 1000, currencyCode: "KWD", exchangeRate: 12.3, method: "transfer", cashAccountId: acc["110103"], invoiceId: inv.id, post: true });
+      const [rc] = await db.select().from(s.receipts).where(eq(s.receipts.id, r.id));
+      const lines = await db
+        .select({ code: s.accounts.code, d: s.journalLines.debitBase, c: s.journalLines.creditBase })
+        .from(s.journalLines)
+        .innerJoin(s.accounts, eq(s.accounts.id, s.journalLines.accountId))
+        .where(eq(s.journalLines.entryId, rc.journalEntryId!));
+      const fx = lines.find((l) => l.code === "7103");
+      expect(Number(fx?.c)).toBe(100);
+      const ar = lines.filter((l) => l.code === "1103").reduce((t, l) => t + Number(l.c) - Number(l.d), 0);
+      expect(Math.round(ar * 100) / 100).toBe(12200);
+      await revertReceipt(db, r.id);
+      await db.delete(s.salesInvoices).where(eq(s.salesInvoices.id, inv.id));
+    });
+
+    it("إقفال السنة: ينقل صافي الربح إلى 3103، ويقفل الأشهر، ولا يظهر في قائمة الدخل، ويُلغى", async () => {
+      const Y = YEAR - 3;
+      await openYear(db, Y);
+      const [other] = await db.select().from(s.accounts).where(eq(s.accounts.code, "4201"));
+      await createJournalEntry(db, { entryDate: `${Y}-06-01`, post: true, lines: [{ accountId: acc["110101"], debit: 500 }, { accountId: other.id, credit: 500 }] });
+      expect(await yearClosePreview(db, Y)).toEqual({ lines: 1, net: 500 });
+      const { net } = await closeYear(db, Y);
+      expect(net).toBe(500);
+      const inc = await incomeStatement(db, { from: `${Y}-01-01`, to: `${Y}-12-31` });
+      expect(inc.current.net).toBe(500);
+      const bs = await balanceSheet(db, `${Y}-12-31`);
+      expect(bs.sections.find((x) => x.key === "equity")?.lines.find((l) => l.code === "3103")?.amount).toBe(500);
+      expect(bs.difference).toBe(0);
+      await expect(createJournalEntry(db, { entryDate: `${Y}-07-01`, post: true, lines: [{ accountId: acc["110101"], debit: 1 }, { accountId: other.id, credit: 1 }] })).rejects.toThrow();
+      const [p] = await db.select().from(s.fiscalPeriods).where(and(eq(s.fiscalPeriods.year, Y), eq(s.fiscalPeriods.month, 3)));
+      await expect(setPeriodStatus(db, p.id, "open")).rejects.toThrow("ألغِ إقفال السنة");
+      await reopenYear(db, Y);
+      expect(await yearClosePreview(db, Y)).toEqual({ lines: 1, net: 500 });
     });
 
     it("اللوحة الرئيسية: الإيراد والتكلفة من القيود المرحّلة، وربحية المركبة، وأعمار الذمم والتنبيهات", async () => {
@@ -1580,5 +1623,77 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     expect(await hr.driverLeaveOn(db, drv.id, `${YEAR}-12-15`)).toBeNull();
     const dash = await hr.hrDashboard(db, `${YEAR}-12-12`);
     expect(dash.onLeave.map((x) => x.name)).toContain("سائق المقدم");
+  });
+
+  it("التسوية البنكية: تأشير الحركات حتى يصبح الفرق صفراً، والرسوم تُرحّل وتُطابق، والمعلق ينتقل للتسوية التالية", async () => {
+    const bank = await createCashAccount(db, { kind: "bank", nameAr: "الراجحي – تسوية", bankName: "مصرف الراجحي", openingBalance: 10000, openingDate: `${YEAR}-11-01` });
+    const move = (date: string, amount: number) =>
+      createJournalEntry(db, {
+        entryDate: date,
+        description: amount > 0 ? "إيداع" : "شيك",
+        post: true,
+        lines: [
+          { accountId: bank.id, ...(amount > 0 ? { debit: amount } : { credit: -amount }) },
+          { accountId: acc["110101"], ...(amount > 0 ? { credit: amount } : { debit: -amount }) },
+        ],
+      });
+    await move(`${YEAR}-11-10`, 3000);
+    await move(`${YEAR}-11-20`, -1200);
+    await move(`${YEAR}-11-28`, -500); // شيك لم يُصرف بعد
+    await move(`${YEAR}-12-05`, 700); // بعد تاريخ الكشف
+    const r = await rec.createReconciliation(db, { accountId: bank.id, statementDate: `${YEAR}-11-30`, statementBalance: 11775 });
+    await expect(rec.createReconciliation(db, { accountId: bank.id, statementDate: `${YEAR}-11-30`, statementBalance: 1 })).rejects.toThrow("مسودة");
+    let v = (await rec.reconciliationView(db, r.id))!;
+    expect(v.items.length).toBe(4); // الافتتاحي + 3 حركات حتى 30 نوفمبر
+    expect(v.book).toBe(11300);
+    const ids = v.items.filter((i) => i.description !== "شيك" || i.credit === 1200).map((i) => i.id);
+    await rec.saveCleared(db, r.id, ids);
+    v = (await rec.reconciliationView(db, r.id))!;
+    let t = rec.reconciliationTotals(v);
+    expect([t.cleared, t.difference, t.outstandingOut]).toEqual([11800, -25, 500]);
+    await expect(rec.completeReconciliation(db, r.id)).rejects.toThrow("الفرق");
+    await rec.addBankAdjustment(db, r.id, { kind: "fee", amount: 25 });
+    v = (await rec.reconciliationView(db, r.id))!;
+    t = rec.reconciliationTotals(v);
+    expect(t.difference).toBe(0);
+    await rec.completeReconciliation(db, r.id);
+    // التسوية التالية: المطابق سابقاً رصيد ثابت، والشيك المعلق والإيداع الجديد للتأشير
+    const r2 = await rec.createReconciliation(db, { accountId: bank.id, statementDate: `${YEAR}-12-31`, statementBalance: 11975 });
+    v = (await rec.reconciliationView(db, r2.id))!;
+    expect(v.priorCleared).toBe(11775);
+    expect(v.items.map((i) => i.credit || i.debit).sort((a, b) => a - b)).toEqual([500, 700]);
+    await rec.saveCleared(db, r2.id, v.items.map((i) => i.id));
+    await rec.completeReconciliation(db, r2.id);
+    await expect(rec.reopenReconciliation(db, r.id)).rejects.toThrow("لاحقة");
+    await rec.reopenReconciliation(db, r2.id);
+    await rec.deleteReconciliation(db, r2.id);
+    await rec.reopenReconciliation(db, r.id);
+  });
+
+  it("الإيراد المستحق غير المفوتر: قيد آخر الشهر على 1112 والإيراد بالمركبة، وعكسه أول الشهر التالي", async () => {
+    const Y = YEAR - 1;
+    await openYear(db, Y);
+    const [w] = (await db.execute(sql`
+      insert into waybills (number, waybill_date, customer_id, route_id, shipper, consignee, delivery_address, is_international, currency_code, execution, vehicle_id, driver_id, carrier_id, amount, tax_code_id, status)
+      select 'WB-ACR-1', ${`${Y}-06-20`}, customer_id, route_id, 'شاحن', 'مستلم', 'الرياض', false, 'SAR', execution, vehicle_id, driver_id, carrier_id, 4000, tax_code_id, 'approved'
+      from waybills where vehicle_id is not null limit 1 returning id`)) as unknown as { id: number }[];
+    const p = await accrualPreview(db, `${Y}-06`);
+    expect([p.count, p.total]).toEqual([1, 4000]);
+    const { entry, reversal } = await postRevenueAccrual(db, `${Y}-06`);
+    await expect(postRevenueAccrual(db, `${Y}-06`)).rejects.toThrow("رُحّل");
+    const lines = await db
+      .select({ code: s.accounts.code, d: s.journalLines.debitBase, c: s.journalLines.creditBase, cc: s.journalLines.costCenterId, entryId: s.journalLines.entryId })
+      .from(s.journalLines)
+      .innerJoin(s.accounts, eq(s.accounts.id, s.journalLines.accountId))
+      .where(sql`${s.journalLines.entryId} in (${entry.id}, ${reversal.id})`);
+    const rev = lines.find((l) => l.entryId === entry.id && l.code === "4101")!;
+    expect([Number(rev.c), rev.cc]).toEqual([4000, expect.any(Number)]);
+    expect(Number(lines.find((l) => l.entryId === entry.id && l.code === "1112")!.d)).toBe(4000);
+    expect(Number(lines.find((l) => l.entryId === reversal.id && l.code === "1112")!.c)).toBe(4000);
+    const [rv] = await db.select().from(s.journalEntries).where(eq(s.journalEntries.id, reversal.id));
+    expect(rv.entryDate).toBe(`${Y}-07-01`);
+    await undoRevenueAccrual(db, `${Y}-06`);
+    expect((await db.select().from(s.journalEntries).where(sql`${s.journalEntries.id} in (${entry.id}, ${reversal.id})`)).length).toBe(0);
+    await db.execute(sql`delete from waybills where id = ${w.id}`);
   });
 });

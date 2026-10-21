@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Sans_Arabic, Readex_Pro } from "next/font/google";
 import { RouteProgress } from "@/components/route-progress";
 import "./globals.css";
@@ -10,7 +10,10 @@ const display = Readex_Pro({ subsets: ["arabic", "latin"], weight: ["500", "600"
 export const metadata: Metadata = {
   title: "الكمال للنقليات – نظام الإدارة",
   description: "نظام ERP لشركة الكمال للنقليات",
+  appleWebApp: { capable: true, title: "الكمال", statusBarStyle: "default" },
 };
+
+export const viewport: Viewport = { themeColor: "#ffffff", width: "device-width", initialScale: 1, viewportFit: "cover" };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

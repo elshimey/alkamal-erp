@@ -56,7 +56,7 @@ export default async function JournalPage({ searchParams }: { searchParams: Prom
 
       {openDoc ? (
         <div className="grid items-start gap-4 lg:grid-cols-[minmax(17rem,22rem)_1fr]">
-          <ul className="max-h-[calc(100vh-9rem)] divide-y divide-gray-100 overflow-y-auto rounded-2xl border border-black/[0.06] bg-white shadow-sm print:hidden lg:sticky lg:top-4">
+          <ul className="hidden max-h-[calc(100vh-9rem)] lg:block divide-y divide-gray-100 overflow-y-auto rounded-2xl border border-black/[0.06] bg-white shadow-sm print:hidden lg:sticky lg:top-4">
             {list.map(({ e, total }) => (
               <li key={e.id}>
                 <Link href={listHref(BASE, sp, { open: String(e.id) })} scroll={false} className={`block border-s-4 px-4 py-3 transition ${e.id === openId ? "border-brand-500 bg-brand-50/70" : "border-transparent hover:bg-gray-50"}`}>

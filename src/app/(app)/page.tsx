@@ -309,21 +309,21 @@ export default async function Dashboard({
   return (
     <>
       {/* لوحة القيادة: طريق تعبره شاحنة */}
-      <section className="relative z-10 mb-4 rounded-2xl bg-asphalt-900 px-7 pt-7 pb-16 text-white shadow-lg">
+      <section className="relative z-10 mb-4 rounded-2xl bg-asphalt-900 px-5 pt-6 pb-16 text-white shadow-lg sm:px-7 sm:pt-7">
         <div className="relative flex flex-wrap items-end justify-between gap-4">
           <div>
             <p className="flex items-center gap-2 text-sm text-brand-500">
               <span className="rounded-md bg-brand-500 px-2 py-0.5 text-xs font-semibold text-asphalt-900">لوحة القيادة</span>
               {gregorian}
             </p>
-            <h1 className="mt-2 text-3xl font-semibold">أهلاً، {user.name}</h1>
+            <h1 className="mt-2 text-2xl font-semibold sm:text-3xl">أهلاً، {user.name}</h1>
             <p className="mt-2 max-w-xl text-sm leading-relaxed text-white/60">
               {ops ? `${ops.trips} رحلة · ${period.label}` : "لوحة البداية"}
               {cur ? ` · إيراد ${money(cur.revenue)} ر.س · مجمل ربح ${margin}%` : ""}
               {activeAlerts.length ? ` · ${activeAlerts.length} تنبيه يحتاج متابعة` : ""}
             </p>
           </div>
-          <div className="flex flex-col items-end gap-3">
+          <div className="flex flex-col items-start gap-3 sm:items-end">
             <div className="flex items-center gap-2 rounded-full bg-white/[0.06] px-4 py-2 text-xs text-white/70">
               <Icon name="calendar" className="size-4 text-brand-500" />
               {hijri}
@@ -346,7 +346,7 @@ export default async function Dashboard({
             <Link
               key={t.key}
               href={dashHref(period, t.key)}
-              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm whitespace-nowrap transition ${t.key === tab ? "bg-asphalt-900 font-semibold text-brand-500 shadow" : "text-gray-600 hover:bg-concrete hover:text-brand-900"}`}
+              className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm whitespace-nowrap transition sm:flex-none sm:px-4 ${t.key === tab ? "bg-asphalt-900 font-semibold text-brand-500 shadow" : "text-gray-600 hover:bg-concrete hover:text-brand-900"}`}
             >
               <Icon name={t.icon} className="size-4" />
               {t.label}
@@ -370,8 +370,8 @@ export default async function Dashboard({
             </div>
           )}
 
-          <div className="grid gap-6 xl:grid-cols-3">
-            <div className="flex flex-col gap-6 xl:col-span-2">
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+            <div className="flex min-w-0 flex-col gap-6 xl:col-span-2">
               {/* الرحلات والشحنات */}
               {ops && prevOps && (
                 <Panel i={4} title="الرحلات والشحنات" icon="waybill" settings={setting("/routes", "routes")} href="/waybills" more="كل البوالص">
@@ -649,7 +649,7 @@ function Kpi({ i, label, value, prev, icon, href, unit, note, invert = false }: 
 function Panel({ i, title, icon, href, more, sub, settings, children }: { i: number; title: string; icon: IconName; href?: string; more?: string; sub?: string; settings?: string; children: ReactNode }) {
   return (
     <section className="animate-rise stagger rounded-2xl border border-black/[0.06] bg-white p-5 shadow-[0_4px_16px_-8px_rgba(27,33,38,0.08)]" style={delay(i)}>
-      <header className="mb-4 flex items-center gap-2">
+      <header className="mb-4 flex flex-wrap items-center gap-2">
         <span className="flex size-8 items-center justify-center rounded-lg bg-asphalt-900 text-brand-500">
           <Icon name={icon} className="size-4" />
         </span>
@@ -804,10 +804,10 @@ function dashHref(period: Period, tab: Tab, over: { p?: string } = {}) {
 
 function PeriodPicker({ period, tab }: { period: Period; tab: Tab }) {
   return (
-    <div className="flex flex-wrap items-center justify-end gap-2">
+    <div className="flex flex-wrap items-center gap-2 sm:justify-end">
       <nav className="flex rounded-full bg-white/[0.06] p-1 text-xs">
         {(Object.keys(PERIODS) as (keyof typeof PERIODS)[]).map((k) => (
-          <Link key={k} href={dashHref(period, tab, { p: k })} className={`rounded-full px-3.5 py-1.5 transition ${k === period.key ? "bg-brand-500 font-semibold text-asphalt-900" : "text-white/70 hover:text-white"}`}>
+          <Link key={k} href={dashHref(period, tab, { p: k })} className={`rounded-full px-2.5 py-1.5 whitespace-nowrap transition sm:px-3.5 ${k === period.key ? "bg-brand-500 font-semibold text-asphalt-900" : "text-white/70 hover:text-white"}`}>
             {PERIODS[k]}
           </Link>
         ))}
@@ -820,7 +820,7 @@ function PeriodPicker({ period, tab }: { period: Period; tab: Tab }) {
           <Icon name="calendar" className="size-3.5" />
           {period.key === "custom" ? <span className="ltr-nums">{period.label}</span> : "فترة مخصصة"}
         </summary>
-        <form action="/" className="absolute end-0 z-20 mt-2 flex w-64 flex-col gap-3 rounded-xl bg-white p-4 text-sm text-gray-700 shadow-xl">
+        <form action="/" className="absolute start-0 z-20 mt-2 flex w-64 sm:start-auto sm:end-0 flex-col gap-3 rounded-xl bg-white p-4 text-sm text-gray-700 shadow-xl">
           <input type="hidden" name="p" value="custom" />
           {tab !== "overview" && <input type="hidden" name="tab" value={tab} />}
           <label className="flex flex-col gap-1">
@@ -892,8 +892,8 @@ function IncomeTab({ r, period, costs, canReports, settings }: { r: Income; peri
         <Kpi i={2} label="الربح التشغيلي" value={r.current.operating} prev={p?.operating ?? 0} icon="truck" unit="ر.س" note={`هامش ${pct(r.current.operating, revenue)}%`} />
         <Kpi i={3} label="صافي الربح" value={r.current.net} prev={p?.net ?? 0} icon="ledger" unit="ر.س" note={`هامش ${pct(r.current.net, revenue)}%`} />
       </div>
-      <div className="grid gap-6 xl:grid-cols-3">
-        <div className="xl:col-span-2">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+        <div className="min-w-0 xl:col-span-2">
           <Panel i={4} title="قائمة الدخل" icon="ledger" sub={period.label} href={full} more="التقرير الكامل" settings={settings}>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -1048,8 +1048,8 @@ function CashTab({ r, period, canReports, settings }: { r: Cash; period: Period;
         <CashKpi i={2} label="المدفوعات" value={r.outflow} icon="invoice" tone="out" />
         <CashKpi i={3} label="رصيد آخر الفترة" value={r.closing} icon="ledger" note={`صافي التغير ${r.net > 0 ? "+" : ""}${money(r.net)}`} />
       </div>
-      <div className="grid gap-6 xl:grid-cols-3">
-        <div className="flex flex-col gap-6 xl:col-span-2">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+        <div className="flex min-w-0 flex-col gap-6 xl:col-span-2">
           <Panel i={4} title="قائمة التدفق النقدي" icon="exchange" sub={period.label} settings={settings}>
             {r.sections.every((s) => s.items.length === 0) ? (
               <Empty>لا توجد حركة على الصناديق أو البنوك في هذه الفترة.</Empty>

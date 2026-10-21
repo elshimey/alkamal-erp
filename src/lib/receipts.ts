@@ -101,7 +101,29 @@ export async function customerCredit(db: Db | Tx, customerId: number) {
   return { advances, receivable, available: round2(Math.max(0, advances) + Math.max(0, -receivable)) };
 }
 
-type Alloc = { invoiceId: number; amount: number };
+type Alloc = { invoiceId: number; amount: number; invoiceRate?: number };
+
+/**
+ * فروق العملة المحققة (IAS 21): الفاتورة قُيدت على العميل بسعر يومها، والتحصيل يُقفلها بسعر يوم السند.
+ * الفرق بالريال يُسوّى على حساب العميل مقابل 7103: ارتفاع السعر ربح، وانخفاضه خسارة.
+ */
+async function fxDifferenceLines(tx: Tx, allocs: Alloc[], receiptRate: number, partyId: number, receivable: number, label: string): Promise<LineInput[]> {
+  const diff = round2(allocs.reduce((t, a) => t + round2(a.amount * receiptRate) - round2(a.amount * (a.invoiceRate ?? receiptRate)), 0));
+  if (Math.abs(diff) < EPS) return [];
+  const fx = await accountId(tx, SALES_ACCOUNTS.fxDifferences);
+  const party = { currencyCode: "SAR", exchangeRate: 1, partyId };
+  const amount = Math.abs(diff);
+  const description = `فروق عملة محققة – ${label}`;
+  return diff > 0
+    ? [
+        { accountId: receivable, debit: amount, ...party, description },
+        { accountId: fx, credit: amount, description },
+      ]
+    : [
+        { accountId: fx, debit: amount, description },
+        { accountId: receivable, credit: amount, ...party, description },
+      ];
+}
 
 /** يوزع مبلغاً على فواتير العميل: المحدد بمبالغه، أو الأقدم استحقاقاً. يعيد التوزيع الفعلي. */
 async function allocate(tx: Tx, r: typeof s.receipts.$inferSelect, available: number, plan: Alloc[] | null, only: number | null) {
@@ -128,7 +150,7 @@ async function allocate(tx: Tx, r: typeof s.receipts.$inferSelect, available: nu
       if (!inv) throw new Error("إحدى الفواتير المختارة مسددة أو ليست لهذا العميل بنفس العملة");
       const outstanding = round2(num(inv.total) - num(inv.paidAmount));
       if (a.amount > outstanding + EPS) throw new Error(`المبلغ على الفاتورة ${inv.number} أكبر من رصيدها ${outstanding.toLocaleString("en")}`);
-      out.push({ invoiceId: inv.id, amount: round2(Math.min(a.amount, outstanding)) });
+      out.push({ invoiceId: inv.id, amount: round2(Math.min(a.amount, outstanding)), invoiceRate: num(inv.exchangeRate) });
     }
   } else {
     if (only && !open.length) throw new Error("الفاتورة المختارة مسددة أو ليست لهذا العميل بنفس العملة");
@@ -136,7 +158,7 @@ async function allocate(tx: Tx, r: typeof s.receipts.$inferSelect, available: nu
     for (const inv of open) {
       if (left <= 0) break;
       const take = round2(Math.min(left, num(inv.total) - num(inv.paidAmount)));
-      out.push({ invoiceId: inv.id, amount: take });
+      out.push({ invoiceId: inv.id, amount: take, invoiceRate: num(inv.exchangeRate) });
       left = round2(left - take);
     }
   }
@@ -192,6 +214,7 @@ async function postReceiptTx(tx: Tx, receiptId: number, opts: { invoiceId?: numb
     lines.push({ accountId: receivable, credit: settled, ...party, description: `قبض ${r.number}` });
     allocs = await allocate(tx, r, settled, plan.allocations?.length ? plan.allocations : null, opts.invoiceId ?? plan.invoiceId ?? null);
     unallocated = round2(settled - allocs.reduce((t, a) => t + a.amount, 0));
+    lines.push(...(await fxDifferenceLines(tx, allocs, num(r.exchangeRate), r.customerId, receivable, r.number)));
   }
 
   const entry = await createJournalEntryTx(tx, {
@@ -222,6 +245,7 @@ export async function applyAdvance(db: Db, receiptId: number, allocations: Alloc
     const total = round2(allocs.reduce((t, a) => t + a.amount, 0));
     if (opts.date < r.receiptDate) throw new Error("تاريخ التطبيق قبل تاريخ الدفعة");
     const party = { currencyCode: r.currencyCode, exchangeRate: num(r.exchangeRate), partyId: r.customerId };
+    const receivable = await accountId(tx, SALES_ACCOUNTS.receivable);
     const entry = await createJournalEntryTx(tx, {
       entryDate: opts.date,
       // بلا مصدر: قيد المصدر فريد لكل سند، والتطبيق قد يتكرر؛ يُربط بالتخصيصات عبر entryId
@@ -230,7 +254,8 @@ export async function applyAdvance(db: Db, receiptId: number, allocations: Alloc
       userId: opts.userId,
       lines: [
         { accountId: await accountId(tx, SALES_ACCOUNTS.customerAdvances), debit: total, ...party, description: `تطبيق ${r.number}` },
-        { accountId: await accountId(tx, SALES_ACCOUNTS.receivable), credit: total, ...party, description: `تطبيق ${r.number}` },
+        { accountId: receivable, credit: total, ...party, description: `تطبيق ${r.number}` },
+        ...(await fxDifferenceLines(tx, allocs, num(r.exchangeRate), r.customerId, receivable, r.number)),
       ],
     });
     await tx.insert(s.receiptAllocations).values(allocs.map((a) => ({ receiptId: r.id, invoiceId: a.invoiceId, amount: String(a.amount), entryId: entry.id })));

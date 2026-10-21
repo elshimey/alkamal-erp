@@ -36,6 +36,7 @@ export const SALES_ACCOUNTS = {
   rechargedExpenses: "4104",
   outputVat: "2109",
   customerAdvances: "2112",
+  fxDifferences: "7103",
 } as const;
 
 export const RECEIPT_KINDS = {

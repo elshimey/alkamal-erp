@@ -32,7 +32,7 @@ export const PAYABLE_BY_ROLE = [
 export type SupplierRole = (typeof PAYABLE_BY_ROLE)[number]["role"];
 export const SUPPLIER_ROLES = PAYABLE_BY_ROLE.map((p) => p.role) as SupplierRole[];
 
-export const PURCHASE_ACCOUNTS = { inputVat: "1108" } as const;
+export const PURCHASE_ACCOUNTS = { inputVat: "1108", fxDifferences: "7103" } as const;
 
 // الحسابات المسموحة في سطور المشتريات والمصروفات: التكاليف والمصروفات، والمخزون والمدفوع مقدماً والأصول
 export const EXPENSE_ACCOUNT_PREFIXES = ["5", "6", "1109", "1110", "12"] as const;
