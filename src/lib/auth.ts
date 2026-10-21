@@ -3,7 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { cache } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { and, eq, gt } from "drizzle-orm";
+import { and, eq, gt, isNull, or } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
 import { can, type Action, type Entity, type PermissionSet, type Scope } from "@/lib/permissions";
@@ -49,7 +49,7 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
     .select({ id: s.users.id, name: s.users.name, login: s.users.login })
     .from(s.sessions)
     .innerJoin(s.users, eq(s.users.id, s.sessions.userId))
-    .where(and(eq(s.sessions.id, hashToken(token)), gt(s.sessions.expiresAt, new Date()), eq(s.users.isActive, true)));
+    .where(and(eq(s.sessions.id, hashToken(token)), gt(s.sessions.expiresAt, new Date()), eq(s.users.isActive, true), or(isNull(s.users.expiresAt), gt(s.users.expiresAt, new Date()))));
   if (!row) return null;
 
   const roles = await db

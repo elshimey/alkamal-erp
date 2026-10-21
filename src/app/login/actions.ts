@@ -17,6 +17,7 @@ export async function login(_: FormState, data: FormData): Promise<FormState> {
   const [user] = await db.select().from(s.users).where(eq(s.users.login, loginName));
   const valid = user && user.isActive && (await verifyPassword(password, user.passwordHash));
   if (!valid) return { error: "اسم الدخول أو كلمة المرور غير صحيحة" };
+  if (user.expiresAt && user.expiresAt <= new Date()) return { error: "انتهت الفترة التجريبية لهذا الحساب؛ تواصل مع مدير النظام لتمديدها" };
 
   await createSession(user.id);
   const roles = await db.select({ key: s.roles.key }).from(s.userRoles).innerJoin(s.roles, eq(s.roles.id, s.userRoles.roleId)).where(eq(s.userRoles.userId, user.id));

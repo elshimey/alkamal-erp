@@ -15,7 +15,10 @@ const UserSchema = z.object({
   login: z.string().trim().min(3, "اسم الدخول إلزامي (الجوال أو البريد)"),
   password: z.string().min(MIN_PASSWORD_LENGTH, `كلمة المرور ${MIN_PASSWORD_LENGTH} أحرف على الأقل`),
   roleIds: z.array(z.coerce.number().int().positive()).min(1, "اختر دوراً واحداً على الأقل"),
+  trialDays: z.coerce.number().int().min(0).max(365),
 });
+
+const DAY = 24 * 60 * 60 * 1000;
 
 export async function createUser(_: FormState, data: FormData): Promise<FormState> {
   await requirePermission("users", "create");
@@ -24,19 +27,21 @@ export async function createUser(_: FormState, data: FormData): Promise<FormStat
     login: data.get("login"),
     password: data.get("password"),
     roleIds: data.getAll("roleIds"),
+    trialDays: data.get("trialDays") ?? 0,
   });
   if (!parsed.success) return { error: parsed.error.issues.map((i) => i.message).join("\n") };
-  const { name, login, password, roleIds } = parsed.data;
+  const { name, login, password, roleIds, trialDays } = parsed.data;
+  const expiresAt = trialDays ? new Date(Date.now() + trialDays * DAY) : null;
   try {
     await db.transaction(async (tx) => {
       const [user] = await tx
         .insert(s.users)
-        .values({ name, login, passwordHash: await hashPassword(password) })
+        .values({ name, login, passwordHash: await hashPassword(password), expiresAt })
         .returning({ id: s.users.id });
       await tx.insert(s.userRoles).values(roleIds.map((roleId) => ({ userId: user.id, roleId })));
     });
     revalidatePath("/users");
-    return { ok: `أُنشئ المستخدم ${name}` };
+    return { ok: trialDays ? `أُنشئ المستخدم ${name} بحساب تجريبي ${trialDays} يوماً` : `أُنشئ المستخدم ${name}` };
   } catch (err) {
     return { error: errorMessage(err) };
   }
@@ -57,5 +62,16 @@ export async function setUserActive(userId: number, active: boolean) {
   }
   await db.update(s.users).set({ isActive: active, updatedAt: new Date() }).where(eq(s.users.id, userId));
   if (!active) await db.delete(s.sessions).where(inArray(s.sessions.userId, [userId]));
+  revalidatePath("/users");
+}
+
+/** يمدد الحساب التجريبي (من اليوم أو من نهايته إن لم تنتهِ)، أو يجعله دائماً بـ days = 0. */
+export async function setUserTrial(userId: number, days: number) {
+  const me = await requirePermission("users", "update");
+  if (userId === me.id && days > 0) return;
+  const [u] = await db.select({ expiresAt: s.users.expiresAt }).from(s.users).where(eq(s.users.id, userId));
+  if (!u) return;
+  const from = u.expiresAt && u.expiresAt > new Date() ? u.expiresAt.getTime() : Date.now();
+  await db.update(s.users).set({ expiresAt: days ? new Date(from + days * DAY) : null, updatedAt: new Date() }).where(eq(s.users.id, userId));
   revalidatePath("/users");
 }
