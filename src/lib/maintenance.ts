@@ -1,4 +1,5 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, lte, or, sql, type SQL } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
 import { averageCost, issueForMaintenanceTx, onHand, removeMovesTx } from "@/lib/inventory";
@@ -38,7 +39,7 @@ export interface BreakdownInput {
   userId?: number;
 }
 
-export async function createBreakdownRequest(db: Db, input: BreakdownInput) {
+export async function createBreakdownRequest(db: Db | Tx, input: BreakdownInput) {
   if (!input.description.trim()) throw new Error("اكتب وصف العطل");
   return db.transaction(async (tx) => {
     const number = await nextDocumentNumber(tx, "breakdown_request", "BR", Number(input.reportDate.slice(0, 4)));
@@ -66,7 +67,7 @@ async function lockRequest(tx: Tx, id: number) {
 }
 
 /** مراجعة المشرف: يعتمده مباشرة إن كانت التكلفة ضمن الحد، وإلا يحوّله لاعتماد المدير. */
-export async function reviewBreakdownRequest(db: Db, id: number, opts: { estimatedCost?: number | null; userId?: number; limit?: number } = {}) {
+export async function reviewBreakdownRequest(db: Db | Tx, id: number, opts: { estimatedCost?: number | null; userId?: number; limit?: number } = {}) {
   return db.transaction(async (tx) => {
     const r = await lockRequest(tx, id);
     if (r.status !== "pending_supervisor") throw new Error("الطلب ليس بانتظار المشرف");
@@ -82,7 +83,7 @@ export async function reviewBreakdownRequest(db: Db, id: number, opts: { estimat
   });
 }
 
-export async function approveBreakdownRequest(db: Db, id: number, userId?: number) {
+export async function approveBreakdownRequest(db: Db | Tx, id: number, userId?: number) {
   return db.transaction(async (tx) => {
     const r = await lockRequest(tx, id);
     if (r.status !== "pending_approval") throw new Error("الطلب ليس بانتظار الاعتماد");
@@ -90,7 +91,7 @@ export async function approveBreakdownRequest(db: Db, id: number, userId?: numbe
   });
 }
 
-export async function rejectBreakdownRequest(db: Db, id: number, reason: string) {
+export async function rejectBreakdownRequest(db: Db | Tx, id: number, reason: string) {
   if (!reason.trim()) throw new Error("اكتب سبب الرفض");
   return db.transaction(async (tx) => {
     const r = await lockRequest(tx, id);
@@ -117,7 +118,7 @@ export interface OrderInput {
   userId?: number;
 }
 
-export async function createMaintenanceOrder(db: Db, input: OrderInput) {
+export async function createMaintenanceOrder(db: Db | Tx, input: OrderInput) {
   return db.transaction(async (tx) => {
     const [vehicle] = await tx.select().from(s.vehicles).where(eq(s.vehicles.id, input.vehicleId));
     if (!vehicle) throw new Error("المركبة غير موجودة");
@@ -197,7 +198,7 @@ export interface MaintenanceLineInput {
   vatRate?: number;
 }
 
-export async function addMaintenanceLines(db: Db, orderId: number, lines: MaintenanceLineInput[]) {
+export async function addMaintenanceLines(db: Db | Tx, orderId: number, lines: MaintenanceLineInput[]) {
   return db.transaction(async (tx) => {
     const o = await lockOrder(tx, orderId);
     if (o.status !== "draft") throw new Error("الأمر معتمد؛ أرجعه لمسودة لتعديل البنود");
@@ -244,7 +245,7 @@ export async function addMaintenanceLines(db: Db, orderId: number, lines: Mainte
   });
 }
 
-export async function removeMaintenanceLine(db: Db, orderId: number, lineId: number) {
+export async function removeMaintenanceLine(db: Db | Tx, orderId: number, lineId: number) {
   return db.transaction(async (tx) => {
     const o = await lockOrder(tx, orderId);
     if (o.status !== "draft") throw new Error("الأمر معتمد؛ أرجعه لمسودة لتعديل البنود");
@@ -254,7 +255,7 @@ export async function removeMaintenanceLine(db: Db, orderId: number, lineId: num
 }
 
 /** الاعتماد: قيد الصيانة على مركز تكلفة المركبة، والمركبة تصبح «في الصيانة». */
-export async function approveMaintenanceOrder(db: Db, orderId: number, opts: { cashAccountId?: number | null; userId?: number } = {}) {
+export async function approveMaintenanceOrder(db: Db | Tx, orderId: number, opts: { cashAccountId?: number | null; userId?: number } = {}) {
   return db.transaction(async (tx) => {
     const o = await lockOrder(tx, orderId);
     if (o.status !== "draft") throw new Error(`الأمر ${o.number} معتمد مسبقاً`);
@@ -312,7 +313,7 @@ export async function approveMaintenanceOrder(db: Db, orderId: number, opts: { c
 }
 
 /** الإكمال: المركبة تعود «تعمل»، ويُحدَّث العداد وآخر تنفيذ للخطة الدورية وطلب العطل. */
-export async function completeMaintenanceOrder(db: Db, orderId: number, opts: { completedDate: string; odometer?: number | null }) {
+export async function completeMaintenanceOrder(db: Db | Tx, orderId: number, opts: { completedDate: string; odometer?: number | null }) {
   return db.transaction(async (tx) => {
     const o = await lockOrder(tx, orderId);
     if (o.status !== "approved") throw new Error("الأمر غير معتمد أو مكتمل مسبقاً");
@@ -339,7 +340,7 @@ export async function completeMaintenanceOrder(db: Db, orderId: number, opts: { 
 }
 
 /** الإرجاع لمسودة: يلغي القيد؛ المركبة تعود «تعمل» إن لم يبقَ لها أمر آخر. */
-export async function revertMaintenanceOrder(db: Db, orderId: number) {
+export async function revertMaintenanceOrder(db: Db | Tx, orderId: number) {
   return db.transaction(async (tx) => {
     const o = await lockOrder(tx, orderId);
     if (o.status !== "approved") throw new Error("الإرجاع متاح للأمر المعتمد غير المكتمل");
@@ -354,7 +355,7 @@ export async function revertMaintenanceOrder(db: Db, orderId: number) {
   });
 }
 
-export async function deleteMaintenanceOrder(db: Db, orderId: number, opts: { reason: string; userId?: number }) {
+export async function deleteMaintenanceOrder(db: Db | Tx, orderId: number, opts: { reason: string; userId?: number }) {
   if (!opts.reason.trim()) throw new Error("اكتب سبب الحذف");
   return db.transaction(async (tx) => {
     const o = await lockOrder(tx, orderId);
@@ -369,7 +370,7 @@ export async function deleteMaintenanceOrder(db: Db, orderId: number, opts: { re
 
 // ───────────── الخطة الدورية ─────────────
 
-export async function savePlan(db: Db, input: { vehicleId: number; type: MaintenanceType; title: string; intervalDays: number; lastDoneDate?: string | null }) {
+export async function savePlan(db: Db | Tx, input: { vehicleId: number; type: MaintenanceType; title: string; intervalDays: number; lastDoneDate?: string | null }) {
   const title = input.title.trim();
   if (!title) throw new Error("اسم الصيانة إلزامي");
   if (!Number.isInteger(input.intervalDays) || input.intervalDays < 1) throw new Error("المدة بالأيام إلزامية");
@@ -416,4 +417,204 @@ export async function maintenanceCostByVehicle(db: Db | Tx, from: string, to: st
     where (a.code like '5107%' or a.code like '5108%') and e.entry_date between ${from} and ${to}
     group by v.id, v.plate order by cost desc`)) as unknown as { id: number; plate: string; cost: string }[];
   return rows.map((r) => ({ id: Number(r.id), plate: r.plate, cost: Number(r.cost) }));
+}
+
+// ───────────── القوائم والمعاينة (بآلية الفواتير) ─────────────
+
+const like = (q: string) => `%${q.replace(/[%_\\]/g, "\\$&")}%`;
+
+export const ORDER_SORTS = {
+  date_desc: "الأحدث أولاً",
+  date_asc: "الأقدم أولاً",
+  amount_desc: "الأعلى مبلغاً",
+  amount_asc: "الأقل مبلغاً",
+  vehicle: "حسب المركبة",
+} as const;
+
+export interface OrderFilter {
+  q?: string;
+  status?: "draft" | "approved" | "completed";
+  from?: string;
+  to?: string;
+  vehicleId?: number;
+  type?: MaintenanceType;
+  provider?: "internal" | "external";
+  sort?: keyof typeof ORDER_SORTS;
+}
+
+export async function listOrders(db: Db | Tx, f: OrderFilter = {}, limit = 300) {
+  const where: SQL[] = [];
+  const o = s.maintenanceOrders;
+  if (f.status) where.push(eq(o.status, f.status));
+  if (f.from) where.push(gte(o.orderDate, f.from));
+  if (f.to) where.push(lte(o.orderDate, f.to));
+  if (f.vehicleId) where.push(eq(o.vehicleId, f.vehicleId));
+  if (f.type) where.push(eq(o.type, f.type));
+  if (f.provider) where.push(eq(o.provider, f.provider));
+  if (f.q) {
+    const q = like(f.q);
+    const any = or(ilike(o.number, q), ilike(s.vehicles.plate, q), ilike(s.parties.nameAr, q), ilike(o.supplierInvoiceNo, q), ilike(o.notes, q), ilike(s.breakdownRequests.number, q));
+    if (any) where.push(any);
+  }
+  const order =
+    f.sort === "date_asc"
+      ? [asc(o.orderDate), asc(o.id)]
+      : f.sort === "amount_desc"
+        ? [desc(o.total), desc(o.id)]
+        : f.sort === "amount_asc"
+          ? [asc(o.total), asc(o.id)]
+          : f.sort === "vehicle"
+            ? [asc(s.vehicles.plate), desc(o.orderDate)]
+            : [desc(o.orderDate), desc(o.id)];
+  return db
+    .select({
+      o,
+      plate: s.vehicles.plate,
+      supplier: s.parties.nameAr,
+      request: s.breakdownRequests.number,
+      plan: s.maintenancePlans.title,
+      lines: sql<number>`(select count(*)::int from maintenance_lines ml where ml.order_id = maintenance_orders.id)`,
+    })
+    .from(o)
+    .innerJoin(s.vehicles, eq(s.vehicles.id, o.vehicleId))
+    .leftJoin(s.parties, eq(s.parties.id, o.supplierId))
+    .leftJoin(s.breakdownRequests, eq(s.breakdownRequests.id, o.breakdownRequestId))
+    .leftJoin(s.maintenancePlans, eq(s.maintenancePlans.id, o.planId))
+    .where(where.length ? and(...where) : undefined)
+    .orderBy(...order)
+    .limit(limit);
+}
+
+/** أمر الصيانة كاملاً للمعاينة والطباعة. */
+export async function orderDoc(db: Db | Tx, id: number) {
+  const cash = alias(s.accounts, "cash");
+  const [row] = await db
+    .select({
+      o: s.maintenanceOrders,
+      plate: s.vehicles.plate,
+      supplier: s.parties.nameAr,
+      cash: cash.nameAr,
+      request: s.breakdownRequests,
+      plan: s.maintenancePlans.title,
+      entry: s.journalEntries.number,
+    })
+    .from(s.maintenanceOrders)
+    .innerJoin(s.vehicles, eq(s.vehicles.id, s.maintenanceOrders.vehicleId))
+    .leftJoin(s.parties, eq(s.parties.id, s.maintenanceOrders.supplierId))
+    .leftJoin(cash, eq(cash.id, s.maintenanceOrders.cashAccountId))
+    .leftJoin(s.breakdownRequests, eq(s.breakdownRequests.id, s.maintenanceOrders.breakdownRequestId))
+    .leftJoin(s.maintenancePlans, eq(s.maintenancePlans.id, s.maintenanceOrders.planId))
+    .leftJoin(s.journalEntries, eq(s.journalEntries.id, s.maintenanceOrders.journalEntryId))
+    .where(eq(s.maintenanceOrders.id, id));
+  if (!row) return null;
+  const lines = await db
+    .select({ l: s.maintenanceLines, product: s.products.code, warehouse: s.warehouses.nameAr })
+    .from(s.maintenanceLines)
+    .leftJoin(s.products, eq(s.products.id, s.maintenanceLines.productId))
+    .leftJoin(s.warehouses, eq(s.warehouses.id, s.maintenanceLines.warehouseId))
+    .where(eq(s.maintenanceLines.orderId, id))
+    .orderBy(asc(s.maintenanceLines.lineNo));
+  return { ...row, lines };
+}
+
+/** تعديل بيانات رأس المسودة من الشيت. */
+export async function updateDraftOrder(db: Db | Tx, id: number, patch: { orderDate?: string; supplierInvoiceNo?: string; odometer?: string; notes?: string }) {
+  return db.transaction(async (tx) => {
+    const o = await lockOrder(tx, id);
+    if (o.status !== "draft") throw new Error(`الأمر ${o.number} معتمد؛ أرجعه لمسودة لتعديله`);
+    const set: Partial<typeof s.maintenanceOrders.$inferInsert> = {};
+    if (patch.orderDate !== undefined) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(patch.orderDate)) throw new Error("التاريخ غير صحيح");
+      set.orderDate = patch.orderDate;
+    }
+    if (patch.supplierInvoiceNo !== undefined) set.supplierInvoiceNo = o.provider === "external" ? patch.supplierInvoiceNo.trim() || null : null;
+    if (patch.odometer !== undefined) {
+      const n = patch.odometer.trim() ? Number(patch.odometer) : null;
+      if (n != null && !(Number.isInteger(n) && n >= 0)) throw new Error("قراءة العداد رقم صحيح");
+      set.odometer = n;
+    }
+    if (patch.notes !== undefined) set.notes = patch.notes.trim() || null;
+    if (Object.keys(set).length) await tx.update(s.maintenanceOrders).set(set).where(eq(s.maintenanceOrders.id, id));
+  });
+}
+
+export interface RequestFilter {
+  q?: string;
+  status?: BreakdownStatusKey;
+  from?: string;
+  to?: string;
+  vehicleId?: number;
+  priority?: "low" | "normal" | "urgent";
+}
+type BreakdownStatusKey = (typeof s.breakdownRequests.$inferSelect)["status"];
+
+export async function listRequests(db: Db | Tx, f: RequestFilter = {}, limit = 300) {
+  const r = s.breakdownRequests;
+  const where: SQL[] = [];
+  if (f.status) where.push(eq(r.status, f.status));
+  if (f.from) where.push(gte(r.reportDate, f.from));
+  if (f.to) where.push(lte(r.reportDate, f.to));
+  if (f.vehicleId) where.push(eq(r.vehicleId, f.vehicleId));
+  if (f.priority) where.push(eq(r.priority, f.priority));
+  if (f.q) {
+    const q = like(f.q);
+    const any = or(ilike(r.number, q), ilike(r.description, q), ilike(s.vehicles.plate, q), ilike(s.employees.nameAr, q));
+    if (any) where.push(any);
+  }
+  return db
+    .select({ r, plate: s.vehicles.plate, driver: s.employees.nameAr, order: { id: s.maintenanceOrders.id, number: s.maintenanceOrders.number, status: s.maintenanceOrders.status } })
+    .from(r)
+    .innerJoin(s.vehicles, eq(s.vehicles.id, r.vehicleId))
+    .leftJoin(s.drivers, eq(s.drivers.id, r.driverId))
+    .leftJoin(s.employees, eq(s.employees.id, s.drivers.employeeId))
+    .leftJoin(s.maintenanceOrders, eq(s.maintenanceOrders.breakdownRequestId, r.id))
+    .where(where.length ? and(...where) : undefined)
+    .orderBy(desc(r.reportDate), desc(r.id))
+    .limit(limit);
+}
+
+export async function requestDoc(db: Db | Tx, id: number) {
+  const reviewer = alias(s.users, "reviewer");
+  const approver = alias(s.users, "approver");
+  const [row] = await db
+    .select({
+      r: s.breakdownRequests,
+      plate: s.vehicles.plate,
+      driver: s.employees.nameAr,
+      reviewer: reviewer.name,
+      approver: approver.name,
+      order: { id: s.maintenanceOrders.id, number: s.maintenanceOrders.number, status: s.maintenanceOrders.status, total: s.maintenanceOrders.total },
+    })
+    .from(s.breakdownRequests)
+    .innerJoin(s.vehicles, eq(s.vehicles.id, s.breakdownRequests.vehicleId))
+    .leftJoin(s.drivers, eq(s.drivers.id, s.breakdownRequests.driverId))
+    .leftJoin(s.employees, eq(s.employees.id, s.drivers.employeeId))
+    .leftJoin(reviewer, eq(reviewer.id, s.breakdownRequests.reviewedBy))
+    .leftJoin(approver, eq(approver.id, s.breakdownRequests.approvedBy))
+    .leftJoin(s.maintenanceOrders, eq(s.maintenanceOrders.breakdownRequestId, s.breakdownRequests.id))
+    .where(eq(s.breakdownRequests.id, id));
+  return row ?? null;
+}
+
+/** أمر صيانة (مسودة، ورشة داخلية) لكل طلب عطل معتمد أو خطة دورية محددة. */
+export async function createOrdersFrom(db: Db | Tx, source: { requests?: number[]; plans?: number[] }, opts: { orderDate: string; userId?: number }) {
+  const created: string[] = [];
+  for (const id of source.requests ?? []) {
+    const [r] = await db.select().from(s.breakdownRequests).where(eq(s.breakdownRequests.id, id));
+    if (!r) continue;
+    const o = await createMaintenanceOrder(db, { vehicleId: r.vehicleId, orderDate: opts.orderDate, type: "mechanical", provider: "internal", breakdownRequestId: r.id, notes: r.description, userId: opts.userId });
+    created.push(o.number);
+  }
+  for (const id of source.plans ?? []) {
+    const [p] = await db.select().from(s.maintenancePlans).where(eq(s.maintenancePlans.id, id));
+    if (!p) continue;
+    const [open] = await db
+      .select({ number: s.maintenanceOrders.number })
+      .from(s.maintenanceOrders)
+      .where(and(eq(s.maintenanceOrders.planId, p.id), sql`${s.maintenanceOrders.status} <> 'completed'`));
+    if (open) throw new Error(`للخطة «${p.title}» أمر مفتوح ${open.number}`);
+    const o = await createMaintenanceOrder(db, { vehicleId: p.vehicleId, orderDate: opts.orderDate, type: p.type, provider: "internal", planId: p.id, notes: p.title, userId: opts.userId });
+    created.push(o.number);
+  }
+  return created;
 }

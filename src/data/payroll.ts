@@ -20,6 +20,7 @@ export const PAYROLL_ACCOUNTS = {
   gosiPayable: "2115",
   eosbProvision: "2203",
   advances: "1107",
+  penalties: "2116",
 } as const;
 
 // التأمينات الاجتماعية على (الأساسي + السكن) بسقف 45,000 ر.س شهرياً
@@ -43,6 +44,9 @@ export interface PayrollInputs {
   /** مخالفات على السائق قُيدت على حسابه عند تسجيلها */
   violations?: number;
   advanceDeduction: number;
+  /** حوافز وجزاءات الموارد البشرية المعتمدة */
+  incentives?: number;
+  penalties?: number;
   isSaudi: boolean;
   gosiSubject: boolean;
   /** سنوات الخدمة في آخر الشهر (لمخصص نهاية الخدمة) */
@@ -58,8 +62,9 @@ export function computePayrollLine(i: PayrollInputs) {
   const gosiEmployer = i.gosiSubject ? r2(gosiBase * (i.isSaudi ? GOSI.saudiEmployer : GOSI.nonSaudiEmployer)) : 0;
   // نظام العمل: نصف شهر عن كل سنة من الخمس الأولى، وشهر كامل عما بعدها
   const eosbAccrual = i.serviceYears == null ? 0 : r2(i.serviceYears >= 5 ? wage / 12 : wage / 24);
-  const earnings = r2(wage + i.additions - absenceDeduction - i.deductions);
-  const net = r2(earnings - gosiEmployee - i.advanceDeduction + i.commissions - (i.violations ?? 0));
+  // الجزاء لا يُنقص مصروف الرواتب: يُحتجز في حسابه لصالح العمال، فيُخصم من الصافي فقط
+  const earnings = r2(wage + i.additions + (i.incentives ?? 0) - absenceDeduction - i.deductions);
+  const net = r2(earnings - (i.penalties ?? 0) - gosiEmployee - i.advanceDeduction + i.commissions - (i.violations ?? 0));
   return { absenceDeduction, gosiEmployee, gosiEmployer, eosbAccrual, earnings, net };
 }
 

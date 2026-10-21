@@ -86,6 +86,14 @@ export async function updateEmployee(db: Db, id: number, input: Partial<Employee
   if (input.bankName !== undefined) set.bankName = input.bankName || null;
   if (input.iban !== undefined) set.iban = cleanIban(input.iban);
   if (input.status !== undefined) set.status = input.status;
+  if (input.status === "terminated") {
+    const [open] = await db
+      .select({ number: s.custodyDocs.number })
+      .from(s.custodyDocs)
+      .where(and(eq(s.custodyDocs.employeeId, id), inArray(s.custodyDocs.status, ["approved", "delivered"])))
+      .limit(1);
+    if (open) throw new Error(`على الموظف عهدة غير مسواة (${open.number})؛ سوّها أو استلمها قبل إنهاء خدمته`);
+  }
   const [row] = await db.update(s.employees).set(set).where(eq(s.employees.id, id)).returning();
   if (!row) throw new Error("الموظف غير موجود");
   return row;
@@ -94,7 +102,7 @@ export async function updateEmployee(db: Db, id: number, input: Partial<Employee
 // ───────────── السلف ─────────────
 
 export async function createAdvance(
-  db: Db,
+  db: Db | Tx,
   input: { employeeId: number; advanceDate: string; amount: number; installment?: number | null; notes?: string | null; userId?: number },
 ) {
   if (!(input.amount > 0)) throw new Error("مبلغ السلفة إلزامي");
@@ -127,7 +135,7 @@ async function lockAdvance(tx: Tx, id: number) {
 }
 
 /** صرف السلفة: من حـ/ سلف الموظفين إلى حـ/ الصندوق أو البنك. */
-export async function payAdvance(db: Db, id: number, opts: { cashAccountId: number; userId?: number }) {
+export async function payAdvance(db: Db | Tx, id: number, opts: { cashAccountId: number; userId?: number }) {
   return db.transaction(async (tx) => {
     const a = await lockAdvance(tx, id);
     if (a.status !== "pending") throw new Error(`السلفة ${a.number} مصروفة مسبقاً`);
@@ -253,6 +261,66 @@ async function claimViolations(tx: Tx, runId: number, driverIds: number[], end: 
   return out;
 }
 
+/** جزاءات وحوافز الموارد البشرية المعتمدة حتى آخر الشهر: يحجزها المسير المسودة كالمخالفات. */
+async function claimHrActions(tx: Tx, runId: number, employeeIds: number[], end: string) {
+  await tx.update(s.hrActions).set({ payrollRunId: null }).where(eq(s.hrActions.payrollRunId, runId));
+  const out = new Map<number, { incentives: number; penalties: number }>();
+  if (!employeeIds.length) return out;
+  const rows = await tx
+    .update(s.hrActions)
+    .set({ payrollRunId: runId })
+    .where(
+      and(
+        inArray(s.hrActions.kind, ["incentive", "penalty"]),
+        eq(s.hrActions.status, "approved"),
+        isNull(s.hrActions.payrollRunId),
+        inArray(s.hrActions.employeeId, employeeIds),
+        lte(s.hrActions.actionDate, end),
+      ),
+    )
+    .returning({ employeeId: s.hrActions.employeeId, kind: s.hrActions.kind, amount: s.hrActions.amount });
+  for (const r of rows) {
+    const d = out.get(r.employeeId) ?? { incentives: 0, penalties: 0 };
+    if (r.kind === "incentive") d.incentives = r2(d.incentives + num(r.amount));
+    else d.penalties = r2(d.penalties + num(r.amount));
+    out.set(r.employeeId, d);
+  }
+  return out;
+}
+
+const overlapDays = (from: string, to: string, start: string, end: string) => {
+  const a = from > start ? from : start;
+  const b = to < end ? to : end;
+  return b < a ? 0 : Math.round((Date.parse(b) - Date.parse(a)) / 86_400_000) + 1;
+};
+
+/** أيام بلا أجر في الشهر: الإجازات المعتمدة بدون راتب، وأيام الغياب في سجل الحضور. */
+async function unpaidDays(tx: Tx, employeeIds: number[], start: string, end: string) {
+  const out = new Map<number, number>();
+  if (!employeeIds.length) return out;
+  const leaves = await tx
+    .select({ employeeId: s.leaveRequests.employeeId, fromDate: s.leaveRequests.fromDate, toDate: s.leaveRequests.toDate })
+    .from(s.leaveRequests)
+    .innerJoin(s.leaveTypes, eq(s.leaveTypes.id, s.leaveRequests.typeId))
+    .where(
+      and(
+        eq(s.leaveRequests.status, "approved"),
+        eq(s.leaveTypes.paid, false),
+        inArray(s.leaveRequests.employeeId, employeeIds),
+        lte(s.leaveRequests.fromDate, end),
+        sql`${s.leaveRequests.toDate} >= ${start}`,
+      ),
+    );
+  for (const l of leaves) out.set(l.employeeId, (out.get(l.employeeId) ?? 0) + overlapDays(l.fromDate, l.toDate, start, end));
+  const absent = await tx
+    .select({ employeeId: s.attendance.employeeId, n: sql<number>`count(*)::int` })
+    .from(s.attendance)
+    .where(and(eq(s.attendance.status, "absent"), inArray(s.attendance.employeeId, employeeIds), sql`${s.attendance.day} between ${start} and ${end}`))
+    .groupBy(s.attendance.employeeId);
+  for (const a of absent) out.set(a.employeeId, (out.get(a.employeeId) ?? 0) + a.n);
+  return out;
+}
+
 const serviceYears = (hireDate: string | null, asOf: string) =>
   hireDate ? (Date.parse(asOf) - Date.parse(hireDate)) / (365.25 * 86_400_000) : null;
 
@@ -272,6 +340,8 @@ async function buildLines(tx: Tx, runId: number, month: string, keep: Map<number
   const commissions = await commissionsFor(tx, emps.map((x) => x.e.payableAccountId).filter((v): v is number => v != null), start, end);
   const advances = await advanceDue(tx, ids);
   const violations = await claimViolations(tx, runId, emps.map((x) => x.driverId).filter((v): v is number => v != null), end);
+  const hr = await claimHrActions(tx, runId, ids, end);
+  const unpaid = await unpaidDays(tx, ids, start, end);
   // سائق بلا مركبة بعد: تُحمَّل تكلفته على الإدارة العامة
   const [adm] = await tx.select({ id: s.costCenters.id }).from(s.costCenters).where(eq(s.costCenters.code, "ADM"));
   await tx.delete(s.payrollLines).where(eq(s.payrollLines.runId, runId));
@@ -280,6 +350,8 @@ async function buildLines(tx: Tx, runId: number, month: string, keep: Map<number
     const k = keep.get(e.id);
     const adv = advances.get(e.id);
     const advanceDeduction = k ? Math.min(num(k.advanceDeduction), adv?.outstanding ?? 0) : (adv?.installment ?? 0);
+    const h = hr.get(e.id);
+    const leaveDays = unpaid.get(e.id) ?? 0;
     const base = {
       basic: num(e.basicSalary),
       housing: num(e.housingAllowance),
@@ -290,8 +362,11 @@ async function buildLines(tx: Tx, runId: number, month: string, keep: Map<number
       commissions: commissions.get(e.payableAccountId ?? -1) ?? 0,
       violations: driverId ? (violations.get(driverId) ?? 0) : 0,
       advanceDeduction,
+      incentives: h?.incentives ?? 0,
+      penalties: h?.penalties ?? 0,
+      leaveDays,
     };
-    const c = computePayrollLine({ ...base, isSaudi: e.isSaudi, gosiSubject: e.gosiSubject, serviceYears: serviceYears(e.hireDate, end) });
+    const c = computePayrollLine({ ...base, absenceDays: base.absenceDays + leaveDays, isSaudi: e.isSaudi, gosiSubject: e.gosiSubject, serviceYears: serviceYears(e.hireDate, end) });
     values.push({
       runId,
       employeeId: e.id,
@@ -382,6 +457,7 @@ export async function payrollPostingLines(tx: Tx, run: { number: string; month: 
     gosiPay: await accountIdByCode(tx, PAYROLL_ACCOUNTS.gosiPayable),
     eosbProv: await accountIdByCode(tx, PAYROLL_ACCOUNTS.eosbProvision),
     advances: await accountIdByCode(tx, PAYROLL_ACCOUNTS.advances),
+    penalties: await accountIdByCode(tx, PAYROLL_ACCOUNTS.penalties),
   };
   const out: LineInput[] = [];
   const pair = (debit: LineInput, credit: LineInput, amount: number) => {
@@ -392,7 +468,7 @@ export async function payrollPostingLines(tx: Tx, run: { number: string; month: 
   for (const l of lines) {
     if (!l.payableAccountId) throw new Error(`لا يوجد حساب رواتب مستحقة للموظف ${l.name}`);
     if (l.driverId && !l.costCenterId) throw new Error(`السائق ${l.name} بلا مركز تكلفة؛ أسنده لمركبة ثم حدّث المسير`);
-    const earnings = r2(num(l.basic) + num(l.housing) + num(l.otherAllowances) + num(l.additions) - num(l.absenceDeduction) - num(l.deductions));
+    const earnings = r2(num(l.basic) + num(l.housing) + num(l.otherAllowances) + num(l.additions) + num(l.incentives) - num(l.absenceDeduction) - num(l.deductions));
     if (earnings < 0) throw new Error(`خصومات ${l.name} أكبر من استحقاقه`);
     const payable = { accountId: l.payableAccountId, driverId: l.driverId };
     const tag = `${l.name} – ${monthLabel(run.month)}`;
@@ -402,6 +478,7 @@ export async function payrollPostingLines(tx: Tx, run: { number: string; month: 
       earnings,
     );
     pair({ ...payable, description: `حصة الموظف في التأمينات – ${tag}` }, { accountId: acc.gosiPay, description: `حصة الموظف في التأمينات – ${tag}` }, num(l.gosiEmployee));
+    pair({ ...payable, description: `جزاءات – ${tag}` }, { accountId: acc.penalties, description: `جزاءات محتجزة – ${tag}` }, num(l.penalties));
     pair({ ...payable, description: `قسط سلفة – ${tag}` }, { accountId: acc.advances, description: `قسط سلفة – ${tag}` }, num(l.advanceDeduction));
     pair({ accountId: acc.gosiExp, costCenterId: l.costCenterId, description: `حصة المنشأة في التأمينات – ${tag}` }, { accountId: acc.gosiPay, description: `حصة المنشأة في التأمينات – ${tag}` }, num(l.gosiEmployer));
     pair({ accountId: acc.eosbExp, costCenterId: l.costCenterId, description: `مخصص نهاية الخدمة – ${tag}` }, { accountId: acc.eosbProv, description: `مخصص نهاية الخدمة – ${tag}` }, num(l.eosbAccrual));
@@ -452,6 +529,20 @@ export async function approvePayrollRun(db: Db, runId: number, opts: { userId?: 
     if (late || lines.some((l) => l.driverId && r2(byDriver.get(l.driverId) ?? 0) !== r2(num(l.violations)))) {
       throw new Error("سُجلت مخالفات بعد إعداد المسير؛ اضغط «تحديث المسير» ثم اعتمده");
     }
+    const [lateHr] = await tx
+      .select({ id: s.hrActions.id })
+      .from(s.hrActions)
+      .where(
+        and(
+          inArray(s.hrActions.kind, ["incentive", "penalty"]),
+          eq(s.hrActions.status, "approved"),
+          isNull(s.hrActions.payrollRunId),
+          inArray(s.hrActions.employeeId, lines.map((l) => l.employeeId)),
+          lte(s.hrActions.actionDate, end),
+        ),
+      )
+      .limit(1);
+    if (lateHr) throw new Error("اعتُمدت جزاءات أو حوافز بعد إعداد المسير؛ اضغط «تحديث المسير» ثم اعتمده");
     const entry = await createJournalEntryTx(tx, {
       entryDate: end,
       description: `مسير رواتب ${monthLabel(run.month)} – ${run.number}`,
@@ -584,6 +675,6 @@ export async function bankTransferRows(db: Db, runId: number) {
 
 /** إجماليات المسير للعرض. */
 export function payrollTotals(lines: LineRow[]) {
-  const keys = ["basic", "housing", "otherAllowances", "absenceDeduction", "additions", "deductions", "commissions", "violations", "advanceDeduction", "gosiEmployee", "gosiEmployer", "eosbAccrual", "net"] as const;
+  const keys = ["basic", "housing", "otherAllowances", "absenceDeduction", "additions", "deductions", "commissions", "violations", "advanceDeduction", "incentives", "penalties", "gosiEmployee", "gosiEmployer", "eosbAccrual", "net"] as const;
   return Object.fromEntries(keys.map((k) => [k, r2(lines.reduce((t, l) => t + num(l[k]), 0))])) as Record<(typeof keys)[number], number>;
 }

@@ -5,6 +5,7 @@ import { createJournalEntryTx, deleteEntryTx, nextDocumentNumber } from "@/lib/l
 import { activeContract, contractRatesFor } from "@/lib/operations";
 import { resolvePrice } from "@/lib/pricing";
 import { driverOnDate } from "@/lib/fleet";
+import { driverLeaveOn } from "@/lib/hr";
 import { waybillPostingLines } from "@/lib/waybill-posting";
 import { WAYBILL_ACCOUNTS, type WaybillAccountKey, type WaybillStatus } from "@/data/waybills";
 
@@ -92,6 +93,8 @@ export async function createWaybill(db: Db, input: WaybillInput) {
       // السائق المسند للمركبة في تاريخ الرحلة إن لم يُحدَّد
       driverId = input.driverId ?? (await driverOnDate(tx, v.id, input.waybillDate));
       if (!driverId) throw new Error(`المركبة ${v.plate} غير مسندة لسائق في هذا التاريخ؛ اختر السائق`);
+      const leave = await driverLeaveOn(tx, driverId, input.waybillDate);
+      if (leave) throw new Error(`السائق ${leave.name} في إجازة معتمدة (${leave.number}) حتى ${leave.toDate}؛ اختر سائقاً آخر`);
     }
 
     // السعر من العقد الساري (قابل للتعديل بصلاحية)

@@ -14,13 +14,16 @@ import {
   completeMaintenanceOrder,
   createBreakdownRequest,
   createMaintenanceOrder,
+  createOrdersFrom,
   deleteMaintenanceOrder,
   rejectBreakdownRequest,
   removeMaintenanceLine,
   revertMaintenanceOrder,
   reviewBreakdownRequest,
   savePlan,
+  updateDraftOrder,
 } from "@/lib/maintenance";
+import type { DocSheetResult, SheetChange } from "@/components/doc-sheet";
 import { MAINTENANCE_TYPES, PRIORITIES, type MaintenanceType } from "@/data/maintenance";
 import type { FormState } from "@/components/action-form";
 
@@ -214,4 +217,85 @@ export async function savePlans(rows: SheetRow[]) {
   });
   refresh();
   return result;
+}
+
+// ───────────── الإجراءات الجماعية (بآلية الفواتير) ─────────────
+
+const ids = (fd: FormData) => fd.getAll("ids").map(Number).filter((n) => Number.isInteger(n) && n > 0);
+
+/** يطبق الإجراء على كل مستند وحده؛ الخطأ في واحد لا يوقف الباقي. */
+async function each(list: number[], noun: string, done: string, fn: (id: number) => Promise<unknown>): Promise<FormState> {
+  if (!list.length) return { error: `حدد ${noun} من الجدول أولاً` };
+  const errors: string[] = [];
+  let ok = 0;
+  for (const id of list) {
+    try {
+      await fn(id);
+      ok++;
+    } catch (err) {
+      errors.push(errorMessage(err));
+    }
+  }
+  refresh();
+  if (!ok) return { error: errors.slice(0, 3).join(" · ") };
+  return { ok: `${done} ${ok} من ${list.length}${errors.length ? `. لم يتم الباقي: ${errors.slice(0, 2).join(" · ")}` : ""}` };
+}
+
+export async function bulkOrders(_: FormState, fd: FormData): Promise<FormState> {
+  const op = String(fd.get("op") || "");
+  if (op === "approve") {
+    const user = await requirePermission("maintenance", "approve");
+    return each(ids(fd), "الأوامر", "اعتُمد ورُحّل", (id) => approveMaintenanceOrder(db, id, { userId: user.id }));
+  }
+  if (op === "complete") {
+    await requirePermission("maintenance", "update");
+    const date = String(fd.get("date") || todayRiyadh());
+    return each(ids(fd), "الأوامر", "اكتمل", (id) => completeMaintenanceOrder(db, id, { completedDate: date }));
+  }
+  return { error: "اختر الإجراء" };
+}
+
+const ORDER_SHEET_FIELDS = { orderDate: "orderDate", supplierInvoiceNo: "supplierInvoiceNo", odometer: "odometer", notes: "notes" } as const;
+
+export async function saveOrderSheet(payload: string): Promise<DocSheetResult> {
+  await requirePermission("maintenance", "update");
+  const changes = JSON.parse(payload) as SheetChange[];
+  const errors: Record<number, string> = {};
+  let saved = 0;
+  for (const { id, values } of changes) {
+    const patch: Record<string, string> = {};
+    for (const [key, v] of Object.entries(values)) if (key in ORDER_SHEET_FIELDS) patch[key] = v;
+    try {
+      await updateDraftOrder(db, Number(id), patch);
+      saved++;
+    } catch (err) {
+      errors[id] = errorMessage(err);
+    }
+  }
+  refresh();
+  return { ok: saved ? `حُفظت تعديلات ${saved} أمر` : undefined, errors };
+}
+
+export async function bulkRequests(_: FormState, fd: FormData): Promise<FormState> {
+  const op = String(fd.get("op") || "");
+  if (op === "review") {
+    const user = await requirePermission("maintenance", "update");
+    return each(ids(fd), "الطلبات", "روجع", (id) => reviewBreakdownRequest(db, id, { userId: user.id }));
+  }
+  if (op === "approve") {
+    const user = await requirePermission("maintenance", "approve");
+    return each(ids(fd), "الطلبات", "اعتُمد", (id) => approveBreakdownRequest(db, id, user.id));
+  }
+  if (op === "order") {
+    const user = await requirePermission("maintenance", "create");
+    const date = String(fd.get("date") || todayRiyadh());
+    return each(ids(fd), "الطلبات", "أُنشئ أمر صيانة لـ", (id) => createOrdersFrom(db, { requests: [id] }, { orderDate: date, userId: user.id }));
+  }
+  return { error: "اختر الإجراء" };
+}
+
+export async function bulkPlanOrders(_: FormState, fd: FormData): Promise<FormState> {
+  const user = await requirePermission("maintenance", "create");
+  const date = String(fd.get("date") || todayRiyadh());
+  return each(ids(fd), "الخطط", "أُنشئ أمر صيانة لـ", (id) => createOrdersFrom(db, { plans: [id] }, { orderDate: date, userId: user.id }));
 }

@@ -411,6 +411,8 @@ export const employees = pgTable("employees", {
   iban: varchar("iban", { length: 34 }),
   // حساب الرواتب المستحقة الخاص به (فرعي تحت 2107)، وإليه تُقيد العمولات والخصومات
   payableAccountId: ref("payable_account_id").unique().references(() => accounts.id),
+  // عهدة الموظف الإداري (فرعي تحت 1105)، تُفتح عند أول عهدة نقدية. السائق عهدته في جدول السائقين
+  custodyAccountId: ref("custody_account_id").unique().references(() => accounts.id),
   status: employeeStatus("status").notNull().default("active"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
@@ -1310,6 +1312,11 @@ export const payrollLines = pgTable(
     // للعرض فقط: المخالفات قُيدت على حسابه عند تسجيلها، ويخصمها المسير من الصافي
     violations: money("violations").notNull().default("0"),
     advanceDeduction: money("advance_deduction").notNull().default("0"),
+    // من الموارد البشرية بعد اعتمادها: الحوافز تضاف، والجزاءات تُخصم وتُحتجز في 2116
+    incentives: money("incentives").notNull().default("0"),
+    penalties: money("penalties").notNull().default("0"),
+    // أيام الإجازة بدون راتب وغياب الحضور في الشهر، تُضاف إلى أيام الغياب اليدوية
+    leaveDays: numeric("leave_days", { precision: 5, scale: 2 }).notNull().default("0"),
     gosiEmployee: money("gosi_employee").notNull().default("0"),
     gosiEmployer: money("gosi_employer").notNull().default("0"),
     eosbAccrual: money("eosb_accrual").notNull().default("0"),
@@ -1575,4 +1582,223 @@ export const stockMoves = pgTable(
     index("stock_moves_source_idx").on(t.sourceType, t.sourceId),
     check("stock_moves_qty", sql`${t.quantity} <> 0`),
   ],
+);
+
+// ───────────────────────── الموارد البشرية ─────────────────────────
+
+// إعدادات صف واحد (id = 1)
+export const hrSettings = pgTable(
+  "hr_settings",
+  {
+    id: smallint("id").primaryKey().default(1),
+    // نقاط تُخصم من التقييم الشهري عن كل إنذار
+    warningPoints: smallint("warning_points").notNull().default(2),
+    // مخالفة السائق المرورية تُحسب إنذاراً في تقييم شهرها
+    violationsAsWarnings: boolean("violations_as_warnings").notNull().default(true),
+    // الترقية تظهر مستحقة بعد عدد أشهر متتالية بدرجة لا تقل عن الحد
+    promotionScore: smallint("promotion_score").notNull().default(85),
+    promotionMonths: smallint("promotion_months").notNull().default(3),
+    // مقدم العمولة من تطبيق السائق: أيام الطلب في الشهر والسقف لكل فئة
+    advanceOpenDay: smallint("advance_open_day").notNull().default(1),
+    advanceCloseDay: smallint("advance_close_day").notNull().default(20),
+    advanceCapDomestic: money("advance_cap_domestic").notNull().default("1000"),
+    advanceCapInternational: money("advance_cap_international").notNull().default("2000"),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    check("hr_settings_singleton", sql`${t.id} = 1`),
+    check("hr_settings_days", sql`${t.advanceOpenDay} between 1 and 31 and ${t.advanceCloseDay} between ${t.advanceOpenDay} and 31`),
+  ],
+);
+
+export const evaluationCriteria = pgTable(
+  "evaluation_criteria",
+  {
+    id: id(),
+    nameAr: text("name_ar").notNull(),
+    weight: smallint("weight").notNull(),
+    active: boolean("active").notNull().default(true),
+    sortOrder: smallint("sort_order").notNull().default(0),
+  },
+  (t) => [check("evaluation_criteria_weight", sql`${t.weight} between 1 and 10`)],
+);
+
+// العهدة النقدية لها قيد (مدين عهدة الموظف، دائن الصندوق)، والعينية سجل رقابي بلا قيد
+export const custodyKind = pgEnum("custody_kind", ["cash", "in_kind"]);
+export const custodyStatus = pgEnum("custody_status", ["draft", "approved", "delivered", "settled", "returned", "cancelled"]);
+
+export const custodyDocs = pgTable(
+  "custody_docs",
+  {
+    id: id(),
+    number: varchar("number", { length: 30 }).notNull().unique(),
+    kind: custodyKind("kind").notNull(),
+    employeeId: ref("employee_id").notNull().references(() => employees.id),
+    docDate: date("doc_date").notNull(),
+    description: text("description").notNull(),
+    quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull().default("1"),
+    // مبلغ العهدة النقدية، أو قيمة العينية للرقابة
+    amount: money("amount").notNull().default("0"),
+    serialNo: varchar("serial_no", { length: 60 }),
+    // عهدة قائمة قبل بدء العمل على البرنامج: رصيدها في القيد الافتتاحي فلا قيد لها هنا
+    isOpening: boolean("is_opening").notNull().default(false),
+    status: custodyStatus("status").notNull().default("draft"),
+    cashAccountId: ref("cash_account_id").references(() => accounts.id),
+    journalEntryId: ref("journal_entry_id").references(() => journalEntries.id),
+    closeDate: date("close_date"),
+    returnedAmount: money("returned_amount").notNull().default("0"),
+    closeEntryId: ref("close_entry_id").references(() => journalEntries.id),
+    closeNotes: text("close_notes"),
+    notes: text("notes"),
+    createdBy: ref("created_by").references(() => users.id),
+    approvedBy: ref("approved_by").references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("custody_docs_employee_idx").on(t.employeeId, t.status),
+    check("custody_docs_amounts", sql`${t.amount} >= 0 and ${t.quantity} > 0 and ${t.returnedAmount} between 0 and ${t.amount} and (${t.kind} <> 'cash' or ${t.amount} > 0)`),
+  ],
+);
+
+// الإنذار يخصم نقاطاً من التقييم، والجزاء يُخصم من الراتب، والحافز يضاف إليه
+export const hrActionKind = pgEnum("hr_action_kind", ["warning", "penalty", "incentive"]);
+export const hrActionStatus = pgEnum("hr_action_status", ["draft", "approved", "cancelled"]);
+
+export const hrActions = pgTable(
+  "hr_actions",
+  {
+    id: id(),
+    number: varchar("number", { length: 30 }).notNull().unique(),
+    kind: hrActionKind("kind").notNull(),
+    employeeId: ref("employee_id").notNull().references(() => employees.id),
+    actionDate: date("action_date").notNull(),
+    amount: money("amount").notNull().default("0"),
+    points: smallint("points").notNull().default(0),
+    reason: text("reason").notNull(),
+    status: hrActionStatus("status").notNull().default("draft"),
+    // المسير الذي أضافه أو خصمه (للجزاء والحافز)
+    payrollRunId: ref("payroll_run_id").references(() => payrollRuns.id, { onDelete: "set null" }),
+    createdBy: ref("created_by").references(() => users.id),
+    approvedBy: ref("approved_by").references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("hr_actions_employee_idx").on(t.employeeId, t.actionDate),
+    check("hr_actions_values", sql`${t.points} >= 0 and (${t.kind} = 'warning' or ${t.amount} > 0)`),
+  ],
+);
+
+export const leaveTypes = pgTable("leave_types", {
+  id: id(),
+  nameAr: text("name_ar").notNull().unique(),
+  paid: boolean("paid").notNull().default(true),
+  // الإجازة السنوية: 21 يوماً، و30 بعد خمس سنوات خدمة (نظام العمل)
+  isAnnual: boolean("is_annual").notNull().default(false),
+  // رصيد سنوي ثابت لغير السنوية؛ فارغ = بلا رصيد
+  yearlyDays: smallint("yearly_days"),
+  active: boolean("active").notNull().default(true),
+});
+
+export const leaveStatus = pgEnum("leave_status", ["pending", "approved", "rejected", "cancelled"]);
+
+export const leaveRequests = pgTable(
+  "leave_requests",
+  {
+    id: id(),
+    number: varchar("number", { length: 30 }).notNull().unique(),
+    employeeId: ref("employee_id").notNull().references(() => employees.id),
+    typeId: ref("type_id").notNull().references(() => leaveTypes.id),
+    fromDate: date("from_date").notNull(),
+    toDate: date("to_date").notNull(),
+    days: smallint("days").notNull(),
+    reason: text("reason"),
+    status: leaveStatus("status").notNull().default("pending"),
+    rejectReason: text("reject_reason"),
+    createdBy: ref("created_by").references(() => users.id),
+    approvedBy: ref("approved_by").references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("leave_requests_employee_idx").on(t.employeeId, t.fromDate),
+    check("leave_requests_dates", sql`${t.toDate} >= ${t.fromDate} and ${t.days} > 0`),
+  ],
+);
+
+// حضور الإداريين فقط؛ السائق حضوره رحلاته
+export const attendanceStatus = pgEnum("attendance_status", ["present", "absent", "late", "leave"]);
+
+export const attendance = pgTable(
+  "attendance",
+  {
+    id: id(),
+    employeeId: ref("employee_id").notNull().references(() => employees.id),
+    day: date("day").notNull(),
+    status: attendanceStatus("status").notNull(),
+    lateMinutes: smallint("late_minutes").notNull().default(0),
+    notes: text("notes"),
+    createdBy: ref("created_by").references(() => users.id),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("attendance_employee_day_uq").on(t.employeeId, t.day), check("attendance_late", sql`${t.lateMinutes} >= 0`)],
+);
+
+export const evaluationStatus = pgEnum("evaluation_status", ["draft", "approved"]);
+
+// التقييم الشهري: درجة المعايير الموزونة ناقص نقاط الإنذارات (والمخالفات إن فُعّلت)
+export const evaluations = pgTable(
+  "evaluations",
+  {
+    id: id(),
+    employeeId: ref("employee_id").notNull().references(() => employees.id),
+    // أول يوم في الشهر
+    month: date("month").notNull(),
+    // { [معرّف المعيار]: درجة من 0 إلى 10 }
+    scores: jsonb("scores").$type<Record<string, number>>().notNull().default({}),
+    baseScore: numeric("base_score", { precision: 5, scale: 2 }).notNull().default("0"),
+    warnings: smallint("warnings").notNull().default(0),
+    violations: smallint("violations").notNull().default(0),
+    deduction: numeric("deduction", { precision: 5, scale: 2 }).notNull().default("0"),
+    finalScore: numeric("final_score", { precision: 5, scale: 2 }).notNull().default("0"),
+    status: evaluationStatus("status").notNull().default("draft"),
+    notes: text("notes"),
+    createdBy: ref("created_by").references(() => users.id),
+    approvedBy: ref("approved_by").references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("evaluations_employee_month_uq").on(t.employeeId, t.month), check("evaluations_month_start", sql`extract(day from ${t.month}) = 1`)],
+);
+
+// الترقية تُطبق فوراً على المسمى والراتب الأساسي، ويبقى سجلها
+export const promotions = pgTable("promotions", {
+  id: id(),
+  employeeId: ref("employee_id").notNull().references(() => employees.id),
+  effectiveDate: date("effective_date").notNull(),
+  fromTitle: text("from_title"),
+  toTitle: text("to_title"),
+  fromBasic: money("from_basic").notNull(),
+  toBasic: money("to_basic").notNull(),
+  reason: text("reason"),
+  createdBy: ref("created_by").references(() => users.id),
+  createdAt: createdAt(),
+});
+
+export const commissionAdvanceStatus = pgEnum("commission_advance_status", ["pending", "approved", "rejected"]);
+
+// طلب مقدم العمولة من تطبيق السائق؛ الاعتماد ينشئ سلفة تُستقطع كاملة في المسير القادم
+export const commissionAdvanceRequests = pgTable(
+  "commission_advance_requests",
+  {
+    id: id(),
+    number: varchar("number", { length: 30 }).notNull().unique(),
+    driverId: ref("driver_id").notNull().references(() => drivers.id),
+    requestDate: date("request_date").notNull(),
+    amount: money("amount").notNull(),
+    notes: text("notes"),
+    status: commissionAdvanceStatus("status").notNull().default("pending"),
+    advanceId: ref("advance_id").references(() => employeeAdvances.id),
+    rejectReason: text("reject_reason"),
+    decidedBy: ref("decided_by").references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [index("commission_advance_driver_idx").on(t.driverId, t.requestDate), check("commission_advance_amount", sql`${t.amount} > 0`)],
 );

@@ -15,6 +15,8 @@ export const ENTRY_SOURCES: Record<string, { label: string; href?: (id: number) 
   violation_payment: { label: "سداد مخالفة", href: () => "/violations" },
   fixed_asset: { label: "اقتناء أصل", href: (id) => `/fixed-assets?open=${id}` },
   depreciation: { label: "إهلاك شهري", href: () => "/fixed-assets" },
+  custody: { label: "عهدة موظف", href: (id) => `/hr/custody?open=${id}` },
+  custody_close: { label: "تسوية عهدة", href: (id) => `/hr/custody?open=${id}` },
 };
 
 export const ENTRY_KINDS = { manual: "قيود يدوية", auto: "قيود آلية من المستندات", draft: "مسودات" } as const;

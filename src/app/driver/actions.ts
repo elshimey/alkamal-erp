@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { requireDriver } from "@/lib/driver-auth";
 import { createDriverExpense, ownTrip, recordDriverStage, reportBreakdown, setDriverLanguage, startTrip, type TripStage } from "@/lib/driver-app";
+import { requestCommissionAdvance } from "@/lib/hr";
 import { addExpense, addFuel, deleteWaybillItem } from "@/lib/waybills";
 import { todayRiyadh } from "@/lib/dates";
 import { errorMessage } from "@/lib/errors";
@@ -149,6 +150,20 @@ export async function breakdownAction(_: FormState, data: FormData): Promise<For
     return { error: errorMessage(err) };
   }
   revalidatePath("/driver/breakdown");
+  return { ok: t.saved };
+}
+
+export async function advanceAction(_: FormState, data: FormData): Promise<FormState> {
+  const { driver, t } = await requireDriver();
+  try {
+    const amount = num(data, "amount");
+    if (!amount) throw new Error("المبلغ إلزامي");
+    await requestCommissionAdvance(db, { driverId: driver.id, amount, notes: str(data, "notes") || null, today: todayRiyadh() });
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+  revalidatePath("/driver/balance");
+  revalidatePath("/hr/advances");
   return { ok: t.saved };
 }
 

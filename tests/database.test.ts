@@ -16,7 +16,7 @@ import { activeContract, createContract, createLocation, createParty, createRout
 import { createInvoice, createReceipt, invoicingQueue, issueInvoice, listSalesInvoices, revertInvoice, revertReceipt, updateDraftInvoice } from "@/lib/invoices";
 import { parseDocFilter } from "@/lib/doc-filters";
 import { createExpense, approveExpense, createPayment, createPurchaseInvoice, custodyBalances, deletePurchaseInvoice, listPurchaseInvoices, postPurchaseInvoice, updateDraftPurchase, rejectExpense, revertExpense, revertPayment, revertPurchaseInvoice, supplierBalances } from "@/lib/purchases";
-import { addMaintenanceLines, approveBreakdownRequest, approveMaintenanceOrder, completeMaintenanceOrder, createBreakdownRequest, createMaintenanceOrder, deleteMaintenanceOrder, planSchedule, rejectBreakdownRequest, revertMaintenanceOrder, reviewBreakdownRequest, savePlan } from "@/lib/maintenance";
+import { addMaintenanceLines, approveBreakdownRequest, approveMaintenanceOrder, completeMaintenanceOrder, createBreakdownRequest, createMaintenanceOrder, deleteMaintenanceOrder, planSchedule, rejectBreakdownRequest, revertMaintenanceOrder, reviewBreakdownRequest, savePlan, listOrders, orderDoc, updateDraftOrder, createOrdersFrom, listRequests, requestDoc } from "@/lib/maintenance";
 import { adjustPayrollLines, approvePayrollRun, bankTransferRows, createAdvance, createEmployee, createPayrollRun, payAdvance, payPayrollRun, refreshPayrollRun, revertAdvance, revertPayrollPayment, revertPayrollRun, updateEmployee } from "@/lib/payroll";
 import { createViolation, deleteViolation, listViolations, payViolations, revertViolationPayment, violationSummary } from "@/lib/violations";
 import { computePayrollLine } from "@/data/payroll";
@@ -32,6 +32,7 @@ import { createCashAccount, listCashAccounts, normalizeIban } from "@/lib/banks"
 import { averageCost, createProduct, createStockDoc, createWarehouse, listProducts, onHand, postStockDoc, productCard, revertStockDoc, saveCount, stockDoc } from "@/lib/inventory";
 import { createAsset, deleteAsset, disposeAsset, listAssets, runDepreciation, undoLastDepreciation } from "@/lib/assets";
 import { IMPORT_SPECS } from "@/data/import-specs";
+import * as hr from "@/lib/hr";
 import { addExpense, addFuel, approveWaybill, createWaybill, deleteWaybill, recordStage, rejectWaybill, revertWaybill } from "@/lib/waybills";
 
 const url = process.env.TEST_DATABASE_URL;
@@ -63,7 +64,7 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
 
   it("زرعت شجرة الحسابات مرة واحدة مع الآباء", async () => {
     const rows = await db.select().from(s.accounts);
-    expect(rows.length).toBe(115);
+    expect(rows.length).toBe(116);
     expect(rows.filter((r) => r.parentId === null).length).toBe(7);
   });
 
@@ -1424,5 +1425,160 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     expect((find(after, "expenses")?.out ?? 0) - (find(before, "expenses")?.out ?? 0)).toBe(200);
     const office = after.accounts.find((a) => a.code === "110102")!;
     expect(office.in - (before.accounts.find((a) => a.code === "110102")?.in ?? 0)).toBe(300);
+  });
+
+  it("الصيانة بآلية الفواتير: بحث وفلترة، تعديل المسودة، أوامر من الخطط والبلاغات، واستيراد الأوامر ببنودها", async () => {
+    const v = await createVehicle(db, { plate: "ص ي ن 4321", chassis: "CH-MNT" });
+    const ws = await createParty(db, { nameAr: "ورشة المنطقة الصناعية", roles: ["workshop"] });
+    const day = `${YEAR}-07-15`;
+
+    const plan = await savePlan(db, { vehicleId: v.id, type: "consumable", title: "زيت وفلاتر", intervalDays: 45 });
+    const [fromPlan] = await createOrdersFrom(db, { plans: [plan.id] }, { orderDate: day });
+    await expect(createOrdersFrom(db, { plans: [plan.id] }, { orderDate: day })).rejects.toThrow("أمر مفتوح");
+    const req = await createBreakdownRequest(db, { vehicleId: v.id, reportDate: day, description: "صوت في القير", estimatedCost: 900 });
+    await reviewBreakdownRequest(db, req.id, { limit: 5000 });
+    const [fromReq] = await createOrdersFrom(db, { requests: [req.id] }, { orderDate: day });
+    expect((await requestDoc(db, req.id))?.order?.number).toBe(fromReq);
+    expect((await listRequests(db, { q: "القير" })).map((x) => x.r.id)).toEqual([req.id]);
+
+    const mine = await listOrders(db, { vehicleId: v.id });
+    expect(mine.map((x) => x.o.number).sort()).toEqual([fromPlan, fromReq].sort());
+    expect(mine.every((x) => x.o.status === "draft" && x.lines === 0)).toBe(true);
+    const planOrder = mine.find((x) => x.o.number === fromPlan)!.o;
+    expect(planOrder).toMatchObject({ type: "consumable", planId: plan.id, provider: "internal" });
+
+    await updateDraftOrder(db, planOrder.id, { odometer: "120500", notes: " بعد الرحلة " });
+    expect((await orderDoc(db, planOrder.id))?.o).toMatchObject({ odometer: 120500, notes: "بعد الرحلة" });
+    await expect(updateDraftOrder(db, planOrder.id, { odometer: "-3" })).rejects.toThrow("العداد");
+
+    const spec = IMPORT_SPECS["maintenance-orders"];
+    const rows = [
+      { ref: "A", orderDate: "16/07/" + YEAR, vehicle: "ص ي ن 4321", type: "ميكانيكا", workshop: "ورشة المنطقة الصناعية", supplierInvoiceNo: "IND-55", lineKind: "قطعة غيار", description: "كلتش", quantity: "1", unitPrice: "1500", vat: "15%" },
+      { ref: "A", orderDate: "16/07/" + YEAR, vehicle: "ص ي ن 4321", type: "ميكانيكا", workshop: "ورشة المنطقة الصناعية", supplierInvoiceNo: "IND-55", lineKind: "شغل يد", description: "تركيب", unitPrice: "300", vat: "بدون" },
+      { ref: "B", orderDate: `${YEAR}-07-16`, vehicle: "غير موجودة", description: "x", unitPrice: "1" },
+      { ref: "C", orderDate: `${YEAR}-07-16`, vehicle: "ص ي ن 4321", workshop: "ورشة لا وجود لها", description: "x", unitPrice: "1" },
+    ].map((values, i) => ({ row: i + 5, values: values as Record<string, string> }));
+    const dry = await runImport(db, spec, rows, { dryRun: true });
+    expect(dry).toMatchObject({ total: 3, ok: 1 });
+    expect(dry.issues.map((x) => x.rows)).toEqual([[7], [8]]);
+    expect((await listOrders(db, { vehicleId: v.id })).length).toBe(2);
+    const real = await runImport(db, spec, rows.slice(0, 2), { dryRun: false });
+    expect(real.ok).toBe(1);
+    const [imported] = await listOrders(db, { q: "IND-55" });
+    expect(imported).toMatchObject({ supplier: "ورشة المنطقة الصناعية", lines: 2 });
+    expect([Number(imported.o.subtotal), Number(imported.o.vatTotal), Number(imported.o.total)]).toEqual([1800, 225, 2025]);
+    expect(imported.o.supplierId).toBe(ws.id);
+    expect((await listOrders(db, { vehicleId: v.id, sort: "amount_desc" }))[0].o.id).toBe(imported.o.id);
+
+    const reqImport = await runImport(db, IMPORT_SPECS["breakdown-requests"], [{ row: 5, values: { reportDate: day, vehicle: "ص ي ن 4321", description: "إضاءة خلفية", priority: "عاجلة" } }], { dryRun: false });
+    expect(reqImport.ok).toBe(1);
+    expect((await listRequests(db, { vehicleId: v.id, priority: "urgent" })).length).toBe(1);
+    const planImport = await runImport(db, IMPORT_SPECS["maintenance-plans"], [{ row: 5, values: { vehicle: "ص ي ن 4321", title: "فحص إطارات", type: "إطارات", intervalDays: "30" } }], { dryRun: false });
+    expect(planImport.ok).toBe(1);
+    expect((await planSchedule(db, day)).find((p) => p.vehicleId === v.id && p.title === "فحص إطارات")?.type).toBe("tires");
+  });
+
+  it("الموارد البشرية: العهد بقيودها، والجزاءات والحوافز والإجازات والغياب في المسير، والتقييم والترقية، ومقدم العمولة بسقفه", async () => {
+    const jl = async (entryId: number) =>
+      (await db.select({ l: s.journalLines, code: s.accounts.code }).from(s.journalLines).innerJoin(s.accounts, eq(s.accounts.id, s.journalLines.accountId)).where(eq(s.journalLines.entryId, entryId))).map(({ l, code }) => ({ code, account: l.accountId, debit: Number(l.debitBase), credit: Number(l.creditBase) }));
+    const emp = await createEmployee(db, { nameAr: "موظفة الموارد", hireDate: `${YEAR}-01-01`, basicSalary: 6000 });
+
+    // العهدة النقدية: تسليم بقيد، ثم تسوية بإعادة ومصروف؛ والافتتاحية بلا قيد
+    const cash = await hr.createCustody(db, { kind: "cash", employeeId: emp.id, docDate: `${YEAR}-11-02`, description: "مصاريف المكتب", amount: 1000 });
+    await expect(hr.deliverCustody(db, cash.id, { cashAccountId: acc["110101"] })).rejects.toThrow("اعتمد");
+    await hr.approveCustody(db, cash.id);
+    await expect(hr.deliverCustody(db, cash.id, {})).rejects.toThrow("الصندوق");
+    await hr.deliverCustody(db, cash.id, { cashAccountId: acc["110101"] });
+    let doc = (await hr.custodyDoc(db, cash.id))!;
+    const [withAcc] = await db.select().from(s.employees).where(eq(s.employees.id, emp.id));
+    expect(withAcc.custodyAccountId).toBeTruthy();
+    expect(await jl(doc.c.journalEntryId!)).toEqual(
+      expect.arrayContaining([expect.objectContaining({ account: withAcc.custodyAccountId, debit: 1000 }), expect.objectContaining({ code: "110101", credit: 1000 })]),
+    );
+    await expect(updateEmployee(db, emp.id, { status: "terminated" })).rejects.toThrow("عهدة");
+    await expect(hr.closeCustody(db, cash.id, { outcome: "settled", date: `${YEAR}-11-20`, returnedAmount: 800, spentAmount: 300, expenseAccountId: acc["6105"] })).rejects.toThrow("أكبر");
+    await hr.closeCustody(db, cash.id, { outcome: "settled", date: `${YEAR}-11-20`, returnedAmount: 200, cashAccountId: acc["110101"], spentAmount: 300, expenseAccountId: acc["6105"] });
+    doc = (await hr.custodyDoc(db, cash.id))!;
+    expect(doc.c.status).toBe("settled");
+    expect(await jl(doc.c.closeEntryId!)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "110101", debit: 200 }),
+        expect.objectContaining({ code: "6105", debit: 300 }),
+        expect.objectContaining({ account: withAcc.custodyAccountId, credit: 500 }),
+      ]),
+    );
+    expect(await hr.revertCustody(db, cash.id)).toBe("delivered");
+    expect(await db.select().from(s.journalEntries).where(eq(s.journalEntries.id, doc.c.closeEntryId!))).toHaveLength(0);
+    await hr.closeCustody(db, cash.id, { outcome: "returned", date: `${YEAR}-11-21`, cashAccountId: acc["110101"] });
+    const phone = await hr.createCustody(db, { kind: "in_kind", employeeId: emp.id, docDate: `${YEAR}-01-01`, description: "جوال", amount: 2500, serialNo: "IMEI-1", isOpening: true });
+    expect(phone).toMatchObject({ status: "delivered", journalEntryId: null });
+    expect((await hr.openCustodyByEmployee(db)).find((x) => x.employeeId === emp.id)).toMatchObject({ n: 1 });
+
+    // الجزاء والحافز والإنذار، والإجازة بدون راتب والغياب، في مسير نوفمبر
+    const penalty = await hr.createHrAction(db, { kind: "penalty", employeeId: emp.id, actionDate: `${YEAR}-11-05`, amount: 300, reason: "تأخر متكرر" });
+    const incentive = await hr.createHrAction(db, { kind: "incentive", employeeId: emp.id, actionDate: `${YEAR}-11-06`, amount: 500, reason: "إنجاز الإقفال" });
+    const warning = await hr.createHrAction(db, { kind: "warning", employeeId: emp.id, actionDate: `${YEAR}-11-07`, reason: "إنذار أول" });
+    expect(warning.points).toBe(2);
+    await expect(hr.createHrAction(db, { kind: "penalty", employeeId: emp.id, actionDate: `${YEAR}-11-05`, reason: "بلا مبلغ" })).rejects.toThrow("مبلغ");
+    for (const a of [penalty, incentive, warning]) await hr.approveHrAction(db, a.id);
+
+    const [annual] = await db.select().from(s.leaveTypes).where(eq(s.leaveTypes.isAnnual, true));
+    const [unpaid] = await db.select().from(s.leaveTypes).where(eq(s.leaveTypes.paid, false));
+    const long = await hr.createLeave(db, { employeeId: emp.id, typeId: annual.id, fromDate: `${YEAR}-03-01`, toDate: `${YEAR}-03-25` });
+    await expect(hr.approveLeave(db, long.id)).rejects.toThrow("الرصيد");
+    await hr.cancelLeave(db, long.id);
+    const lv = await hr.createLeave(db, { employeeId: emp.id, typeId: unpaid.id, fromDate: `${YEAR}-11-29`, toDate: `${YEAR}-12-02` });
+    await expect(hr.createLeave(db, { employeeId: emp.id, typeId: annual.id, fromDate: `${YEAR}-12-01`, toDate: `${YEAR}-12-01` })).rejects.toThrow("تتداخل");
+    await hr.approveLeave(db, lv.id);
+    await hr.saveAttendance(db, `${YEAR}-11-10`, [{ employeeId: emp.id, status: "absent" }]);
+    await hr.saveAttendance(db, `${YEAR}-11-11`, [{ employeeId: emp.id, status: "late", lateMinutes: 25 }]);
+    expect((await hr.attendanceMonth(db, `${YEAR}-11`)).find((x) => x.id === emp.id)).toMatchObject({ absent: 1, late: 1, lateMinutes: 25 });
+    const bal = await hr.leaveBalances(db, YEAR);
+    expect(bal.rows.find((r) => r.id === emp.id)!.balances.find((b) => b.typeId === annual.id)).toMatchObject({ quota: 21, used: 0, left: 21 });
+
+    const run = await createPayrollRun(db, { month: `${YEAR}-11` });
+    const [line] = await db.select().from(s.payrollLines).where(sql`${s.payrollLines.runId} = ${run.id} and ${s.payrollLines.employeeId} = ${emp.id}`);
+    expect([Number(line.incentives), Number(line.penalties), Number(line.leaveDays), Number(line.absenceDeduction)]).toEqual([500, 300, 3, 600]);
+    expect(Number(line.net)).toBe(6000 + 500 - 600 - 300);
+    const drv = await createDriver(db, { nameAr: "سائق المقدم" });
+    const [drvEmp] = await db.select().from(s.drivers).where(eq(s.drivers.id, drv.id));
+    await expect(hr.saveAttendance(db, `${YEAR}-11-12`, [{ employeeId: drvEmp.employeeId, status: "present" }])).rejects.toThrow("الإداريين");
+    const entry = await approvePayrollRun(db, run.id);
+    const pl = await jl(entry.id);
+    expect(pl.find((l) => l.code === "2116")).toMatchObject({ credit: 300 });
+    await expect(hr.cancelHrAction(db, penalty.id)).rejects.toThrow("المعتمد");
+    await expect(hr.saveAttendance(db, `${YEAR}-11-12`, [{ employeeId: emp.id, status: "present" }])).rejects.toThrow("معتمد");
+    await expect(hr.cancelLeave(db, lv.id)).rejects.toThrow("المسير");
+
+    // التقييم: 8 من 10 في كل المعايير = 80، ناقص نقطتي الإنذار
+    const criteria = await hr.listCriteria(db, true);
+    const ev = await hr.saveEvaluation(db, { employeeId: emp.id, month: `${YEAR}-11`, scores: Object.fromEntries(criteria.map((c) => [String(c.id), 8])) });
+    expect([Number(ev.baseScore), Number(ev.deduction), Number(ev.finalScore), ev.warnings]).toEqual([80, 2, 78, 1]);
+    await hr.approveEvaluation(db, ev.id);
+    await expect(hr.saveEvaluation(db, { employeeId: emp.id, month: `${YEAR}-11`, scores: {} })).rejects.toThrow("معتمد");
+    const settings = await hr.getHrSettings(db);
+    await hr.saveHrSettings(db, { ...settings, advanceCapDomestic: 1000, advanceCapInternational: 2000, promotionScore: 75, promotionMonths: 1, advanceOpenDay: 1, advanceCloseDay: 20 });
+    expect((await hr.promotionCandidates(db)).map((c) => c.employeeId)).toContain(emp.id);
+    await hr.promoteEmployee(db, { employeeId: emp.id, effectiveDate: `${YEAR}-12-01`, toTitle: "رئيسة قسم", toBasic: 7000 });
+    expect((await db.select().from(s.employees).where(eq(s.employees.id, emp.id)))[0]).toMatchObject({ jobTitle: "رئيسة قسم", basicSalary: "7000.000" });
+    expect((await hr.promotionCandidates(db)).map((c) => c.employeeId)).not.toContain(emp.id);
+
+    // مقدم العمولة: داخل النافذة وبالسقف، والاعتماد ينشئ سلفة مصروفة تُستقطع كاملة
+    await expect(hr.requestCommissionAdvance(db, { driverId: drv.id, amount: 100, today: `${YEAR}-11-25` })).rejects.toThrow("مفتوحة");
+    const req = await hr.requestCommissionAdvance(db, { driverId: drv.id, amount: 600, today: `${YEAR}-11-10` });
+    await expect(hr.requestCommissionAdvance(db, { driverId: drv.id, amount: 500, today: `${YEAR}-11-11` })).rejects.toThrow("المتاح");
+    expect(await hr.advanceWindow(db, drv.id, `${YEAR}-11-12`)).toMatchObject({ open: true, cap: 1000, used: 600, remaining: 400 });
+    const adv = await hr.approveAdvanceRequest(db, req.id, { cashAccountId: acc["110101"] });
+    const [paid] = await db.select().from(s.employeeAdvances).where(eq(s.employeeAdvances.id, adv.id));
+    expect(paid).toMatchObject({ status: "paid", amount: "600.000", installment: "600.000" });
+    expect((await hr.listAdvanceRequests(db, { status: "approved" })).find((x) => x.r.id === req.id)?.advance).toBe(paid.number);
+
+    // السائق في إجازة معتمدة لا يُسند لرحلة
+    const dl = await hr.createLeave(db, { employeeId: drvEmp.employeeId, typeId: annual.id, fromDate: `${YEAR}-12-10`, toDate: `${YEAR}-12-14` });
+    await hr.approveLeave(db, dl.id);
+    expect(await hr.driverLeaveOn(db, drv.id, `${YEAR}-12-12`)).toMatchObject({ number: dl.number });
+    expect(await hr.driverLeaveOn(db, drv.id, `${YEAR}-12-15`)).toBeNull();
+    const dash = await hr.hrDashboard(db, `${YEAR}-12-12`);
+    expect(dash.onLeave.map((x) => x.name)).toContain("سائق المقدم");
   });
 });

@@ -1,5 +1,5 @@
 import "server-only";
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
 
@@ -75,5 +75,15 @@ export async function driverOptions() {
 
 export async function chargeTypeOptions() {
   const rows = await db.select().from(s.chargeTypes).where(eq(s.chargeTypes.isActive, true)).orderBy(asc(s.chargeTypes.id));
+  return rows.map((r) => ({ value: String(r.id), label: r.nameAr }));
+}
+
+/** الموظفون على رأس العمل (إداريون وسائقون) بأسمائهم. */
+export async function employeeOptions() {
+  const rows = await db
+    .select({ id: s.employees.id, nameAr: s.employees.nameAr })
+    .from(s.employees)
+    .where(inArray(s.employees.status, ["active", "on_leave"]))
+    .orderBy(asc(s.employees.nameAr));
   return rows.map((r) => ({ value: String(r.id), label: r.nameAr }));
 }

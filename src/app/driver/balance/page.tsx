@@ -5,13 +5,19 @@ import { todayRiyadh } from "@/lib/dates";
 import { DRIVER_LANGS, LANG_NAMES } from "@/data/driver-i18n";
 import { Icon } from "@/components/icons";
 import { logout } from "../../login/actions";
-import { languageAction } from "../actions";
-import { fmt, Section } from "../driver-ui";
+import { advanceWindow, driverAdvanceRequests } from "@/lib/hr";
+import { ActionForm, SubmitButton } from "@/components/action-form";
+import { advanceAction, languageAction } from "../actions";
+import { DField, DInput, fmt, Pill, Section } from "../driver-ui";
+
+const ADVANCE_TONE = { pending: "amber", approved: "green", rejected: "red" } as const;
 
 export default async function DriverBalance() {
   const { driver, t, lang } = await getDriverContext();
   if (!driver) return null;
-  const b = await driverBalances(db, driver, todayRiyadh());
+  const today = todayRiyadh();
+  const [b, w, requests] = await Promise.all([driverBalances(db, driver, today), advanceWindow(db, driver.id, today), driverAdvanceRequests(db, driver.id)]);
+  const fill = (text: string) => text.replace("{open}", String(w.openDay)).replace("{close}", String(w.closeDay));
 
   return (
     <>
@@ -40,6 +46,46 @@ export default async function DriverBalance() {
           {t.pendingExpenses}: <b className="ltr-nums">{fmt(b.pendingExpenses)}</b> ({b.pendingCount})
         </p>
       )}
+
+      <Section title={t.advanceTitle}>
+        <p className="mb-3 text-sm text-gray-500">{fill(t.advanceHint)}</p>
+        <div className="mb-3 flex items-center justify-between rounded-xl bg-gray-50 px-3 py-2 text-sm">
+          <span className="text-gray-600">{t.advanceRemaining}</span>
+          <b className="ltr-nums text-asphalt-900">
+            {fmt(w.remaining)} <span className="text-xs font-normal text-gray-400">/ {fmt(w.cap)}</span>
+          </b>
+        </div>
+        {w.open && w.remaining > 0 ? (
+          <ActionForm action={advanceAction} className="flex flex-col gap-3">
+            <DField label={t.advanceAmount}>
+              <DInput name="amount" type="number" inputMode="decimal" step="0.01" min={1} max={w.remaining} required />
+            </DField>
+            <DField label={t.advanceNote}>
+              <DInput name="notes" />
+            </DField>
+            <SubmitButton pendingLabel={t.saving} className="w-full py-3 text-base">
+              {t.advanceSend}
+            </SubmitButton>
+          </ActionForm>
+        ) : (
+          !w.open && <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">{fill(t.advanceClosed)}</p>
+        )}
+        {requests.length > 0 && (
+          <ul className="mt-3 divide-y divide-gray-100">
+            {requests.map((r) => (
+              <li key={r.id} className="flex items-center justify-between gap-2 py-2">
+                <span className="ltr-nums text-xs text-gray-400">
+                  {r.requestDate} · {r.number}
+                </span>
+                <span className="flex items-center gap-2">
+                  <b className="ltr-nums text-sm">{fmt(r.amount)}</b>
+                  <Pill tone={ADVANCE_TONE[r.status]}>{t.advanceStatus[r.status]}</Pill>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
 
       <Section title={t.movements}>
         {b.movements.length === 0 && <p className="text-sm text-gray-400">{t.nothing}</p>}
