@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { Icon, type IconName } from "@/components/icons";
 import { PageHeader } from "@/components/ui";
+import { TourCards } from "./tour-cards";
 
 const SUPPORT = "966535443598";
 
@@ -119,6 +120,12 @@ export default async function HelpPage() {
             <span className="mt-0.5 block text-sm text-gray-500">اقترح ما تحتاجه في النظام</span>
           </span>
         </a>
+      </div>
+
+      <h2 className="mb-1 text-base font-semibold text-brand-900">الدورات المستندية: جولات تفاعلية</h2>
+      <p className="mb-3 text-sm text-gray-500">اختر دورة فينقلك البرنامج إلى كل خطوة، ويضيء البند المطلوب برقمه، ويشرح ما تفعله وأثره المحاسبي، ويختم بالقيود التي تكوّنت.</p>
+      <div className="mb-9">
+        <TourCards />
       </div>
 
       <h2 className="mb-3 text-base font-semibold text-brand-900">ابدأ من هنا</h2>
