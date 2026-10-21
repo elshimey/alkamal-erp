@@ -1429,6 +1429,42 @@ export const bankAccounts = pgTable("bank_accounts", {
   createdAt: createdAt(),
 });
 
+// ───────────── التسوية البنكية ─────────────
+
+export const reconciliationStatus = pgEnum("reconciliation_status", ["draft", "completed"]);
+
+/** مطابقة كشف البنك: رصيد الكشف في تاريخه مقابل حركات الحساب المؤشر عليها «ظهرت في الكشف». */
+export const bankReconciliations = pgTable(
+  "bank_reconciliations",
+  {
+    id: id(),
+    number: varchar("number", { length: 30 }).notNull().unique(),
+    accountId: ref("account_id").notNull().references(() => accounts.id),
+    statementDate: date("statement_date").notNull(),
+    // بعملة الحساب
+    statementBalance: money("statement_balance").notNull(),
+    status: reconciliationStatus("status").notNull().default("draft"),
+    notes: text("notes"),
+    createdBy: ref("created_by").references(() => users.id),
+    createdAt: createdAt(),
+    completedBy: ref("completed_by").references(() => users.id),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (t) => [index("bank_reconciliations_account_idx").on(t.accountId, t.statementDate)],
+);
+
+/** سطر قيد ظهر في كشف البنك. السطر يُطابق مرة واحدة. */
+export const bankReconciliationItems = pgTable("bank_reconciliation_items", {
+  id: id(),
+  reconciliationId: ref("reconciliation_id")
+    .notNull()
+    .references(() => bankReconciliations.id, { onDelete: "cascade" }),
+  journalLineId: ref("journal_line_id")
+    .notNull()
+    .unique()
+    .references(() => journalLines.id, { onDelete: "cascade" }),
+});
+
 // ───────────── الأصول الثابتة والإهلاك ─────────────
 
 export const assetStatus = pgEnum("asset_status", ["active", "disposed"]);

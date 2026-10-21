@@ -532,19 +532,9 @@ async function postPaymentTx(tx: Tx, id: number, opts: { invoiceId?: number | nu
   const amount = num(p.amount);
   const fx = { currencyCode: p.currencyCode, exchangeRate: num(p.exchangeRate) };
   const label = `صرف ${p.number}`;
-  const entry = await createJournalEntryTx(tx, {
-    entryDate: p.paymentDate,
-    description: p.kind === "custody" ? `صرف عهدة ${p.number}` : `سند صرف ${p.number}`,
-    source: { type: "payment", id: p.id },
-    post: true,
-    userId: opts.userId,
-    lines: [
-      { accountId: p.debitAccountId, debit: amount, ...fx, partyId: p.partyId, driverId: p.driverId, description: label },
-      { accountId: p.cashAccountId, credit: amount, ...fx, partyId: p.partyId, driverId: p.driverId, description: label },
-    ],
-  });
-
   let left = amount;
+  // فرق السعر بين يوم الفاتورة ويوم السداد بالريال (موجب: دفعنا أكثر مما قُيد للمورد)
+  let fxDiff = 0;
   if (p.kind === "supplier" && p.partyId) {
     const open = await tx
       .select()
@@ -566,10 +556,41 @@ async function postPaymentTx(tx: Tx, id: number, opts: { invoiceId?: number | nu
       if (left <= 0) break;
       const take = round2(Math.min(left, num(inv.total) - num(inv.paidAmount)));
       await tx.insert(s.paymentAllocations).values({ paymentId: p.id, invoiceId: inv.id, amount: String(take) });
+      fxDiff = round2(fxDiff + round2(take * num(p.exchangeRate)) - round2(take * num(inv.exchangeRate)));
       await tx.update(s.purchaseInvoices).set({ paidAmount: String(round2(num(inv.paidAmount) + take)), updatedAt: new Date() }).where(eq(s.purchaseInvoices.id, inv.id));
       left = round2(left - take);
     }
   }
+  const lines: LineInput[] = [
+    { accountId: p.debitAccountId, debit: amount, ...fx, partyId: p.partyId, driverId: p.driverId, description: label },
+    { accountId: p.cashAccountId, credit: amount, ...fx, partyId: p.partyId, driverId: p.driverId, description: label },
+  ];
+  // فروق العملة المحققة (IAS 21): يُقفل رصيد المورد بالريال بسعر فاتورته، والفرق على 7103
+  if (Math.abs(fxDiff) >= 0.005) {
+    const fxAccount = await accountIdByCode(tx, PURCHASE_ACCOUNTS.fxDifferences);
+    const sar = { currencyCode: "SAR", exchangeRate: 1, partyId: p.partyId };
+    const description = `فروق عملة محققة – ${p.number}`;
+    const amt = Math.abs(fxDiff);
+    lines.push(
+      ...(fxDiff > 0
+        ? [
+            { accountId: fxAccount, debit: amt, description },
+            { accountId: p.debitAccountId, credit: amt, ...sar, description },
+          ]
+        : [
+            { accountId: p.debitAccountId, debit: amt, ...sar, description },
+            { accountId: fxAccount, credit: amt, description },
+          ]),
+    );
+  }
+  const entry = await createJournalEntryTx(tx, {
+    entryDate: p.paymentDate,
+    description: p.kind === "custody" ? `صرف عهدة ${p.number}` : `سند صرف ${p.number}`,
+    source: { type: "payment", id: p.id },
+    post: true,
+    userId: opts.userId,
+    lines,
+  });
   await tx.update(s.payments).set({ status: "posted", journalEntryId: entry.id }).where(eq(s.payments.id, id));
   // الباقي يسدد أرصدة الجهة المسجلة من البوالص (ناقل، محطة) أو يبقى دفعة مقدمة
   return { entry, unallocated: p.kind === "supplier" ? left : 0 };

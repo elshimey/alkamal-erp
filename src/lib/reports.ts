@@ -78,7 +78,7 @@ async function netByGeneralAccount(db: Db, from: string, to: string) {
     db,
     sql`select g.code, g.name_ar as name, sum(l.debit_base - l.credit_base) as net
         from journal_lines l
-        join journal_entries e on e.id = l.entry_id and e.status = 'posted'
+        join journal_entries e on e.id = l.entry_id and e.status = 'posted' and e.source_type is distinct from 'year_close'
         join accounts a on a.id = l.account_id
         join accounts g on g.code = left(a.code, 4)
         where e.entry_date between ${from} and ${to} and a.code ~ '^[4-7]'
@@ -261,7 +261,7 @@ export async function costCenterProfit(db: Db, from: string, to: string) {
           coalesce(sum(case when a.code ~ '^[67]' then l.debit_base - l.credit_base end), 0) as other
         from cost_centers cc
         left join journal_lines l on l.cost_center_id = cc.id
-          and exists (select 1 from journal_entries e where e.id = l.entry_id and e.status = 'posted' and e.entry_date between ${from} and ${to})
+          and exists (select 1 from journal_entries e where e.id = l.entry_id and e.status = 'posted' and e.source_type is distinct from 'year_close' and e.entry_date between ${from} and ${to})
         left join accounts a on a.id = l.account_id
         group by cc.id
         order by cc.type, cc.code`,

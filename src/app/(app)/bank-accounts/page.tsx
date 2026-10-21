@@ -79,6 +79,9 @@ export default async function BankAccountsPage() {
                   <Link href="/payments" className="text-brand-700 hover:underline">
                     سند صرف
                   </Link>
+                  <Link href="/bank-accounts/reconcile" className="text-brand-700 hover:underline">
+                    تسوية بنكية
+                  </Link>
                 </div>
                 {canEdit && (
                   <details className="mt-2 text-sm">

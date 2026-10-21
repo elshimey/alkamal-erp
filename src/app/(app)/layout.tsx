@@ -97,11 +97,13 @@ const NAV: { title: string; icon: IconName; items: { href: string; label: string
     items: [
       { href: "/journal", label: "القيود اليومية", icon: "ledger", entity: "journal_entries" },
       { href: "/bank-accounts", label: "البنوك والصناديق", icon: "cash", entity: "accounts" },
+      { href: "/bank-accounts/reconcile", label: "التسوية البنكية", icon: "check", entity: "accounts" },
       { href: "/fixed-assets", label: "الأصول الثابتة", icon: "building", entity: "fixed_assets" },
       { href: "/journal/reclassify", label: "إعادة التصنيف", icon: "exchange", entity: "journal_entries" },
       { href: "/accounts", label: "شجرة الحسابات", icon: "tree", entity: "accounts" },
       { href: "/cost-centers", label: "مراكز التكلفة", icon: "target", entity: "cost_centers" },
       { href: "/exchange-rates", label: "أسعار الصرف", icon: "exchange", entity: "accounts" },
+      { href: "/periods", label: "الفترات والإقفال", icon: "calendar", entity: "fiscal_periods" },
     ],
   },
   {

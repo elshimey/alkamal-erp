@@ -90,7 +90,7 @@ async function incomeByAccount(db: Db, from: string, to: string) {
     db,
     sql`select left(a.code, 4) as code, min(p.name_ar) as name, sum(l.credit_base - l.debit_base) as net
         from journal_lines l
-        join journal_entries e on e.id = l.entry_id and e.status = 'posted'
+        join journal_entries e on e.id = l.entry_id and e.status = 'posted' and e.source_type is distinct from 'year_close'
         join accounts a on a.id = l.account_id
         left join accounts p on p.code = left(a.code, 4)
         where e.entry_date between ${from} and ${to} and left(a.code, 1) in ('4', '5', '6')
@@ -183,7 +183,7 @@ export async function monthlyTrend(db: Db, today: string) {
           sum(case when a.code like '4%' then l.credit_base - l.debit_base else 0 end) as revenue,
           sum(case when a.code like '5%' or a.code like '6%' then l.debit_base - l.credit_base else 0 end) as cost
         from journal_lines l
-        join journal_entries e on e.id = l.entry_id and e.status = 'posted'
+        join journal_entries e on e.id = l.entry_id and e.status = 'posted' and e.source_type is distinct from 'year_close'
         join accounts a on a.id = l.account_id
         where e.entry_date >= ${from} and e.entry_date <= ${today}
         group by 1`,
@@ -206,7 +206,7 @@ export async function balances(db: Db, today: string) {
           coalesce(sum(case when a.code like '2101%' or a.code like '2102%' or a.code like '2103%' or a.code like '2104%' or a.code like '2105%' then l.credit_base - l.debit_base end), 0) as payable,
           coalesce(sum(case when a.code like '2109%' or a.code like '2110%' then l.credit_base - l.debit_base when a.code like '1108%' then l.credit_base - l.debit_base end), 0) as vat
         from journal_lines l
-        join journal_entries e on e.id = l.entry_id and e.status = 'posted'
+        join journal_entries e on e.id = l.entry_id and e.status = 'posted' and e.source_type is distinct from 'year_close'
         join accounts a on a.id = l.account_id
         where e.entry_date <= ${today}`,
   );
@@ -310,7 +310,7 @@ export async function vehicleProfit(db: Db, from: string, to: string) {
             where (w.vehicle_id = v.id or (v.id is null and cc.code = 'EXT' and w.carrier_id is not null))
               and w.status <> 'rejected' and w.waybill_date between ${from} and ${to})::int as trips
         from journal_lines l
-        join journal_entries e on e.id = l.entry_id and e.status = 'posted'
+        join journal_entries e on e.id = l.entry_id and e.status = 'posted' and e.source_type is distinct from 'year_close'
         join accounts a on a.id = l.account_id
         join cost_centers cc on cc.id = l.cost_center_id
         left join vehicles v on v.cost_center_id = cc.id
@@ -401,7 +401,7 @@ export async function alertCounts(db: Db, today: string) {
           (select coalesce(sum((total - paid_amount) * exchange_rate), 0) from purchase_invoices
             where status = 'posted' and paid_amount < total and due_date between ${today} and ${today}::date + 7) as due_week,
           (select count(*) from drivers d where d.status = 'active' and (select coalesce(sum(l.debit_base - l.credit_base), 0) from journal_lines l
-            join journal_entries e on e.id = l.entry_id and e.status = 'posted' where l.account_id = d.custody_account_id) < 0)::int as negative_custody,
+            join journal_entries e on e.id = l.entry_id and e.status = 'posted' and e.source_type is distinct from 'year_close' where l.account_id = d.custody_account_id) < 0)::int as negative_custody,
           (select count(*) from breakdown_requests where status in ('pending_supervisor', 'pending_approval'))::int as pending_breakdowns,
           (select count(*) from breakdown_requests where status = 'approved')::int as approved_breakdowns,
           (select count(*) from maintenance_orders where status = 'approved')::int as open_maintenance,
@@ -550,7 +550,7 @@ export async function cashFlow(db: Db, from: string, to: string) {
           join accounts a on a.id = l.account_id
           where not ${CASH} and l.entry_id in (
             select l.entry_id from journal_lines l
-            join journal_entries e on e.id = l.entry_id and e.status = 'posted'
+            join journal_entries e on e.id = l.entry_id and e.status = 'posted' and e.source_type is distinct from 'year_close'
             join accounts a on a.id = l.account_id
             where e.entry_date between ${from} and ${to} and ${CASH})
           group by a.code`,
@@ -569,7 +569,7 @@ export async function cashFlow(db: Db, from: string, to: string) {
             coalesce(sum(l.debit_base) filter (where e.entry_date between ${from} and ${to}), 0) as cash_in,
             coalesce(sum(l.credit_base) filter (where e.entry_date between ${from} and ${to}), 0) as cash_out
           from journal_lines l
-          join journal_entries e on e.id = l.entry_id and e.status = 'posted'
+          join journal_entries e on e.id = l.entry_id and e.status = 'posted' and e.source_type is distinct from 'year_close'
           join accounts a on a.id = l.account_id
           where ${CASH} and e.entry_date <= ${to}
           group by a.id, a.code, a.name_ar
@@ -580,7 +580,7 @@ export async function cashFlow(db: Db, from: string, to: string) {
       sql`select to_char(e.entry_date, ${bucket}) as k,
             sum(greatest(l.debit_base - l.credit_base, 0)) as cash_in, sum(greatest(l.credit_base - l.debit_base, 0)) as cash_out
           from journal_lines l
-          join journal_entries e on e.id = l.entry_id and e.status = 'posted'
+          join journal_entries e on e.id = l.entry_id and e.status = 'posted' and e.source_type is distinct from 'year_close'
           join accounts a on a.id = l.account_id
           where ${CASH} and e.entry_date between ${from} and ${to}
             and exists (select 1 from journal_lines x join accounts xa on xa.id = x.account_id

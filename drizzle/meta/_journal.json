@@ -120,6 +120,13 @@
       "when": 1792536688160,
       "tag": "0016_hr",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1792563935321,
+      "tag": "0017_bank_reconciliation",
+      "breakpoints": true
     }
   ]
 }
