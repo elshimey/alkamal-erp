@@ -305,7 +305,7 @@ export function TourRunner() {
   // في صفحة أخرى: بطاقة صغيرة تدعو للانتقال
   if (!onPage) {
     return (
-      <div data-tour-ui className="fixed bottom-4 left-4 z-[90] w-[min(24rem,calc(100vw-2rem))] rounded-2xl border border-brand-500/40 bg-white p-4 shadow-2xl print:hidden">
+      <div data-tour-ui className="fixed bottom-20 left-4 z-[90] md:bottom-4 w-[min(24rem,calc(100vw-2rem))] rounded-2xl border border-brand-500/40 bg-white p-4 shadow-2xl print:hidden">
         <div className="mb-1 text-xs text-gray-500">{tour.title}</div>
         {body}
         <div className="mt-4 flex items-center gap-2">
@@ -330,7 +330,7 @@ export function TourRunner() {
   if (!rect) {
     if (!missing) return null;
     return (
-      <div data-tour-ui className="fixed bottom-4 left-4 z-[90] w-[min(26rem,calc(100vw-2rem))] rounded-2xl border border-brand-500/40 bg-white p-4 shadow-2xl print:hidden">
+      <div data-tour-ui className="fixed bottom-20 left-4 z-[90] md:bottom-4 w-[min(26rem,calc(100vw-2rem))] rounded-2xl border border-brand-500/40 bg-white p-4 shadow-2xl print:hidden">
         <div className="mb-1 text-xs text-gray-500">{tour.title}</div>
         {body}
         <p className="mt-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">البند غير ظاهر الآن، غالباً لأنه لا توجد بيانات بعد أو لا تملك صلاحيته. تابع بزر «التالي».</p>

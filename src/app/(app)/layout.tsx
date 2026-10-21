@@ -4,7 +4,7 @@ import { isDriverOnly } from "@/lib/driver-app";
 import { requireUser } from "@/lib/auth";
 import { can, type Entity } from "@/lib/permissions";
 import { Icon, type IconName } from "@/components/icons";
-import { Logo } from "@/components/logo";
+import { Logo, LogoMark } from "@/components/logo";
 import { MobileNav, NavLinks, type NavGroup } from "@/components/nav-links";
 import { TourRunner } from "@/components/tour";
 import { logout } from "../login/actions";
@@ -142,26 +142,29 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <NavLinks groups={groups} footer={FOOTER} />
         </nav>
       </aside>
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 flex print:hidden items-center justify-between gap-4 border-b border-black/5 bg-white/85 px-6 py-3 backdrop-blur">
-          <MobileNav groups={[...groups, FOOTER[0]]} />
-          <div className="ms-auto flex items-center gap-4 text-sm">
+      <div className="flex min-w-0 flex-1 flex-col overflow-x-clip">
+        <header className="sticky top-0 z-30 flex print:hidden items-center justify-between gap-3 border-b border-black/5 bg-white/85 px-3 py-2 backdrop-blur md:gap-4 md:px-6 md:py-3">
+          <MobileNav groups={[...groups, ...FOOTER]} />
+          <Link href="/" className="md:hidden" aria-label="لوحة القيادة">
+            <LogoMark size={30} />
+          </Link>
+          <div className="ms-auto flex items-center gap-2 text-sm md:gap-4">
             <Link href="/account" className="flex items-center gap-2 text-gray-700 hover:text-brand-700">
               <span className="flex size-9 items-center justify-center rounded-full bg-asphalt-900 font-display font-semibold text-brand-500 ring-2 ring-brand-600/40">{user.name.trim()[0]}</span>
-              <span>
+              <span className="hidden sm:inline">
                 {user.name}
                 <span className="ms-2 text-xs text-gray-400">{user.roles.map((r) => r.nameAr).join("، ")}</span>
               </span>
             </Link>
             <form action={logout}>
-              <button className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-gray-500 transition hover:bg-red-50 hover:text-red-600">
+              <button aria-label="خروج" className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-gray-500 transition hover:bg-red-50 hover:text-red-600">
                 <Icon name="logout" className="size-4" />
-                خروج
+                <span className="hidden sm:inline">خروج</span>
               </button>
             </form>
           </div>
         </header>
-        <main className="flex-1 p-6 lg:p-8 print:p-0">{children}</main>
+        <main className="flex-1 p-4 pb-24 sm:p-6 md:pb-6 lg:p-8 print:p-0">{children}</main>
         <TourRunner />
       </div>
     </div>

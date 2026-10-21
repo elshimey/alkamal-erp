@@ -63,7 +63,7 @@ export default async function NotesPage({ params, searchParams }: { params: Prom
 
       {openDoc ? (
         <div className="grid items-start gap-4 lg:grid-cols-[minmax(17rem,22rem)_1fr]">
-          <ul className="max-h-[calc(100vh-9rem)] divide-y divide-gray-100 overflow-y-auto rounded-2xl border border-black/[0.06] bg-white shadow-sm print:hidden lg:sticky lg:top-4">
+          <ul className="hidden max-h-[calc(100vh-9rem)] lg:block divide-y divide-gray-100 overflow-y-auto rounded-2xl border border-black/[0.06] bg-white shadow-sm print:hidden lg:sticky lg:top-4">
             {list.map(({ n, party }) => (
               <li key={n.id}>
                 <Link href={listHref(base, sp, { open: String(n.id) })} scroll={false} className={`block border-s-4 px-4 py-3 transition ${n.id === openId ? "border-brand-500 bg-brand-50/70" : "border-transparent hover:bg-gray-50"}`}>

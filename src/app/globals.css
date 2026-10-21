@@ -25,6 +25,9 @@
   --animate-flyout: flyout 0.18s cubic-bezier(0.2, 0.7, 0.2, 1) both;
   --animate-page-in: page-in 0.38s cubic-bezier(0.2, 0.7, 0.2, 1) both;
   --animate-rise: rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  --animate-fade-in: fade-in 0.2s ease-out both;
+  --animate-drawer-in: drawer-in 0.28s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  --animate-sheet-up: sheet-up 0.3s cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
 
 body {
@@ -158,6 +161,78 @@ aside:hover > .road-line {
   transform-origin: right;
   animation: grow-x 0.8s cubic-bezier(0.2, 0.7, 0.2, 1) both;
   animation-delay: calc(var(--i, 0) * 60ms);
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+/* الدرج يدخل من بداية الصفحة (اليمين في العربية) */
+@keyframes drawer-in {
+  from {
+    transform: translateX(100%);
+  }
+}
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+}
+
+/* الجوال: خط الحقول 16px حتى لا يكبّر Safari الصفحة عند الكتابة */
+@media (max-width: 767px) {
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+/* الجوال: الجداول تتحول إلى بطاقات، وكل خلية تحمل عنوان عمودها (من Table في ui.tsx) */
+@media (max-width: 767px) {
+  .stack-table {
+    display: block;
+  }
+  .stack-table thead {
+    display: none;
+  }
+  .stack-table tbody {
+    display: block;
+  }
+  .stack-table tbody > tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.6rem 1rem;
+    padding: 0.9rem 1rem;
+  }
+  .stack-table tbody > tr > td {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.15rem;
+    min-width: 0;
+    padding: 0;
+    text-align: start;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .stack-table tbody > tr > td::before {
+    font-size: 11px;
+    font-weight: 400;
+    color: #8a9096;
+  }
+  .stack-table tbody > tr > td:first-child {
+    grid-column: 1 / -1;
+    font-weight: 600;
+    font-size: 15px;
+  }
+  .stack-table tbody > tr > td[colspan] {
+    grid-column: 1 / -1;
+  }
+  .stack-table tbody > tr > td:empty {
+    display: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

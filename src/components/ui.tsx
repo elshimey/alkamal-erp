@@ -45,10 +45,24 @@ export function Select(props: ComponentProps<"select">) {
   return <select {...props} className={`${inputClass} ${props.className ?? ""}`} />;
 }
 
-export function Table({ head, children }: { head: ReactNode[]; children: ReactNode }) {
+const cssText = (v: string) => v.replace(/["\\\n]/g, " ");
+const hashOf = (v: string) => {
+  let h = 0;
+  for (let i = 0; i < v.length; i++) h = (h * 31 + v.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+};
+
+/** جدول؛ على الجوال تتحول صفوفه إلى بطاقات وتحمل كل خلية عنوان عمودها. stack={false} لإبقائه جدولاً يُمرَّر أفقياً. */
+export function Table({ head, children, stack = true }: { head: ReactNode[]; children: ReactNode; stack?: boolean }) {
+  const labels = head.map((h) => (typeof h === "string" || typeof h === "number" ? String(h) : ""));
+  const key = `t${hashOf(labels.join("|"))}`;
+  const rules = labels
+    .map((l, i) => (l ? `.${key} tbody>tr>td:nth-child(${i + 1})::before{content:"${cssText(l)}"}` : ""))
+    .join("");
   return (
     <div className="overflow-x-auto rounded-2xl border border-black/[0.06] bg-white shadow-[0_4px_16px_-8px_rgba(27,33,38,0.08)]">
-      <table className="w-full text-sm">
+      {stack && rules && <style precedence="default" href={key}>{`@media (max-width:767px){${rules}}`}</style>}
+      <table className={`w-full text-sm ${stack ? `stack-table ${key}` : ""}`}>
         <thead className="bg-asphalt-900 text-white/85">
           <tr>
             {head.map((h, i) => (

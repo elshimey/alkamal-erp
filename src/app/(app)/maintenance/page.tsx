@@ -172,7 +172,7 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
         />
       ) : openDoc ? (
         <div className="grid items-start gap-4 lg:grid-cols-[minmax(17rem,22rem)_1fr]">
-          <ul className="max-h-[calc(100vh-9rem)] divide-y divide-gray-100 overflow-y-auto rounded-2xl border border-black/[0.06] bg-white shadow-sm print:hidden lg:sticky lg:top-4">
+          <ul className="hidden max-h-[calc(100vh-9rem)] lg:block divide-y divide-gray-100 overflow-y-auto rounded-2xl border border-black/[0.06] bg-white shadow-sm print:hidden lg:sticky lg:top-4">
             {list.map(({ o, plate, supplier }) => (
               <li key={o.id}>
                 <Link
