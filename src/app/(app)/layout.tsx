@@ -6,6 +6,7 @@ import { can, type Entity } from "@/lib/permissions";
 import { Icon, type IconName } from "@/components/icons";
 import { Logo } from "@/components/logo";
 import { MobileNav, NavLinks, type NavGroup } from "@/components/nav-links";
+import { TourRunner } from "@/components/tour";
 import { logout } from "../login/actions";
 
 // الدعم الفني (واتساب واتصال)
@@ -159,6 +160,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </div>
         </header>
         <main className="flex-1 p-6 lg:p-8 print:p-0">{children}</main>
+        <TourRunner />
       </div>
     </div>
   );
