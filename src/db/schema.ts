@@ -38,6 +38,8 @@ export const users = pgTable("users", {
   passwordHash: text("password_hash").notNull(),
   locale: varchar("locale", { length: 5 }).notNull().default("ar"),
   isActive: boolean("is_active").notNull().default(true),
+  // الحساب التجريبي: لا يدخل بعد هذا الوقت (فارغ = دائم)
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
   lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),

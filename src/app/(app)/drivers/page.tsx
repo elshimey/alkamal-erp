@@ -67,7 +67,7 @@ export default async function DriversPage() {
       {can(user.perms, "users", "create") && rows.some((r) => !r.login) && (
         <Card title="حساب دخول لتطبيق السائق" className="mb-6">
           <p className="mb-4 text-sm text-gray-500">
-            يدخل السائق بهذا الحساب من جواله على الرابط <a href="/driver" dir="ltr" className="font-medium text-brand-700 hover:underline" style={{ unicodeBidi: "isolate" }}>/driver</a>، ويرى رحلاته ومصاريفه وعهدته بلغته فقط.
+            يدخل السائق بهذا الحساب من جواله على الرابط <a href="/driver" dir="ltr" className="font-medium text-brand-700 hover:underline" style={{ unicodeBidi: "isolate" }}>/driver</a>، ويرى رحلاته ومصاريفه وعهدته بلغته فقط. رابط الإرسال ورمز التطبيق في <a href="/settings/driver-app" className="font-medium text-brand-700 hover:underline">الإعدادات ← تطبيق السائق</a>.
           </p>
           <ActionForm action={createDriverLoginAction} className="grid items-end gap-4 sm:grid-cols-4">
             <Field label="السائق">

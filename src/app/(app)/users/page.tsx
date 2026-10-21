@@ -7,7 +7,9 @@ import { MIN_PASSWORD_LENGTH } from "@/lib/password";
 import { PasswordInput } from "@/components/password-input";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Badge, Card, Field, Input, PageHeader, Table, Td } from "@/components/ui";
-import { createUser, setUserActive } from "./actions";
+import { createUser, setUserActive, setUserTrial } from "./actions";
+
+const daysLeft = (d: Date) => Math.ceil((d.getTime() - Date.now()) / 86_400_000);
 
 export default async function UsersPage() {
   const me = await requirePermission("users", "view");
@@ -35,6 +37,13 @@ export default async function UsersPage() {
             </Field>
             <Field label="كلمة المرور الأولى" hint={`${MIN_PASSWORD_LENGTH} أحرف على الأقل، ويغيّرها المستخدم من صفحة حسابه`}>
               <PasswordInput name="password" required minLength={MIN_PASSWORD_LENGTH} dir="ltr" autoComplete="new-password" />
+            </Field>
+            <Field label="نوع الحساب" hint="التجريبي يتوقف دخوله تلقائياً بعد المدة، ويمكن تمديده أو جعله دائماً">
+              <select name="trialDays" defaultValue="0" className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm">
+                <option value="0">دائم</option>
+                <option value="15">تجريبي 15 يوماً</option>
+                <option value="30">تجريبي 30 يوماً</option>
+              </select>
             </Field>
             <fieldset className="col-span-full">
               <legend className="mb-2 text-sm font-medium text-gray-700">الأدوار</legend>
@@ -70,12 +79,38 @@ export default async function UsersPage() {
               </div>
             </Td>
             <Td className="ltr-nums text-xs text-gray-500">{u.lastLoginAt?.toLocaleString("en-GB") ?? "—"}</Td>
-            <Td>{u.isActive ? <Badge tone="green">نشط</Badge> : <Badge tone="red">موقوف</Badge>}</Td>
+            <Td>
+              <div className="flex flex-wrap gap-1">
+                {u.isActive ? <Badge tone="green">نشط</Badge> : <Badge tone="red">موقوف</Badge>}
+                {u.expiresAt &&
+                  (daysLeft(u.expiresAt) > 0 ? (
+                    <Badge tone="amber">تجريبي · يتبقى {daysLeft(u.expiresAt)} يوم</Badge>
+                  ) : (
+                    <Badge tone="red">انتهت التجربة</Badge>
+                  ))}
+              </div>
+            </Td>
             <Td>
               {canUpdate && u.id !== me.id && (
-                <form action={setUserActive.bind(null, u.id, !u.isActive)}>
-                  <button className="text-xs text-brand-700 hover:underline">{u.isActive ? "إيقاف" : "تفعيل"}</button>
-                </form>
+                <div className="flex flex-wrap gap-3">
+                  <form action={setUserActive.bind(null, u.id, !u.isActive)}>
+                    <button className="text-xs text-brand-700 hover:underline">{u.isActive ? "إيقاف" : "تفعيل"}</button>
+                  </form>
+                  {u.expiresAt ? (
+                    <>
+                      <form action={setUserTrial.bind(null, u.id, 15)}>
+                        <button className="text-xs text-brand-700 hover:underline">تمديد 15 يوماً</button>
+                      </form>
+                      <form action={setUserTrial.bind(null, u.id, 0)}>
+                        <button className="text-xs text-brand-700 hover:underline">جعله دائماً</button>
+                      </form>
+                    </>
+                  ) : (
+                    <form action={setUserTrial.bind(null, u.id, 15)}>
+                      <button className="text-xs text-gray-500 hover:underline">تحويله لتجريبي 15 يوماً</button>
+                    </form>
+                  )}
+                </div>
               )}
             </Td>
           </tr>
