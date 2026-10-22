@@ -38,7 +38,9 @@ const inputClass =
   "rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-brand-600 focus:ring-3 focus:ring-brand-100";
 
 export function Input(props: ComponentProps<"input">) {
-  return <input {...props} className={`${inputClass} ${props.className ?? ""}`} />;
+  // الحقول اللاتينية (أسماء الدخول وكلمات المرور والرموز): لا تكبير تلقائي للحرف الأول ولا تصحيح على الجوال
+  const latin = props.dir === "ltr" ? { autoCapitalize: "none", autoCorrect: "off", spellCheck: false } : {};
+  return <input {...latin} {...props} className={`${inputClass} ${props.className ?? ""}`} />;
 }
 
 export function Select(props: ComponentProps<"select">) {

@@ -3,8 +3,9 @@ import { baseSql } from "@/db";
 import { getTenant, requireAdmin } from "@/lib/auth";
 import { listTenants } from "@/lib/platform";
 import { ActionForm, SubmitButton } from "@/components/action-form";
-import { Badge, Card, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
-import { activateAction, createTenantAction, deleteAction, extendAction, suspendAction } from "./actions";
+import { Badge, Card, Input, PageHeader, Table, Td } from "@/components/ui";
+import { activateAction, deleteAction, extendAction, resetAdminAction, suspendAction, tenantWelcome } from "./actions";
+import { CreateTenantForm, ResetAdminForm, WelcomeMessage } from "./create-form";
 
 export const maxDuration = 60; // إنشاء شركة يبني جداولها كاملة
 
@@ -15,42 +16,14 @@ export default async function OwnerPage() {
   if (!(await getTenant()).isHome) redirect("/?denied=1");
   const tenants = await listTenants(baseSql);
   const others = tenants.filter((t) => t.schema_name !== "public");
+  const welcome = new Map(await Promise.all(others.filter((t) => t.admin_login).map(async (t) => [t.id, await tenantWelcome(t.name, t.admin_name ?? "", t.admin_login!)] as const)));
 
   return (
     <>
       <PageHeader title="الشركات المشتركة" description="كل شركة تدخل من نفس الرابط ببيانات منفصلة تماماً. التجربة تتوقف وحدها عند انتهاء مدتها، وتبقى بياناتها حتى تفعّلها أو تحذفها." />
 
       <Card title="إضافة شركة" className="mb-6">
-        <ActionForm action={createTenantAction} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Field label="اسم الشركة">
-            <Input name="name" required placeholder="مؤسسة النقل السريع" />
-          </Field>
-          <Field label="رمز الشركة" hint="حروف إنجليزية صغيرة وأرقام، لا يتغير">
-            <Input name="slug" required pattern="[a-z][a-z0-9]{1,29}" dir="ltr" placeholder="fasttrans" />
-          </Field>
-          <Field label="نوع الاشتراك">
-            <Select name="trialDays" defaultValue="15">
-              <option value="15">تجربة 15 يوماً</option>
-              <option value="30">تجربة 30 يوماً</option>
-              <option value="0">اشتراك فعلي</option>
-            </Select>
-          </Field>
-          <Field label="جوال أو بريد للتواصل">
-            <Input name="contact" dir="ltr" />
-          </Field>
-          <Field label="اسم مدير الشركة">
-            <Input name="adminName" required />
-          </Field>
-          <Field label="اسم دخول المدير" hint="فريد على مستوى كل الشركات">
-            <Input name="adminLogin" required dir="ltr" autoComplete="off" />
-          </Field>
-          <Field label="كلمة مرور المدير" hint="8 أحرف على الأقل">
-            <Input name="adminPassword" required minLength={8} dir="ltr" autoComplete="new-password" />
-          </Field>
-          <div className="flex items-end">
-            <SubmitButton pendingLabel="جارٍ تجهيز الشركة…">إنشاء الشركة</SubmitButton>
-          </div>
-        </ActionForm>
+        <CreateTenantForm />
       </Card>
 
       <Table head={["الشركة", "الحالة", "التجربة تنتهي", "المستخدمون", "القيود", "آخر دخول", "إجراءات"]}>
@@ -65,6 +38,7 @@ export default async function OwnerPage() {
                 <div className="ltr-nums text-xs text-gray-500" dir="ltr">
                   {home ? "شركة البداية" : t.slug}
                   {t.contact ? ` · ${t.contact}` : ""}
+                  {t.admin_login && !home ? ` · دخول المدير: ${t.admin_login}` : ""}
                 </div>
               </Td>
               <Td>
@@ -87,6 +61,15 @@ export default async function OwnerPage() {
                   <span className="text-xs text-gray-400">—</span>
                 ) : (
                   <div className="flex flex-wrap gap-2">
+                    {welcome.has(t.id) && (
+                      <details className="relative w-full sm:w-auto">
+                        <summary className="w-fit cursor-pointer list-none rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50">رسالة الدخول</summary>
+                        <div className="z-20 mt-2 w-full rounded-xl border border-gray-200 bg-white p-2 shadow-lg sm:absolute sm:end-0 sm:w-96">
+                          <WelcomeMessage text={welcome.get(t.id)!} phone={t.contact} />
+                          <ResetAdminForm action={resetAdminAction.bind(null, t.id, t.contact)} />
+                        </div>
+                      </details>
+                    )}
                     {t.status !== "active" && (
                       <ActionForm action={activateAction.bind(null, t.id)} resetOnSuccess={false}>
                         <SubmitButton className="!px-3 !py-1.5 text-xs">تحويل لاشتراك فعلي</SubmitButton>

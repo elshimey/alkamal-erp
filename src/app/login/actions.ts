@@ -1,7 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { baseSql, db } from "@/db";
 import { runInTenant } from "@/db/tenant";
 import { schemaForLogin, tenantState } from "@/lib/platform";
@@ -16,7 +16,8 @@ export async function signIn(loginName: string, password: string): Promise<{ err
   // اسم الدخول يحدد الشركة، فيدخل كل مستخدم إلى بيانات شركته فقط
   const schema = await schemaForLogin(baseSql, loginName);
   return runInTenant(schema, async () => {
-    const [user] = await db.select().from(s.users).where(eq(s.users.login, loginName));
+    // اسم الدخول لا يفرّق بين الحروف الكبيرة والصغيرة (الجوال يكبّر الحرف الأول تلقائياً)
+    const [user] = await db.select().from(s.users).where(sql`lower(${s.users.login}) = lower(${loginName})`).limit(1);
     const valid = user && user.isActive && (await verifyPassword(password, user.passwordHash));
     if (!valid) return { error: "اسم الدخول أو كلمة المرور غير صحيحة" };
     if (user.expiresAt && user.expiresAt <= new Date()) return { error: "انتهت الفترة التجريبية لهذا الحساب؛ تواصل مع مدير النظام لتمديدها", locked: true };
