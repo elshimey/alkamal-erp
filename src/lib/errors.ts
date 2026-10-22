@@ -9,7 +9,7 @@ export function errorMessage(err: unknown): string {
   return "حدث خطأ غير متوقع";
 }
 
-function findPgError(err: unknown): { code?: string; message?: string } | undefined {
+export function findPgError(err: unknown): { code?: string; message?: string } | undefined {
   let e = err as { code?: string; message?: string; cause?: unknown } | undefined;
   for (let i = 0; e && i < 5; i++) {
     if (typeof e.code === "string" && /^[0-9A-Z]{5}$/.test(e.code)) return e;

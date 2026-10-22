@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
@@ -17,7 +18,8 @@ const STATUS = {
   terminated: { label: "منتهية خدمته", tone: "red" },
 } as const;
 
-export default async function DriversPage() {
+export default async function DriversPage({ searchParams }: { searchParams: Promise<{ deleted?: string }> }) {
+  const { deleted } = await searchParams;
   const user = await requirePermission("drivers", "view");
   const custody = alias(s.accounts, "custody");
   const rows = await db
@@ -42,6 +44,7 @@ export default async function DriversPage() {
         title="السائقون"
         description="كل سائق يُنشأ معه موظفه، وحساب عهدته تحت 1105، وحساب رواتبه المستحقة تحت 2107 تلقائياً."
       />
+      {deleted && <p className="mb-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-800">حُذف السائق «{deleted}» نهائياً</p>}
       {can(user.perms, "drivers", "create") && (
         <Card title="إدخال سائقين" className="mb-6">
           <SheetEditor
@@ -95,11 +98,16 @@ export default async function DriversPage() {
           </ActionForm>
         </Card>
       )}
+      <p className="mb-2 text-sm text-gray-500">اضغط اسم السائق لتعديل بياناته أو حالته أو حساب دخوله أو حذفه.</p>
       <Table head={["الاسم", "الجوال", "الجنسية", "لغة التطبيق", "العمولة", "المركبة الحالية", "حساب العهدة", "دخول التطبيق", "الحالة"]}>
         {rows.length === 0 && <EmptyRow cols={9}>لا يوجد سائقون بعد</EmptyRow>}
         {rows.map(({ d, name, custodyCode, plate, login }) => (
           <tr key={d.id}>
-            <Td className="font-medium">{name}</Td>
+            <Td className="font-medium">
+              <Link href={`/drivers/${d.id}`} className="text-brand-700 hover:underline">
+                {name}
+              </Link>
+            </Td>
             <Td className="ltr-nums">{d.mobile ?? "—"}</Td>
             <Td>{d.nationality ?? "—"}</Td>
             <Td>{LANG[d.appLanguage]}</Td>

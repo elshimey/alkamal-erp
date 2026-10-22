@@ -4,14 +4,16 @@ import { db } from "@/db";
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
 import { driverForUser } from "@/lib/driver-app";
-import { DRIVER_DICT } from "@/data/driver-i18n";
+import { cookies } from "next/headers";
+import { DRIVER_DICT, DRIVER_LANG_COOKIE, DRIVER_LANGS, type DriverLang } from "@/data/driver-i18n";
 
 /** المستخدم الحالي وسائقه ونصوص لغته؛ السائق null إن لم يُربط الحساب بسائق. */
 export const getDriverContext = cache(async () => {
   const user = await getCurrentUser();
   if (!user) redirect("/driver/login"); // للسائق صفحة دخول خاصة بلغته
   const driver = await driverForUser(db, user.id);
-  const lang = driver?.appLanguage ?? "ar";
+  const picked = (await cookies()).get(DRIVER_LANG_COOKIE)?.value as DriverLang | undefined;
+  const lang = driver?.appLanguage ?? (picked && DRIVER_LANGS.includes(picked) ? picked : "ar");
   return { user, driver, lang, t: DRIVER_DICT[lang] };
 });
 

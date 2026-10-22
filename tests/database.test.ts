@@ -11,7 +11,7 @@ import type { Db } from "@/db";
 import { ensureAdminUser, seedReferenceData } from "@/lib/seed";
 import { createJournalEntry } from "@/lib/ledger";
 import { getCompany, getInvoiceTemplate, invoiceReadiness, saveCompany, saveInvoiceTemplate } from "@/lib/company";
-import { assignVehicle, createDriver, createVehicle, driverOnDate, expiringDocuments, releaseAssignment } from "@/lib/fleet";
+import { assignVehicle, createDriver, deleteDriver, updateDriver, createVehicle, driverOnDate, expiringDocuments, releaseAssignment } from "@/lib/fleet";
 import { addSubAccount } from "@/lib/accounts";
 import { activeContract, createContract, createLocation, createParty, createRoute, priceTrip, setContractStatus } from "@/lib/operations";
 import { createInvoice, createReceipt, invoicingQueue, issueInvoice, listSalesInvoices, revertInvoice, revertReceipt, updateDraftInvoice } from "@/lib/invoices";
@@ -23,7 +23,7 @@ import { createViolation, deleteViolation, listViolations, payViolations, revert
 import { computePayrollLine } from "@/data/payroll";
 import { accountLedger, balanceSheet, costCenterProfit, incomeStatement, previousRange, trialBalance, vatReturn } from "@/lib/reports";
 import { alertCounts, cashFlow, financials, operations, periodRange, receivablesAging, vehicleProfit } from "@/lib/dashboard";
-import { createDriverExpense, createDriverLogin, driverBalances, driverBreakdowns, driverForUser, driverTrips, isDriverOnly, nextStages, recordDriverStage, reportBreakdown, startTrip, tripDetail } from "@/lib/driver-app";
+import { createDriverExpense, createDriverLogin, linkUserToDriver, removeDriverLogin, resetDriverPassword, driverBalances, driverBreakdowns, driverForUser, driverTrips, isDriverOnly, nextStages, recordDriverStage, reportBreakdown, startTrip, tripDetail } from "@/lib/driver-app";
 import { runImport } from "@/lib/importers";
 import { applyAdvance, customerCredit, postReceipt } from "@/lib/receipts";
 import { createNote, postNote, revertNote } from "@/lib/notes";
@@ -1769,5 +1769,31 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     await platform.deleteTenant(client, t.id, "acme");
     expect(await client`select 1 from pg_namespace where nspname = 't_acme'`).toHaveLength(0);
     expect(await platform.schemaForLogin(client, "acme_admin")).toBe("public");
+  });
+
+  it("يعدّل السائق ويحذفه ويربط حسابه ويدير دخوله", async () => {
+    const d = await createDriver(db, { nameAr: "سائق للتعديل" });
+    await updateDriver(db, d.id, { nameAr: "سائق معدل", mobile: "0509999999", appLanguage: "ur", commissionClass: "international", custodyLimit: 500, status: "on_leave" });
+    const [row] = await db.select({ name: s.employees.nameAr, status: s.drivers.status, lang: s.drivers.appLanguage, acc: s.accounts.nameAr }).from(s.drivers).innerJoin(s.employees, eq(s.employees.id, s.drivers.employeeId)).innerJoin(s.accounts, eq(s.accounts.id, s.drivers.custodyAccountId)).where(eq(s.drivers.id, d.id));
+    expect(row).toEqual({ name: "سائق معدل", status: "on_leave", lang: "ur", acc: "عهدة – سائق معدل" });
+
+    const user = await createDriverLogin(db, { driverId: d.id, login: "edit-driver", password: "pass-12345" });
+    await resetDriverPassword(db, d.id, "new-pass-123");
+    await updateDriver(db, d.id, { nameAr: "سائق معدل", status: "terminated" });
+    const [u] = await db.select({ active: s.users.isActive }).from(s.users).where(eq(s.users.id, user.id));
+    expect(u.active).toBe(false);
+    await removeDriverLogin(db, d.id);
+    expect(await driverForUser(db, user.id)).toBeNull();
+
+    // ربط حساب موجود بسائق
+    const [other] = await db.insert(s.users).values({ name: "حساب منفصل", login: "loose-driver", passwordHash: "x" }).returning({ id: s.users.id });
+    await linkUserToDriver(db, other.id, d.id);
+    expect((await driverForUser(db, other.id))?.id).toBe(d.id);
+
+    // سائق بلا حركات يُحذف مع حساباته، ومن له حركة لا يُحذف
+    await deleteDriver(db, d.id);
+    expect(await db.select().from(s.drivers).where(eq(s.drivers.id, d.id))).toHaveLength(0);
+    const busy = await db.select({ id: s.waybills.driverId }).from(s.waybills).where(sql`${s.waybills.driverId} is not null`).limit(1);
+    if (busy[0]?.id) await expect(deleteDriver(db, busy[0].id)).rejects.toThrow("له حركات");
   });
 });
