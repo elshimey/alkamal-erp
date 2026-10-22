@@ -1,3 +1,4 @@
+import { EditLink } from "@/components/edit-link";
 import { and, asc, eq, like } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
@@ -70,7 +71,10 @@ export default async function VehiclesPage() {
         {rows.length === 0 && <EmptyRow cols={9}>لا توجد مركبات بعد</EmptyRow>}
         {rows.map(({ v, typeName, ccCode, accCode, accName }) => (
           <tr key={v.id}>
-            <Td className="font-medium">{v.plate}</Td>
+            <Td className="font-medium">
+              {v.plate}
+              <EditLink href={`/records/vehicles/${v.id}`} />
+            </Td>
             <Td>{typeName ?? "—"}</Td>
             <Td>{[v.make, v.model].filter(Boolean).join(" ") || "—"}</Td>
             <Td className="ltr-nums">{v.year ?? "—"}</Td>

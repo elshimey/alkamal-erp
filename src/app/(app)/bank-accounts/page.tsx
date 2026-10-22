@@ -1,3 +1,4 @@
+import { EditLink } from "@/components/edit-link";
 import Link from "next/link";
 import { asc } from "drizzle-orm";
 import { db } from "@/db";
@@ -42,7 +43,10 @@ export default async function BankAccountsPage() {
               <article key={r.a.id} className="flex flex-col rounded-2xl border border-black/[0.06] bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <div className="font-semibold text-gray-900">{r.a.nameAr}</div>
+                    <div className="font-semibold text-gray-900">
+                      {r.a.nameAr}
+                      <EditLink href={r.bank ? `/records/bank_accounts/${r.bank.id}` : `/records/accounts/${r.a.id}`} />
+                    </div>
                     <div className="text-xs text-gray-500">
                       <span className="ltr-nums">{r.a.code}</span>
                       {r.bank && <> · {r.bank.bankName}</>}

@@ -1,0 +1,152 @@
+import type { IconName } from "@/components/icons";
+import type { Entity } from "@/lib/permissions";
+
+// أقسام القائمة الجانبية، ويستخدمها البحث الشامل أيضاً
+export const NAV: { title: string; icon: IconName; items: { href: string; label: string; icon: IconName; entity?: Entity }[] }[] = [
+  { title: "عام",
+    icon: "home", items: [{ href: "/", label: "لوحة القيادة", icon: "home" }] },
+  {
+    title: "الأسطول",
+    icon: "truck",
+    items: [
+      { href: "/vehicles", label: "المركبات", icon: "truck", entity: "vehicles" },
+      { href: "/drivers", label: "السائقون", icon: "driver", entity: "drivers" },
+      { href: "/assignments", label: "الإسناد والتسليم", icon: "handover", entity: "vehicles" },
+      { href: "/fleet-documents", label: "وثائق الأسطول", icon: "document", entity: "fleet_documents" },
+      { href: "/violations", label: "المخالفات المرورية", icon: "ticket", entity: "violations" },
+      { href: "/maintenance", label: "أوامر الصيانة", icon: "wrench", entity: "maintenance" },
+      { href: "/maintenance/requests", label: "طلبات العطل", icon: "alert", entity: "maintenance" },
+      { href: "/maintenance/plans", label: "الصيانة الدورية", icon: "calendar", entity: "maintenance" },
+    ],
+  },
+  {
+    title: "التشغيل والمبيعات",
+    icon: "waybill",
+    items: [
+      { href: "/waybills", label: "الشحنات", icon: "waybill", entity: "waybills" },
+      { href: "/invoices", label: "الفواتير", icon: "invoice", entity: "sales_invoices" },
+      { href: "/customers", label: "العملاء", icon: "people", entity: "parties" },
+      { href: "/receipts", label: "سندات العملاء", icon: "cash", entity: "receipts" },
+      { href: "/notes/sales", label: "إشعارات العملاء", icon: "document", entity: "sales_invoices" },
+      { href: "/parties", label: "جهات الاتصال", icon: "people", entity: "parties" },
+      { href: "/routes", label: "المواقع والمسارات", icon: "route", entity: "routes" },
+      { href: "/contracts", label: "العقود والأسعار", icon: "contract", entity: "contracts" },
+    ],
+  },
+  {
+    title: "المشتريات والمصروفات",
+    icon: "invoice",
+    items: [
+      { href: "/purchases", label: "فواتير الموردين", icon: "invoice", entity: "purchase_invoices" },
+      { href: "/expenses", label: "المصروفات", icon: "fuel", entity: "expenses" },
+      { href: "/payments", label: "سندات الصرف", icon: "cash", entity: "payments" },
+      { href: "/notes/purchase", label: "إشعارات الموردين", icon: "document", entity: "purchase_invoices" },
+    ],
+  },
+  {
+    title: "الموظفون والرواتب",
+    icon: "people",
+    items: [
+      { href: "/hr", label: "لوحة الموارد البشرية", icon: "chart", entity: "employees" },
+      { href: "/employees", label: "الموظفون", icon: "people", entity: "employees" },
+      { href: "/hr/custody", label: "العُهد", icon: "handover", entity: "custody" },
+      { href: "/hr/discipline", label: "الإنذارات والجزاءات والحوافز", icon: "alert", entity: "hr_actions" },
+      { href: "/hr/leaves", label: "الإجازات", icon: "calendar", entity: "leaves" },
+      { href: "/hr/attendance", label: "الحضور", icon: "check", entity: "leaves" },
+      { href: "/hr/evaluations", label: "التقييم والترقية", icon: "target", entity: "evaluations" },
+      { href: "/hr/advances", label: "مقدم العمولة", icon: "cash", entity: "payroll" },
+      { href: "/payroll", label: "مسيرات الرواتب", icon: "cash", entity: "payroll" },
+      { href: "/payroll/advances", label: "السلف", icon: "handover", entity: "payroll" },
+    ],
+  },
+  {
+    title: "المخزون",
+    icon: "wrench",
+    items: [
+      { href: "/products", label: "الأصناف والخدمات", icon: "list", entity: "inventory" },
+      { href: "/inventory", label: "المخزون والمستودعات", icon: "building", entity: "inventory" },
+      { href: "/inventory/docs", label: "التسويات والتحويل والجرد", icon: "exchange", entity: "inventory" },
+    ],
+  },
+  {
+    title: "المحاسبة",
+    icon: "ledger",
+    items: [
+      { href: "/journal", label: "القيود اليومية", icon: "ledger", entity: "journal_entries" },
+      { href: "/bank-accounts", label: "البنوك والصناديق", icon: "cash", entity: "accounts" },
+      { href: "/bank-accounts/reconcile", label: "التسوية البنكية", icon: "check", entity: "accounts" },
+      { href: "/fixed-assets", label: "الأصول الثابتة", icon: "building", entity: "fixed_assets" },
+      { href: "/journal/reclassify", label: "إعادة التصنيف", icon: "exchange", entity: "journal_entries" },
+      { href: "/accounts", label: "شجرة الحسابات", icon: "tree", entity: "accounts" },
+      { href: "/cost-centers", label: "مراكز التكلفة", icon: "target", entity: "cost_centers" },
+      { href: "/exchange-rates", label: "أسعار الصرف", icon: "exchange", entity: "accounts" },
+      { href: "/periods", label: "الفترات والإقفال", icon: "calendar", entity: "fiscal_periods" },
+    ],
+  },
+  {
+    title: "التقارير",
+    icon: "chart",
+    items: [
+      { href: "/reports", label: "كل التقارير", icon: "chart", entity: "financial_reports" },
+      { href: "/reports/trial-balance", label: "ميزان المراجعة", icon: "ledger", entity: "financial_reports" },
+      { href: "/reports/income", label: "قائمة الدخل", icon: "chart", entity: "financial_reports" },
+      { href: "/reports/balance-sheet", label: "المركز المالي", icon: "tree", entity: "financial_reports" },
+      { href: "/reports/ledger", label: "كشف حساب", icon: "document", entity: "financial_reports" },
+      { href: "/reports/cost-centers", label: "ربحية المركبات", icon: "truck", entity: "financial_reports" },
+      { href: "/reports/vat", label: "إقرار الضريبة", icon: "invoice", entity: "financial_reports" },
+    ],
+  },
+];
+
+
+// صفحات لا تظهر في القائمة الجانبية لكن يصل لها البحث الشامل
+export const EXTRA_PAGES: { href: string; label: string; group: string; entity?: Entity; admin?: boolean; keywords?: string }[] = [
+  { href: "/waybills", label: "إضافة شحنة جديدة", group: "إنشاء", entity: "waybills", keywords: "بوليصة رحلة" },
+  { href: "/invoices", label: "فاتورة مبيعات جديدة", group: "إنشاء", entity: "sales_invoices", keywords: "فوترة" },
+  { href: "/receipts/new", label: "سند قبض جديد", group: "إنشاء", entity: "receipts", keywords: "تحصيل" },
+  { href: "/notes/sales/new", label: "إشعار دائن أو مدين لعميل", group: "إنشاء", entity: "sales_invoices", keywords: "مرتجع خصم" },
+  { href: "/notes/purchase/new", label: "إشعار مورد جديد", group: "إنشاء", entity: "purchase_invoices" },
+  { href: "/journal/new", label: "قيد يومية جديد", group: "إنشاء", entity: "journal_entries", keywords: "قيد يدوي" },
+  { href: "/inventory/docs/new", label: "تسوية أو تحويل أو جرد مخزني", group: "إنشاء", entity: "inventory" },
+  { href: "/settings", label: "مركز الإعدادات", group: "الإعدادات" },
+  { href: "/settings/company", label: "بيانات الشركة (الرقم الضريبي والسجل والشعار)", group: "الإعدادات", admin: true, keywords: "منشأة لوجو" },
+  { href: "/settings/invoice-template", label: "تصميم قالب الفاتورة", group: "الإعدادات", admin: true, keywords: "طباعة شكل" },
+  { href: "/settings/driver-app", label: "رابط تطبيق السائق", group: "الإعدادات", keywords: "جوال واتساب" },
+  { href: "/settings/hr", label: "إعدادات الموارد البشرية", group: "الإعدادات", entity: "employees", keywords: "إجازات تقييم" },
+  { href: "/settings/subscription", label: "الاشتراك والبيانات", group: "الإعدادات", admin: true },
+  { href: "/users", label: "المستخدمون وكلمات المرور", group: "الإعدادات", entity: "users", keywords: "حسابات دخول" },
+  { href: "/roles", label: "الأدوار والصلاحيات", group: "الإعدادات", entity: "roles" },
+  { href: "/account", label: "حسابي وتغيير كلمة المرور", group: "الإعدادات" },
+  { href: "/owner", label: "الشركات المشتركة", group: "الإعدادات", admin: true },
+  { href: "/help", label: "دليل الاستخدام والجولات التفاعلية", group: "المساعدة", keywords: "شرح مساعدة" },
+  { href: "/import/vehicles", label: "استيراد المركبات من Excel", group: "استيراد", entity: "vehicles" },
+  { href: "/import/sales-invoices", label: "استيراد فواتير المبيعات من Excel", group: "استيراد", entity: "sales_invoices" },
+  { href: "/import/receipts", label: "استيراد سندات القبض من Excel", group: "استيراد", entity: "receipts" },
+  { href: "/import/journal-entries", label: "استيراد القيود من Excel", group: "استيراد", entity: "journal_entries" },
+  { href: "/import/violations", label: "استيراد المخالفات من Excel", group: "استيراد", entity: "violations" },
+  { href: "/import/maintenance-orders", label: "استيراد أوامر الصيانة من Excel", group: "استيراد", entity: "maintenance" },
+  { href: "/import/maintenance-plans", label: "استيراد خطط الصيانة من Excel", group: "استيراد", entity: "maintenance" },
+  { href: "/import/breakdown-requests", label: "استيراد طلبات العطل من Excel", group: "استيراد", entity: "maintenance" },
+];
+
+// كلمات إضافية يجد بها البحث شاشات القائمة (المفرد والعامية)
+export const NAV_KEYWORDS: Record<string, string> = {
+  "/invoices": "فاتورة مبيعات فوترة",
+  "/purchases": "فاتورة مورد مشتريات",
+  "/waybills": "شحنة بوليصة رحلة نقلة",
+  "/receipts": "سند قبض تحصيل",
+  "/payments": "سند صرف دفع سداد",
+  "/journal": "قيد يومية",
+  "/vehicles": "مركبة شاحنة سيارة تريلا",
+  "/drivers": "سائق",
+  "/employees": "موظف",
+  "/customers": "عميل",
+  "/parties": "عميل مورد ورشة ناقل",
+  "/products": "صنف قطع غيار",
+  "/reports/ledger": "كشف حساب",
+  "/expenses": "مصروف",
+  "/violations": "مخالفة ساهر",
+  "/fleet-documents": "وثيقة استمارة رخصة تأمين إقامة",
+  "/accounts": "دليل الحسابات شجرة",
+  "/maintenance": "صيانة ورشة",
+};

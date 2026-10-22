@@ -1,7 +1,7 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema";
-import { tenantClient } from "./tenant";
+import { currentSchema, tenantClient } from "./tenant";
 
 const url = process.env.DATABASE_URL ?? "postgres://erp:erp@localhost:5432/alkamal_erp";
 
@@ -16,7 +16,17 @@ if (process.env.NODE_ENV !== "production") globalForDb.pgClient = client;
 
 // db يعمل على بيانات الشركة الحالية؛ baseSql للعمليات على مستوى المنصة (إنشاء الشركات وترحيلها)
 export const baseSql = client;
-export const db = drizzle(tenantClient(client), { schema });
+// المستخدم الحالي لسجل التعديلات؛ خارج طلب ويب (سكربت أو اختبار) لا يوجد مستخدم
+async function currentUserId(): Promise<number | null> {
+  try {
+    const { getCurrentUser } = await import("@/lib/auth");
+    return (await getCurrentUser())?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export const db = drizzle(tenantClient(client, currentSchema, currentUserId), { schema });
 export type Db = typeof db;
 export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 export { schema };

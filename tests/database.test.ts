@@ -3,7 +3,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { closeYear, openYear, reopenYear, setPeriodStatus, yearClosePreview } from "@/lib/periods";
 import postgres from "postgres";
 import * as s from "@/db/schema";
@@ -1795,5 +1795,24 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     expect(await db.select().from(s.drivers).where(eq(s.drivers.id, d.id))).toHaveLength(0);
     const busy = await db.select({ id: s.waybills.driverId }).from(s.waybills).where(sql`${s.waybills.driverId} is not null`).limit(1);
     if (busy[0]?.id) await expect(deleteDriver(db, busy[0].id)).rejects.toThrow("له حركات");
+  });
+
+  it("يسجل كل إنشاء وتعديل وحذف في سجل التعديلات مع المستخدم", async () => {
+    const [admin] = await db.select({ id: s.users.id }).from(s.users).limit(1);
+    const v = await db.transaction(async (tx) => {
+      await tx.execute(sql`select set_config('app.user_id', ${String(admin.id)}, true)`);
+      const [row] = await tx.insert(s.vehicleTypes).values({ nameAr: "نوع للسجل" }).returning();
+      await tx.update(s.vehicleTypes).set({ nameAr: "نوع معدل" }).where(eq(s.vehicleTypes.id, row.id));
+      await tx.delete(s.vehicleTypes).where(eq(s.vehicleTypes.id, row.id));
+      return row;
+    });
+    const log = await db.select().from(s.auditLog).where(and(eq(s.auditLog.entity, "vehicle_types"), eq(s.auditLog.entityId, String(v.id)))).orderBy(s.auditLog.id);
+    expect(log.map((l) => l.action)).toEqual(["create", "update", "delete"]);
+    expect(log.every((l) => l.userId === admin.id)).toBe(true);
+    expect(log[1].changes).toEqual({ name_ar: ["نوع للسجل", "نوع معدل"] });
+    // كلمة المرور لا تُحفظ في السجل
+    await db.update(s.users).set({ passwordHash: "changed" }).where(eq(s.users.id, admin.id));
+    const [pw] = await db.select().from(s.auditLog).where(and(eq(s.auditLog.entity, "users"), eq(s.auditLog.action, "update"))).orderBy(desc(s.auditLog.id)).limit(1);
+    expect(JSON.stringify(pw.changes)).not.toContain("changed");
   });
 });

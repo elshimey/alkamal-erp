@@ -1,3 +1,4 @@
+import { EditLink } from "@/components/edit-link";
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
@@ -84,6 +85,7 @@ export default async function EmployeesPage() {
             <tr key={e.id}>
               <Td className="font-medium">
                 {e.nameAr}
+                <EditLink href={driverId ? `/drivers/${driverId}` : `/records/employees/${e.id}`} />
                 <div className="ltr-nums text-xs font-normal text-gray-500">{account}</div>
               </Td>
               <Td>

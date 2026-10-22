@@ -1,3 +1,4 @@
+import { EditLink } from "@/components/edit-link";
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
@@ -95,7 +96,10 @@ export default async function FleetDocumentsPage() {
         {docs.map(({ doc, plate, driverName }) => (
           <tr key={doc.id}>
             <Td className="font-medium">{plate ?? driverName}</Td>
-            <Td>{DOCUMENT_TYPES[doc.type]}</Td>
+            <Td>
+              {DOCUMENT_TYPES[doc.type]}
+              <EditLink href={`/records/fleet_documents/${doc.id}`} />
+            </Td>
             <Td className="ltr-nums">{doc.number ?? "—"}</Td>
             <Td>{doc.authority ?? "—"}</Td>
             <Td className="ltr-nums">{doc.expiryDate}</Td>

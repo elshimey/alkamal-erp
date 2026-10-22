@@ -1,3 +1,4 @@
+import { EditLink } from "@/components/edit-link";
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
@@ -119,7 +120,10 @@ export default async function UsersPage() {
       <Table head={["الاسم", "اسم الدخول", "الأدوار", "آخر دخول", "الحالة", ""]}>
         {users.map((u) => (
           <tr key={u.id}>
-            <Td className="font-medium">{u.name}</Td>
+            <Td className="font-medium">
+              {u.name}
+              <EditLink href={`/records/users/${u.id}`} />
+            </Td>
             <Td className="ltr-nums text-gray-600">{u.login}</Td>
             <Td>
               <div className="flex flex-wrap gap-1">
