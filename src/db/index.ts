@@ -1,6 +1,7 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema";
+import { tenantClient } from "./tenant";
 
 const url = process.env.DATABASE_URL ?? "postgres://erp:erp@localhost:5432/alkamal_erp";
 
@@ -13,7 +14,9 @@ const client = globalForDb.pgClient ?? postgres(url, {
 });
 if (process.env.NODE_ENV !== "production") globalForDb.pgClient = client;
 
-export const db = drizzle(client, { schema });
+// db يعمل على بيانات الشركة الحالية؛ baseSql للعمليات على مستوى المنصة (إنشاء الشركات وترحيلها)
+export const baseSql = client;
+export const db = drizzle(tenantClient(client), { schema });
 export type Db = typeof db;
 export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 export { schema };

@@ -4,7 +4,9 @@ import { cache } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { and, eq, gt, isNull, or } from "drizzle-orm";
-import { db } from "@/db";
+import { baseSql, db } from "@/db";
+import { currentSchema, HOME_SCHEMA, TENANT_COOKIE } from "@/db/tenant";
+import { tenantState } from "@/lib/platform";
 import * as s from "@/db/schema";
 import { can, type Action, type Entity, type PermissionSet, type Scope } from "@/lib/permissions";
 
@@ -13,18 +15,30 @@ const SESSION_DAYS = 30;
 
 const hashToken = (token: string) => createHash("sha256").update(token).digest("hex");
 
+const cookieOptions = (expires: Date) => ({
+  httpOnly: true,
+  sameSite: "lax" as const,
+  secure: process.env.NODE_ENV === "production",
+  path: "/",
+  expires,
+});
+
+/** حالة اشتراك الشركة الحالية (مرة واحدة لكل طلب). */
+export const getTenant = cache(async () => {
+  const schema = await currentSchema();
+  const state = await tenantState(baseSql, schema);
+  return { schema, isHome: schema === HOME_SCHEMA, ...state };
+});
+
 export async function createSession(userId: number) {
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000);
   await db.insert(s.sessions).values({ id: hashToken(token), userId, expiresAt });
   await db.update(s.users).set({ lastLoginAt: new Date() }).where(eq(s.users.id, userId));
-  (await cookies()).set(COOKIE, token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    expires: expiresAt,
-  });
+  const store = await cookies();
+  store.set(COOKIE, token, cookieOptions(expiresAt));
+  // الشركة التي ينتمي لها المستخدم؛ الجلسة نفسها محفوظة داخل مخطط الشركة فلا يفيد تزوير هذه القيمة
+  store.set(TENANT_COOKIE, await currentSchema(), cookieOptions(expiresAt));
 }
 
 export async function destroySession() {
@@ -32,6 +46,7 @@ export async function destroySession() {
   const token = store.get(COOKIE)?.value;
   if (token) await db.delete(s.sessions).where(eq(s.sessions.id, hashToken(token)));
   store.delete(COOKIE);
+  store.delete(TENANT_COOKIE);
 }
 
 export interface CurrentUser {
@@ -45,6 +60,7 @@ export interface CurrentUser {
 export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   const token = (await cookies()).get(COOKIE)?.value;
   if (!token) return null;
+  if ((await getTenant()).blocked) return null; // انتهت التجربة أو أوقف الاشتراك
   const [row] = await db
     .select({ id: s.users.id, name: s.users.name, login: s.users.login })
     .from(s.sessions)

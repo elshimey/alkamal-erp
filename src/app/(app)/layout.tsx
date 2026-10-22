@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { isDriverOnly } from "@/lib/driver-app";
-import { requireUser } from "@/lib/auth";
+import { getTenant, requireUser } from "@/lib/auth";
 import { can, type Entity } from "@/lib/permissions";
 import { Icon, type IconName } from "@/components/icons";
 import { Logo, LogoMark } from "@/components/logo";
@@ -125,6 +125,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const user = await requireUser();
   // السائق يعمل من تطبيقه فقط
   if (isDriverOnly(user.roles)) redirect("/driver");
+  const tenant = await getTenant();
+  const trialDays = tenant.tenant?.status === "trial" ? Math.max(tenant.daysLeft ?? 0, 0) : null;
   const groups: NavGroup[] = NAV.map((g) => ({
     title: g.title,
     icon: g.icon,
@@ -164,6 +166,18 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             </form>
           </div>
         </header>
+        {trialDays !== null && (
+          <div className="flex flex-wrap items-center justify-center gap-x-2 border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-xs text-amber-900 print:hidden">
+            <span>
+              نسخة تجريبية: باقي <b className="ltr-nums">{trialDays}</b> {trialDays > 10 ? "يوماً" : "أيام"}، ثم يتوقف الدخول وتبقى بياناتك محفوظة حتى الاشتراك.
+            </span>
+            {user.perms.isAdmin && (
+              <Link href="/settings/subscription" className="font-semibold underline underline-offset-2">
+                تفاصيل الاشتراك
+              </Link>
+            )}
+          </div>
+        )}
         <main className="flex-1 p-4 pb-24 sm:p-6 md:pb-6 lg:p-8 print:p-0">{children}</main>
         <TourRunner />
       </div>
