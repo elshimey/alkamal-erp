@@ -17,7 +17,7 @@ export function waNumber(raw?: string | null) {
  * إرسال المستند للعميل: رابط عام يفتح المستند ويحمّله PDF دون دخول،
  * عبر واتساب أو البريد أو قائمة المشاركة في الجوال.
  */
-export function SendDocument({ kind, id, label, company, phone, email }: { kind: string; id: number; label: string; company: string; phone?: string | null; email?: string | null }) {
+export function SendDocument({ kind, id, label, company, phone, email, to = "للعميل" }: { kind: string; id: number; label: string; company: string; phone?: string | null; email?: string | null; to?: string }) {
   const [open, setOpen] = useState(false);
   const [url, setUrl] = useState<string>();
   const [error, setError] = useState<string>();
@@ -41,7 +41,7 @@ export function SendDocument({ kind, id, label, company, phone, email }: { kind:
         className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50"
       >
         <Icon name="chat" className="size-4" />
-        إرسال للعميل
+        إرسال {to}
       </button>
       {open && (
         <div className="absolute end-0 top-full z-30 mt-2 w-64 rounded-xl border border-black/5 bg-white p-2 text-sm shadow-xl">

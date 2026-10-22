@@ -57,7 +57,7 @@ function toNumber(raw: string, label: string, opts: { min?: number; max?: number
 }
 
 /** يقبل 2026-10-05 أو 05/10/2026 أو 5-10-2026. */
-function toDate(raw: string, label: string) {
+export function toDate(raw: string, label: string) {
   const t = raw.trim().replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
   const dmy = t.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/);
   const ymd = t.match(/^(\d{4})[/.-](\d{1,2})[/.-](\d{1,2})/);

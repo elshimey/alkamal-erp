@@ -31,6 +31,11 @@ import { listCustomers } from "@/lib/customers";
 import { createManualEntry, deleteManualEntry, listEntries, postManualEntry, reclassCandidates, reclassify, revertManualEntry, updateManualEntry } from "@/lib/journal";
 import { createCashAccount, listCashAccounts, normalizeIban } from "@/lib/banks";
 import { exportAllData } from "@/lib/export";
+import { createTransfer, deleteTransfer } from "@/lib/transfers";
+import { DEFAULT_ECL_RATES, deleteEcl, eclAging, eclCompute, postEcl, provisionBalance } from "@/lib/ecl";
+import { createStatement, postLineAsExpense, setStatementStatus, statementDetail } from "@/lib/fuel-cards";
+import { createPurchaseOrder, createPurchaseRequest, decideRequest, orderToInvoice, requestToOrderLines, setOrderStatus } from "@/lib/purchasing";
+import { createQuotation, quotationToInvoice } from "@/lib/quotations";
 import { setupSteps } from "@/lib/setup";
 import ExcelJS from "exceljs";
 import { getAttachment, listAttachments, onceForOp, saveDataUrl } from "@/lib/attachments";
@@ -1862,5 +1867,85 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     const steps = await setupSteps(db);
     expect(steps.map((x) => x.key)).toEqual(["company", "template", "banks", "vehicles", "drivers", "customers", "routes", "opening", "users"]);
     expect(steps.find((x) => x.key === "vehicles")!.done).toBe(true);
+  });
+
+  it("الدفعة الخامسة: التحويل بين الحسابات، مخصص الديون، بطاقات الوقود، الشراء، عروض الأسعار", async () => {
+    const [admin] = await db.select({ id: s.users.id }).from(s.users).limit(1);
+    await openYear(db, YEAR + 1);
+    await openYear(db, YEAR + 2);
+    const bal = async (code: string) => {
+      const [r] = await db.execute(sql`select coalesce(sum(l.debit_base - l.credit_base), 0)::float8 as v from journal_lines l join journal_entries e on e.id = l.entry_id where e.status = 'posted' and l.account_id = ${acc[code]}`);
+      return Number((r as { v: number }).v);
+    };
+    // تحويل بالريال مع رسوم
+    const bank = await createCashAccount(db, { kind: "bank", nameAr: "بنك التحويل", bankName: "الأهلي", openingBalance: 50000, openingDate: `${YEAR + 1}-01-01` });
+    const box = (await db.select().from(s.accounts).where(eq(s.accounts.code, "110101")))[0];
+    const before = await bal(box.code);
+    const t1 = await createTransfer(db, { date: `${YEAR + 1}-05-01`, fromAccountId: bank.id, toAccountId: box.id, amount: 1000, fee: 10, userId: admin.id });
+    expect(await bal(box.code)).toBeCloseTo(before + 1000);
+    const lines = await db.select().from(s.journalLines).where(eq(s.journalLines.entryId, t1.journalEntryId));
+    expect(lines.find((l) => l.accountId === acc["6108"])?.debit).toBe("10.000");
+    // من ريال إلى صندوق بالدينار: السعر الضمني من المبلغين
+    const kwd = (await db.select().from(s.accounts).where(eq(s.accounts.currencyCode, "KWD")))[0];
+    if (kwd) {
+      const t2 = await createTransfer(db, { date: `${YEAR + 1}-05-02`, fromAccountId: bank.id, toAccountId: kwd.id, amount: 1225, receivedAmount: 100 });
+      const l2 = await db.select().from(s.journalLines).where(eq(s.journalLines.entryId, t2.journalEntryId));
+      expect(l2.find((l) => l.accountId === kwd.id)).toMatchObject({ debit: "100.000", exchangeRate: "12.250000", debitBase: "1225.000" });
+      await expect(createTransfer(db, { date: `${YEAR + 1}-05-02`, fromAccountId: bank.id, toAccountId: kwd.id, amount: 100 })).rejects.toThrow("المبلغ المستلم");
+    }
+    await deleteTransfer(db, t1.id);
+    expect(await bal(box.code)).toBeCloseTo(before);
+    await expect(createTransfer(db, { date: `${YEAR + 1}-05-01`, fromAccountId: bank.id, toAccountId: acc["5101"], amount: 5 })).rejects.toThrow("بنكاً أو صندوقاً");
+
+    // مخصص الخسائر الائتمانية: يطابق المطلوب، ولا يتكرر في نفس التاريخ
+    const asOf = `${YEAR + 2}-12-31`;
+    const { required, customers } = eclCompute(await eclAging(db, asOf), DEFAULT_ECL_RATES);
+    if (required > 0) {
+      expect(customers.length).toBeGreaterThan(0);
+      const e = await postEcl(db, asOf, DEFAULT_ECL_RATES, admin.id);
+      expect(await provisionBalance(db, asOf)).toBeCloseTo(required);
+      await expect(postEcl(db, asOf, DEFAULT_ECL_RATES)).rejects.toThrow();
+      await deleteEcl(db, e.id);
+      expect(await provisionBalance(db, asOf)).toBeCloseTo(0);
+    }
+
+    // كشف بطاقات الوقود: سطر غير مسجل يُقيد ديزلاً على المركبة من رصيد البطاقات
+    const st = await createStatement(db, { periodFrom: `${YEAR + 1}-06-01`, periodTo: `${YEAR + 1}-06-30`, closingBalance: 0, lines: [{ date: `${YEAR + 1}-06-05`, plate: "أب ج1234", amount: 115, liters: 50, station: "الدريس" }], userId: admin.id });
+    let d = await statementDetail(db, st.id);
+    expect(d.lines[0].vehicle).toBe("أ ب ج 1234");
+    expect(d.summary.unresolved).toBe(1);
+    await expect(setStatementStatus(db, st.id, "reconciled")).rejects.toThrow("غير مطابق");
+    const fe = await postLineAsExpense(db, d.lines[0].l.id, admin.id);
+    const fl = await db.select().from(s.journalLines).where(eq(s.journalLines.entryId, fe.id));
+    expect(fl.find((l) => l.accountId === acc["5101"])).toMatchObject({ debit: "100.000", costCenterId: vehicleCc });
+    expect(fl.find((l) => l.accountId === acc["1106"])?.credit).toBe("115.000");
+    d = await statementDetail(db, st.id);
+    expect(d.summary.unresolved).toBe(0);
+    await setStatementStatus(db, st.id, "reconciled");
+
+    // طلب شراء ← أمر شراء ← فاتورة مورد مسودة
+    const supplier = await createParty(db, { nameAr: "مورد قطع الغيار", roles: ["supplier"] });
+    const [veh] = await db.select().from(s.vehicles).where(eq(s.vehicles.costCenterId, vehicleCc));
+    const pr = await createPurchaseRequest(db, { date: `${YEAR + 1}-07-01`, vehicleId: veh.id, notes: "إطارات", lines: [{ description: "إطار 315/80", quantity: 4, estimatedPrice: 900 }], userId: admin.id });
+    await expect(createPurchaseOrder(db, { date: `${YEAR + 1}-07-02`, supplierId: supplier.id, requestId: pr.id, lines: [] })).rejects.toThrow();
+    await decideRequest(db, pr.id, "approve", { userId: admin.id });
+    const oLines = (await requestToOrderLines(db, pr.id)).map((l) => ({ ...l, accountId: acc["5108"] }));
+    const po = await createPurchaseOrder(db, { date: `${YEAR + 1}-07-02`, supplierId: supplier.id, requestId: pr.id, lines: oLines, userId: admin.id });
+    expect((await db.select().from(s.purchaseRequests).where(eq(s.purchaseRequests.id, pr.id)))[0].status).toBe("ordered");
+    await expect(orderToInvoice(db, po.id, { supplierInvoiceNo: "S-1", invoiceDate: `${YEAR + 1}-07-05` })).rejects.toThrow("اعتمد");
+    await setOrderStatus(db, po.id, "approved", admin.id);
+    const pinv = await orderToInvoice(db, po.id, { supplierInvoiceNo: "S-1", invoiceDate: `${YEAR + 1}-07-05`, userId: admin.id });
+    expect(Number(pinv.total)).toBeCloseTo(4 * 900 * 1.15);
+    expect((await db.select().from(s.purchaseOrders).where(eq(s.purchaseOrders.id, po.id)))[0].status).toBe("invoiced");
+
+    // عرض سعر ← فاتورة مبيعات مسودة بنفس السطور
+    const customer = await createParty(db, { nameAr: "عميل عرض السعر", roles: ["customer"] });
+    const q = await createQuotation(db, { date: `${YEAR + 1}-08-01`, validUntil: `${YEAR + 1}-08-15`, customerId: customer.id, lines: [{ description: "نقل حاوية الدمام ← الرياض", quantity: 3, unitPrice: 1500, vatRate: 15 }, { description: "نقل للكويت", quantity: 1, unitPrice: 6000, vatRate: 0 }], userId: admin.id });
+    expect(Number(q.total)).toBeCloseTo(4500 * 1.15 + 6000);
+    const sinv = await quotationToInvoice(db, q.id, { invoiceDate: `${YEAR + 1}-08-03`, userId: admin.id });
+    const [si] = await db.select().from(s.salesInvoices).where(eq(s.salesInvoices.id, sinv.id));
+    expect(Number(si.total)).toBeCloseTo(Number(q.total));
+    expect(si.status).toBe("draft");
+    await expect(quotationToInvoice(db, q.id, { invoiceDate: `${YEAR + 1}-08-03` })).rejects.toThrow("مسبقاً");
   });
 });

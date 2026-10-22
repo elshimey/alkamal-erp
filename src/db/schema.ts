@@ -1868,3 +1868,163 @@ export const clientOps = pgTable("client_ops", {
   opId: varchar("op_id", { length: 40 }).primaryKey(),
   createdAt: createdAt(),
 });
+
+// ───────────────────────── التحويل بين البنوك والصناديق ─────────────────────────
+
+/** تحويل بين حسابين نقديين (بنك، صندوق، بطاقة وقود). يُقيد فوراً؛ وبعملتين يُسجل المبلغ المستلم والفرق لفروق العملة. */
+export const cashTransfers = pgTable(
+  "cash_transfers",
+  {
+    id: id(),
+    number: varchar("number", { length: 30 }).notNull().unique(),
+    transferDate: date("transfer_date").notNull(),
+    fromAccountId: ref("from_account_id").notNull().references(() => accounts.id),
+    toAccountId: ref("to_account_id").notNull().references(() => accounts.id),
+    // بعملة الحساب المحوَّل منه
+    amount: money("amount").notNull(),
+    // بعملة الحساب المحوَّل إليه
+    receivedAmount: money("received_amount").notNull(),
+    // رسوم التحويل بعملة الحساب المحوَّل منه
+    fee: money("fee").notNull().default("0"),
+    reference: varchar("reference", { length: 60 }),
+    notes: text("notes"),
+    journalEntryId: ref("journal_entry_id").references(() => journalEntries.id),
+    createdBy: ref("created_by").references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [check("cash_transfers_amounts", sql`${t.amount} > 0 and ${t.receivedAmount} > 0 and ${t.fee} >= 0 and ${t.fromAccountId} <> ${t.toAccountId}`)],
+);
+
+// ───────────────────────── طلبات وأوامر الشراء ─────────────────────────
+
+export const purchaseRequestStatus = pgEnum("purchase_request_status", ["draft", "approved", "rejected", "ordered"]);
+export const purchaseOrderStatus = pgEnum("purchase_order_status", ["draft", "approved", "invoiced", "cancelled"]);
+
+export const purchaseRequests = pgTable("purchase_requests", {
+  id: id(),
+  number: varchar("number", { length: 30 }).notNull().unique(),
+  requestDate: date("request_date").notNull(),
+  neededBy: date("needed_by"),
+  vehicleId: ref("vehicle_id").references(() => vehicles.id),
+  status: purchaseRequestStatus("status").notNull().default("draft"),
+  notes: text("notes"),
+  rejectReason: text("reject_reason"),
+  createdBy: ref("created_by").references(() => users.id),
+  approvedBy: ref("approved_by").references(() => users.id),
+  createdAt: createdAt(),
+});
+
+export const purchaseRequestLines = pgTable("purchase_request_lines", {
+  id: id(),
+  requestId: ref("request_id").notNull().references(() => purchaseRequests.id, { onDelete: "cascade" }),
+  lineNo: smallint("line_no").notNull(),
+  productId: ref("product_id").references(() => products.id),
+  description: text("description").notNull(),
+  quantity: numeric("quantity", { precision: 14, scale: 3 }).notNull(),
+  estimatedPrice: money("estimated_price"),
+});
+
+export const purchaseOrders = pgTable("purchase_orders", {
+  id: id(),
+  number: varchar("number", { length: 30 }).notNull().unique(),
+  orderDate: date("order_date").notNull(),
+  expectedDate: date("expected_date"),
+  supplierId: ref("supplier_id").notNull().references(() => parties.id),
+  requestId: ref("request_id").references(() => purchaseRequests.id),
+  vehicleId: ref("vehicle_id").references(() => vehicles.id),
+  currencyCode: varchar("currency_code", { length: 3 }).notNull().default("SAR").references(() => currencies.code),
+  status: purchaseOrderStatus("status").notNull().default("draft"),
+  notes: text("notes"),
+  purchaseInvoiceId: ref("purchase_invoice_id").references(() => purchaseInvoices.id, { onDelete: "set null" }),
+  createdBy: ref("created_by").references(() => users.id),
+  approvedBy: ref("approved_by").references(() => users.id),
+  createdAt: createdAt(),
+});
+
+export const purchaseOrderLines = pgTable("purchase_order_lines", {
+  id: id(),
+  orderId: ref("order_id").notNull().references(() => purchaseOrders.id, { onDelete: "cascade" }),
+  lineNo: smallint("line_no").notNull(),
+  productId: ref("product_id").references(() => products.id),
+  accountId: ref("account_id").references(() => accounts.id),
+  description: text("description").notNull(),
+  quantity: numeric("quantity", { precision: 14, scale: 3 }).notNull(),
+  unitPrice: numeric("unit_price", { precision: 18, scale: 4 }).notNull(),
+  vatRate: numeric("vat_rate", { precision: 5, scale: 2 }).notNull().default("15"),
+});
+
+// ───────────────────────── عروض الأسعار ─────────────────────────
+
+export const quotationStatus = pgEnum("quotation_status", ["draft", "sent", "accepted", "rejected"]);
+
+export const quotations = pgTable("quotations", {
+  id: id(),
+  number: varchar("number", { length: 30 }).notNull().unique(),
+  quoteDate: date("quote_date").notNull(),
+  validUntil: date("valid_until").notNull(),
+  customerId: ref("customer_id").notNull().references(() => parties.id),
+  currencyCode: varchar("currency_code", { length: 3 }).notNull().default("SAR").references(() => currencies.code),
+  status: quotationStatus("status").notNull().default("draft"),
+  subtotal: money("subtotal").notNull().default("0"),
+  vatTotal: money("vat_total").notNull().default("0"),
+  total: money("total").notNull().default("0"),
+  notes: text("notes"),
+  terms: text("terms"),
+  salesInvoiceId: ref("sales_invoice_id").references(() => salesInvoices.id, { onDelete: "set null" }),
+  createdBy: ref("created_by").references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+export const quotationLines = pgTable("quotation_lines", {
+  id: id(),
+  quotationId: ref("quotation_id").notNull().references(() => quotations.id, { onDelete: "cascade" }),
+  lineNo: smallint("line_no").notNull(),
+  routeId: ref("route_id").references(() => routes.id),
+  description: text("description").notNull(),
+  quantity: numeric("quantity", { precision: 14, scale: 3 }).notNull(),
+  unitPrice: numeric("unit_price", { precision: 18, scale: 4 }).notNull(),
+  vatRate: numeric("vat_rate", { precision: 5, scale: 2 }).notNull().default("15"),
+  amount: money("amount").notNull(),
+  vatAmount: money("vat_amount").notNull().default("0"),
+});
+
+// ───────────────────────── مطابقة بطاقات الوقود ─────────────────────────
+
+export const fuelStatementStatus = pgEnum("fuel_statement_status", ["open", "reconciled"]);
+
+/** كشف شهري من مزود بطاقات الوقود يُطابق مع تعبئات البطاقة المسجلة في الشحنات. */
+export const fuelCardStatements = pgTable("fuel_card_statements", {
+  id: id(),
+  number: varchar("number", { length: 30 }).notNull().unique(),
+  providerId: ref("provider_id").references(() => parties.id),
+  periodFrom: date("period_from").notNull(),
+  periodTo: date("period_to").notNull(),
+  closingBalance: money("closing_balance"),
+  status: fuelStatementStatus("status").notNull().default("open"),
+  notes: text("notes"),
+  createdBy: ref("created_by").references(() => users.id),
+  createdAt: createdAt(),
+});
+
+export const fuelCardLines = pgTable(
+  "fuel_card_lines",
+  {
+    id: id(),
+    statementId: ref("statement_id").notNull().references(() => fuelCardStatements.id, { onDelete: "cascade" }),
+    lineNo: integer("line_no").notNull(),
+    txnDate: date("txn_date").notNull(),
+    plate: varchar("plate", { length: 30 }),
+    vehicleId: ref("vehicle_id").references(() => vehicles.id),
+    station: varchar("station", { length: 120 }),
+    reference: varchar("reference", { length: 60 }),
+    liters: numeric("liters", { precision: 10, scale: 2 }),
+    // شامل الضريبة كما في الكشف
+    amount: money("amount").notNull(),
+    // التعبئة المسجلة في الشحنة التي طابقها
+    fuelId: ref("fuel_id").references(() => waybillFuel.id, { onDelete: "set null" }),
+    // أو قيد مصروف ديزل أُنشئ له مباشرة
+    journalEntryId: ref("journal_entry_id").references(() => journalEntries.id),
+  },
+  (t) => [index("fuel_card_lines_statement_idx").on(t.statementId), uniqueIndex("fuel_card_lines_fuel_uq").on(t.fuelId).where(sql`${t.fuelId} is not null`)],
+);
