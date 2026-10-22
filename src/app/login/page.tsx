@@ -30,7 +30,7 @@ export default async function LoginPage() {
             <span className="text-brand-500">في مكان واحد.</span>
           </h1>
           <p className="mt-4 leading-relaxed text-white/55">
-            الأسطول والسائقون والعقود والبوالص والحسابات في نظام واحد، يربط كل مركبة بتكاليفها وإيراداتها.
+            الأسطول والسائقون والعقود والشحنات والحسابات في نظام واحد، يربط كل مركبة بتكاليفها وإيراداتها.
           </p>
         </div>
         <div className="relative -mx-12 -mb-12 h-24 bg-asphalt-800">

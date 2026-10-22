@@ -28,7 +28,7 @@ export default async function ContractsPage() {
 
   return (
     <>
-      <PageHeader title="العقود" description="عقد العميل وبنود تسعيره. البوليصة تأخذ سعرها من العقد الساري تلقائياً." />
+      <PageHeader title="العقود" description="عقد العميل وبنود تسعيره. الشحنة تأخذ سعرها من العقد الساري تلقائياً." />
       {can(user.perms, "contracts", "create") && (
         <Card title="إدخال عقود جديدة" className="mb-6">
           {customers.length === 0 ? (

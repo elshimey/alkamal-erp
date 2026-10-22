@@ -3,7 +3,7 @@ import type { Db } from "@/db";
 import { PLAN_ALERT_DAYS } from "@/data/maintenance";
 
 // مؤشرات اللوحة الرئيسية. الأرقام المالية من القيود المرحّلة فقط (بالريال)،
-// وأرقام التشغيل من البوالص نفسها.
+// وأرقام التشغيل من الشحنات نفسها.
 
 export type PeriodKey = "week" | "month" | "quarter" | "year" | "custom";
 export const PERIODS: Record<Exclude<PeriodKey, "custom">, string> = {
@@ -250,7 +250,7 @@ export async function collected(db: Db, from: string, to: string) {
   return { total: n(r.total), count: n(r.count) };
 }
 
-// سعر الريال لعملة البوليصة في تاريخها (آخر سعر مسجّل)
+// سعر الريال لعملة الشحنة في تاريخها (آخر سعر مسجّل)
 const sarRate = sql`(case when w.currency_code = 'SAR' then 1 else coalesce((select er.rate from exchange_rates er
   where er.currency_code = w.currency_code and er.rate_date <= w.waybill_date order by er.rate_date desc limit 1), 0) end)`;
 

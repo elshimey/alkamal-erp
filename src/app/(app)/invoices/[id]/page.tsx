@@ -115,7 +115,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
 
       <div className="grid gap-6 lg:grid-cols-2 print:hidden">
         {canUpdate && available.length > 0 && (
-          <Card title="إضافة بوالص معتمدة لهذا العميل">
+          <Card title="إضافة شحنات معتمدة لهذا العميل">
             <ActionForm action={addWaybills.bind(null, id)} className="flex flex-col gap-2">
               <div className="max-h-64 overflow-y-auto rounded-lg border border-gray-100">
                 {available.map((w) => (
@@ -161,7 +161,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
               <Input name="reason" placeholder="سبب الحذف" className="flex-1" />
               <SubmitButton variant="secondary">حذف</SubmitButton>
             </ActionForm>
-            <p className="mt-2 text-xs text-gray-500">تعود بوالصها للقائمة بانتظار الفوترة. اليوم {todayRiyadh()}.</p>
+            <p className="mt-2 text-xs text-gray-500">تعود شحناتها للقائمة بانتظار الفوترة. اليوم {todayRiyadh()}.</p>
           </Card>
         )}
       </div>

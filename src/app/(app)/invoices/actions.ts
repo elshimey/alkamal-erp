@@ -35,7 +35,7 @@ export async function invoiceAll(_: FormState, fd: FormData): Promise<FormState>
   const user = await requirePermission("sales_invoices", "create");
   const { created, errors } = await createAllInvoices(db, dateOf(fd), user.id);
   refresh();
-  if (!created.length && !errors.length) return { error: "لا توجد بوالص معتمدة غير مفوترة حتى هذا التاريخ" };
+  if (!created.length && !errors.length) return { error: "لا توجد شحنات معتمدة غير مفوترة حتى هذا التاريخ" };
   return {
     ok: created.length ? `أُنشئت ${created.length} فاتورة مسودة: ${created.map((c) => c.number).join("، ")}` : undefined,
     error: errors.length ? errors.join("\n") : undefined,
@@ -45,11 +45,11 @@ export async function invoiceAll(_: FormState, fd: FormData): Promise<FormState>
 export async function addWaybills(id: number, _: FormState, fd: FormData): Promise<FormState> {
   await requirePermission("sales_invoices", "update");
   const ids = fd.getAll("waybillIds").map(Number).filter(Number.isInteger);
-  if (!ids.length) return { error: "حدد بوليصة واحدة على الأقل" };
+  if (!ids.length) return { error: "حدد شحنة واحدة على الأقل" };
   try {
     await addWaybillsToInvoice(db, id, ids);
     refresh(id);
-    return { ok: `أُضيفت البوالص: ${ids.length}` };
+    return { ok: `أُضيفت الشحنات: ${ids.length}` };
   } catch (err) {
     return { error: errorMessage(err) };
   }

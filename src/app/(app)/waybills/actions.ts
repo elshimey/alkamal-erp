@@ -24,7 +24,7 @@ import {
 import { EXPENSE_BILL_TO, EXPENSE_PAYERS, FUEL_SOURCES, TRIP_STAGES } from "@/data/waybills";
 import type { FormState } from "@/components/action-form";
 
-/** صلاحية على بوليصة محددة؛ صاحب النطاق «الخاص» (السائق) لا يصل إلا لبوالصه. */
+/** صلاحية على شحنة محددة؛ صاحب النطاق «الخاص» (السائق) لا يصل إلا لشحناته. */
 async function guard(action: Action, waybillId?: number): Promise<CurrentUser> {
   const user = await requirePermission("waybills", action);
   if (waybillId != null && scopeFor(user.perms, "waybills", action) === "own") {
@@ -73,7 +73,7 @@ export async function saveWaybills(rows: SheetRow[]) {
   return result;
 }
 
-/** إجراء جماعي على البوالص المحددة في القائمة (تسليم أو اعتماد). */
+/** إجراء جماعي على الشحنات المحددة في القائمة (تسليم أو اعتماد). */
 export async function bulkWaybills(kind: "deliver" | "approve", ids: number[], overrideReason?: string) {
   const user = await guard(kind === "approve" ? "approve" : "update");
   const canOverride = hasSpecial(user.perms, "override_controls");
@@ -142,7 +142,7 @@ export async function approveOne(id: number, _: FormState, fd: FormData): Promis
       overrideReason: String(fd.get("overrideReason") ?? ""),
     });
     refresh(id);
-    return { ok: entry ? `اعتُمدت البوليصة ورُحّل القيد ${entry.number}` : "اعتُمدت البوليصة (بلا تكاليف تُقيد)" };
+    return { ok: entry ? `اعتُمدت الشحنة ورُحّل القيد ${entry.number}` : "اعتُمدت الشحنة (بلا تكاليف تُقيد)" };
   } catch (err) {
     return { error: errorMessage(err) };
   }
@@ -153,7 +153,7 @@ export async function rejectOne(id: number, _: FormState, fd: FormData): Promise
   try {
     await rejectWaybill(db, id, String(fd.get("reason") ?? ""));
     refresh(id);
-    return { ok: "رُفضت البوليصة وأُعيدت مع السبب" };
+    return { ok: "رُفضت الشحنة وأُعيدت مع السبب" };
   } catch (err) {
     return { error: errorMessage(err) };
   }
@@ -164,7 +164,7 @@ export async function revertOne(id: number): Promise<FormState> {
   try {
     await revertWaybill(db, id);
     refresh(id);
-    return { ok: "أُرجعت البوليصة وأُلغي قيدها" };
+    return { ok: "أُرجعت الشحنة وأُلغي قيدها" };
   } catch (err) {
     return { error: errorMessage(err) };
   }

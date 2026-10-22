@@ -6,7 +6,7 @@ import { createJournalEntryTx, deleteEntryTx, nextDocumentNumber, type LineInput
 import { computePayrollLine, monthLabel, monthRange, PAYROLL_ACCOUNTS } from "@/data/payroll";
 
 // الرواتب: الموظف ← السلفة ← مسير الشهر (قيد الاستحقاق عند الاعتماد) ← الصرف من البنك بالصافي.
-// العمولات قُيدت لحساب راتب السائق عند اعتماد البوالص، فالمسير يعرضها ويصرفها ولا يقيدها مرة ثانية.
+// العمولات قُيدت لحساب راتب السائق عند اعتماد الشحنات، فالمسير يعرضها ويصرفها ولا يقيدها مرة ثانية.
 
 const num = (v: string | null | undefined) => (v == null ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100 + 0;
@@ -219,7 +219,7 @@ async function driverCostCenter(tx: Tx, driverId: number, monthEnd: string) {
   return row?.cc ?? null;
 }
 
-/** عمولات البوالص المرحّلة لحساب راتب الموظف خلال الشهر. */
+/** عمولات الشحنات المرحّلة لحساب راتب الموظف خلال الشهر. */
 async function commissionsFor(tx: Tx, accountIds: number[], start: string, end: string) {
   const out = new Map<number, number>();
   if (!accountIds.length) return out;
@@ -399,7 +399,7 @@ export async function createPayrollRun(db: Db, input: { month: string; userId?: 
   });
 }
 
-/** تحديث المسودة من بيانات الموظفين والعمولات (بعد اعتماد بوالص جديدة مثلاً)، مع الإبقاء على الإدخالات اليدوية. */
+/** تحديث المسودة من بيانات الموظفين والعمولات (بعد اعتماد شحنات جديدة مثلاً)، مع الإبقاء على الإدخالات اليدوية. */
 export async function refreshPayrollRun(db: Db, runId: number) {
   return db.transaction(async (tx) => {
     const run = await lockRun(tx, runId);

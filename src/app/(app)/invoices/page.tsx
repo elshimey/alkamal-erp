@@ -55,7 +55,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
 
   return (
     <>
-      <PageHeader title="فواتير المبيعات" description="فاتورة تجميعية لعدة بوالص معتمدة، سطر لكل بوليصة بمركز تكلفة مركبتها. الإيراد والضريبة يُقيدان عند الإصدار.">
+      <PageHeader title="فواتير المبيعات" description="فاتورة تجميعية لعدة شحنات معتمدة، سطر لكل شحنة بمركز تكلفة مركبتها. الإيراد والضريبة يُقيدان عند الإصدار.">
         {canCreate && <ImportLink entity="sales-invoices" />}
       </PageHeader>
 
@@ -65,8 +65,8 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
             <span className="flex size-8 items-center justify-center rounded-lg bg-brand-500 text-brand-900">
               <Icon name="waybill" className="size-4" />
             </span>
-            <span className="font-semibold text-brand-900">بوالص معتمدة بانتظار الفوترة</span>
-            <Badge tone="amber">{queue.reduce((a, q) => a + q.count, 0)} بوليصة</Badge>
+            <span className="font-semibold text-brand-900">شحنات معتمدة بانتظار الفوترة</span>
+            <Badge tone="amber">{queue.reduce((a, q) => a + q.count, 0)} شحنة</Badge>
             <span className="ms-auto text-xs text-gray-500 group-open:hidden">عرض</span>
           </summary>
           <div className="px-5 pb-4">
@@ -75,7 +75,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
               <Input name="invoiceDate" type="date" defaultValue={today} className="w-44" />
               <SubmitButton>فوترة الكل (فاتورة لكل عميل)</SubmitButton>
             </ActionForm>
-            <Table head={["العميل", "العملة", "عدد البوالص", "الفترة", "المبلغ قبل الضريبة", ""]}>
+            <Table head={["العميل", "العملة", "عدد الشحنات", "الفترة", "المبلغ قبل الضريبة", ""]}>
               {queue.map((q) => (
                 <tr key={`${q.customerId}-${q.currencyCode}`}>
                   <Td className="font-medium">{q.customer}</Td>
@@ -114,7 +114,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
             { key: "dueDate", label: "الاستحقاق", type: "date", editable: true, width: "8.5rem" },
             { key: "customer", label: "العميل", width: "12rem" },
             { key: "currency", label: "العملة", width: "4rem" },
-            { key: "waybills", label: "البوالص", ltr: true, width: "4.5rem" },
+            { key: "waybills", label: "الشحنات", ltr: true, width: "4.5rem" },
             { key: "subtotal", label: "قبل الضريبة", type: "number", width: "7rem" },
             { key: "vat", label: "الضريبة", type: "number", width: "6rem" },
             { key: "total", label: "الإجمالي", type: "number", width: "7rem" },

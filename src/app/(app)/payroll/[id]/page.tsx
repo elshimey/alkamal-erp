@@ -78,7 +78,7 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
         {[
           { label: "الرواتب والبدلات", value: t.basic + t.housing + t.otherAllowances + t.additions + t.incentives - t.absenceDeduction - t.deductions, hint: t.incentives ? `منها حوافز ${fmt(t.incentives)}` : undefined },
-          { label: "عمولات البوالص", value: t.commissions, hint: "مقيدة من البوالص، تُصرف هنا" },
+          { label: "عمولات الشحنات", value: t.commissions, hint: "مقيدة من الشحنات، تُصرف هنا" },
           { label: "الاستقطاعات", value: t.gosiEmployee + t.advanceDeduction + t.violations + t.penalties, hint: "تأمينات الموظف وأقساط السلف والمخالفات والجزاءات" },
           { label: "الصافي للصرف", value: t.net, strong: true },
         ].map((k) => (
@@ -165,7 +165,7 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
             <ActionForm action={refreshRun.bind(null, id)} resetOnSuccess={false}>
               <SubmitButton variant="secondary">تحديث من الموظفين والعمولات والمخالفات والموارد البشرية</SubmitButton>
             </ActionForm>
-            <p className="mt-2 text-xs text-gray-500">بعد تعديل راتب أو اعتماد بوالص أو مخالفات أو جزاءات وحوافز وإجازات بدون راتب وغياب. تعديلاتك أعلاه تبقى.</p>
+            <p className="mt-2 text-xs text-gray-500">بعد تعديل راتب أو اعتماد شحنات أو مخالفات أو جزاءات وحوافز وإجازات بدون راتب وغياب. تعديلاتك أعلاه تبقى.</p>
           </Card>
         )}
         {draft && can(user.perms, "payroll", "approve") && (

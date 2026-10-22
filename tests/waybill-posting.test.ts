@@ -21,7 +21,7 @@ const fleet: PostingWaybill = {
   salesRepCommission: 0,
 };
 
-describe("قيد اعتماد البوليصة", () => {
+describe("قيد اعتماد الشحنة", () => {
   it("متوازن، والديزل بالدينار يُقيد بسعر صرفه", () => {
     const lines = waybillPostingLines(
       fleet,
@@ -37,7 +37,7 @@ describe("قيد اعتماد البوليصة", () => {
     expect(lines.find((l) => l.accountId === 210701)).toMatchObject({ credit: 150, driverId: 3 });
   });
 
-  it("بوليصة الناقل لا تقبل الدفع من عهدة سائق", () => {
+  it("شحنة الناقل لا تقبل الدفع من عهدة سائق", () => {
     const carrier = { ...fleet, execution: "carrier" as const, driverId: null, driverCustodyAccountId: null, driverPayableAccountId: null, carrierId: 20, carrierCost: 900 };
     expect(() =>
       waybillPostingLines(carrier, [{ source: "custody", partyId: null, amount: 10, vatAmount: 0, currencyCode: "SAR", exchangeRate: 1 }], [], account, 1),

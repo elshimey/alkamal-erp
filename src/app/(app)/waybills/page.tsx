@@ -27,7 +27,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
 
   const carrier = alias(s.parties, "carrier");
   const where: SQL[] = [];
-  // السائق يرى بوالصه فقط
+  // السائق يرى شحناته فقط
   if (scopeFor(user.perms, "waybills", "view") === "own") where.push(eq(s.drivers.userId, user.id));
   const counts = await db
     .select({ status: s.waybills.status, n: sql<number>`count(*)::int` })
@@ -66,9 +66,9 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
 
   return (
     <>
-      <PageHeader title="البوالص" description="كل بوليصة رحلة واحدة. السعر من العقد الساري والعمولة من المسار تلقائياً، والقيد يُرحّل عند الاعتماد." />
+      <PageHeader title="الشحنات" description="كل شحنة رحلة واحدة. السعر من العقد الساري والعمولة من المسار تلقائياً، والقيد يُرحّل عند الاعتماد." />
       {canCreate && (
-        <Card title="إدخال بوالص" className="mb-6">
+        <Card title="إدخال شحنات" className="mb-6">
           {customers.length === 0 || routes.length === 0 ? (
             <p className="text-sm text-gray-500">
               أضف العملاء من{" "}
@@ -84,7 +84,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
           ) : (
             <>
               <SheetEditor
-                templateName="البوالص"
+                templateName="الشحنات"
                 action={saveWaybills}
                 initialRows={4}
                 columns={[

@@ -8,7 +8,7 @@ import { SALES_ACCOUNTS } from "@/data/sales";
 import type { DocFilter } from "@/lib/doc-filters";
 import { docOrder, docWhere } from "@/lib/doc-query";
 
-// الفاتورة التجميعية: عدة بوالص معتمدة لعميل واحد، سطر لكل بوليصة. هنا يُقيد الإيراد (القرار 3).
+// الفاتورة التجميعية: عدة شحنات معتمدة لعميل واحد، سطر لكل شحنة. هنا يُقيد الإيراد (القرار 3).
 
 const num = (v: string | null | undefined) => (v == null ? 0 : Number(v));
 
@@ -30,7 +30,7 @@ const addDays = (iso: string, days: number) => {
   return d.toISOString().slice(0, 10);
 };
 
-/** البوالص المعتمدة غير المفوترة (ليست على أي فاتورة، ولو مسودة). */
+/** الشحنات المعتمدة غير المفوترة (ليست على أي فاتورة، ولو مسودة). */
 function uninvoicedWaybills() {
   return and(
     eq(s.waybills.status, "approved"),
@@ -38,7 +38,7 @@ function uninvoicedWaybills() {
   );
 }
 
-/** قائمة الفوترة: لكل عميل وعملة عدد البوالص المعتمدة غير المفوترة ومبلغها. */
+/** قائمة الفوترة: لكل عميل وعملة عدد الشحنات المعتمدة غير المفوترة ومبلغها. */
 export async function invoicingQueue(db: Db | Tx, upTo?: string) {
   return db
     .select({
@@ -57,7 +57,7 @@ export async function invoicingQueue(db: Db | Tx, upTo?: string) {
     .orderBy(asc(s.parties.nameAr));
 }
 
-/** يبني سطور البوالص ومصاريفها المحمّلة على العميل، بعملة الفاتورة. */
+/** يبني سطور الشحنات ومصاريفها المحمّلة على العميل، بعملة الفاتورة. */
 async function buildLines(tx: Tx, waybillIds: number[], currencyCode: string, rate: number) {
   if (!waybillIds.length) return [];
   const [ext] = await tx.select({ id: s.costCenters.id }).from(s.costCenters).where(eq(s.costCenters.code, "EXT"));
@@ -95,8 +95,8 @@ async function buildLines(tx: Tx, waybillIds: number[], currencyCode: string, ra
 
   const lines: (typeof s.salesInvoiceLines.$inferInsert)[] = [];
   for (const { w, plate, vehicleCc, taxRate } of rows) {
-    if (w.status !== "approved") throw new Error(`البوليصة ${w.number} غير معتمدة`);
-    if (w.currencyCode !== currencyCode) throw new Error(`البوليصة ${w.number} بعملة ${w.currencyCode} والفاتورة بـ ${currencyCode}`);
+    if (w.status !== "approved") throw new Error(`الشحنة ${w.number} غير معتمدة`);
+    if (w.currencyCode !== currencyCode) throw new Error(`الشحنة ${w.number} بعملة ${w.currencyCode} والفاتورة بـ ${currencyCode}`);
     const vatRate = num(taxRate);
     const amount = num(w.amount);
     const base = {
@@ -163,13 +163,13 @@ export interface InvoiceInput {
   customerId: number;
   invoiceDate: string;
   currencyCode?: string;
-  // فارغ = كل البوالص المعتمدة غير المفوترة للعميل حتى تاريخ الفاتورة
+  // فارغ = كل الشحنات المعتمدة غير المفوترة للعميل حتى تاريخ الفاتورة
   waybillIds?: number[];
   notes?: string | null;
   userId?: number;
 }
 
-/** ينشئ فاتورة تجميعية مسودة من بوالص العميل المعتمدة. */
+/** ينشئ فاتورة تجميعية مسودة من شحنات العميل المعتمدة. */
 export async function createInvoice(db: Db, input: InvoiceInput) {
   return db.transaction(async (tx) => {
     const currency = input.currencyCode ?? "SAR";
@@ -186,9 +186,9 @@ export async function createInvoice(db: Db, input: InvoiceInput) {
         ),
       );
     if (input.waybillIds?.length && candidates.length !== input.waybillIds.length) {
-      throw new Error("بعض البوالص المختارة غير معتمدة أو مفوترة أو لعميل آخر");
+      throw new Error("بعض الشحنات المختارة غير معتمدة أو مفوترة أو لعميل آخر");
     }
-    if (!candidates.length) throw new Error("لا توجد بوالص معتمدة غير مفوترة لهذا العميل حتى تاريخ الفاتورة");
+    if (!candidates.length) throw new Error("لا توجد شحنات معتمدة غير مفوترة لهذا العميل حتى تاريخ الفاتورة");
 
     const contractId = candidates.find((c) => c.contractId)?.contractId ?? null;
     const [contract] = contractId ? await tx.select().from(s.contracts).where(eq(s.contracts.id, contractId)) : [];
@@ -236,7 +236,7 @@ export interface ManualInvoiceInput {
   }[];
 }
 
-/** فاتورة مسودة بسطور حرة (المستوردة من Excel أو نظام سابق)، بلا بوالص. */
+/** فاتورة مسودة بسطور حرة (المستوردة من Excel أو نظام سابق)، بلا شحنات. */
 export async function createManualInvoiceTx(tx: Tx, input: ManualInvoiceInput) {
   if (!input.lines.length) throw new Error("الفاتورة بلا بنود");
   const [dup] = await tx.select({ number: s.salesInvoices.number }).from(s.salesInvoices).where(eq(s.salesInvoices.reference, input.reference));
@@ -280,7 +280,7 @@ export async function createManualInvoiceTx(tx: Tx, input: ManualInvoiceInput) {
   return inv;
 }
 
-/** فوترة الكل: فاتورة لكل عميل وعملة بكل بوالصه المعتمدة غير المفوترة. */
+/** فوترة الكل: فاتورة لكل عميل وعملة بكل شحناته المعتمدة غير المفوترة. */
 export async function createAllInvoices(db: Db, invoiceDate: string, userId?: number) {
   const queue = await invoicingQueue(db, invoiceDate);
   const created: { number: string; customer: string }[] = [];
@@ -304,13 +304,13 @@ export async function addWaybillsToInvoice(db: Db, invoiceId: number, waybillIds
       .select({ id: s.waybills.id })
       .from(s.waybills)
       .where(and(uninvoicedWaybills(), eq(s.waybills.customerId, inv.customerId), inArray(s.waybills.id, waybillIds)));
-    if (ok.length !== waybillIds.length) throw new Error("بعض البوالص غير معتمدة أو مفوترة أو لعميل آخر");
+    if (ok.length !== waybillIds.length) throw new Error("بعض الشحنات غير معتمدة أو مفوترة أو لعميل آخر");
     await insertLines(tx, invoiceId, await buildLines(tx, waybillIds, inv.currencyCode, num(inv.exchangeRate)));
     await recomputeTotals(tx, invoiceId);
   });
 }
 
-/** يحذف سطراً من مسودة؛ حذف سطر بوليصة يحذف مصاريفها المحمّلة معه. */
+/** يحذف سطراً من مسودة؛ حذف سطر شحنة يحذف مصاريفها المحمّلة معه. */
 export async function removeInvoiceLine(db: Db, invoiceId: number, lineId: number) {
   return db.transaction(async (tx) => {
     const inv = await lockInvoice(tx, invoiceId);
@@ -329,7 +329,7 @@ export async function removeInvoiceLine(db: Db, invoiceId: number, lineId: numbe
   });
 }
 
-/** الإصدار: يرحّل قيد الإيراد والضريبة، وتصبح بوالصها «مفوترة». */
+/** الإصدار: يرحّل قيد الإيراد والضريبة، وتصبح شحناتها «مفوترة». */
 export async function issueInvoice(db: Db, invoiceId: number, userId?: number) {
   return db.transaction(async (tx) => {
     const inv = await lockInvoice(tx, invoiceId);
@@ -339,7 +339,7 @@ export async function issueInvoice(db: Db, invoiceId: number, userId?: number) {
     const waybillIds = [...new Set(lines.map((l) => l.waybillId).filter((v): v is number => v != null))];
     const locked = await tx.select({ id: s.waybills.id, number: s.waybills.number, status: s.waybills.status }).from(s.waybills).where(inArray(s.waybills.id, waybillIds)).for("update");
     const notApproved = locked.filter((w) => w.status !== "approved");
-    if (notApproved.length) throw new Error(`بوالص لم تعد معتمدة: ${notApproved.map((w) => w.number).join("، ")}`);
+    if (notApproved.length) throw new Error(`شحنات لم تعد معتمدة: ${notApproved.map((w) => w.number).join("، ")}`);
 
     const [vatOut] = await tx.select({ id: s.taxCodes.id }).from(s.taxCodes).where(eq(s.taxCodes.code, "VAT15-OUT"));
     const entry = await createJournalEntryTx(tx, {
@@ -371,7 +371,7 @@ export async function issueInvoice(db: Db, invoiceId: number, userId?: number) {
   });
 }
 
-/** الإرجاع لمسودة: يلغي القيد ويعيد البوالص «معتمدة». يُمنع بعد تخصيص قبض عليها. */
+/** الإرجاع لمسودة: يلغي القيد ويعيد الشحنات «معتمدة». يُمنع بعد تخصيص قبض عليها. */
 export async function revertInvoice(db: Db, invoiceId: number) {
   return db.transaction(async (tx) => {
     const inv = await lockInvoice(tx, invoiceId);
@@ -447,7 +447,7 @@ export interface DraftInvoicePatch {
 }
 
 /**
- * تعديل مسودة من الشيت. تغيير التاريخ يعيد سعر الصرف وسطور البوالص بسعر اليوم الجديد،
+ * تعديل مسودة من الشيت. تغيير التاريخ يعيد سعر الصرف وسطور الشحنات بسعر اليوم الجديد،
  * ويُزاح الاستحقاق بنفس المدة ما لم يُحدد.
  */
 export async function updateDraftInvoice(db: Db, id: number, patch: DraftInvoicePatch) {
@@ -471,7 +471,7 @@ export async function updateDraftInvoice(db: Db, id: number, patch: DraftInvoice
           .from(s.waybills)
           .where(and(inArray(s.waybills.id, waybillIds), sql`${s.waybills.waybillDate} > ${invoiceDate}`))
           .limit(1);
-        if (late) throw new Error(`تاريخ الفاتورة قبل البوليصة ${late.number} (${late.date})`);
+        if (late) throw new Error(`تاريخ الفاتورة قبل الشحنة ${late.number} (${late.date})`);
       }
       const rate = await rateOn(tx, inv.currencyCode, invoiceDate);
       if (rate !== num(inv.exchangeRate)) {

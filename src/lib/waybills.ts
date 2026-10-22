@@ -9,7 +9,7 @@ import { driverLeaveOn } from "@/lib/hr";
 import { waybillPostingLines } from "@/lib/waybill-posting";
 import { WAYBILL_ACCOUNTS, type WaybillAccountKey, type WaybillStatus } from "@/data/waybills";
 
-// البوليصة = رحلة واحدة (القرار 2). لا قيد قبل الاعتماد (القرار 3).
+// الشحنة = رحلة واحدة (القرار 2). لا قيد قبل الاعتماد (القرار 3).
 
 const EDITABLE: WaybillStatus[] = ["draft", "in_transit", "delivered", "rejected"];
 const APPROVABLE: WaybillStatus[] = ["draft", "in_transit", "delivered"];
@@ -23,12 +23,12 @@ async function hasRole(tx: Db | Tx, partyId: number, role: (typeof s.partyRoleTy
 
 async function lockWaybill(tx: Tx, id: number) {
   const [w] = await tx.select().from(s.waybills).where(eq(s.waybills.id, id)).for("update");
-  if (!w) throw new Error("البوليصة غير موجودة");
+  if (!w) throw new Error("الشحنة غير موجودة");
   return w;
 }
 
 function assertEditable(w: { status: WaybillStatus; number: string }) {
-  if (!EDITABLE.includes(w.status)) throw new Error(`البوليصة ${w.number} معتمدة؛ أرجعها لمسودة أولاً للتعديل`);
+  if (!EDITABLE.includes(w.status)) throw new Error(`الشحنة ${w.number} معتمدة؛ أرجعها لمسودة أولاً للتعديل`);
 }
 
 /** سعر الصرف المسجل للعملة في التاريخ أو قبله (الريال = 1). */
@@ -209,7 +209,7 @@ export async function addFuel(db: Db, waybillId: number, f: FuelInput) {
   return db.transaction(async (tx) => {
     const w = await lockWaybill(tx, waybillId);
     assertEditable(w);
-    if (f.source === "custody" && w.execution !== "fleet") throw new Error("عهدة السائق متاحة لبوالص الأسطول فقط");
+    if (f.source === "custody" && w.execution !== "fleet") throw new Error("عهدة السائق متاحة لشحنات الأسطول فقط");
     if (f.source === "station_credit" && !f.partyId) throw new Error("اختر المحطة");
     const currency = f.currencyCode ?? "SAR";
     const [row] = await tx
@@ -247,7 +247,7 @@ export async function addExpense(db: Db, waybillId: number, e: ExpenseInput) {
     const w = await lockWaybill(tx, waybillId);
     assertEditable(w);
     const payer = e.payer ?? (w.execution === "fleet" ? "driver_custody" : "customs_broker");
-    if (payer === "driver_custody" && w.execution !== "fleet") throw new Error("عهدة السائق متاحة لبوالص الأسطول فقط");
+    if (payer === "driver_custody" && w.execution !== "fleet") throw new Error("عهدة السائق متاحة لشحنات الأسطول فقط");
     if (payer === "customs_broker" && !e.partyId) throw new Error("اختر المخلص");
     const currency = e.currencyCode ?? "SAR";
     const [row] = await tx
@@ -268,7 +268,7 @@ export async function addExpense(db: Db, waybillId: number, e: ExpenseInput) {
   });
 }
 
-/** يحذف سطر ديزل أو مصروف ما دامت البوليصة غير معتمدة. */
+/** يحذف سطر ديزل أو مصروف ما دامت الشحنة غير معتمدة. */
 export async function deleteWaybillItem(db: Db, waybillId: number, kind: "fuel" | "expense", itemId: number) {
   return db.transaction(async (tx) => {
     assertEditable(await lockWaybill(tx, waybillId));
@@ -287,7 +287,7 @@ export async function recordStage(
   return db.transaction(async (tx) => {
     const w = await lockWaybill(tx, waybillId);
     assertEditable(w);
-    if (w.status === "rejected") throw new Error("البوليصة مرفوضة؛ أعدها لمسودة أولاً");
+    if (w.status === "rejected") throw new Error("الشحنة مرفوضة؛ أعدها لمسودة أولاً");
     await tx.insert(s.tripStages).values({
       waybillId,
       stage,
@@ -319,10 +319,10 @@ export interface ControlIssue {
 export async function approvalIssues(db: Db | Tx, w: typeof s.waybills.$inferSelect): Promise<ControlIssue[]> {
   const issues: ControlIssue[] = [];
   const contract = await activeContract(db, w.customerId, w.waybillDate);
-  if (!contract) issues.push({ code: "no_contract", message: "لا يوجد عقد ساري للعميل في تاريخ البوليصة" });
-  if (!(num(w.amount) > 0)) issues.push({ code: "zero_amount", message: "مبلغ البوليصة صفر" });
+  if (!contract) issues.push({ code: "no_contract", message: "لا يوجد عقد ساري للعميل في تاريخ الشحنة" });
+  if (!(num(w.amount) > 0)) issues.push({ code: "zero_amount", message: "مبلغ الشحنة صفر" });
   if (contract?.creditLimit != null) {
-    // الرصيد المرحّل على حساب العملاء + المعتمد غير المفوتر + هذه البوليصة
+    // الرصيد المرحّل على حساب العملاء + المعتمد غير المفوتر + هذه الشحنة
     const [ar] = await db
       .select({ balance: sql<string>`coalesce(sum(${s.journalLines.debitBase} - ${s.journalLines.creditBase}), 0)` })
       .from(s.journalLines)
@@ -363,7 +363,7 @@ export async function approveWaybill(
   return db.transaction(async (tx) => {
     const w = await lockWaybill(tx, id);
     if (!APPROVABLE.includes(w.status)) {
-      throw new Error(w.status === "rejected" ? `البوليصة ${w.number} مرفوضة؛ صحّحها وأعدها لمسودة أولاً` : `البوليصة ${w.number} معتمدة مسبقاً`);
+      throw new Error(w.status === "rejected" ? `الشحنة ${w.number} مرفوضة؛ صحّحها وأعدها لمسودة أولاً` : `الشحنة ${w.number} معتمدة مسبقاً`);
     }
     const issues = await approvalIssues(tx, w);
     const reason = opts.overrideReason?.trim() || null;
@@ -439,11 +439,11 @@ export async function approveWaybill(
       vatIn?.id ?? null,
     );
 
-    // بوليصة بلا أي تكلفة (لا ديزل ولا عمولة) تُعتمد بلا قيد
+    // شحنة بلا أي تكلفة (لا ديزل ولا عمولة) تُعتمد بلا قيد
     const entry = lines.length
       ? await createJournalEntryTx(tx, {
           entryDate: w.waybillDate,
-          description: `تكلفة البوليصة ${w.number}`,
+          description: `تكلفة الشحنة ${w.number}`,
           source: { type: "waybill", id: w.id },
           lines,
           post: true,
@@ -473,7 +473,7 @@ export async function rejectWaybill(db: Db, id: number, reason: string) {
   if (!reason.trim()) throw new Error("اكتب سبب الرفض ليصل للسائق");
   return db.transaction(async (tx) => {
     const w = await lockWaybill(tx, id);
-    if (!APPROVABLE.includes(w.status)) throw new Error("لا يمكن رفض بوليصة معتمدة؛ أرجعها لمسودة أولاً");
+    if (!APPROVABLE.includes(w.status)) throw new Error("لا يمكن رفض شحنة معتمدة؛ أرجعها لمسودة أولاً");
     await tx.update(s.waybills).set({ status: "rejected", rejectionReason: reason.trim(), updatedAt: new Date() }).where(eq(s.waybills.id, id));
   });
 }
@@ -482,12 +482,12 @@ export async function rejectWaybill(db: Db, id: number, reason: string) {
 export async function revertWaybill(db: Db, id: number) {
   return db.transaction(async (tx) => {
     const w = await lockWaybill(tx, id);
-    if (w.status === "invoiced") throw new Error("البوليصة مفوترة؛ ألغِ الفاتورة أولاً");
+    if (w.status === "invoiced") throw new Error("الشحنة مفوترة؛ ألغِ الفاتورة أولاً");
     if (w.status === "rejected") {
       await tx.update(s.waybills).set({ status: "draft", updatedAt: new Date() }).where(eq(s.waybills.id, id));
       return;
     }
-    if (w.status !== "approved") throw new Error("البوليصة ليست معتمدة");
+    if (w.status !== "approved") throw new Error("الشحنة ليست معتمدة");
     await tx
       .update(s.waybills)
       .set({ status: "delivered", journalEntryId: null, approvedBy: null, approvedAt: null, updatedAt: new Date() })
@@ -496,7 +496,7 @@ export async function revertWaybill(db: Db, id: number) {
   });
 }
 
-/** حذف بوليصة مسودة أو مرفوضة، مع حفظ نسخة في سجل المحذوفات. */
+/** حذف شحنة مسودة أو مرفوضة، مع حفظ نسخة في سجل المحذوفات. */
 export async function deleteWaybill(db: Db, id: number, opts: { reason: string; userId?: number }) {
   if (!opts.reason.trim()) throw new Error("اكتب سبب الحذف");
   return db.transaction(async (tx) => {

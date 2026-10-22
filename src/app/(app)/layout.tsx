@@ -47,7 +47,7 @@ const NAV: { title: string; icon: IconName; items: { href: string; label: string
     title: "التشغيل والمبيعات",
     icon: "waybill",
     items: [
-      { href: "/waybills", label: "البوالص", icon: "waybill", entity: "waybills" },
+      { href: "/waybills", label: "الشحنات", icon: "waybill", entity: "waybills" },
       { href: "/invoices", label: "الفواتير", icon: "invoice", entity: "sales_invoices" },
       { href: "/customers", label: "العملاء", icon: "people", entity: "parties" },
       { href: "/receipts", label: "سندات العملاء", icon: "cash", entity: "receipts" },

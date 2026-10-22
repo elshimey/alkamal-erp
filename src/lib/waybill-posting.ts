@@ -1,4 +1,4 @@
-// قيد اعتماد البوليصة (القرار 3: التكلفة عند الاعتماد، والإيراد لاحقاً عند الفوترة).
+// قيد اعتماد الشحنة (القرار 3: التكلفة عند الاعتماد، والإيراد لاحقاً عند الفوترة).
 // دالة صافية بلا قاعدة بيانات حتى تُختبر وحدها:
 //   الديزل: مدين تكلفة الديزل (+ ضريبة المدخلات) / دائن مصدره (عهدة السائق، بطاقة الوقود، المحطة)
 //   العمولة: مدين عمولات السائقين / دائن رواتب السائق المستحقة
@@ -63,9 +63,9 @@ export function waybillPostingLines(
     const fx = { currencyCode: f.currencyCode, exchangeRate: f.exchangeRate };
     const creditAccount =
       f.source === "custody" ? custody() : f.source === "fuel_card" ? account.fuelCards : account.fuelStations;
-    const credit = { accountId: creditAccount, ...fx, partyId: f.partyId, driverId: w.driverId, waybillId: w.id, description: `ديزل البوليصة ${w.number}` };
+    const credit = { accountId: creditAccount, ...fx, partyId: f.partyId, driverId: w.driverId, waybillId: w.id, description: `ديزل الشحنة ${w.number}` };
     // كل مدين يقابله دائن بالمبلغ نفسه، فيبقى القيد متوازناً بالريال مهما كان تقريب سعر الصرف
-    pair({ accountId: account.fuelCost, ...fx, ...dims, description: `ديزل البوليصة ${w.number}` }, credit, f.amount);
+    pair({ accountId: account.fuelCost, ...fx, ...dims, description: `ديزل الشحنة ${w.number}` }, credit, f.amount);
     if (f.vatAmount > 0) {
       pair({ accountId: account.inputVat, ...fx, taxCodeId: inputVatTaxCodeId, waybillId: w.id, description: "ضريبة مدخلات الديزل" }, credit, f.vatAmount);
     }
@@ -75,7 +75,7 @@ export function waybillPostingLines(
     if (!w.driverPayableAccountId) throw new Error("السائق بلا حساب رواتب مستحقة");
     pair(
       { accountId: account.driverCommission, ...dims, description: `عمولة السائق – ${w.number}` },
-      { accountId: w.driverPayableAccountId, driverId: w.driverId, waybillId: w.id, description: `عمولة البوليصة ${w.number}` },
+      { accountId: w.driverPayableAccountId, driverId: w.driverId, waybillId: w.id, description: `عمولة الشحنة ${w.number}` },
       w.driverCommission,
     );
   }
@@ -101,7 +101,7 @@ export function waybillPostingLines(
     if (!w.carrierId || !(w.carrierCost > 0)) throw new Error("أدخل الناقل وتكلفة النقل");
     pair(
       { accountId: account.carrierCost, ...dims, partyId: w.carrierId, description: `ناقل خارجي – ${w.number}` },
-      { accountId: account.carriers, partyId: w.carrierId, waybillId: w.id, description: `تكلفة نقل البوليصة ${w.number}` },
+      { accountId: account.carriers, partyId: w.carrierId, waybillId: w.id, description: `تكلفة نقل الشحنة ${w.number}` },
       w.carrierCost,
     );
   }

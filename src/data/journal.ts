@@ -6,7 +6,7 @@ export const ENTRY_SOURCES: Record<string, { label: string; href?: (id: number) 
   purchase_invoice: { label: "فاتورة مورد", href: (id) => `/purchases?open=${id}` },
   expense: { label: "مصروف", href: () => "/expenses" },
   payment: { label: "سند صرف", href: () => "/payments" },
-  waybill: { label: "بوليصة", href: (id) => `/waybills/${id}` },
+  waybill: { label: "شحنة", href: (id) => `/waybills/${id}` },
   maintenance_order: { label: "أمر صيانة", href: (id) => `/maintenance/${id}` },
   payroll_run: { label: "مسير رواتب", href: (id) => `/payroll/${id}` },
   payroll_payment: { label: "صرف رواتب", href: (id) => `/payroll/${id}` },

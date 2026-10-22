@@ -339,7 +339,7 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     });
   });
 
-  describe("البوليصة", () => {
+  describe("الشحنة", () => {
     const D = `${YEAR}-08-05`;
     let customerId: number;
     let routeId: number;
@@ -366,7 +366,7 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       stationId = (await createParty(db, { nameAr: "محطة ساسكو", roles: ["fuel_station"] })).id;
       carrierId = (await createParty(db, { nameAr: "ناقل الشمال", roles: ["carrier"] })).id;
       vehicle = await createVehicle(db, { plate: "ر س ت 999", chassis: "CH-9", odometer: 4000 });
-      const d = await createDriver(db, { nameAr: "سائق البوالص" });
+      const d = await createDriver(db, { nameAr: "سائق الشحنات" });
       const [emp] = await db.select().from(s.employees).where(eq(s.employees.id, d.employeeId));
       driver = { id: d.id, payableAccountId: emp.payableAccountId!, custodyAccountId: d.custodyAccountId };
       await assignVehicle(db, { vehicleId: vehicle.id, driverId: d.id, fromDate: `${YEAR}-08-01` });
@@ -464,7 +464,7 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(logs[0].entity).toBe("waybill");
     });
 
-    it("الفاتورة التجميعية: سطر لكل بوليصة ومصاريفها المحمّلة، والإيراد والضريبة عند الإصدار", async () => {
+    it("الفاتورة التجميعية: سطر لكل شحنة ومصاريفها المحمّلة، والإيراد والضريبة عند الإصدار", async () => {
       const [waiting] = await db.select().from(s.chargeTypes).where(eq(s.chargeTypes.nameAr, "انتظار"));
       await addExpense(db, firstId, { chargeTypeId: waiting.id, amount: 200, billTo: "customer" });
       await approveWaybill(db, firstId, { canOverride: true, overrideReason: "حد ائتماني مؤقت" });
@@ -481,7 +481,7 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(Number(row.vatTotal)).toBe(930.15);
       expect(Number(row.total)).toBe(7131.15);
       expect(row.dueDate).toBe(`${YEAR}-09-30`);
-      await expect(createInvoice(db, { customerId, invoiceDate: `${YEAR}-08-31` })).rejects.toThrow("لا توجد بوالص");
+      await expect(createInvoice(db, { customerId, invoiceDate: `${YEAR}-08-31` })).rejects.toThrow("لا توجد شحنات");
 
       const entry = await issueInvoice(db, inv.id);
       const jl = await linesOf(entry.id);
@@ -517,7 +517,7 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       await updateDraftInvoice(db, inv.i.id, { invoiceDate: `${YEAR}-09-01`, notes: "  دفعة أغسطس " });
       let [row] = await db.select().from(s.salesInvoices).where(eq(s.salesInvoices.id, inv.i.id));
       expect([row.invoiceDate, row.dueDate, row.notes, Number(row.total)]).toEqual([`${YEAR}-09-01`, `${YEAR}-10-01`, "دفعة أغسطس", 7131.15]);
-      await expect(updateDraftInvoice(db, inv.i.id, { invoiceDate: `${YEAR}-01-01` })).rejects.toThrow("قبل البوليصة");
+      await expect(updateDraftInvoice(db, inv.i.id, { invoiceDate: `${YEAR}-01-01` })).rejects.toThrow("قبل الشحنة");
       await expect(updateDraftInvoice(db, inv.i.id, { dueDate: `${YEAR}-08-01` })).rejects.toThrow("الاستحقاق قبل");
       await expect(updateDraftInvoice(db, inv.i.id, { invoiceDate: `${YEAR + 1}-01-02` })).rejects.toThrow("سنة أخرى");
       await updateDraftInvoice(db, inv.i.id, { invoiceDate: `${YEAR}-08-31`, dueDate: `${YEAR}-09-30`, notes: "" });
@@ -652,7 +652,7 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(Number(row.paidAmount)).toBe(620);
     });
 
-    it("سداد الناقل يخفض رصيده المسجل من البوالص، وصرف العهدة يرفع رصيد السائق", async () => {
+    it("سداد الناقل يخفض رصيده المسجل من الشحنات، وصرف العهدة يرفع رصيد السائق", async () => {
       const before = (await supplierBalances(db)).find((b) => b.id === carrierId)?.balance ?? 0;
       expect(before).toBeGreaterThan(0);
       const p = await createPayment(db, { paymentDate: `${YEAR}-09-03`, kind: "supplier", partyId: carrierId, amount: 500, method: "transfer", cashAccountId: acc["110101"], post: true });
