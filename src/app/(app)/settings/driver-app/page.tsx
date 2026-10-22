@@ -2,6 +2,7 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import QRCode from "qrcode";
 import { requirePermission } from "@/lib/auth";
+import { getBrand } from "@/lib/brand";
 import { Card, PageHeader } from "@/components/ui";
 import { CopyLink } from "./copy-link";
 
@@ -13,7 +14,7 @@ export default async function DriverAppPage() {
   const proto = h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
   const url = `${proto}://${host}/driver`;
   const qr = await QRCode.toString(url, { type: "svg", margin: 1, color: { dark: "#1b2126", light: "#ffffff" } });
-  const message = `تطبيق السائق – الكمال للنقليات\n${url}\nادخل باسم الدخول وكلمة المرور التي أرسلناها لك، ثم أضف التطبيق إلى الشاشة الرئيسية.`;
+  const message = `تطبيق السائق – ${(await getBrand()).name}\n${url}\nادخل باسم الدخول وكلمة المرور التي أرسلناها لك، ثم أضف التطبيق إلى الشاشة الرئيسية.`;
 
   return (
     <>

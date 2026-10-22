@@ -4,7 +4,8 @@ import { isDriverOnly } from "@/lib/driver-app";
 import { getTenant, requireUser } from "@/lib/auth";
 import { can, type Entity } from "@/lib/permissions";
 import { Icon, type IconName } from "@/components/icons";
-import { Logo, LogoMark } from "@/components/logo";
+import { BrandMark, Logo } from "@/components/logo";
+import { getBrand } from "@/lib/brand";
 import { MobileNav, NavLinks, type NavGroup } from "@/components/nav-links";
 import { TourRunner } from "@/components/tour";
 import { logout } from "../login/actions";
@@ -18,9 +19,9 @@ const FOOTER: NavGroup[] = [
     icon: "help",
     items: [
       { href: "/help", label: "دليل استخدام النظام", icon: "book" },
-      { href: `https://wa.me/${SUPPORT_PHONE}?text=${encodeURIComponent("مرحباً، أحتاج مساعدة في نظام الكمال")}`, label: "الدعم الفني (واتساب)", icon: "chat", external: true },
+      { href: `https://wa.me/${SUPPORT_PHONE}?text=${encodeURIComponent("مرحباً، أحتاج مساعدة في البرنامج")}`, label: "الدعم الفني (واتساب)", icon: "chat", external: true },
       { href: `tel:+${SUPPORT_PHONE}`, label: "اتصال بالدعم", icon: "phone", external: true, hint: `+${SUPPORT_PHONE}` },
-      { href: `https://wa.me/${SUPPORT_PHONE}?text=${encodeURIComponent("اقتراح ميزة جديدة لنظام الكمال: ")}`, label: "طلب ميزة جديدة", icon: "sparkle", external: true },
+      { href: `https://wa.me/${SUPPORT_PHONE}?text=${encodeURIComponent("اقتراح ميزة جديدة للبرنامج: ")}`, label: "طلب ميزة جديدة", icon: "sparkle", external: true },
     ],
   },
 ];
@@ -126,6 +127,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // السائق يعمل من تطبيقه فقط
   if (isDriverOnly(user.roles)) redirect("/driver");
   const tenant = await getTenant();
+  const brand = await getBrand();
   const trialDays = tenant.tenant?.status === "trial" ? Math.max(tenant.daysLeft ?? 0, 0) : null;
   const groups: NavGroup[] = NAV.map((g) => ({
     title: g.title,
@@ -138,7 +140,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <aside className="sticky top-0 hidden print:hidden h-screen w-64 shrink-0 flex-col overflow-y-auto bg-asphalt-900 text-white md:flex">
         <div className="road-line absolute inset-y-0 end-0 opacity-70" />
         <div className="border-b border-white/5 px-5 py-5">
-          <Logo light />
+          <Logo light name={brand.name} logo={brand.logo} />
         </div>
         <nav className="flex flex-1 flex-col p-3 pt-4">
           <NavLinks groups={groups} footer={FOOTER} />
@@ -146,9 +148,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       </aside>
       <div className="flex min-w-0 flex-1 flex-col overflow-x-clip">
         <header className="sticky top-0 z-30 flex print:hidden items-center justify-between gap-3 border-b border-black/5 bg-white/85 px-3 py-2 backdrop-blur md:gap-4 md:px-6 md:py-3">
-          <MobileNav groups={[...groups, ...FOOTER]} />
+          <MobileNav groups={[...groups, ...FOOTER]} brand={{ name: brand.name, logo: brand.logo }} />
           <Link href="/" className="md:hidden" aria-label="لوحة القيادة">
-            <LogoMark size={30} />
+            <BrandMark logo={brand.logo} size={30} />
           </Link>
           <div className="ms-auto flex items-center gap-2 text-sm md:gap-4">
             <Link href="/account" className="flex items-center gap-2 text-gray-700 hover:text-brand-700">

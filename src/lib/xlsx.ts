@@ -20,7 +20,7 @@ export interface TemplateList {
 
 export async function buildTemplate(spec: ImportSpec, lists: TemplateList[]) {
   const wb = new ExcelJS.Workbook();
-  wb.creator = "الكمال للنقليات";
+  wb.creator = "نظام إدارة النقل والحسابات";
   const ws = wb.addWorksheet("البيانات", { views: [{ rightToLeft: true, state: "frozen", ySplit: 1, xSplit: 1 }] });
   ws.columns = [{ width: 13 }, ...spec.fields.map((f) => ({ width: f.width ?? 16 }))];
 

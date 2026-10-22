@@ -1,9 +1,12 @@
 // يجعل تطبيق السائق قابلاً للإضافة للشاشة الرئيسية ويفتح بملء الشاشة كتطبيق
-export function GET() {
+import { getBrand } from "@/lib/brand";
+
+export async function GET() {
+  const { name } = await getBrand(true);
   return Response.json(
     {
-      name: "الكمال للنقليات – السائق",
-      short_name: "الكمال – السائق",
+      name: `${name} – السائق`,
+      short_name: `${name} – السائق`.slice(0, 30),
       start_url: "/driver",
       scope: "/driver",
       display: "standalone",

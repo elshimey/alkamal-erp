@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { presetRanges } from "@/lib/reports";
+import { getBrand } from "@/lib/brand";
 import { ExportButton } from "@/components/export-button";
 import { PrintButton } from "@/components/print-button";
 
@@ -30,7 +31,7 @@ export const money = (v: number, dashZero = true) => {
   return v < 0 ? `(${s})` : s;
 };
 
-export function ReportHeader({ title, period, filename, children }: { title: string; period: string; filename: string; children?: ReactNode }) {
+export async function ReportHeader({ title, period, filename, children }: { title: string; period: string; filename: string; children?: ReactNode }) {
   return (
     <div className="mb-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -43,7 +44,7 @@ export function ReportHeader({ title, period, filename, children }: { title: str
             {title}
           </h1>
           <p className="mt-1 ps-4.5 text-sm text-gray-500">
-            <span className="hidden font-semibold text-gray-800 print:inline">الكمال للنقليات · </span>
+            <span className="hidden font-semibold text-gray-800 print:inline">{(await getBrand()).name} · </span>
             {period} · بالريال السعودي، من القيود المرحّلة فقط
           </p>
         </div>

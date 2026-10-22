@@ -38,15 +38,15 @@ export async function createSession(userId: number) {
   const store = await cookies();
   store.set(COOKIE, token, cookieOptions(expiresAt));
   // الشركة التي ينتمي لها المستخدم؛ الجلسة نفسها محفوظة داخل مخطط الشركة فلا يفيد تزوير هذه القيمة
-  store.set(TENANT_COOKIE, await currentSchema(), cookieOptions(expiresAt));
+  store.set(TENANT_COOKIE, await currentSchema(), cookieOptions(new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)));
 }
 
 export async function destroySession() {
   const store = await cookies();
   const token = store.get(COOKIE)?.value;
   if (token) await db.delete(s.sessions).where(eq(s.sessions.id, hashToken(token)));
+  // يبقى ملف الشركة بعد الخروج لتظهر هويتها في صفحة الدخول؛ لا يمنح أي صلاحية بلا جلسة
   store.delete(COOKIE);
-  store.delete(TENANT_COOKIE);
 }
 
 export interface CurrentUser {
