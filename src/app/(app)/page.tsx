@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { requireUser } from "@/lib/auth";
 import { can, scopeFor } from "@/lib/permissions";
 import { daysBetween, todayRiyadh } from "@/lib/dates";
+import { setupSteps } from "@/lib/setup";
 import { PERIODS, alertCounts, cashFlow, balances, collected, financials, fleetStatus, monthlyTrend, operations, receivablesAging, resolvePeriod, topCustomers, unbilledTrips, vehicleProfit, type Period } from "@/lib/dashboard";
 import { incomeStatement } from "@/lib/reports";
 import type { Entity } from "@/lib/permissions";
@@ -100,6 +101,10 @@ export default async function Dashboard({
     year: "numeric",
     timeZone: "Asia/Riyadh",
   }).format(now);
+
+  // معالج الإعداد يظهر لمدير النظام حتى تكتمل خطواته
+  const setup = user.perms.isAdmin ? await setupSteps(db) : [];
+  const setupDone = setup.filter((x) => x.done).length;
 
   // التنبيهات: ما يحتاج تدخلاً، كل واحد يفتح القسم المعني
   const kwdStale = !alerts.kwdRateDate || daysBetween(alerts.kwdRateDate, today) > 30;
@@ -339,6 +344,24 @@ export default async function Dashboard({
         </div>
       </section>
       {denied && <p className="mb-4 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800">ليست لديك صلاحية لفتح الصفحة المطلوبة.</p>}
+      {setupDone < setup.length && (
+        <Link
+          href="/setup"
+          className="mb-6 flex flex-wrap items-center gap-4 rounded-2xl border border-brand-500/60 bg-brand-50 p-4 shadow-sm transition hover:border-brand-600 hover:shadow"
+        >
+          <span className="flex size-10 items-center justify-center rounded-full bg-brand-600 text-brand-900">
+            <Icon name="settings" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="font-semibold text-asphalt-900">أكمل إعداد شركتك ({setupDone} من {setup.length} خطوات)</div>
+            <div className="text-sm text-gray-600">الخطوة التالية: {setup.find((x) => !x.done)?.title}</div>
+          </div>
+          <div className="h-2 w-full overflow-hidden rounded-full bg-white sm:w-40">
+            <div className="h-full rounded-full bg-brand-600" style={{ width: `${Math.round((setupDone / setup.length) * 100)}%` }} />
+          </div>
+          <span className="text-sm font-semibold text-brand-700">متابعة الإعداد ←</span>
+        </Link>
+      )}
 
       {canFinance && (
         <nav className="mb-6 flex gap-1 overflow-x-auto rounded-xl border border-black/[0.06] bg-white p-1 shadow-sm">
