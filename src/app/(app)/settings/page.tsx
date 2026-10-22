@@ -24,6 +24,7 @@ const SECTIONS: { title: string; items: Item[] }[] = [
   {
     title: "إعدادات المنشأة",
     items: [
+      { href: "/setup", title: "معالج إعداد الشركة", description: "خطوات تجهيز النظام بالترتيب، وما اكتمل منها وما بقي.", icon: "check", entity: "settings" },
       { href: "/settings/company", title: "بيانات المنشأة", description: "الشعار والاسم والرقم الضريبي والسجل والعنوان الوطني.", icon: "building", entity: "settings" },
       { href: "/settings/invoice-template", title: "قالب الفاتورة", description: "شكل الفاتورة ولونها ولغتها، والحساب البنكي والشروط.", icon: "invoice", entity: "settings" },
       { href: "/users", title: "المستخدمون", description: "إضافة أعضاء الفريق وتفعيل حساباتهم.", icon: "people", entity: "users" },
@@ -63,6 +64,10 @@ export default async function SettingsPage() {
   const tenant = await getTenant();
   const platform: { title: string; items: Item[] }[] = user.perms.isAdmin
     ? [
+        {
+          title: "البيانات",
+          items: [{ href: "/settings/export", title: "تصدير كل البيانات", description: "ملف Excel بكل أقسام النظام، ورقة لكل قسم.", icon: "download" }],
+        },
         {
           title: "الاشتراك",
           items: tenant.isHome

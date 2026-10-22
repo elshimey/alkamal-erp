@@ -30,6 +30,9 @@ import { createNote, postNote, revertNote } from "@/lib/notes";
 import { listCustomers } from "@/lib/customers";
 import { createManualEntry, deleteManualEntry, listEntries, postManualEntry, reclassCandidates, reclassify, revertManualEntry, updateManualEntry } from "@/lib/journal";
 import { createCashAccount, listCashAccounts, normalizeIban } from "@/lib/banks";
+import { exportAllData } from "@/lib/export";
+import { setupSteps } from "@/lib/setup";
+import ExcelJS from "exceljs";
 import { getAttachment, listAttachments, onceForOp, saveDataUrl } from "@/lib/attachments";
 import * as rec from "@/lib/reconciliation";
 import { accrualPreview, postRevenueAccrual, undoRevenueAccrual } from "@/lib/accruals";
@@ -1836,5 +1839,28 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     await expect(onceForOp(db, "op-fail-12345678", async () => { throw new Error("x"); })).rejects.toThrow("x");
     await onceForOp(db, "op-fail-12345678", async () => void runs++);
     expect(runs).toBe(2);
+  });
+
+  it("يصدّر كل البيانات إلى Excel بأسماء عربية ويستبدل المعرّفات بالأسماء، ويحسب خطوات الإعداد", async () => {
+    const file = await exportAllData(db, "شركة الاختبار");
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(file as unknown as ArrayBuffer);
+    const names = wb.worksheets.map((w) => w.name);
+    expect(names[0]).toBe("الفهرس");
+    expect(names).toContain("شجرة الحسابات");
+    expect(names).toContain("سطور القيود");
+    const users = wb.getWorksheet("المستخدمون")!;
+    const head = (users.getRow(1).values as unknown[]).map(String);
+    expect(head).toContain("اسم الدخول");
+    expect(head.join()).not.toContain("password");
+    const lines = wb.getWorksheet("سطور القيود")!;
+    const lh = (lines.getRow(1).values as unknown[]).map(String);
+    const accCol = lh.indexOf("الحساب");
+    expect(accCol).toBeGreaterThan(0);
+    if (lines.rowCount > 1) expect(String(lines.getRow(2).getCell(accCol).value)).toMatch(/^\d+ \S/);
+
+    const steps = await setupSteps(db);
+    expect(steps.map((x) => x.key)).toEqual(["company", "template", "banks", "vehicles", "drivers", "customers", "routes", "opening", "users"]);
+    expect(steps.find((x) => x.key === "vehicles")!.done).toBe(true);
   });
 });

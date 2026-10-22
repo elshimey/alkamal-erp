@@ -109,6 +109,8 @@ export const EXTRA_PAGES: { href: string; label: string; group: string; entity?:
   { href: "/journal/new", label: "قيد يومية جديد", group: "إنشاء", entity: "journal_entries", keywords: "قيد يدوي" },
   { href: "/inventory/docs/new", label: "تسوية أو تحويل أو جرد مخزني", group: "إنشاء", entity: "inventory" },
   { href: "/settings", label: "مركز الإعدادات", group: "الإعدادات" },
+  { href: "/setup", label: "معالج إعداد الشركة", group: "الإعدادات", admin: true, keywords: "بداية تجهيز خطوات" },
+  { href: "/settings/export", label: "تصدير كل البيانات إلى Excel", group: "الإعدادات", admin: true, keywords: "نسخة احتياطية تنزيل" },
   { href: "/settings/company", label: "بيانات الشركة (الرقم الضريبي والسجل والشعار)", group: "الإعدادات", admin: true, keywords: "منشأة لوجو" },
   { href: "/settings/invoice-template", label: "تصميم قالب الفاتورة", group: "الإعدادات", admin: true, keywords: "طباعة شكل" },
   { href: "/settings/driver-app", label: "رابط تطبيق السائق", group: "الإعدادات", keywords: "جوال واتساب" },
