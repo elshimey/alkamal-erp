@@ -159,6 +159,8 @@ export async function revertNote(db: Db, id: number) {
     const [n] = await tx.select().from(s.adjustmentNotes).where(eq(s.adjustmentNotes.id, id)).for("update");
     if (!n) throw new Error("الإشعار غير موجود");
     if (n.status !== "posted") throw new Error("الإشعار ليس مرحّلاً");
+    const [cleared] = await tx.select({ id: s.zatcaDocuments.id }).from(s.zatcaDocuments).where(and(eq(s.zatcaDocuments.noteId, id), inArray(s.zatcaDocuments.status, ["cleared", "cleared_warnings"])));
+    if (cleared) throw new Error("لا يمكن إرجاع إشعار اعتمدته هيئة الزكاة؛ أصدر إشعاراً معاكساً بدلاً منه");
     const applied = num(n.appliedAmount);
     if (applied > EPS) {
       const table = n.salesInvoiceId ? s.salesInvoices : s.purchaseInvoices;

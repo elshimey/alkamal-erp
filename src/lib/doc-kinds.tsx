@@ -14,7 +14,8 @@ import { custodyDoc } from "@/lib/hr";
 import { waybillDoc } from "@/lib/waybills";
 import { orderDoc as purchaseOrderDoc } from "@/lib/purchasing";
 import { quotationDoc } from "@/lib/quotations";
-import { invoiceQrSvg } from "@/lib/zatca-qr";
+import { invoiceQrSvg, qrSvg } from "@/lib/zatca-qr";
+import { clearedQr, noteQr } from "@/lib/zatca/service";
 import { TaxInvoiceDocument } from "@/components/tax-invoice";
 import { PurchaseInvoiceDocument } from "@/components/purchase-invoice";
 import { ReceiptVoucher } from "@/components/receipt-voucher";
@@ -45,7 +46,7 @@ export const DOC_KINDS: Record<string, DocKind> = {
     render: async (id, c, t) => {
       const d = await salesInvoiceDoc(db, id);
       if (!d) return null;
-      const qr = await invoiceQrSvg(c, d.i);
+      const qr = await invoiceQrSvg(c, d.i, await clearedQr(db, d.i.id));
       return { name: d.i.number, node: <TaxInvoiceDocument company={c} invoice={d.i} customer={d.customer} lines={d.lines} qrSvg={qr} template={t} /> };
     },
   },
@@ -70,7 +71,9 @@ export const DOC_KINDS: Record<string, DocKind> = {
     entity: "sales_invoices",
     render: async (id, c, t) => {
       const d = await noteDoc(db, id);
-      return d && { name: d.n.number, node: <NoteDocument company={c} doc={d} template={t} /> };
+      if (!d) return null;
+      const qr = await noteQr(db, id);
+      return { name: d.n.number, node: <NoteDocument company={c} doc={d} template={t} qrSvg={qr ? await qrSvg(qr) : null} /> };
     },
   },
   journal: {

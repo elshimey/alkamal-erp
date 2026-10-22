@@ -121,7 +121,7 @@ export function TaxInvoiceDocument({
           {(
             [
               ["العميل", "Customer", customer.nameAr, false],
-              ["العنوان", "Address", customer.nationalAddress, false],
+              ["العنوان", "Address", [customer.buildingNo, customer.street, customer.district, customer.city, customer.postalCode].filter(Boolean).join("، ") || customer.nationalAddress, false],
               ["الرقم الضريبي", "VAT No.", t.showCustomerIds ? customer.vatNumber : null, true],
               ["السجل التجاري", "CR No.", t.showCustomerIds ? customer.crNumber : null, true],
             ] as const

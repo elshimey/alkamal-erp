@@ -19,6 +19,7 @@ export async function createParty(
     email?: string | null;
     country?: string;
     defaultCurrency?: string;
+    address?: { buildingNo?: string | null; street?: string | null; district?: string | null; city?: string | null; postalCode?: string | null; additionalNo?: string | null };
     roles: PartyRole[];
   },
 ) {
@@ -32,6 +33,12 @@ export async function createParty(
         kind: input.kind ?? "company",
         vatNumber: input.vatNumber || null,
         crNumber: input.crNumber || null,
+        buildingNo: input.address?.buildingNo || null,
+        street: input.address?.street || null,
+        district: input.address?.district || null,
+        city: input.address?.city || null,
+        postalCode: input.address?.postalCode || null,
+        additionalNo: input.address?.additionalNo || null,
         mobile: input.mobile || null,
         email: input.email || null,
         country: input.country ?? "SA",

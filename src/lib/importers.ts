@@ -236,6 +236,7 @@ async function importCustomer(tx: Tx, [r]: ImportRow[], ctx: Ctx) {
     kind: /فرد|individual|شخص/.test(normText(v(r, "kind"))) ? "individual" : "company",
     vatNumber: vatNumber || null,
     crNumber: v(r, "crNumber") || null,
+    address: { city: v(r, "city"), district: v(r, "district"), street: v(r, "street"), buildingNo: v(r, "buildingNo"), postalCode: v(r, "postalCode"), additionalNo: v(r, "additionalNo") },
     mobile: v(r, "mobile") || null,
     email: email || null,
     country,

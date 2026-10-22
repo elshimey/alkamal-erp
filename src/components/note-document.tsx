@@ -12,7 +12,20 @@ const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFrac
 type Doc = NonNullable<Awaited<ReturnType<typeof noteDoc>>>;
 
 /** الإشعار الدائن/المدين كما يُطبع: مرجع الفاتورة الأصلية والسبب والسطور والضريبة. */
-export function NoteDocument({ company, doc, template: t = DEFAULT_TEMPLATE, compact = false }: { company: CompanyProfile; doc: Doc; template?: InvoiceTemplate; compact?: boolean }) {
+export function NoteDocument({
+  company,
+  doc,
+  template: t = DEFAULT_TEMPLATE,
+  compact = false,
+  qrSvg = null,
+}: {
+  company: CompanyProfile;
+  doc: Doc;
+  template?: InvoiceTemplate;
+  compact?: boolean;
+  /** رمز الهيئة بعد اعتماد الإشعار (المرحلة الثانية) */
+  qrSvg?: string | null;
+}) {
   const { n, party } = doc;
   const k = NOTE_KINDS[n.kind];
   const side = NOTE_SIDES[k.side];
@@ -122,7 +135,10 @@ export function NoteDocument({ company, doc, template: t = DEFAULT_TEMPLATE, com
       </table>
 
       <div className="mt-4 flex flex-wrap items-start justify-between gap-4">
-        <p className="max-w-sm text-xs text-gray-600">{amountInWords(Number(n.total), n.currencyCode)}</p>
+        <div className="flex items-start gap-4">
+          {qrSvg && <div className="size-24 shrink-0" dangerouslySetInnerHTML={{ __html: qrSvg }} />}
+          <p className="max-w-sm text-xs text-gray-600">{amountInWords(Number(n.total), n.currencyCode)}</p>
+        </div>
         <dl className="w-64 space-y-1 text-xs">
           <div className="flex justify-between">
             <dt className="text-gray-500">الإجمالي قبل الضريبة</dt>

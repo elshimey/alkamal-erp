@@ -119,6 +119,7 @@ export const EXTRA_PAGES: { href: string; label: string; group: string; entity?:
   { href: "/settings/export", label: "تصدير كل البيانات إلى Excel", group: "الإعدادات", admin: true, keywords: "نسخة احتياطية تنزيل" },
   { href: "/settings/company", label: "بيانات الشركة (الرقم الضريبي والسجل والشعار)", group: "الإعدادات", admin: true, keywords: "منشأة لوجو" },
   { href: "/settings/invoice-template", label: "تصميم قالب الفاتورة", group: "الإعدادات", admin: true, keywords: "طباعة شكل" },
+  { href: "/settings/zatca", label: "الفوترة الإلكترونية (الربط مع فاتورة)", group: "الإعدادات", admin: true, keywords: "زاتكا هيئة الزكاة اعتماد المرحلة الثانية فاتورة إلكترونية" },
   { href: "/settings/driver-app", label: "رابط تطبيق السائق", group: "الإعدادات", keywords: "جوال واتساب" },
   { href: "/settings/hr", label: "إعدادات الموارد البشرية", group: "الإعدادات", entity: "employees", keywords: "إجازات تقييم" },
   { href: "/settings/subscription", label: "الاشتراك والبيانات", group: "الإعدادات", admin: true },

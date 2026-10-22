@@ -1,6 +1,12 @@
 // اختبارات تكامل على قاعدة PostgreSQL حقيقية. تعمل فقط عند ضبط TEST_DATABASE_URL،
 // وتمسح تلك القاعدة بالكامل في البداية، فلا تشير بها إلى قاعدة التشغيل.
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { newKeyPair } from "@/lib/zatca/der";
+import { clearedQr, submitDocument } from "@/lib/zatca/service";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { and, desc, eq, sql } from "drizzle-orm";
@@ -1947,5 +1953,57 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     expect(Number(si.total)).toBeCloseTo(Number(q.total));
     expect(si.status).toBe("draft");
     await expect(quotationToInvoice(db, q.id, { invoiceDate: `${YEAR + 1}-08-03` })).rejects.toThrow("مسبقاً");
+  });
+
+  it("الفوترة الإلكترونية: الاعتماد يسلسل العداد والبصمة، والرفض يتقدم بالسلسلة، وخطأ الخادم والانقطاع لا يغيّرانها", async () => {
+    const [admin] = await db.select().from(s.users).limit(1);
+    await db.update(s.companyProfile).set({ vatNumber: "310123456700003", crNumber: "2050197412", street: "طريق الملك فهد", buildingNo: "6701", district: "الفيصلية", city: "الدمام", postalCode: "32263" });
+    const customer = await createParty(db, { nameAr: "عميل الفوترة الإلكترونية", vatNumber: "300000000000003", roles: ["customer"] });
+    const q = await createQuotation(db, { date: `${YEAR + 1}-09-01`, validUntil: `${YEAR + 1}-09-15`, customerId: customer.id, lines: [{ description: "نقل الدمام ← الرياض", quantity: 2, unitPrice: 500, vatRate: 15 }, { description: "نقل للكويت", quantity: 1, unitPrice: 3000, vatRate: 0 }], userId: admin.id });
+    const inv = await quotationToInvoice(db, q.id, { invoiceDate: `${YEAR + 1}-09-01`, userId: admin.id });
+    await issueInvoice(db, inv.id);
+
+    await expect(submitDocument(db, { invoiceId: inv.id })).rejects.toThrow("أكمل بيانات العميل");
+    await db.update(s.parties).set({ street: "الصناعية", buildingNo: "1234", district: "السلي", city: "الرياض", postalCode: "12211" }).where(eq(s.parties.id, customer.id));
+    await expect(submitDocument(db, { invoiceId: inv.id })).rejects.toThrow("غير مربوط");
+
+    const key = newKeyPair();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "zatca-"));
+    fs.writeFileSync(path.join(dir, "k.pem"), key);
+    execFileSync("openssl", ["req", "-new", "-x509", "-key", "k.pem", "-out", "c.pem", "-days", "1", "-subj", "/CN=TEST"], { cwd: dir });
+    await db.insert(s.zatcaSettings).values({ id: 1, environment: "simulation", privateKey: key, certificate: fs.readFileSync(path.join(dir, "c.pem"), "utf8"), token: "t", secret: "s" });
+
+    const reply = (status: number, body: object) => vi.fn(async (_url: string, init: RequestInit) => new Response(JSON.stringify(typeof body === "function" ? (body as (b: unknown) => object)(JSON.parse(String(init.body))) : body), { status }));
+    const settings = async () => (await db.select().from(s.zatcaSettings))[0];
+
+    vi.stubGlobal("fetch", reply(200, ((b: { invoice: string }) => ({ clearanceStatus: "CLEARED", clearedInvoice: b.invoice, validationResults: { status: "PASS" } })) as unknown as object));
+    const first = await submitDocument(db, { invoiceId: inv.id }, admin.id);
+    expect(first).toMatchObject({ status: "cleared", icv: 1 });
+    expect(first.xml).toContain("<cbc:UUID>");
+    expect((await settings()).lastHash).toBe(first.invoiceHash);
+    expect((await db.select().from(s.salesInvoices).where(eq(s.salesInvoices.id, inv.id)))[0].zatcaStatus).toBe("accepted");
+    expect(await clearedQr(db, inv.id)).toBeTruthy();
+    await expect(submitDocument(db, { invoiceId: inv.id })).rejects.toThrow("مسبقاً");
+    await expect(revertInvoice(db, inv.id)).rejects.toThrow();
+
+    const note = await createNote(db, { kind: "sales_credit", noteDate: `${YEAR + 1}-09-02`, partyId: customer.id, invoiceId: inv.id, reason: "خصم تجاري", lines: [{ description: "خصم", accountId: acc["4101"], amount: 100, vatRate: 15 }], post: true });
+    vi.stubGlobal("fetch", reply(400, { clearanceStatus: "NOT_CLEARED", validationResults: { status: "ERROR", errorMessages: [{ code: "BR-KSA-01", message: "خطأ تجريبي" }] } }));
+    const rejected = await submitDocument(db, { noteId: note.id });
+    expect(rejected).toMatchObject({ status: "rejected", icv: 2, previousHash: first.invoiceHash });
+    expect(rejected.xml).toContain("<cbc:InvoiceTypeCode name=\"0100000\">381</cbc:InvoiceTypeCode>");
+    expect(rejected.errors).toEqual(["BR-KSA-01: خطأ تجريبي"]);
+
+    vi.stubGlobal("fetch", reply(500, {}));
+    expect((await submitDocument(db, { noteId: note.id })).status).toBe("error");
+    expect((await settings()).lastIcv).toBe(2);
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("offline"); }));
+    await expect(submitDocument(db, { noteId: note.id })).rejects.toThrow("تعذر الاتصال");
+    expect((await settings()).lastIcv).toBe(2);
+
+    vi.stubGlobal("fetch", reply(200, { clearanceStatus: "CLEARED", validationResults: { status: "WARNING", warningMessages: [{ code: "W1", message: "تنبيه" }] } }));
+    const ok = await submitDocument(db, { noteId: note.id });
+    expect(ok).toMatchObject({ status: "cleared_warnings", icv: 3, previousHash: rejected.invoiceHash, warnings: ["W1: تنبيه"] });
+    await expect(revertNote(db, note.id)).rejects.toThrow("اعتمدته");
+    vi.unstubAllGlobals();
   });
 });

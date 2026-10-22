@@ -14,7 +14,10 @@ import { DocToolbar } from "@/components/doc-toolbar";
 import { Icon } from "@/components/icons";
 import { NoteDocument } from "@/components/note-document";
 import { Badge, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
-import { post, remove, revert } from "./actions";
+import { post, remove, revert, sendToZatca } from "./actions";
+import { getSettings, latestDocument, noteQr, sendBlocker } from "@/lib/zatca/service";
+import { qrSvg } from "@/lib/zatca-qr";
+import { ZatcaPanel } from "@/components/zatca-panel";
 
 const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const SORTS = { date_desc: "الأحدث أولاً", date_asc: "الأقدم أولاً", amount_desc: "الأعلى مبلغاً", amount_asc: "الأقل مبلغاً" } as const;
@@ -39,6 +42,8 @@ export default async function NotesPage({ params, searchParams }: { params: Prom
   ]);
   const openDoc = doc && NOTE_KINDS[doc.n.kind].side === side ? doc : null;
   const canCreate = can(user.perms, cfg.entity, "create");
+  const zatcaOn = side === "sales" && openDoc?.n.status === "posted";
+  const [zatca, zatcaDoc, qr, blocker] = zatcaOn ? await Promise.all([getSettings(db), latestDocument(db, { noteId: openDoc.n.id }), noteQr(db, openDoc.n.id), sendBlocker(db, { noteId: openDoc.n.id })]) : [null, null, null, null];
 
   const kindBadge = (k: NoteKind) => <Badge tone={NOTE_KINDS[k].tone}>{NOTE_KINDS[k].label}</Badge>;
 
@@ -103,7 +108,7 @@ export default async function NotesPage({ params, searchParams }: { params: Prom
                     <SubmitButton>ترحيل</SubmitButton>
                   </ActionForm>
                 )}
-                {openDoc.n.status === "posted" && can(user.perms, cfg.entity, "revert") && (
+                {openDoc.n.status === "posted" && !qr && can(user.perms, cfg.entity, "revert") && (
                   <ActionForm action={revert.bind(null, side, openDoc.n.id)} resetOnSuccess={false}>
                     <SubmitButton variant="secondary">إرجاع لمسودة</SubmitButton>
                   </ActionForm>
@@ -117,7 +122,8 @@ export default async function NotesPage({ params, searchParams }: { params: Prom
             </div>
             <div className="p-4 sm:p-6">
               <div className="mx-auto max-w-3xl">
-                <NoteDocument company={company} doc={openDoc} template={template} compact />
+                {zatcaOn && <ZatcaPanel doc={zatcaDoc} connected={!!zatca?.token} blocker={blocker} partyHref={`/records/parties/${openDoc.n.partyId}`} send={can(user.perms, cfg.entity, "approve") ? sendToZatca.bind(null, openDoc.n.id) : undefined} />}
+                <NoteDocument company={company} doc={openDoc} template={template} compact qrSvg={qr ? await qrSvg(qr) : null} />
               </div>
             </div>
           </section>

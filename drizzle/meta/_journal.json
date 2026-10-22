@@ -155,6 +155,13 @@
       "when": 1792693992992,
       "tag": "0021_batch5_transfers_purchasing_quotes_fuel",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1792697125139,
+      "tag": "0022_zatca_phase2",
+      "breakpoints": true
     }
   ]
 }
