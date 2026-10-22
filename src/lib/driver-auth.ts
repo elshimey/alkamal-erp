@@ -1,13 +1,15 @@
 import "server-only";
 import { cache } from "react";
 import { db } from "@/db";
-import { requireUser } from "@/lib/auth";
+import { redirect } from "next/navigation";
+import { getCurrentUser } from "@/lib/auth";
 import { driverForUser } from "@/lib/driver-app";
 import { DRIVER_DICT } from "@/data/driver-i18n";
 
 /** المستخدم الحالي وسائقه ونصوص لغته؛ السائق null إن لم يُربط الحساب بسائق. */
 export const getDriverContext = cache(async () => {
-  const user = await requireUser();
+  const user = await getCurrentUser();
+  if (!user) redirect("/driver/login"); // للسائق صفحة دخول خاصة بلغته
   const driver = await driverForUser(db, user.id);
   const lang = driver?.appLanguage ?? "ar";
   return { user, driver, lang, t: DRIVER_DICT[lang] };

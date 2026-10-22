@@ -4,8 +4,8 @@ import { driverExpenses } from "@/lib/driver-app";
 import { todayRiyadh } from "@/lib/dates";
 import { DRIVER_EXPENSE_ACCOUNTS, type DriverExpenseType } from "@/data/driver-i18n";
 import { ActionForm, SubmitButton } from "@/components/action-form";
-import { expenseAction } from "../actions";
-import { DField, DInput, fmt, Pill, Section } from "../driver-ui";
+import { expenseAction } from "../../actions";
+import { DField, DInput, fmt, Pill, Section } from "../../driver-ui";
 
 const TONE = { pending: "amber", approved: "green", rejected: "red" } as const;
 

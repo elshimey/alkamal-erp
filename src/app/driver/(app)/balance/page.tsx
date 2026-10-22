@@ -4,11 +4,10 @@ import { driverBalances } from "@/lib/driver-app";
 import { todayRiyadh } from "@/lib/dates";
 import { DRIVER_LANGS, LANG_NAMES } from "@/data/driver-i18n";
 import { Icon } from "@/components/icons";
-import { logout } from "../../login/actions";
 import { advanceWindow, driverAdvanceRequests } from "@/lib/hr";
 import { ActionForm, SubmitButton } from "@/components/action-form";
-import { advanceAction, languageAction } from "../actions";
-import { DField, DInput, fmt, Pill, Section } from "../driver-ui";
+import { advanceAction, driverLogout, languageAction } from "../../actions";
+import { DField, DInput, fmt, Pill, Section } from "../../driver-ui";
 
 const ADVANCE_TONE = { pending: "amber", approved: "green", rejected: "red" } as const;
 
@@ -120,7 +119,7 @@ export default async function DriverBalance() {
         <p className="mt-3 text-xs text-gray-500">{t.install}</p>
       </Section>
 
-      <form action={logout} className="mb-4">
+      <form action={driverLogout} className="mb-4">
         <button className="flex w-full items-center justify-center gap-2 rounded-2xl border border-gray-300 bg-white py-3 text-sm text-gray-700">
           <Icon name="logout" className="size-4" />
           {t.logout}

@@ -7,8 +7,8 @@ import { Input } from "./ui";
 export function PasswordInput({ className = "", ...props }: Omit<ComponentProps<"input">, "type">) {
   const [shown, setShown] = useState(false);
   return (
-    <div className="relative" dir="ltr">
-      <Input {...props} type={shown ? "text" : "password"} dir="ltr" className={`pe-10 ${className}`} />
+    <div className="relative w-full" dir="ltr">
+      <Input {...props} type={shown ? "text" : "password"} dir="ltr" className={`w-full pe-10 ${className}`} />
       <button
         type="button"
         onClick={() => setShown((v) => !v)}

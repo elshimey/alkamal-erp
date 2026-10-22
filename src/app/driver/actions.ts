@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { requireDriver } from "@/lib/driver-auth";
+import { destroySession } from "@/lib/auth";
 import { createDriverExpense, ownTrip, recordDriverStage, reportBreakdown, setDriverLanguage, startTrip, type TripStage } from "@/lib/driver-app";
 import { requestCommissionAdvance } from "@/lib/hr";
 import { addExpense, addFuel, deleteWaybillItem } from "@/lib/waybills";
@@ -172,4 +173,9 @@ export async function languageAction(data: FormData) {
   const lang = str(data, "lang") as DriverLang;
   if (DRIVER_LANGS.includes(lang)) await setDriverLanguage(db, driver.id, lang);
   revalidatePath("/driver", "layout");
+}
+
+export async function driverLogout() {
+  await destroySession();
+  redirect("/driver/login");
 }
