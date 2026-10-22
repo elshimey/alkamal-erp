@@ -5,8 +5,10 @@ import { getDriverContext } from "@/lib/driver-auth";
 import { tripDetail } from "@/lib/driver-app";
 import { chargeTypeOptions } from "@/lib/lookups";
 import { isRtl } from "@/data/driver-i18n";
-import { ActionForm, SubmitButton } from "@/components/action-form";
-import { fuelAction, removeTripItem, stageAction, tripExpenseAction } from "../../../actions";
+import { SubmitButton } from "@/components/action-form";
+import { listAttachments } from "@/lib/attachments";
+import { DriverForm, PhotoInput } from "../../../offline";
+import { removeTripItem } from "../../../actions";
 import { DField, DInput, DSelect, fmt, Pill, Section, STATUS_TONE } from "../../../driver-ui";
 
 export default async function TripPage({ params }: { params: Promise<{ id: string }> }) {
@@ -17,6 +19,7 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
   if (!d) notFound();
   const { trip, stages, fuel, expenses, next, editable } = d;
   const chargeTypes = editable ? await chargeTypeOptions() : [];
+  const photos = await listAttachments(db, "waybills", [trip.id]);
   const time = (at: Date) => at.toLocaleString("en-GB", { timeZone: "Asia/Riyadh", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
   const needsOdometer = next.includes("delivery") && next.length === 1;
 
@@ -79,7 +82,7 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
           ))}
         </ol>
         {next.length > 0 && (
-          <ActionForm action={stageAction} className="mt-2 flex flex-col gap-3 rounded-xl bg-brand-50 p-3">
+          <DriverForm actionKey="stage" savedOffline={t.savedOffline} className="mt-2 flex flex-col gap-3 rounded-xl bg-brand-50 p-3">
             <input type="hidden" name="waybillId" value={trip.id} />
             <div className="text-sm font-semibold text-asphalt-900">{t.nextStage}</div>
             <div className="flex flex-wrap gap-2">
@@ -100,12 +103,26 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
                 <DInput name="note" />
               </DField>
             </div>
+            <PhotoInput label={next.includes("delivery") ? `${t.podPhoto} / ${t.odometerPhoto}` : t.odometerPhoto} />
             <SubmitButton pendingLabel={t.saving} className="w-full py-3 text-base">
               {t.record}
             </SubmitButton>
-          </ActionForm>
+          </DriverForm>
         )}
       </Section>
+
+      {photos.length > 0 && (
+        <Section title={t.photos}>
+          <div className="grid grid-cols-3 gap-2">
+            {photos.map((ph) => (
+              <a key={ph.id} href={`/files/${ph.id}`} target="_blank" rel="noreferrer" className="block">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={`/files/${ph.id}`} alt="" loading="lazy" className="aspect-square w-full rounded-lg object-cover ring-1 ring-black/10" />
+              </a>
+            ))}
+          </div>
+        </Section>
+      )}
 
       <Section title={t.fuel}>
         <ItemList
@@ -121,7 +138,7 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
         {editable && (
           <details className="mt-3 rounded-xl border border-gray-200 p-3 [&_summary::-webkit-details-marker]:hidden">
             <summary className="cursor-pointer text-sm font-semibold text-brand-700">+ {t.addFuel}</summary>
-            <ActionForm action={fuelAction} className="mt-3 flex flex-col gap-3">
+            <DriverForm actionKey="fuel" savedOffline={t.savedOffline} className="mt-3 flex flex-col gap-3">
               <input type="hidden" name="waybillId" value={trip.id} />
               <DField label={t.source}>
                 <DSelect name="source" defaultValue="custody">
@@ -143,8 +160,9 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
                   <DInput name="invoiceNumber" dir="ltr" />
                 </DField>
               </div>
+              <PhotoInput label={t.receiptPhoto} />
               <SubmitButton pendingLabel={t.saving}>{t.save}</SubmitButton>
-            </ActionForm>
+            </DriverForm>
           </details>
         )}
       </Section>
@@ -163,7 +181,7 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
         {editable && (
           <details className="mt-3 rounded-xl border border-gray-200 p-3 [&_summary::-webkit-details-marker]:hidden">
             <summary className="cursor-pointer text-sm font-semibold text-brand-700">+ {t.addTripExpense}</summary>
-            <ActionForm action={tripExpenseAction} className="mt-3 flex flex-col gap-3">
+            <DriverForm actionKey="tripExpense" savedOffline={t.savedOffline} className="mt-3 flex flex-col gap-3">
               <input type="hidden" name="waybillId" value={trip.id} />
               <DField label={t.chargeType}>
                 <DSelect name="chargeTypeId" required defaultValue="">
@@ -191,8 +209,9 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
               <DField label={t.note} hint={t.optional}>
                 <DInput name="note" />
               </DField>
+              <PhotoInput label={t.receiptPhoto} />
               <SubmitButton pendingLabel={t.saving}>{t.save}</SubmitButton>
-            </ActionForm>
+            </DriverForm>
           </details>
         )}
       </Section>

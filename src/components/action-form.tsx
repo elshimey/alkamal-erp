@@ -5,7 +5,7 @@ import { createContext, startTransition, useActionState, useContext, useEffect, 
 
 export type FormState = { error?: string; ok?: string } | undefined;
 
-const PendingContext = createContext(false);
+export const PendingContext = createContext(false);
 
 export function SubmitButton({
   children,

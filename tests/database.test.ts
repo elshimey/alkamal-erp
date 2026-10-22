@@ -30,6 +30,7 @@ import { createNote, postNote, revertNote } from "@/lib/notes";
 import { listCustomers } from "@/lib/customers";
 import { createManualEntry, deleteManualEntry, listEntries, postManualEntry, reclassCandidates, reclassify, revertManualEntry, updateManualEntry } from "@/lib/journal";
 import { createCashAccount, listCashAccounts, normalizeIban } from "@/lib/banks";
+import { getAttachment, listAttachments, onceForOp, saveDataUrl } from "@/lib/attachments";
 import * as rec from "@/lib/reconciliation";
 import { accrualPreview, postRevenueAccrual, undoRevenueAccrual } from "@/lib/accruals";
 import { averageCost, createProduct, createStockDoc, createWarehouse, listProducts, onHand, postStockDoc, productCard, revertStockDoc, saveCount, stockDoc } from "@/lib/inventory";
@@ -1814,5 +1815,26 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     await db.update(s.users).set({ passwordHash: "changed" }).where(eq(s.users.id, admin.id));
     const [pw] = await db.select().from(s.auditLog).where(and(eq(s.auditLog.entity, "users"), eq(s.auditLog.action, "update"))).orderBy(desc(s.auditLog.id)).limit(1);
     expect(JSON.stringify(pw.changes)).not.toContain("changed");
+  });
+
+  it("يحفظ صور السائق، ولا يكرر العملية المرسلة مرتين بعد انقطاع الشبكة", async () => {
+    const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const id = await saveDataUrl(db, { entity: "waybills", entityId: 999001, kind: "pod", dataUrl: png });
+    expect(await saveDataUrl(db, { entity: "waybills", entityId: 999001, kind: "pod", dataUrl: "" })).toBeNull();
+    await expect(saveDataUrl(db, { entity: "waybills", entityId: 999001, kind: "pod", dataUrl: `data:image/jpeg;base64,${"A".repeat(2_100_000)}` })).rejects.toThrow("كبيرة");
+    const list = await listAttachments(db, "waybills", [999001]);
+    expect(list.map((a) => [a.id, a.kind])).toEqual([[id, "pod"]]);
+    const file = await getAttachment(db, id!);
+    expect(file?.mime).toBe("image/png");
+    expect(file?.data.subarray(1, 4).toString()).toBe("PNG");
+
+    let runs = 0;
+    const op = "op-test-12345678";
+    await onceForOp(db, op, async () => void runs++);
+    await onceForOp(db, op, async () => void runs++);
+    // فشل العملية لا يسجلها، فتُعاد لاحقاً
+    await expect(onceForOp(db, "op-fail-12345678", async () => { throw new Error("x"); })).rejects.toThrow("x");
+    await onceForOp(db, "op-fail-12345678", async () => void runs++);
+    expect(runs).toBe(2);
   });
 });

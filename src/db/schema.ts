@@ -4,6 +4,7 @@
 import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
+  customType,
   bigint,
   boolean,
   check,
@@ -1840,3 +1841,30 @@ export const commissionAdvanceRequests = pgTable(
   },
   (t) => [index("commission_advance_driver_idx").on(t.driverId, t.requestDate), check("commission_advance_amount", sql`${t.amount} > 0`)],
 );
+
+// ───────────── المرفقات (صور تطبيق السائق) ─────────────
+
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });
+
+// صورة مضغوطة مرتبطة بسجل: إثبات التسليم أو العداد أو فاتورة الوقود أو إيصال مصروف
+export const attachments = pgTable(
+  "attachments",
+  {
+    id: id(),
+    entity: varchar("entity", { length: 40 }).notNull(),
+    entityId: ref("entity_id").notNull(),
+    kind: varchar("kind", { length: 30 }).notNull(),
+    mime: varchar("mime", { length: 40 }).notNull(),
+    size: integer("size").notNull(),
+    data: bytea("data").notNull(),
+    createdBy: ref("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("attachments_entity_idx").on(t.entity, t.entityId)],
+);
+
+// عمليات تطبيق السائق المرسلة (لمنع تكرار ما حُفظ دون إنترنت ثم أُعيد إرساله)
+export const clientOps = pgTable("client_ops", {
+  opId: varchar("op_id", { length: 40 }).primaryKey(),
+  createdAt: createdAt(),
+});

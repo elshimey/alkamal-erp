@@ -1,8 +1,8 @@
 import { db } from "@/db";
 import { getDriverContext } from "@/lib/driver-auth";
 import { driverBreakdowns } from "@/lib/driver-app";
-import { ActionForm, SubmitButton } from "@/components/action-form";
-import { breakdownAction } from "../../actions";
+import { SubmitButton } from "@/components/action-form";
+import { DriverForm } from "../../offline";
 import { DField, DTextarea, Pill, Section } from "../../driver-ui";
 
 const TONE = { pending_supervisor: "amber", pending_approval: "amber", approved: "blue", in_progress: "blue", completed: "green", rejected: "red" } as const;
@@ -19,7 +19,7 @@ export default async function DriverBreakdown() {
         {!driver.vehicle ? (
           <p className="text-sm text-amber-900">{t.noVehicle}</p>
         ) : (
-          <ActionForm action={breakdownAction} className="flex flex-col gap-3">
+          <DriverForm actionKey="breakdown" savedOffline={t.savedOffline} className="flex flex-col gap-3">
             <p className="text-sm text-gray-500">{t.breakdownHint}</p>
             <DField label={t.breakdownDesc}>
               <DTextarea name="description" required rows={4} />
@@ -41,7 +41,7 @@ export default async function DriverBreakdown() {
             <SubmitButton pendingLabel={t.saving} className="w-full py-3 text-base">
               {t.send}
             </SubmitButton>
-          </ActionForm>
+          </DriverForm>
         )}
       </Section>
 

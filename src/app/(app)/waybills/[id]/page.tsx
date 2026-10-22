@@ -14,6 +14,7 @@ import { SheetEditor } from "@/components/sheet-editor";
 import { Icon } from "@/components/icons";
 import { SendDocument } from "@/components/send-document";
 import { getBrand } from "@/lib/brand";
+import { ATTACHMENT_KINDS, listAttachments, type AttachmentKind } from "@/lib/attachments";
 import { Badge, Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { addStage, approveOne, deleteOne, rejectOne, removeItem, revertOne, saveExpenses, saveFuel, saveWaybillDetails } from "../actions";
 
@@ -59,7 +60,7 @@ export default async function WaybillPage({ params }: { params: Promise<{ id: st
 
   const station = alias(s.parties, "station");
   const broker = alias(s.parties, "broker");
-  const [routes, fuel, expenses, stages, lines, chargeTypes, stations, brokers, issues] = await Promise.all([
+  const [routes, fuel, expenses, stages, lines, chargeTypes, stations, brokers, issues, photos] = await Promise.all([
     routeOptions(),
     db.select({ f: s.waybillFuel, party: station.nameAr }).from(s.waybillFuel).leftJoin(station, eq(station.id, s.waybillFuel.partyId)).where(eq(s.waybillFuel.waybillId, id)).orderBy(asc(s.waybillFuel.id)),
     db
@@ -83,6 +84,7 @@ export default async function WaybillPage({ params }: { params: Promise<{ id: st
     Promise.all([partyOptions("fuel_station"), partyOptions("supplier")]).then(([a, b]) => [...a, ...b.filter((x) => !a.some((y) => y.value === x.value))]),
     partyOptions("customs_broker"),
     ["draft", "in_transit", "delivered"].includes(w.status) ? approvalIssues(db, w) : Promise.resolve([]),
+    listAttachments(db, "waybills", [id]),
   ]);
 
   const showPrices = hasSpecial(user.perms, "view_prices");
@@ -225,6 +227,21 @@ export default async function WaybillPage({ params }: { params: Promise<{ id: st
               <SubmitButton>حفظ التعديلات</SubmitButton>
             </div>
           </ActionForm>
+        </Card>
+      )}
+
+      {photos.length > 0 && (
+        <Card title={`صور الرحلة من السائق (${photos.length})`} className="mb-6">
+          <div className="grid grid-cols-3 gap-3 sm:grid-cols-6">
+            {photos.map((ph) => (
+              <a key={ph.id} href={`/files/${ph.id}`} target="_blank" rel="noreferrer" className="group block text-center">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={`/files/${ph.id}`} alt={ATTACHMENT_KINDS[ph.kind as AttachmentKind] ?? "صورة"} loading="lazy" className="aspect-square w-full rounded-lg object-cover ring-1 ring-black/10 transition group-hover:ring-brand-500" />
+                <span className="mt-1 block text-xs text-gray-600">{ATTACHMENT_KINDS[ph.kind as AttachmentKind] ?? "صورة"}</span>
+                <span className="ltr-nums block text-[10px] text-gray-400">{ph.createdAt.toLocaleString("en-GB", { timeZone: "Asia/Riyadh", dateStyle: "short", timeStyle: "short" })}</span>
+              </a>
+            ))}
+          </div>
         </Card>
       )}
 
