@@ -1,7 +1,7 @@
 // يحوّل أخطاء قاعدة البيانات إلى رسائل مفهومة للمستخدم
 export function errorMessage(err: unknown): string {
   const pg = findPgError(err);
-  if (pg?.code === "23505") return "هذه القيمة مسجلة مسبقاً";
+  if (pg?.code === "23505") return pg.message && /[؀-ۿ]/.test(pg.message) ? pg.message : "هذه القيمة مسجلة مسبقاً";
   if (pg?.code === "23503") return "السجل مرتبط ببيانات أخرى";
   if (pg?.code === "23514" && pg.message && /[؀-ۿ]/.test(pg.message)) return pg.message;
   if (err instanceof Error && /[؀-ۿ]/.test(err.message)) return err.message;

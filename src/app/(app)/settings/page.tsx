@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { db } from "@/db";
-import { requireUser } from "@/lib/auth";
+import { getTenant, requireUser } from "@/lib/auth";
 import { can, type Entity } from "@/lib/permissions";
 import { getCompany, invoiceReadiness } from "@/lib/company";
 import { Icon, type IconName } from "@/components/icons";
@@ -60,7 +60,18 @@ export default async function SettingsPage() {
   const user = await requireUser();
   const company = await getCompany(db);
   const ready = invoiceReadiness(company);
-  const sections = SECTIONS.map((s) => ({ ...s, items: s.items.filter((i) => !i.entity || can(user.perms, i.entity, "view")) })).filter((s) => s.items.length);
+  const tenant = await getTenant();
+  const platform: { title: string; items: Item[] }[] = user.perms.isAdmin
+    ? [
+        {
+          title: "الاشتراك",
+          items: tenant.isHome
+            ? [{ href: "/owner", title: "الشركات المشتركة", description: "إضافة شركة بتجربة 15 يوماً، وتحويلها لاشتراك فعلي أو تمديدها أو إيقافها أو حذفها.", icon: "building" }]
+            : [{ href: "/settings/subscription", title: "الاشتراك والبيانات", description: "حالة الاشتراك والأيام الباقية، والبدء من جديد بمسح بيانات التجربة.", icon: "shield" }],
+        },
+      ]
+    : [];
+  const sections = [...SECTIONS, ...platform].map((s) => ({ ...s, items: s.items.filter((i) => !i.entity || can(user.perms, i.entity, "view")) })).filter((s) => s.items.length);
 
   return (
     <>

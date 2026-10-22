@@ -36,6 +36,8 @@ import { averageCost, createProduct, createStockDoc, createWarehouse, listProduc
 import { createAsset, deleteAsset, disposeAsset, listAssets, runDepreciation, undoLastDepreciation } from "@/lib/assets";
 import { IMPORT_SPECS } from "@/data/import-specs";
 import * as hr from "@/lib/hr";
+import * as platform from "@/lib/platform";
+import { runInTenant, tenantClient } from "@/db/tenant";
 import { addExpense, addFuel, approveWaybill, createWaybill, deleteWaybill, recordStage, rejectWaybill, revertWaybill } from "@/lib/waybills";
 
 const url = process.env.TEST_DATABASE_URL;
@@ -51,6 +53,8 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     client = postgres(url!, { max: 2, onnotice: () => {} });
     await client`drop schema if exists public cascade`;
     await client`drop schema if exists drizzle cascade`;
+    await client`drop schema if exists platform cascade`;
+    for (const r of await client`select nspname from pg_namespace where nspname like 't\\_%'`) await client.unsafe(`drop schema "${r.nspname}" cascade`);
     await client`create schema public`;
     db = drizzle(client, { schema: s }) as unknown as Db;
     await migrate(db, { migrationsFolder: "drizzle" });
@@ -1695,5 +1699,75 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     await undoRevenueAccrual(db, `${Y}-06`);
     expect((await db.select().from(s.journalEntries).where(sql`${s.journalEntries.id} in (${entry.id}, ${reversal.id})`)).length).toBe(0);
     await db.execute(sql`delete from waybills where id = ${w.id}`);
+  });
+
+  it("المنصة: كل شركة ببيانات منفصلة، والتجربة تتوقف وحدها، والتفعيل يبقي البيانات، والبدء من جديد يمسحها", async () => {
+    const tdb = drizzle(tenantClient(client), { schema: s }) as unknown as Db;
+    await platform.ensurePlatform(client);
+    await platform.ensurePlatform(client); // التكرار آمن
+    expect(await platform.schemaForLogin(client, "admin")).toBe("public");
+
+    const base = { name: "شركة التجربة", slug: "acme", trialDays: 15, adminName: "مدير أكمي", adminLogin: "acme_admin", adminPassword: "acme-pass-1" };
+    await expect(platform.createTenant(client, tdb, { ...base, adminLogin: "admin" })).rejects.toThrow("مستخدم في شركة أخرى");
+    await expect(platform.createTenant(client, tdb, { ...base, slug: "Bad-Slug" })).rejects.toThrow("رمز الشركة");
+    const t = await platform.createTenant(client, tdb, base);
+    expect(t.schema_name).toBe("t_acme");
+    await expect(platform.createTenant(client, tdb, { ...base, adminLogin: "other" })).rejects.toThrow("رمز الشركة مستخدم");
+    expect(await platform.schemaForLogin(client, "acme_admin")).toBe("t_acme");
+
+    // بيانات الشركة الجديدة منفصلة: شجرة حسابات خاصة، لا قيود، ومركبة لا تظهر عند الكمال
+    const publicVehicles = (await db.select().from(s.vehicles)).length;
+    await runInTenant("t_acme", async () => {
+      expect((await tdb.select().from(s.accounts)).length).toBeGreaterThan(50);
+      expect(await tdb.select().from(s.journalEntries)).toHaveLength(0);
+      const [u] = await tdb.select().from(s.users);
+      expect(u).toMatchObject({ login: "acme_admin", name: "مدير أكمي" });
+      expect((await getCompany(tdb))?.nameAr).toBe("شركة التجربة");
+      await createVehicle(tdb, { plate: "ACME 1", chassis: "AC-1" });
+      expect(await tdb.select().from(s.vehicles)).toHaveLength(1);
+      // اسم دخول مستخدم في شركة أخرى مرفوض
+      await expect(tdb.insert(s.users).values({ name: "x", login: "admin", passwordHash: "x" })).rejects.toThrow();
+      // معاملة كاملة داخل الشركة
+      await tdb.transaction(async (tx) => {
+        await tx.update(s.users).set({ locale: "en" }).where(eq(s.users.login, "acme_admin"));
+      });
+    });
+    expect(await db.select().from(s.vehicles)).toHaveLength(publicVehicles);
+
+    // التجربة: فعّالة ثم تتوقف وحدها بانتهاء المدة
+    expect((await platform.tenantState(client, "t_acme"))?.daysLeft).toBe(15);
+    expect((await platform.tenantState(client, "t_acme"))?.blocked).toBeNull();
+    await client`update platform.tenants set trial_ends_at = now() - interval '1 hour' where id = ${t.id}`;
+    expect((await platform.tenantState(client, "t_acme"))?.blocked).toContain("انتهت الفترة التجريبية");
+    await platform.extendTrial(client, t.id, 15);
+    expect((await platform.tenantState(client, "t_acme"))?.daysLeft).toBe(15);
+    await platform.setSuspended(client, t.id, true);
+    expect((await platform.tenantState(client, "t_acme"))?.blocked).toContain("أوقف");
+    await platform.setSuspended(client, t.id, false);
+    await platform.activateTenant(client, t.id);
+    const state = await platform.tenantState(client, "t_acme");
+    expect(state?.tenant.status).toBe("active");
+    expect(state?.blocked).toBeNull();
+    await runInTenant("t_acme", async () => expect(await tdb.select().from(s.vehicles)).toHaveLength(1));
+    await expect(platform.activateTenant(client, (await client`select id from platform.tenants where schema_name = 'public'`)[0].id)).rejects.toThrow("شركة البداية");
+
+    // البدء من جديد: تُمسح البيانات ويبقى المستخدم بدوره وبيانات المنشأة
+    await expect(platform.resetTenant(client, tdb, "t_acme", "wrong")).rejects.toThrow("للتأكيد");
+    await platform.resetTenant(client, tdb, "t_acme", "acme");
+    await runInTenant("t_acme", async () => {
+      expect(await tdb.select().from(s.vehicles)).toHaveLength(0);
+      expect((await tdb.select().from(s.accounts)).length).toBeGreaterThan(50);
+      const users = await tdb.select({ login: s.users.login, key: s.roles.key }).from(s.users).innerJoin(s.userRoles, eq(s.userRoles.userId, s.users.id)).innerJoin(s.roles, eq(s.roles.id, s.userRoles.roleId));
+      expect(users).toEqual([{ login: "acme_admin", key: "admin" }]);
+      expect((await getCompany(tdb))?.nameAr).toBe("شركة التجربة");
+    });
+    expect(await platform.schemaForLogin(client, "acme_admin")).toBe("t_acme");
+    expect((await platform.listTenants(client)).map((x) => x.slug)).toEqual(["home", "acme"]);
+
+    // الحذف النهائي
+    await expect(platform.deleteTenant(client, t.id, "nope")).rejects.toThrow("للتأكيد");
+    await platform.deleteTenant(client, t.id, "acme");
+    expect(await client`select 1 from pg_namespace where nspname = 't_acme'`).toHaveLength(0);
+    expect(await platform.schemaForLogin(client, "acme_admin")).toBe("public");
   });
 });
