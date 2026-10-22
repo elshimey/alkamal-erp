@@ -20,6 +20,7 @@ import {
   text,
   timestamp,
   uniqueIndex,
+  uuid,
   varchar,
 } from "drizzle-orm/pg-core";
 
@@ -136,6 +137,13 @@ export const parties = pgTable("parties", {
   vatNumber: varchar("vat_number", { length: 20 }),
   crNumber: varchar("cr_number", { length: 20 }),
   nationalAddress: text("national_address"),
+  // العنوان الوطني مفصلاً (يشترطه ملف الفاتورة الإلكترونية للمشتري في المملكة)
+  buildingNo: varchar("building_no", { length: 10 }),
+  street: text("street"),
+  district: text("district"),
+  city: text("city"),
+  postalCode: varchar("postal_code", { length: 10 }),
+  additionalNo: varchar("additional_no", { length: 10 }),
   country: varchar("country", { length: 2 }).notNull().default("SA"),
   mobile: varchar("mobile", { length: 20 }),
   email: varchar("email", { length: 120 }),
@@ -1403,6 +1411,73 @@ export const companyProfile = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [check("company_profile_single", sql`${t.id} = 1`)],
+);
+
+// ───────────── الفوترة الإلكترونية (المرحلة الثانية) ─────────────
+
+export const zatcaEnv = pgEnum("zatca_env", ["sandbox", "simulation", "production"]);
+
+// إعداد الجهاز (EGS) لدى الهيئة: صف واحد. المفتاح الخاص لا يغادر الخادم ولا يُعرض.
+export const zatcaSettings = pgTable(
+  "zatca_settings",
+  {
+    id: integer("id").primaryKey().default(1),
+    environment: zatcaEnv("environment").notNull().default("simulation"),
+    egsSerial: varchar("egs_serial", { length: 120 }),
+    privateKey: text("private_key"),
+    csr: text("csr"),
+    complianceRequestId: varchar("compliance_request_id", { length: 60 }),
+    complianceToken: text("compliance_token"),
+    complianceSecret: text("compliance_secret"),
+    // شهادة الإنتاج: عند وجودها تُرسل الفواتير للاعتماد
+    token: text("token"),
+    secret: text("secret"),
+    certificate: text("certificate"),
+    certificateExpiresAt: timestamp("certificate_expires_at", { withTimezone: true }),
+    onboardedAt: timestamp("onboarded_at", { withTimezone: true }),
+    autoSend: boolean("auto_send").notNull().default(true),
+    // عداد الفواتير (ICV) وبصمة آخر مستند (PIH) لسلسلة المستندات
+    lastIcv: integer("last_icv").notNull().default(0),
+    lastHash: text("last_hash"),
+    // نتيجة آخر تجربة على بيئة المطورين
+    sandboxTest: jsonb("sandbox_test"),
+    updatedBy: ref("updated_by").references(() => users.id),
+    updatedAt: updatedAt(),
+  },
+  (t) => [check("zatca_settings_single", sql`${t.id} = 1`)],
+);
+
+export const zatcaDocStatus = pgEnum("zatca_doc_status", ["cleared", "cleared_warnings", "rejected", "error"]);
+
+// كل إرسال لمستند (فاتورة أو إشعار دائن/مدين) بملفه الموقّع ورد الهيئة
+export const zatcaDocuments = pgTable(
+  "zatca_documents",
+  {
+    id: id(),
+    salesInvoiceId: ref("sales_invoice_id").references(() => salesInvoices.id, { onDelete: "cascade" }),
+    noteId: ref("note_id").references(() => adjustmentNotes.id, { onDelete: "cascade" }),
+    environment: zatcaEnv("environment").notNull(),
+    icv: integer("icv").notNull(),
+    uuid: uuid("uuid").notNull(),
+    invoiceHash: text("invoice_hash").notNull(),
+    previousHash: text("previous_hash").notNull(),
+    xml: text("xml").notNull(),
+    clearedXml: text("cleared_xml"),
+    qr: text("qr"),
+    status: zatcaDocStatus("status").notNull(),
+    httpStatus: integer("http_status"),
+    warnings: jsonb("warnings").$type<string[]>().notNull().default([]),
+    errors: jsonb("errors").$type<string[]>().notNull().default([]),
+    submittedBy: ref("submitted_by").references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("zatca_documents_invoice_idx").on(t.salesInvoiceId),
+    index("zatca_documents_note_idx").on(t.noteId),
+    // العداد فريد لكل ما استلمته الهيئة؛ خطأ الخادم لا يدخل السلسلة فيُعاد بالعداد نفسه
+    uniqueIndex("zatca_documents_icv_uq").on(t.environment, t.icv).where(sql`${t.status} <> 'error'`),
+    check("zatca_documents_ref", sql`(${t.salesInvoiceId} is null) <> (${t.noteId} is null)`),
+  ],
 );
 
 // قالب الفاتورة المطبوعة (صف واحد)؛ الخيارات في JSON تُقرأ عبر normalizeTemplate

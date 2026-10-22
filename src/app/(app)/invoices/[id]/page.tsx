@@ -8,13 +8,15 @@ import { can } from "@/lib/permissions";
 import { todayRiyadh } from "@/lib/dates";
 import { getCompany, getInvoiceTemplate } from "@/lib/company";
 import { invoiceQrSvg } from "@/lib/zatca-qr";
-import { INVOICE_STATUS, PAYMENT_METHODS, ZATCA_STATUS, paymentState } from "@/data/sales";
+import { clearedQr, getSettings, latestDocument, sendBlocker } from "@/lib/zatca/service";
+import { ZatcaPanel } from "@/components/zatca-panel";
+import { INVOICE_STATUS, PAYMENT_METHODS, paymentState } from "@/data/sales";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { AutoPrint, PrintButton } from "@/components/print-button";
 import { TaxInvoiceDocument } from "@/components/tax-invoice";
 import { SendDocument } from "@/components/send-document";
 import { Badge, Card, Input, PageHeader, Table, Td } from "@/components/ui";
-import { addWaybills, issue, remove, removeLine, revert } from "../actions";
+import { addWaybills, issue, remove, removeLine, revert, sendToZatca } from "../actions";
 
 const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -59,7 +61,8 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
     getCompany(db),
     getInvoiceTemplate(db),
   ]);
-  const qrSvg = await invoiceQrSvg(company, i);
+  const [zatca, zatcaDoc, blocker] = await Promise.all([getSettings(db), latestDocument(db, { invoiceId: id }), sendBlocker(db, { invoiceId: id })]);
+  const qrSvg = await invoiceQrSvg(company, i, await clearedQr(db, id));
   const total = Number(i.total);
   const paid = Number(i.paidAmount);
   const pay = paymentState(total, paid);
@@ -80,7 +83,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
                 <SubmitButton>إصدار وترحيل القيد</SubmitButton>
               </ActionForm>
             )}
-            {!draft && can(user.perms, "sales_invoices", "revert") && (
+            {!draft && i.zatcaStatus !== "accepted" && can(user.perms, "sales_invoices", "revert") && (
               <ActionForm action={revert.bind(null, id)} resetOnSuccess={false}>
                 <SubmitButton variant="secondary">إرجاع لمسودة</SubmitButton>
               </ActionForm>
@@ -90,7 +93,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
             </Link>
           </div>
         </PageHeader>
-        {!draft && <p className="-mt-3 mb-5 text-xs text-gray-500">{ZATCA_STATUS[i.zatcaStatus]} · الربط مع بوابة الزكاة يُضاف في مرحلة لاحقة.</p>}
+        {!draft && <ZatcaPanel doc={zatcaDoc} connected={!!zatca?.token} blocker={blocker} partyHref={`/records/parties/${i.customerId}`} send={can(user.perms, "sales_invoices", "approve") ? sendToZatca.bind(null, id) : undefined} />}
       </div>
 
       {/* الفاتورة كما تُطبع */}

@@ -20,16 +20,26 @@ export function zatcaTlv(input: ZatcaQrInput) {
   return Buffer.concat(parts).toString("base64");
 }
 
+/** رمز معتمد جاهز (نص Base64) كـ SVG. */
+export function qrSvg(base64: string) {
+  return QRCode.toString(base64, { type: "svg", margin: 0, errorCorrectionLevel: "M", color: { dark: "#1b2126", light: "#ffffff" } });
+}
+
 /** الرمز كـ SVG جاهز للعرض والطباعة. */
 export async function zatcaQrSvg(input: ZatcaQrInput) {
   return QRCode.toString(zatcaTlv(input), { type: "svg", margin: 0, errorCorrectionLevel: "M", color: { dark: "#1b2126", light: "#ffffff" } });
 }
 
-/** رمز الفاتورة من بيانات المنشأة والفاتورة؛ لا رمز بلا رقم ضريبي. المبالغ بالريال دائماً. */
+/**
+ * رمز الفاتورة من بيانات المنشأة والفاتورة؛ لا رمز بلا رقم ضريبي. المبالغ بالريال دائماً.
+ * إن اعتمدت الهيئة الفاتورة (المرحلة الثانية) يُستخدم رمزها المعتمد بحقوله التسعة بدلاً من ذلك.
+ */
 export async function invoiceQrSvg(
   company: { nameAr: string; vatNumber: string | null },
   i: { issuedAt: Date | null; invoiceDate: string; total: string; vatTotal: string; exchangeRate: string },
+  clearedQr?: string | null,
 ) {
+  if (clearedQr) return qrSvg(clearedQr);
   if (!company.vatNumber) return null;
   const rate = Number(i.exchangeRate);
   return zatcaQrSvg({

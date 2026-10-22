@@ -6,6 +6,8 @@ import { can } from "@/lib/permissions";
 import { invoicingQueue, listSalesInvoices, salesInvoiceDoc } from "@/lib/invoices";
 import { getCompany, getInvoiceTemplate, invoiceReadiness } from "@/lib/company";
 import { invoiceQrSvg } from "@/lib/zatca-qr";
+import { clearedQr, getSettings, latestDocument, sendBlocker } from "@/lib/zatca/service";
+import { ZatcaPanel } from "@/components/zatca-panel";
 import { listHref, parseDocFilter, type DocListParams } from "@/lib/doc-filters";
 import { todayRiyadh } from "@/lib/dates";
 import { INVOICE_STATUS, ZATCA_STATUS, paymentState } from "@/data/sales";
@@ -18,7 +20,7 @@ import { RowCheck, SelectAll, SelectionTotal } from "@/components/row-selection"
 import { TaxInvoiceDocument } from "@/components/tax-invoice";
 import { Badge, EmptyRow, Input, PageHeader, Table, Td } from "@/components/ui";
 import { ImportLink } from "@/components/import-link";
-import { invoiceAll, invoiceCustomer, issue, issueMany, saveInvoiceSheet } from "./actions";
+import { invoiceAll, invoiceCustomer, issue, issueMany, saveInvoiceSheet, sendToZatca } from "./actions";
 
 const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const BASE = "/invoices";
@@ -42,7 +44,8 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
     getCompany(db),
     getInvoiceTemplate(db),
   ]);
-  const qrSvg = openDoc ? await invoiceQrSvg(company, openDoc.i) : null;
+  const [zatca, zatcaDoc, blocker] = openDoc ? await Promise.all([getSettings(db), latestDocument(db, { invoiceId: openDoc.i.id }), sendBlocker(db, { invoiceId: openDoc.i.id })]) : [null, null, null];
+  const qrSvg = openDoc ? await invoiceQrSvg(company, openDoc.i, await clearedQr(db, openDoc.i.id)) : null;
 
   const state = (i: (typeof invoices)[number]["i"]) => {
     const total = Number(i.total);
@@ -229,6 +232,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
             <ReadinessBar company={company} />
             <div className="p-4 sm:p-6">
               <div className="mx-auto max-w-3xl">
+                {openDoc.i.status === "issued" && <ZatcaPanel doc={zatcaDoc} connected={!!zatca?.token} blocker={blocker} partyHref={`/records/parties/${openDoc.i.customerId}`} send={canIssue ? sendToZatca.bind(null, openDoc.i.id) : undefined} />}
                 <TaxInvoiceDocument company={company} invoice={openDoc.i} customer={openDoc.customer} lines={openDoc.lines} qrSvg={qrSvg} template={template} compact />
               </div>
             </div>

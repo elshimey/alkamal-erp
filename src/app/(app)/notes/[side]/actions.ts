@@ -10,6 +10,7 @@ import { errorMessage } from "@/lib/errors";
 import { createNote, deleteNote, invoiceLinesForNote, postNote, revertNote } from "@/lib/notes";
 import { NOTE_KINDS, NOTE_SIDES, type NoteKind, type NoteSide } from "@/data/sales";
 import type { FormState } from "@/components/action-form";
+import { autoSubmit, submitDocument } from "@/lib/zatca/service";
 
 const sideOf = (side: string): NoteSide => {
   if (side !== "sales" && side !== "purchase") throw new Error("نوع غير معروف");
@@ -75,6 +76,7 @@ export async function saveNote(p: NotePayload): Promise<{ id?: number; error?: s
       post: can(user.perms, entity, "approve"),
       userId: user.id,
     });
+    if (k.side === "sales" && can(user.perms, entity, "approve")) await autoSubmit(db, { noteId: n.id }, user.id);
     refresh(k.side);
     return { id: n.id };
   } catch (err) {
@@ -87,8 +89,9 @@ export async function post(sideRaw: string, id: number): Promise<FormState> {
   const user = await requirePermission(NOTE_SIDES[side].entity, "approve");
   try {
     const { entry } = await postNote(db, id, user.id);
+    const zatca = side === "sales" ? await autoSubmit(db, { noteId: id }, user.id) : null;
     refresh(side);
-    return { ok: `رُحّل القيد ${entry.number}` };
+    return { ok: `رُحّل القيد ${entry.number}${zatca ? ` ${zatca}` : ""}` };
   } catch (err) {
     return { error: errorMessage(err) };
   }
@@ -113,6 +116,20 @@ export async function remove(sideRaw: string, id: number, _: FormState, fd: Form
     await deleteNote(db, id, { reason: String(fd.get("reason") || "حذف من الشاشة"), userId: user.id });
     refresh(side);
     return { ok: "حُذف الإشعار" };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+}
+
+/** إرسال إشعار العميل (أو إعادة إرساله) لبوابة فاتورة. */
+export async function sendToZatca(id: number): Promise<FormState> {
+  const user = await requirePermission(NOTE_SIDES.sales.entity, "approve");
+  try {
+    const row = await submitDocument(db, { noteId: id }, user.id);
+    refresh("sales");
+    if (row.status === "cleared") return { ok: "اعتمدت الهيئة الإشعار" };
+    if (row.status === "cleared_warnings") return { ok: `اعتمدت الهيئة الإشعار بملاحظات: ${row.warnings.join(" · ")}` };
+    return { error: `لم تعتمد الهيئة الإشعار: ${(row.errors as string[]).join(" · ")}` };
   } catch (err) {
     return { error: errorMessage(err) };
   }

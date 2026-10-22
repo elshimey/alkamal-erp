@@ -22,6 +22,7 @@ export async function saveParties(rows: SheetRow[]) {
       mobile: cell.text(r.mobile),
       email: cell.text(r.email),
       country,
+      address: { buildingNo: cell.text(r.buildingNo), street: cell.text(r.street), district: cell.text(r.district), city: cell.text(r.city), postalCode: cell.text(r.postalCode) },
       roles: [role],
     });
   });

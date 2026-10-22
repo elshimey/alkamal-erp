@@ -11,9 +11,9 @@ export function paymentState(total: number, paid: number) {
 }
 
 export const ZATCA_STATUS = {
-  not_sent: "لم تُرسل للزكاة",
-  accepted: "مقبولة",
-  rejected: "مرفوضة",
+  not_sent: "لم تُرسل للهيئة",
+  accepted: "معتمدة من الهيئة",
+  rejected: "مرفوضة من الهيئة",
 } as const;
 
 export const PAYMENT_METHODS = {

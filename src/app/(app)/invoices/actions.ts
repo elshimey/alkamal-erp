@@ -2,13 +2,16 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { eq } from "drizzle-orm";
 import { db } from "@/db";
+import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
 import { todayRiyadh } from "@/lib/dates";
 import { addWaybillsToInvoice, createAllInvoices, createInvoice, deleteInvoice, issueInvoice, removeInvoiceLine, revertInvoice, updateDraftInvoice, type DraftInvoicePatch } from "@/lib/invoices";
 import type { SheetChange, DocSheetResult } from "@/components/doc-sheet";
 import type { FormState } from "@/components/action-form";
+import { autoSubmit, submitDocument } from "@/lib/zatca/service";
 
 const refresh = (id?: number) => {
   revalidatePath("/invoices");
@@ -65,8 +68,9 @@ export async function issue(id: number): Promise<FormState> {
   const user = await requirePermission("sales_invoices", "approve");
   try {
     const entry = await issueInvoice(db, id, user.id);
+    const zatca = await autoSubmit(db, { invoiceId: id }, user.id);
     refresh(id);
-    return { ok: `صدرت الفاتورة ورُحّل القيد ${entry.number}` };
+    return { ok: `صدرت الفاتورة ورُحّل القيد ${entry.number}${zatca ? ` ${zatca}` : ""}` };
   } catch (err) {
     return { error: errorMessage(err) };
   }
@@ -103,13 +107,31 @@ export async function issueMany(_: FormState, fd: FormData): Promise<FormState> 
   const errors: string[] = [];
   for (const id of ids) {
     try {
-      done.push((await issueInvoice(db, id, user.id)).number);
+      await issueInvoice(db, id, user.id);
+      const [{ number }] = await db.select({ number: s.salesInvoices.number }).from(s.salesInvoices).where(eq(s.salesInvoices.id, id));
+      done.push(number);
+      const zatca = await autoSubmit(db, { invoiceId: id }, user.id);
+      if (zatca && !zatca.startsWith("واعتمد")) errors.push(`${number}: صدرت ${zatca}`);
     } catch (err) {
       errors.push(errorMessage(err));
     }
   }
   refresh();
   return { ok: done.length ? `صدرت ${done.length} فاتورة ورُحّلت قيودها` : undefined, error: errors.length ? errors.join("\n") : undefined };
+}
+
+/** إرسال الفاتورة (أو إعادة إرسالها) لبوابة فاتورة للاعتماد. */
+export async function sendToZatca(id: number): Promise<FormState> {
+  const user = await requirePermission("sales_invoices", "approve");
+  try {
+    const row = await submitDocument(db, { invoiceId: id }, user.id);
+    refresh(id);
+    if (row.status === "cleared") return { ok: "اعتمدت الهيئة الفاتورة" };
+    if (row.status === "cleared_warnings") return { ok: `اعتمدت الهيئة الفاتورة بملاحظات: ${row.warnings.join(" · ")}` };
+    return { error: `لم تعتمد الهيئة الفاتورة: ${(row.errors as string[]).join(" · ")}` };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
 }
 
 const SHEET_FIELDS = { invoiceDate: "invoiceDate", dueDate: "dueDate", notes: "notes" } as const;

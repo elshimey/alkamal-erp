@@ -27,6 +27,7 @@ const SECTIONS: { title: string; items: Item[] }[] = [
       { href: "/setup", title: "معالج إعداد الشركة", description: "خطوات تجهيز النظام بالترتيب، وما اكتمل منها وما بقي.", icon: "check", entity: "settings" },
       { href: "/settings/company", title: "بيانات المنشأة", description: "الشعار والاسم والرقم الضريبي والسجل والعنوان الوطني.", icon: "building", entity: "settings" },
       { href: "/settings/invoice-template", title: "قالب الفاتورة", description: "شكل الفاتورة ولونها ولغتها، والحساب البنكي والشروط.", icon: "invoice", entity: "settings" },
+      { href: "/settings/zatca", title: "الفوترة الإلكترونية (فاتورة)", description: "الربط مع بوابة فاتورة لهيئة الزكاة واعتماد الفواتير والإشعارات (المرحلة الثانية).", icon: "shield", entity: "settings" },
       { href: "/users", title: "المستخدمون", description: "إضافة أعضاء الفريق وتفعيل حساباتهم.", icon: "people", entity: "users" },
       { href: "/roles", title: "الأدوار والصلاحيات", description: "ما يراه ويفعله كل دور في كل شاشة.", icon: "shield", entity: "roles" },
     ],
@@ -47,12 +48,6 @@ const SECTIONS: { title: string; items: Item[] }[] = [
       { href: "/settings/hr", title: "الموارد البشرية", description: "نقاط الإنذار والترقية، ومقدم العمولة، ومعايير التقييم وأنواع الإجازات.", icon: "people", entity: "settings" },
       { href: "/vehicles", title: "المركبات", description: "إضافة مركبات الأسطول وبياناتها.", icon: "truck", entity: "vehicles" },
       { href: "/settings/driver-app", title: "تطبيق السائق", description: "رابط التطبيق ورمزه لإرساله للسائقين، وطريقة تثبيته على الجوال.", icon: "driver", entity: "drivers" },
-    ],
-  },
-  {
-    title: "قيد الإعداد",
-    items: [
-      { title: "الفاتورة الإلكترونية (زاتكا)", description: "الربط مع منصة فاتورة لهيئة الزكاة والضريبة.", icon: "shield", badge: "قريباً" },
     ],
   },
 ];
