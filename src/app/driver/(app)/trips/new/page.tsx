@@ -2,8 +2,8 @@ import Link from "next/link";
 import { getDriverContext } from "@/lib/driver-auth";
 import { customerOptions, routeOptions } from "@/lib/lookups";
 import { ActionForm, SubmitButton } from "@/components/action-form";
-import { startTripAction } from "../../actions";
-import { DField, DInput, DSelect, DTextarea, Section } from "../../driver-ui";
+import { startTripAction } from "../../../actions";
+import { DField, DInput, DSelect, DTextarea, Section } from "../../../driver-ui";
 
 export default async function NewTrip() {
   const { driver, t } = await getDriverContext();

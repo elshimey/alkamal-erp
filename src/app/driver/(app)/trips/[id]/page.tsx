@@ -6,8 +6,8 @@ import { tripDetail } from "@/lib/driver-app";
 import { chargeTypeOptions } from "@/lib/lookups";
 import { isRtl } from "@/data/driver-i18n";
 import { ActionForm, SubmitButton } from "@/components/action-form";
-import { fuelAction, removeTripItem, stageAction, tripExpenseAction } from "../../actions";
-import { DField, DInput, DSelect, fmt, Pill, Section, STATUS_TONE } from "../../driver-ui";
+import { fuelAction, removeTripItem, stageAction, tripExpenseAction } from "../../../actions";
+import { DField, DInput, DSelect, fmt, Pill, Section, STATUS_TONE } from "../../../driver-ui";
 
 export default async function TripPage({ params }: { params: Promise<{ id: string }> }) {
   const { driver, t, lang } = await getDriverContext();

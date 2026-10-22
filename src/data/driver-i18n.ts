@@ -4,6 +4,8 @@ export const DRIVER_LANGS = ["ar", "ur", "hi", "en"] as const;
 export type DriverLang = (typeof DRIVER_LANGS)[number];
 
 export const LANG_NAMES: Record<DriverLang, string> = { ar: "العربية", ur: "اردو", hi: "हिन्दी", en: "English" };
+/** لغة صفحة دخول السائق قبل أن يُعرف حسابه. */
+export const DRIVER_LANG_COOKIE = "driver_lang";
 export const isRtl = (l: DriverLang) => l === "ar" || l === "ur";
 
 const ar = {
@@ -107,6 +109,16 @@ const ar = {
   advanceSend: "إرسال الطلب",
   advanceStatus: { pending: "بانتظار الاعتماد", approved: "معتمد", rejected: "مرفوض" },
   install: "أضف التطبيق للشاشة الرئيسية من قائمة المتصفح ليفتح كتطبيق.",
+  loginTitle: "دخول السائق",
+  loginHint: "ادخل باسم الدخول وكلمة المرور التي أعطاك إياها المكتب.",
+  username: "اسم الدخول",
+  password: "كلمة المرور",
+  signIn: "دخول",
+  signingIn: "جارٍ الدخول…",
+  wrongLogin: "اسم الدخول أو كلمة المرور غير صحيحة",
+  accountLocked: "الحساب موقوف؛ تواصل مع المكتب",
+  forgot: "نسيت كلمة المرور؟ اطلب من المكتب تغييرها.",
+  chooseLanguage: "اختر لغتك",
 };
 
 export type DriverDict = typeof ar;
@@ -212,6 +224,16 @@ const ur: DriverDict = {
   advanceSend: "درخواست بھیجیں",
   advanceStatus: { pending: "منظوری کا انتظار", approved: "منظور", rejected: "مسترد" },
   install: "براؤزر مینو سے ایپ کو ہوم اسکرین پر شامل کریں۔",
+  loginTitle: "ڈرائیور لاگ اِن",
+  loginHint: "دفتر کی طرف سے دیا گیا یوزر نیم اور پاس ورڈ درج کریں۔",
+  username: "یوزر نیم",
+  password: "پاس ورڈ",
+  signIn: "لاگ اِن",
+  signingIn: "لاگ اِن ہو رہا ہے…",
+  wrongLogin: "یوزر نیم یا پاس ورڈ غلط ہے",
+  accountLocked: "اکاؤنٹ بند ہے؛ دفتر سے رابطہ کریں",
+  forgot: "پاس ورڈ بھول گئے؟ دفتر سے نیا لیں۔",
+  chooseLanguage: "اپنی زبان منتخب کریں",
 };
 
 const hi: DriverDict = {
@@ -315,6 +337,16 @@ const hi: DriverDict = {
   advanceSend: "अनुरोध भेजें",
   advanceStatus: { pending: "स्वीकृति की प्रतीक्षा", approved: "स्वीकृत", rejected: "अस्वीकृत" },
   install: "ब्राउज़र मेनू से ऐप को होम स्क्रीन पर जोड़ें।",
+  loginTitle: "ड्राइवर लॉगिन",
+  loginHint: "ऑफिस से मिला यूज़रनेम और पासवर्ड डालें।",
+  username: "यूज़रनेम",
+  password: "पासवर्ड",
+  signIn: "लॉगिन",
+  signingIn: "लॉगिन हो रहा है…",
+  wrongLogin: "यूज़रनेम या पासवर्ड गलत है",
+  accountLocked: "खाता बंद है; ऑफिस से संपर्क करें",
+  forgot: "पासवर्ड भूल गए? ऑफिस से नया लें।",
+  chooseLanguage: "अपनी भाषा चुनें",
 };
 
 const en: DriverDict = {
@@ -418,6 +450,16 @@ const en: DriverDict = {
   advanceSend: "Send request",
   advanceStatus: { pending: "Awaiting approval", approved: "Approved", rejected: "Rejected" },
   install: "Add the app to your home screen from the browser menu.",
+  loginTitle: "Driver sign in",
+  loginHint: "Use the username and password the office gave you.",
+  username: "Username",
+  password: "Password",
+  signIn: "Sign in",
+  signingIn: "Signing in…",
+  wrongLogin: "Wrong username or password",
+  accountLocked: "Account is locked; contact the office",
+  forgot: "Forgot your password? Ask the office to reset it.",
+  chooseLanguage: "Choose your language",
 };
 
 export const DRIVER_DICT: Record<DriverLang, DriverDict> = { ar, ur, hi, en };

@@ -4,7 +4,7 @@ import { getDriverContext } from "@/lib/driver-auth";
 import { driverTrips, type TripStage } from "@/lib/driver-app";
 import { Icon, Truck } from "@/components/icons";
 import { isRtl } from "@/data/driver-i18n";
-import { Pill, Section, STATUS_TONE } from "./driver-ui";
+import { Pill, Section, STATUS_TONE } from "../driver-ui";
 
 const ORDER: TripStage[] = ["loading", "in_transit", "border", "delivery"];
 
