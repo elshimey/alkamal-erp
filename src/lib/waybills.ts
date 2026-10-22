@@ -1,4 +1,5 @@
 import { and, desc, eq, inArray, like, lte, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
 import { createJournalEntryTx, deleteEntryTx, nextDocumentNumber } from "@/lib/ledger";
@@ -513,4 +514,37 @@ export async function deleteWaybill(db: Db, id: number, opts: { reason: string; 
     });
     await tx.delete(s.waybills).where(eq(s.waybills.id, id));
   });
+}
+
+/** بيانات بوليصة الشحن للطباعة والمشاركة (دون أسعار أو تكاليف). */
+export async function waybillDoc(db: Db | Tx, id: number) {
+  const from = alias(s.locations, "from_loc");
+  const to = alias(s.locations, "to_loc");
+  const carrier = alias(s.parties, "carrier");
+  const [w] = await db
+    .select({
+      w: s.waybills,
+      customer: s.parties.nameAr,
+      customerMobile: s.parties.mobile,
+      customerEmail: s.parties.email,
+      from: from.nameAr,
+      to: to.nameAr,
+      plate: s.vehicles.plate,
+      driver: s.employees.nameAr,
+      driverMobile: s.drivers.mobile,
+      carrier: carrier.nameAr,
+    })
+    .from(s.waybills)
+    .innerJoin(s.parties, eq(s.parties.id, s.waybills.customerId))
+    .innerJoin(s.routes, eq(s.routes.id, s.waybills.routeId))
+    .innerJoin(from, eq(from.id, s.routes.fromLocationId))
+    .innerJoin(to, eq(to.id, s.routes.toLocationId))
+    .leftJoin(s.vehicles, eq(s.vehicles.id, s.waybills.vehicleId))
+    .leftJoin(s.drivers, eq(s.drivers.id, s.waybills.driverId))
+    .leftJoin(s.employees, eq(s.employees.id, s.drivers.employeeId))
+    .leftJoin(carrier, eq(carrier.id, s.waybills.carrierId))
+    .where(eq(s.waybills.id, id));
+  if (!w) return null;
+  const stages = await db.select().from(s.tripStages).where(eq(s.tripStages.waybillId, id)).orderBy(s.tripStages.at);
+  return { ...w, stages };
 }

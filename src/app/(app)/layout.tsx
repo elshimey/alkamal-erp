@@ -10,6 +10,10 @@ import { BrandMark, Logo } from "@/components/logo";
 import { getBrand } from "@/lib/brand";
 import { MobileNav, NavLinks, type NavGroup } from "@/components/nav-links";
 import { TourRunner } from "@/components/tour";
+import { ExpiryBanner } from "@/components/expiry-banner";
+import { expiryCounts } from "@/lib/fleet";
+import { todayRiyadh } from "@/lib/dates";
+import { db } from "@/db";
 import { logout } from "../login/actions";
 
 // الدعم الفني (واتساب واتصال)
@@ -34,6 +38,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (isDriverOnly(user.roles)) redirect("/driver");
   const tenant = await getTenant();
   const brand = await getBrand();
+  const today = todayRiyadh();
+  const expiry = can(user.perms, "fleet_documents", "view") ? await expiryCounts(db, today) : null;
   const trialDays = tenant.tenant?.status === "trial" ? Math.max(tenant.daysLeft ?? 0, 0) : null;
   const groups: NavGroup[] = NAV.map((g) => ({
     title: g.title,
@@ -92,6 +98,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             )}
           </div>
         )}
+        {expiry && <ExpiryBanner expired={expiry.expired} soon={expiry.soon} today={today} />}
         <main className="flex-1 p-4 pb-24 sm:p-6 md:pb-6 lg:p-8 print:p-0">{children}</main>
         <TourRunner />
       </div>
