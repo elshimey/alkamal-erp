@@ -3,6 +3,7 @@ import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
 import { addSubAccountTx } from "@/lib/accounts";
 import { EXPIRY_ALERT_DAYS } from "@/data/fleet";
+import { findPgError } from "@/lib/errors";
 
 export { EXPIRY_ALERT_DAYS };
 
@@ -105,6 +106,102 @@ export async function createDriver(db: Db, input: DriverInput) {
       .returning();
     return { ...driver, payableAccountCode: payable.code, custodyAccountCode: custody.code };
   });
+}
+
+export type DriverStatus = (typeof s.employeeStatus.enumValues)[number];
+
+/** تعديل بيانات السائق وموظفه؛ تغيير الاسم يغيّر اسم حسابَي العهدة والرواتب واسم حساب دخوله. */
+export async function updateDriver(db: Db, id: number, input: DriverInput & { birthDate?: string | null; status: DriverStatus }) {
+  const name = input.nameAr.trim();
+  if (name.length < 2) throw new Error("الاسم إلزامي");
+  return db.transaction(async (tx) => {
+    const [d] = await tx.select().from(s.drivers).where(eq(s.drivers.id, id)).for("update");
+    if (!d) throw new Error("السائق غير موجود");
+    if (input.status === "terminated" && d.status !== "terminated") {
+      const [open] = await tx
+        .select({ plate: s.vehicles.plate })
+        .from(s.vehicleAssignments)
+        .innerJoin(s.vehicles, eq(s.vehicles.id, s.vehicleAssignments.vehicleId))
+        .where(and(eq(s.vehicleAssignments.driverId, id), isNull(s.vehicleAssignments.toDate)));
+      if (open) throw new Error(`السائق مسند للمركبة ${open.plate}؛ أنهِ الإسناد من شاشة «الإسناد» قبل إنهاء خدمته`);
+      const [custody] = await tx
+        .select({ number: s.custodyDocs.number })
+        .from(s.custodyDocs)
+        .where(and(eq(s.custodyDocs.employeeId, d.employeeId), sql`${s.custodyDocs.status} in ('approved','delivered')`))
+        .limit(1);
+      if (custody) throw new Error(`على السائق عهدة غير مسواة (${custody.number})؛ سوّها قبل إنهاء خدمته`);
+    }
+    await tx
+      .update(s.drivers)
+      .set({
+        mobile: input.mobile || null,
+        nationality: input.nationality || null,
+        residencyNumber: input.residencyNumber || null,
+        licenseNumber: input.licenseNumber || null,
+        transportCardNumber: input.transportCardNumber || null,
+        birthDate: input.birthDate || null,
+        appLanguage: input.appLanguage ?? d.appLanguage,
+        commissionClass: input.commissionClass ?? d.commissionClass,
+        custodyLimit: input.custodyLimit != null ? String(input.custodyLimit) : null,
+        status: input.status,
+        updatedAt: new Date(),
+      })
+      .where(eq(s.drivers.id, id));
+    const [emp] = await tx
+      .update(s.employees)
+      .set({
+        nameAr: name,
+        nationalId: input.nationalId || null,
+        hireDate: input.hireDate || null,
+        ...(input.basicSalary != null ? { basicSalary: String(input.basicSalary) } : {}),
+        status: input.status,
+        updatedAt: new Date(),
+      })
+      .where(eq(s.employees.id, d.employeeId))
+      .returning({ payableAccountId: s.employees.payableAccountId });
+    await tx.update(s.accounts).set({ nameAr: `عهدة – ${name}` }).where(eq(s.accounts.id, d.custodyAccountId));
+    if (emp?.payableAccountId) await tx.update(s.accounts).set({ nameAr: `رواتب مستحقة – ${name}` }).where(eq(s.accounts.id, emp.payableAccountId));
+    if (d.userId) {
+      // منتهي الخدمة لا يدخل التطبيق، ويعود دخوله إن أُعيد نشطاً
+      await tx.update(s.users).set({ name, isActive: input.status !== "terminated", updatedAt: new Date() }).where(eq(s.users.id, d.userId));
+      if (input.status === "terminated") await tx.delete(s.sessions).where(eq(s.sessions.userId, d.userId));
+    }
+  });
+}
+
+/**
+ * حذف السائق نهائياً مع موظفه وحساباته وحساب دخوله، ويُسمح فقط إن لم تكن له أي حركة.
+ * من له حركات تُغيَّر حالته إلى «منتهية خدمته» بدل الحذف حفاظاً على القيود.
+ */
+export async function deleteDriver(db: Db, id: number) {
+  try {
+    return await db.transaction(async (tx) => {
+      const [d] = await tx
+        .select({ d: s.drivers, payable: s.employees.payableAccountId, name: s.employees.nameAr })
+        .from(s.drivers)
+        .innerJoin(s.employees, eq(s.employees.id, s.drivers.employeeId))
+        .where(eq(s.drivers.id, id))
+        .for("update");
+      if (!d) throw new Error("السائق غير موجود");
+      await tx.delete(s.drivers).where(eq(s.drivers.id, id));
+      await tx.delete(s.employees).where(eq(s.employees.id, d.d.employeeId));
+      await tx.delete(s.accounts).where(eq(s.accounts.id, d.d.custodyAccountId));
+      if (d.payable) await tx.delete(s.accounts).where(eq(s.accounts.id, d.payable));
+      if (d.d.userId) {
+        const userId = d.d.userId;
+        // حساب دخول له سجلات (أنشأ مستندات مثلاً) يُوقف بدل حذفه
+        await tx.transaction((sp) => sp.delete(s.users).where(eq(s.users.id, userId))).catch(async () => {
+          await tx.update(s.users).set({ isActive: false }).where(eq(s.users.id, userId));
+          await tx.delete(s.sessions).where(eq(s.sessions.userId, userId));
+        });
+      }
+      return d.name;
+    });
+  } catch (err) {
+    if (findPgError(err)?.code === "23503")
+      throw new Error("لا يمكن حذف السائق لأن له حركات مسجلة (شحنات أو إسناد أو رواتب أو قيود). غيّر حالته إلى «منتهية خدمته» بدلاً من الحذف.");
+    throw err;
+  }
 }
 
 // ───────────── الإسناد والتسليم ─────────────

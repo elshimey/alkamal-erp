@@ -287,5 +287,37 @@ export async function createDriverLogin(db: Db, input: { driverId: number; login
   });
 }
 
+/** كلمة مرور جديدة لحساب السائق، وتُغلق جلساته المفتوحة. */
+export async function resetDriverPassword(db: Db, driverId: number, password: string) {
+  if (password.length < MIN_PASSWORD_LENGTH) throw new Error(`كلمة المرور ${MIN_PASSWORD_LENGTH} أحرف على الأقل`);
+  const [d] = await db.select({ userId: s.drivers.userId }).from(s.drivers).where(eq(s.drivers.id, driverId));
+  if (!d?.userId) throw new Error("السائق ليس له حساب دخول");
+  await db.update(s.users).set({ passwordHash: await hashPassword(password), isActive: true, updatedAt: new Date() }).where(eq(s.users.id, d.userId));
+  await db.delete(s.sessions).where(eq(s.sessions.userId, d.userId));
+}
+
+/** يفك ربط حساب الدخول عن السائق ويحذفه (أو يوقفه إن كانت له سجلات). */
+export async function removeDriverLogin(db: Db, driverId: number) {
+  return db.transaction(async (tx) => {
+    const [d] = await tx.select({ userId: s.drivers.userId }).from(s.drivers).where(eq(s.drivers.id, driverId)).for("update");
+    if (!d?.userId) throw new Error("السائق ليس له حساب دخول");
+    const userId = d.userId;
+    await tx.update(s.drivers).set({ userId: null, updatedAt: new Date() }).where(eq(s.drivers.id, driverId));
+    await tx.delete(s.sessions).where(eq(s.sessions.userId, userId));
+    await tx.transaction((sp) => sp.delete(s.users).where(eq(s.users.id, userId))).catch(() =>
+      tx.update(s.users).set({ isActive: false, updatedAt: new Date() }).where(eq(s.users.id, userId)),
+    );
+  });
+}
+
+/** يربط حساب مستخدم موجود بسائق (لمن أُنشئ حسابه من شاشة المستخدمين). */
+export async function linkUserToDriver(db: Db | Tx, userId: number, driverId: number) {
+  const [d] = await db.select({ userId: s.drivers.userId }).from(s.drivers).where(eq(s.drivers.id, driverId));
+  if (!d) throw new Error("السائق غير موجود");
+  if (d.userId && d.userId !== userId) throw new Error("هذا السائق مربوط بحساب دخول آخر");
+  await db.update(s.drivers).set({ userId: null }).where(and(eq(s.drivers.userId, userId), sql`${s.drivers.id} <> ${driverId}`));
+  await db.update(s.drivers).set({ userId, updatedAt: new Date() }).where(eq(s.drivers.id, driverId));
+}
+
 /** المستخدم الذي كل أدواره «سائق» يذهب لتطبيق السائق لا للوحة المكتب. */
 export const isDriverOnly = (roles: { key: string | null }[]) => roles.length > 0 && roles.every((r) => r.key === "driver");

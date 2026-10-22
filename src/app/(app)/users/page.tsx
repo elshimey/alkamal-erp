@@ -6,21 +6,30 @@ import { can } from "@/lib/permissions";
 import { MIN_PASSWORD_LENGTH } from "@/lib/password";
 import { PasswordInput } from "@/components/password-input";
 import { ActionForm, SubmitButton } from "@/components/action-form";
-import { Badge, Card, Field, Input, PageHeader, Table, Td } from "@/components/ui";
-import { createUser, setUserActive, setUserTrial } from "./actions";
+import { Badge, Card, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
+import { createUser, linkDriverAccount, setUserActive, setUserTrial } from "./actions";
 
 const daysLeft = (d: Date) => Math.ceil((d.getTime() - Date.now()) / 86_400_000);
 
 export default async function UsersPage() {
   const me = await requirePermission("users", "view");
-  const [users, roles, links] = await Promise.all([
+  const [users, roles, links, drivers] = await Promise.all([
     db.select().from(s.users).orderBy(asc(s.users.name)),
     db.select().from(s.roles).orderBy(asc(s.roles.id)),
     db
-      .select({ userId: s.userRoles.userId, nameAr: s.roles.nameAr })
+      .select({ userId: s.userRoles.userId, nameAr: s.roles.nameAr, key: s.roles.key })
       .from(s.userRoles)
       .innerJoin(s.roles, eq(s.roles.id, s.userRoles.roleId)),
+    db
+      .select({ id: s.drivers.id, userId: s.drivers.userId, name: s.employees.nameAr, mobile: s.drivers.mobile })
+      .from(s.drivers)
+      .innerJoin(s.employees, eq(s.employees.id, s.drivers.employeeId))
+      .orderBy(asc(s.employees.nameAr)),
   ]);
+  const freeDrivers = drivers.filter((d) => !d.userId);
+  const driverOf = (userId: number) => drivers.find((d) => d.userId === userId);
+  // حسابات بدور سائق غير مربوطة بسائق: لا تعمل في تطبيق السائق
+  const unlinked = users.filter((u) => links.some((l) => l.userId === u.id && l.key === "driver") && !driverOf(u.id));
   const canUpdate = can(me.perms, "users", "update");
 
   return (
@@ -45,6 +54,17 @@ export default async function UsersPage() {
                 <option value="30">تجريبي 30 يوماً</option>
               </select>
             </Field>
+            <Field label="ربط بسائق" hint="إلزامي لحساب السائق؛ والأسهل إنشاؤه من شاشة السائقين">
+              <Select name="driverId" defaultValue="">
+                <option value="">— ليس سائقاً —</option>
+                {freeDrivers.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name}
+                    {d.mobile ? ` (${d.mobile})` : ""}
+                  </option>
+                ))}
+              </Select>
+            </Field>
             <fieldset className="col-span-full">
               <legend className="mb-2 text-sm font-medium text-gray-700">الأدوار</legend>
               <div className="flex flex-wrap gap-4">
@@ -62,6 +82,40 @@ export default async function UsersPage() {
           </ActionForm>
         </Card>
       )}
+      {canUpdate && unlinked.length > 0 && (
+        <Card title="حسابات سائقين غير مربوطة بسائق" className="mb-6 border-amber-300">
+          <p className="mb-4 text-sm text-amber-800">
+            هذه الحسابات بدور «سائق» لكنها غير مربوطة بأي سائق، فيظهر لصاحبها في التطبيق أن حسابه غير مربوط. اربط كل حساب بسائقه:
+          </p>
+          <ActionForm action={linkDriverAccount} className="grid items-end gap-4 sm:grid-cols-3">
+            <Field label="الحساب">
+              <Select name="userId" required defaultValue="">
+                <option value="" disabled>
+                  اختر الحساب
+                </option>
+                {unlinked.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name} ({u.login})
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="السائق">
+              <Select name="driverId" required defaultValue="">
+                <option value="" disabled>
+                  اختر السائق
+                </option>
+                {freeDrivers.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <SubmitButton>ربط</SubmitButton>
+          </ActionForm>
+        </Card>
+      )}
       <Table head={["الاسم", "اسم الدخول", "الأدوار", "آخر دخول", "الحالة", ""]}>
         {users.map((u) => (
           <tr key={u.id}>
@@ -76,6 +130,11 @@ export default async function UsersPage() {
                       {l.nameAr}
                     </Badge>
                   ))}
+                {driverOf(u.id) ? (
+                  <span className="text-xs text-gray-500">← {driverOf(u.id)!.name}</span>
+                ) : (
+                  unlinked.includes(u) && <Badge tone="red">غير مربوط بسائق</Badge>
+                )}
               </div>
             </Td>
             <Td className="ltr-nums text-xs text-gray-500">{u.lastLoginAt?.toLocaleString("en-GB") ?? "—"}</Td>
