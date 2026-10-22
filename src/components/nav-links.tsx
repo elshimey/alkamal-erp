@@ -238,7 +238,7 @@ export function NavLinks({
 // الجوال: شريط سفلي بأهم الصفحات، وزر «القائمة» يفتح درجاً جانبياً بكل الأقسام مطوية
 const TABS = ["/", "/waybills", "/invoices", "/receipts"];
 
-export function MobileNav({ groups }: { groups: NavGroup[] }) {
+export function MobileNav({ groups, brand }: { groups: NavGroup[]; brand: { name: string; logo: string | null } }) {
   const path = usePathname();
   const active = activeHref(path, groups);
   const current = groups.find((g) => g.items.some((i) => i.href === active))?.title;
@@ -308,7 +308,7 @@ export function MobileNav({ groups }: { groups: NavGroup[] }) {
           <div className="animate-drawer-in absolute inset-y-0 start-0 flex w-[86%] max-w-sm flex-col overflow-hidden bg-asphalt-900 text-white shadow-2xl">
             <div className="road-line absolute inset-y-0 end-0 opacity-60" />
             <div className="flex items-center justify-between border-b border-white/5 px-5 py-4">
-              <Logo light />
+              <Logo light name={brand.name} logo={brand.logo} />
               <button type="button" onClick={() => setState((x) => ({ ...x, open: false }))} aria-label="إغلاق" className="rounded-lg p-2 text-white/70 hover:bg-white/10 hover:text-white">
                 <Icon name="close" className="size-5" />
               </button>

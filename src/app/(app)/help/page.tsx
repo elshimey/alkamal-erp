@@ -84,7 +84,7 @@ export default async function HelpPage() {
 
       <div className="mb-8 grid gap-4 md:grid-cols-3">
         <a
-          href={`https://wa.me/${SUPPORT}?text=${encodeURIComponent("مرحباً، أحتاج مساعدة في نظام الكمال")}`}
+          href={`https://wa.me/${SUPPORT}?text=${encodeURIComponent("مرحباً، أحتاج مساعدة في البرنامج")}`}
           target="_blank"
           rel="noopener noreferrer"
           className="group flex items-center gap-4 rounded-2xl bg-asphalt-900 p-5 text-white transition hover:-translate-y-0.5"
@@ -107,7 +107,7 @@ export default async function HelpPage() {
           </span>
         </a>
         <a
-          href={`https://wa.me/${SUPPORT}?text=${encodeURIComponent("اقتراح ميزة جديدة لنظام الكمال: ")}`}
+          href={`https://wa.me/${SUPPORT}?text=${encodeURIComponent("اقتراح ميزة جديدة للبرنامج: ")}`}
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center gap-4 rounded-2xl bg-white p-5 shadow-sm transition hover:-translate-y-0.5"
