@@ -1,3 +1,4 @@
+import { EditLink } from "@/components/edit-link";
 import { db } from "@/db";
 import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
@@ -60,10 +61,25 @@ export default async function RoutesPage() {
             <Td className="ltr-nums">{r.distanceKm != null ? `${r.distanceKm.toLocaleString("en")} كم` : "—"}</Td>
             <Td>{r.isInternational ? <Badge tone="amber">دولي</Badge> : <Badge>داخلي</Badge>}</Td>
             <Td className="ltr-nums">{Number(r.driverCommission).toLocaleString("en")}</Td>
-            <Td className="ltr-nums">{r.estimatedDieselLiters ?? "—"}</Td>
+            <Td className="ltr-nums">
+              {r.estimatedDieselLiters ?? "—"}
+              <EditLink href={`/records/routes/${r.id}`} />
+            </Td>
           </tr>
         ))}
       </Table>
+      {locations.length > 0 && (
+        <Card title="المدن والمواقع المسجلة" className="mt-6">
+          <div className="flex flex-wrap gap-2">
+            {locations.map((l) => (
+              <span key={l.value} className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-sm">
+                {l.label}
+                <EditLink href={`/records/locations/${l.value}`} />
+              </span>
+            ))}
+          </div>
+        </Card>
+      )}
     </>
   );
 }

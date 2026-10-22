@@ -36,25 +36,33 @@ export async function currentSchema(): Promise<string> {
 
 type Sql = ReturnType<typeof postgres>;
 type Resolver = () => Promise<string>;
+type UserResolver = () => Promise<number | null>;
+const WRITE_RE = /^\s*(insert|update|delete)\b/i;
 
 /**
  * يلف عميل postgres بحيث يمر كل استعلام عبر مخطط الشركة الحالية.
  * لشركة البداية لا يتغير شيء؛ لغيرها: معاملة قصيرة تبدأ بـ SET LOCAL search_path
  * (تعمل مع مجمّع الاتصالات لأن الضبط محصور في المعاملة).
  */
-export function tenantClient(base: Sql, resolve: Resolver = currentSchema): Sql {
+export function tenantClient(base: Sql, resolve: Resolver = currentSchema, resolveUser?: UserResolver): Sql {
   const setPath = (tx: Sql, schema: string) => tx.unsafe(`set local search_path to "${schema}"`);
+  // المستخدم الحالي لسجل التعديلات (مشغل audit_row يقرأ app.user_id)؛ يُضبط داخل المعاملة فقط
+  const setUser = async (tx: Sql, userId: number | null) => {
+    if (userId) await tx.unsafe(`select set_config('app.user_id', $1, true)`, [String(userId)]);
+  };
   const wrapped = {
     options: base.options,
     unsafe(query: string, params?: unknown[], opts?: object) {
       const run = async (values: boolean) => {
         const schema = await resolve();
-        if (schema === HOME_SCHEMA) {
+        const userId = resolveUser && WRITE_RE.test(query) ? await resolveUser() : null;
+        if (schema === HOME_SCHEMA && !userId) {
           const q = base.unsafe(query, params as never[], opts);
           return values ? q.values() : q;
         }
         return base.begin(async (tx) => {
-          await setPath(tx as unknown as Sql, schema);
+          if (schema !== HOME_SCHEMA) await setPath(tx as unknown as Sql, schema);
+          await setUser(tx as unknown as Sql, userId);
           const q = (tx as unknown as Sql).unsafe(query, params as never[], opts);
           return values ? q.values() : q;
         });
@@ -67,8 +75,10 @@ export function tenantClient(base: Sql, resolve: Resolver = currentSchema): Sql 
     },
     async begin(fn: (tx: Sql) => unknown) {
       const schema = await resolve();
+      const userId = resolveUser ? await resolveUser() : null;
       return base.begin(async (tx) => {
         if (schema !== HOME_SCHEMA) await setPath(tx as unknown as Sql, schema);
+        await setUser(tx as unknown as Sql, userId);
         return fn(tx as unknown as Sql);
       });
     },

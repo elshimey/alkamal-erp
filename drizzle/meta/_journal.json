@@ -134,6 +134,13 @@
       "when": 1792595543144,
       "tag": "0018_user_trial",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1792691660114,
+      "tag": "0019_audit_triggers",
+      "breakpoints": true
     }
   ]
 }

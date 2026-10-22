@@ -1,3 +1,4 @@
+import { EditLink } from "@/components/edit-link";
 import { asc } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
@@ -64,6 +65,7 @@ export default async function AccountsPage() {
             <Td className="ltr-nums text-gray-500">{a.code}</Td>
             <Td>
               <span style={{ paddingInlineStart: `${(a.level - 1) * 1.25}rem` }}>{a.nameAr}</span>
+              <EditLink href={`/records/accounts/${a.id}`} />
             </Td>
             <Td className="text-gray-600">{TYPE_LABEL[a.type]}</Td>
             <Td className="text-gray-600">{a.normalBalance === "debit" ? "مدين" : "دائن"}</Td>

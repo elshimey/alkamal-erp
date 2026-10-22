@@ -1,3 +1,4 @@
+import { EditLink } from "@/components/edit-link";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { eq } from "drizzle-orm";
@@ -49,6 +50,7 @@ export default async function ContractPage({ params }: { params: Promise<{ id: s
               <SubmitButton variant="secondary">إيقاف</SubmitButton>
             </ActionForm>
           )}
+          {canEdit && <EditLink href={`/records/contracts/${id}`} label="تعديل بيانات العقد أو حذفه" />}
           <Link href="/contracts" className="text-sm text-brand-700 hover:underline">
             ← العقود
           </Link>

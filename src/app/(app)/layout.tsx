@@ -2,8 +2,10 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { isDriverOnly } from "@/lib/driver-app";
 import { getTenant, requireUser } from "@/lib/auth";
-import { can, type Entity } from "@/lib/permissions";
-import { Icon, type IconName } from "@/components/icons";
+import { can } from "@/lib/permissions";
+import { EXTRA_PAGES, NAV, NAV_KEYWORDS } from "@/data/nav";
+import { GlobalSearch, type SearchPage } from "@/components/global-search";
+import { Icon } from "@/components/icons";
 import { BrandMark, Logo } from "@/components/logo";
 import { getBrand } from "@/lib/brand";
 import { MobileNav, NavLinks, type NavGroup } from "@/components/nav-links";
@@ -26,102 +28,6 @@ const FOOTER: NavGroup[] = [
   },
 ];
 
-const NAV: { title: string; icon: IconName; items: { href: string; label: string; icon: IconName; entity?: Entity }[] }[] = [
-  { title: "عام",
-    icon: "home", items: [{ href: "/", label: "لوحة القيادة", icon: "home" }] },
-  {
-    title: "الأسطول",
-    icon: "truck",
-    items: [
-      { href: "/vehicles", label: "المركبات", icon: "truck", entity: "vehicles" },
-      { href: "/drivers", label: "السائقون", icon: "driver", entity: "drivers" },
-      { href: "/assignments", label: "الإسناد والتسليم", icon: "handover", entity: "vehicles" },
-      { href: "/fleet-documents", label: "وثائق الأسطول", icon: "document", entity: "fleet_documents" },
-      { href: "/violations", label: "المخالفات المرورية", icon: "ticket", entity: "violations" },
-      { href: "/maintenance", label: "أوامر الصيانة", icon: "wrench", entity: "maintenance" },
-      { href: "/maintenance/requests", label: "طلبات العطل", icon: "alert", entity: "maintenance" },
-      { href: "/maintenance/plans", label: "الصيانة الدورية", icon: "calendar", entity: "maintenance" },
-    ],
-  },
-  {
-    title: "التشغيل والمبيعات",
-    icon: "waybill",
-    items: [
-      { href: "/waybills", label: "الشحنات", icon: "waybill", entity: "waybills" },
-      { href: "/invoices", label: "الفواتير", icon: "invoice", entity: "sales_invoices" },
-      { href: "/customers", label: "العملاء", icon: "people", entity: "parties" },
-      { href: "/receipts", label: "سندات العملاء", icon: "cash", entity: "receipts" },
-      { href: "/notes/sales", label: "إشعارات العملاء", icon: "document", entity: "sales_invoices" },
-      { href: "/parties", label: "جهات الاتصال", icon: "people", entity: "parties" },
-      { href: "/routes", label: "المواقع والمسارات", icon: "route", entity: "routes" },
-      { href: "/contracts", label: "العقود والأسعار", icon: "contract", entity: "contracts" },
-    ],
-  },
-  {
-    title: "المشتريات والمصروفات",
-    icon: "invoice",
-    items: [
-      { href: "/purchases", label: "فواتير الموردين", icon: "invoice", entity: "purchase_invoices" },
-      { href: "/expenses", label: "المصروفات", icon: "fuel", entity: "expenses" },
-      { href: "/payments", label: "سندات الصرف", icon: "cash", entity: "payments" },
-      { href: "/notes/purchase", label: "إشعارات الموردين", icon: "document", entity: "purchase_invoices" },
-    ],
-  },
-  {
-    title: "الموظفون والرواتب",
-    icon: "people",
-    items: [
-      { href: "/hr", label: "لوحة الموارد البشرية", icon: "chart", entity: "employees" },
-      { href: "/employees", label: "الموظفون", icon: "people", entity: "employees" },
-      { href: "/hr/custody", label: "العُهد", icon: "handover", entity: "custody" },
-      { href: "/hr/discipline", label: "الإنذارات والجزاءات والحوافز", icon: "alert", entity: "hr_actions" },
-      { href: "/hr/leaves", label: "الإجازات", icon: "calendar", entity: "leaves" },
-      { href: "/hr/attendance", label: "الحضور", icon: "check", entity: "leaves" },
-      { href: "/hr/evaluations", label: "التقييم والترقية", icon: "target", entity: "evaluations" },
-      { href: "/hr/advances", label: "مقدم العمولة", icon: "cash", entity: "payroll" },
-      { href: "/payroll", label: "مسيرات الرواتب", icon: "cash", entity: "payroll" },
-      { href: "/payroll/advances", label: "السلف", icon: "handover", entity: "payroll" },
-    ],
-  },
-  {
-    title: "المخزون",
-    icon: "wrench",
-    items: [
-      { href: "/products", label: "الأصناف والخدمات", icon: "list", entity: "inventory" },
-      { href: "/inventory", label: "المخزون والمستودعات", icon: "building", entity: "inventory" },
-      { href: "/inventory/docs", label: "التسويات والتحويل والجرد", icon: "exchange", entity: "inventory" },
-    ],
-  },
-  {
-    title: "المحاسبة",
-    icon: "ledger",
-    items: [
-      { href: "/journal", label: "القيود اليومية", icon: "ledger", entity: "journal_entries" },
-      { href: "/bank-accounts", label: "البنوك والصناديق", icon: "cash", entity: "accounts" },
-      { href: "/bank-accounts/reconcile", label: "التسوية البنكية", icon: "check", entity: "accounts" },
-      { href: "/fixed-assets", label: "الأصول الثابتة", icon: "building", entity: "fixed_assets" },
-      { href: "/journal/reclassify", label: "إعادة التصنيف", icon: "exchange", entity: "journal_entries" },
-      { href: "/accounts", label: "شجرة الحسابات", icon: "tree", entity: "accounts" },
-      { href: "/cost-centers", label: "مراكز التكلفة", icon: "target", entity: "cost_centers" },
-      { href: "/exchange-rates", label: "أسعار الصرف", icon: "exchange", entity: "accounts" },
-      { href: "/periods", label: "الفترات والإقفال", icon: "calendar", entity: "fiscal_periods" },
-    ],
-  },
-  {
-    title: "التقارير",
-    icon: "chart",
-    items: [
-      { href: "/reports", label: "كل التقارير", icon: "chart", entity: "financial_reports" },
-      { href: "/reports/trial-balance", label: "ميزان المراجعة", icon: "ledger", entity: "financial_reports" },
-      { href: "/reports/income", label: "قائمة الدخل", icon: "chart", entity: "financial_reports" },
-      { href: "/reports/balance-sheet", label: "المركز المالي", icon: "tree", entity: "financial_reports" },
-      { href: "/reports/ledger", label: "كشف حساب", icon: "document", entity: "financial_reports" },
-      { href: "/reports/cost-centers", label: "ربحية المركبات", icon: "truck", entity: "financial_reports" },
-      { href: "/reports/vat", label: "إقرار الضريبة", icon: "invoice", entity: "financial_reports" },
-    ],
-  },
-];
-
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
   // السائق يعمل من تطبيقه فقط
@@ -134,6 +40,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     icon: g.icon,
     items: g.items.filter((n) => !n.entity || can(user.perms, n.entity, "view")).map(({ href, label, icon }) => ({ href, label, icon })),
   })).filter((g) => g.items.length);
+  // كل شاشة يحق للمستخدم فتحها، للبحث الشامل
+  const pages: SearchPage[] = [
+    ...groups.flatMap((g) => g.items.map((i) => ({ href: i.href, label: i.label, group: g.title, keywords: NAV_KEYWORDS[i.href] }))),
+    ...EXTRA_PAGES.filter((p) => (!p.admin || user.perms.isAdmin) && (!p.entity || can(user.perms, p.entity, "view"))).map(({ href, label, group, keywords }) => ({ href, label, group, keywords })),
+  ];
 
   return (
     <div className="flex min-h-screen">
@@ -152,6 +63,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <Link href="/" className="md:hidden" aria-label="لوحة القيادة">
             <BrandMark logo={brand.logo} size={30} />
           </Link>
+          <GlobalSearch pages={pages} />
           <div className="ms-auto flex items-center gap-2 text-sm md:gap-4">
             <Link href="/account" className="flex items-center gap-2 text-gray-700 hover:text-brand-700">
               <span className="flex size-9 items-center justify-center rounded-full bg-asphalt-900 font-display font-semibold text-brand-500 ring-2 ring-brand-600/40">{user.name.trim()[0]}</span>

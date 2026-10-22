@@ -8,6 +8,7 @@ import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { MIN_PASSWORD_LENGTH } from "@/lib/password";
 import { ActionForm, SubmitButton } from "@/components/action-form";
+import { RecordHistory } from "@/components/record-history";
 import { Badge, Card, Field, Input, PageHeader, Select } from "@/components/ui";
 import { createDriverLoginAction, deleteDriverAction, removeDriverLoginAction, resetDriverPasswordAction, updateDriverAction } from "../actions";
 
@@ -153,6 +154,8 @@ export default async function DriverPage({ params }: { params: Promise<{ id: str
           )}
         </Card>
       )}
+
+      <RecordHistory entity="drivers" id={id} also={[["employees", e.id]]} />
 
       {canDelete && (
         <Card title="حذف السائق">

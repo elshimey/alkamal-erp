@@ -1,3 +1,4 @@
+import { EditLink } from "@/components/edit-link";
 import { asc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
@@ -48,7 +49,10 @@ export default async function PartiesPage() {
         {rows.length === 0 && <EmptyRow cols={6}>لا توجد جهات بعد</EmptyRow>}
         {rows.map(({ p, roles }) => (
           <tr key={p.id}>
-            <Td className="font-medium">{p.nameAr}</Td>
+            <Td className="font-medium">
+              {p.nameAr}
+              <EditLink href={`/records/parties/${p.id}`} />
+            </Td>
             <Td>
               <div className="flex flex-wrap gap-1">
                 {roles.filter(Boolean).map((r) => (

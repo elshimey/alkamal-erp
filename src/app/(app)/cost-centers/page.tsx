@@ -1,3 +1,4 @@
+import { EditLink } from "@/components/edit-link";
 import { asc } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
@@ -16,7 +17,10 @@ export default async function CostCentersPage() {
         {rows.map((c) => (
           <tr key={c.id}>
             <Td className="text-gray-500">{c.code}</Td>
-            <Td>{c.nameAr}</Td>
+            <Td>
+              {c.nameAr}
+              <EditLink href={`/records/cost_centers/${c.id}`} />
+            </Td>
             <Td>
               <Badge tone={c.type === "vehicle" ? "blue" : "gray"}>{TYPE_LABEL[c.type]}</Badge>
             </Td>

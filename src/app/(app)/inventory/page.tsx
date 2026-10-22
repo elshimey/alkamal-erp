@@ -1,3 +1,4 @@
+import { EditLink } from "@/components/edit-link";
 import Link from "next/link";
 import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
@@ -42,7 +43,10 @@ export default async function InventoryPage() {
           <article key={w.id} className="rounded-2xl border border-black/[0.06] bg-white p-5 shadow-sm">
             <div className="flex items-start justify-between">
               <div>
-                <div className="font-semibold">{w.nameAr}</div>
+                <div className="font-semibold">
+                  {w.nameAr}
+                  <EditLink href={`/records/warehouses/${w.id}`} />
+                </div>
                 <div className="ltr-nums text-xs text-gray-500">
                   {w.code}
                   {w.location && <> · {w.location}</>}
