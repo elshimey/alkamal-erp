@@ -73,7 +73,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
                 { key: "cashAccountId", label: "أو الصندوق", type: "select", options: cashes.map((a) => ({ value: String(a.id), label: a.nameAr })), width: "9rem" },
                 { key: "accountId", label: "نوع المصروف", type: "select", required: true, options: accounts, width: "13rem" },
                 { key: "vehicleId", label: "المركبة", type: "select", options: vehicles, width: "8rem" },
-                { key: "waybillId", label: "البوليصة", type: "select", options: waybills.map((w) => ({ value: String(w.id), label: `${w.number} · ${w.date}` })), width: "11rem" },
+                { key: "waybillId", label: "الشحنة", type: "select", options: waybills.map((w) => ({ value: String(w.id), label: `${w.number} · ${w.date}` })), width: "11rem" },
                 { key: "description", label: "البيان", width: "10rem" },
                 { key: "amount", label: "المبلغ قبل الضريبة", type: "number", required: true, width: "6rem" },
                 { key: "vat", label: "الضريبة", type: "number", width: "5rem", placeholder: "0" },
@@ -82,7 +82,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
               ]}
             />
             <p className="mt-2 text-xs text-gray-500">
-              اختيار البوليصة يملأ المركبة والسائق تلقائياً. {canApprove ? "تُعتمد المصروفات فور الحفظ." : "تبقى بانتظار الاعتماد حتى يعتمدها المحاسب."}
+              اختيار الشحنة يملأ المركبة والسائق تلقائياً. {canApprove ? "تُعتمد المصروفات فور الحفظ." : "تبقى بانتظار الاعتماد حتى يعتمدها المحاسب."}
             </p>
           </Card>
         )}

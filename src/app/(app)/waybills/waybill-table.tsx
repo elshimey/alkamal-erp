@@ -1,6 +1,6 @@
 "use client";
 
-// قائمة البوالص مع التحديد والإجراءات الجماعية (ورقة المراجعة): تسليم المحدد واعتماده دفعة واحدة.
+// قائمة الشحنات مع التحديد والإجراءات الجماعية (ورقة المراجعة): تسليم المحدد واعتماده دفعة واحدة.
 
 import Link from "next/link";
 import { useState, useTransition } from "react";
@@ -54,7 +54,7 @@ export function WaybillTable({
       const res = await action(kind, [...selected], reason || undefined);
       setSelected(new Set(Object.keys(res.errors).map(Number)));
       setResult({
-        ok: res.done ? `${kind === "approve" ? "اعتُمدت" : "سُلِّمت"} البوالص: ${res.done}` : undefined,
+        ok: res.done ? `${kind === "approve" ? "اعتُمدت" : "سُلِّمت"} الشحنات: ${res.done}` : undefined,
         errors: Object.keys(res.errors).length ? res.errors : undefined,
       });
     });
@@ -121,7 +121,7 @@ export function WaybillTable({
             {rows.length === 0 && (
               <tr>
                 <td colSpan={cols} className="px-4 py-10 text-center text-gray-400">
-                  لا توجد بوالص في هذا التصنيف
+                  لا توجد شحنات في هذا التصنيف
                 </td>
               </tr>
             )}

@@ -38,7 +38,7 @@ export default async function JournalPage({ searchParams }: { searchParams: Prom
 
   return (
     <>
-      <PageHeader title="القيود اليومية" description="كل قيود الدفاتر: اليدوية التي تنشئها هنا، والآلية من الفواتير والسندات والبوالص. اضغط القيد لمعاينته وطباعته.">
+      <PageHeader title="القيود اليومية" description="كل قيود الدفاتر: اليدوية التي تنشئها هنا، والآلية من الفواتير والسندات والشحنات. اضغط القيد لمعاينته وطباعته.">
         {canCreate && (
           <div className="flex flex-wrap items-center gap-2">
             <Link href="/journal/reclassify" className={btn}>

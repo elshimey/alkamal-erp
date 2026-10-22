@@ -63,7 +63,7 @@ export async function seedReferenceData(db: Db, year = new Date().getFullYear())
     .values([
       { code: "ADM", nameAr: "الإدارة العامة", type: "admin" },
       { code: "WS", nameAr: "الورشة", type: "workshop" },
-      // تكاليف بوالص الناقلين الخارجيين (لا مركبة لها من أسطولنا)
+      // تكاليف شحنات الناقلين الخارجيين (لا مركبة لها من أسطولنا)
       { code: "EXT", nameAr: "الناقلون الخارجيون", type: "other" },
     ])
     .onConflictDoNothing({ target: s.costCenters.code });

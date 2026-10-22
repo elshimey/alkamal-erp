@@ -2,7 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
 
-// خدمة القيود: كل وحدة (البوليصة، الفاتورة، السند...) تنشئ قيدها من هنا.
+// خدمة القيود: كل وحدة (الشحنة، الفاتورة، السند...) تنشئ قيدها من هنا.
 // قاعدة البيانات تتحقق من التوازن والترحيل مرة أخرى (drizzle/0001_ledger_integrity.sql).
 
 export interface LineInput {

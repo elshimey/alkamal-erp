@@ -28,7 +28,7 @@ export function accrualMonth(month: string) {
   };
 }
 
-/** البوالص المعتمدة حتى آخر الشهر التي لا تشملها فاتورة صادرة بتاريخ لا يتجاوزه. */
+/** الشحنات المعتمدة حتى آخر الشهر التي لا تشملها فاتورة صادرة بتاريخ لا يتجاوزه. */
 export async function unbilledWaybills(db: Db | Tx, monthEnd: string) {
   const rows = (await db.execute(sql`
     select w.id, w.number, w.waybill_date as date, w.customer_id, p.name_ar as customer, w.currency_code, w.amount::float8 as amount,

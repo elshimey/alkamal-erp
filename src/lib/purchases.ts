@@ -351,7 +351,7 @@ export async function createExpense(db: Db, input: ExpenseInput) {
     let vehicleId = input.vehicleId ?? null;
     if (input.waybillId) {
       const [w] = await tx.select().from(s.waybills).where(eq(s.waybills.id, input.waybillId));
-      if (!w) throw new Error("البوليصة غير موجودة");
+      if (!w) throw new Error("الشحنة غير موجودة");
       vehicleId ??= w.vehicleId;
       if (input.payer === "driver_custody") driverId ??= w.driverId;
     }
@@ -592,7 +592,7 @@ async function postPaymentTx(tx: Tx, id: number, opts: { invoiceId?: number | nu
     lines,
   });
   await tx.update(s.payments).set({ status: "posted", journalEntryId: entry.id }).where(eq(s.payments.id, id));
-  // الباقي يسدد أرصدة الجهة المسجلة من البوالص (ناقل، محطة) أو يبقى دفعة مقدمة
+  // الباقي يسدد أرصدة الجهة المسجلة من الشحنات (ناقل، محطة) أو يبقى دفعة مقدمة
   return { entry, unallocated: p.kind === "supplier" ? left : 0 };
 }
 

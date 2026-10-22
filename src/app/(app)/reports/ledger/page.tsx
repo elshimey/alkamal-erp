@@ -7,7 +7,7 @@ import { accountLedger } from "@/lib/reports";
 import { C, money, param, PeriodFilter, periodFrom, ReportHeader, RTable } from "../report-ui";
 
 const SOURCE: Record<string, { label: string; href?: (id: number) => string }> = {
-  waybill: { label: "بوليصة", href: (id) => `/waybills/${id}` },
+  waybill: { label: "شحنة", href: (id) => `/waybills/${id}` },
   sales_invoice: { label: "فاتورة", href: (id) => `/invoices/${id}` },
   receipt: { label: "سند قبض" },
   purchase_invoice: { label: "فاتورة مورد", href: (id) => `/purchases/${id}` },

@@ -39,7 +39,7 @@ export const ENTITIES = {
   violations: { label: "المخالفات", module: "fleet" },
   routes: { label: "المواقع والمسارات", module: "operations" },
   contracts: { label: "العقود والأسعار", module: "operations" },
-  waybills: { label: "البوالص", module: "operations" },
+  waybills: { label: "الشحنات", module: "operations" },
   maintenance: { label: "أوامر الصيانة وطلبات العطل", module: "maintenance" },
   sales_invoices: { label: "فواتير المبيعات", module: "sales" },
   receipts: { label: "سندات القبض", module: "sales" },
@@ -164,7 +164,7 @@ export const CORE_ROLES: CoreRole[] = [
   {
     key: "driver",
     nameAr: "السائق",
-    description: "تطبيق السائق فقط: بوالصه ومراحلها وديزلها ومصاريفه، بلاغ عطل، رصيد عهدته وعمولته. لا يرى الأسعار",
+    description: "تطبيق السائق فقط: شحناته ومراحلها وديزلها ومصاريفه، بلاغ عطل، رصيد عهدته وعمولته. لا يرى الأسعار",
     permissions: [
       ...grant(["waybills", "expenses"], ["view", "create", "update"], "own"),
       ...grant(["maintenance"], ["view", "create"], "own"),

@@ -242,7 +242,7 @@ export async function deleteTenant(sql: Sql, id: number, confirmSlug: string) {
 }
 
 /**
- * البدء من جديد: يمسح كل ما سُجّل (فواتير، قيود، بوالص، أسطول…) ويعيد الشركة كأنها جديدة،
+ * البدء من جديد: يمسح كل ما سُجّل (فواتير، قيود، شحنات، أسطول…) ويعيد الشركة كأنها جديدة،
  * مع إبقاء المستخدمين بأدوارهم الأساسية وبيانات المنشأة. يلزم كتابة رمز الشركة للتأكيد.
  */
 export async function resetTenant(sql: Sql, db: Db, schema: string, confirmSlug: string) {

@@ -12,6 +12,7 @@ import { EXPENSE_BILL_TO, EXPENSE_PAYERS, FUEL_SOURCES, TRIP_STAGES, WAYBILL_STA
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { SheetEditor } from "@/components/sheet-editor";
 import { Icon } from "@/components/icons";
+import { PrintButton } from "@/components/print-button";
 import { Badge, Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { addStage, approveOne, deleteOne, rejectOne, removeItem, revertOne, saveExpenses, saveFuel, saveWaybillDetails } from "../actions";
 
@@ -108,15 +109,22 @@ export default async function WaybillPage({ params }: { params: Promise<{ id: st
 
   return (
     <>
-      <PageHeader title={`البوليصة ${w.number}`} description={`${w.waybillDate}${showPrices && w.priceNote ? ` · السعر: ${w.priceNote}` : ""}`}>
+      {/* المستند المطبوع يحمل اسمه الرسمي في النقل: بوليصة شحن */}
+      <h1 className="mb-4 hidden text-2xl font-bold print:block">
+        بوليصة شحن رقم <span className="ltr-nums">{w.number}</span> · <span className="ltr-nums">{w.waybillDate}</span>
+      </h1>
+      <div className="print:hidden">
+      <PageHeader title={`الشحنة ${w.number}`} description={`${w.waybillDate}${showPrices && w.priceNote ? ` · السعر: ${w.priceNote}` : ""}`}>
         <div className="flex items-center gap-3">
           <Badge tone={WAYBILL_STATUS[w.status].tone}>{WAYBILL_STATUS[w.status].label}</Badge>
           {row.entry && <span className="ltr-nums text-xs text-gray-500">القيد {row.entry}</span>}
+          <PrintButton label="طباعة البوليصة" />
           <Link href="/waybills" className="text-sm text-brand-700 hover:underline">
-            ← البوالص
+            ← الشحنات
           </Link>
         </div>
       </PageHeader>
+      </div>
 
       {w.status === "rejected" && w.rejectionReason && (
         <p className="mb-5 flex items-center gap-2 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -170,7 +178,7 @@ export default async function WaybillPage({ params }: { params: Promise<{ id: st
             {canDelete && (
               <ActionForm action={deleteOne.bind(null, id)} className="flex flex-col gap-2">
                 <Input name="reason" placeholder="سبب الحذف" />
-                <SubmitButton variant="secondary">حذف البوليصة</SubmitButton>
+                <SubmitButton variant="secondary">حذف الشحنة</SubmitButton>
               </ActionForm>
             )}
             {!canApprove && !canRevert && !canDelete && <p className="text-sm text-gray-500">لا إجراءات متاحة في هذه الحالة.</p>}

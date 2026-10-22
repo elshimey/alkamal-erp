@@ -135,14 +135,14 @@ export default async function Dashboard({
       show: canOps && alerts.toApprove > 0,
       tone: "amber",
       icon: "waybill",
-      text: `${alerts.toApprove} بوليصة مسلّمة بانتظار الاعتماد`,
+      text: `${alerts.toApprove} شحنة مسلّمة بانتظار الاعتماد`,
       href: "/waybills?status=delivered",
     },
     {
       show: canSales && alerts.toInvoice > 0,
       tone: "amber",
       icon: "invoice",
-      text: `${alerts.toInvoice} بوليصة معتمدة لم تُفوتر`,
+      text: `${alerts.toInvoice} شحنة معتمدة لم تُفوتر`,
       href: "/invoices",
     },
     {
@@ -177,7 +177,7 @@ export default async function Dashboard({
       show: canOps && alerts.staleDrafts > 0,
       tone: "blue",
       icon: "waybill",
-      text: `${alerts.staleDrafts} بوليصة مسودة منذ أكثر من يومين`,
+      text: `${alerts.staleDrafts} شحنة مسودة منذ أكثر من يومين`,
       href: "/waybills?status=draft",
     },
     {
@@ -374,7 +374,7 @@ export default async function Dashboard({
             <div className="flex min-w-0 flex-col gap-6 xl:col-span-2">
               {/* الرحلات والشحنات */}
               {ops && prevOps && (
-                <Panel i={4} title="الرحلات والشحنات" icon="waybill" settings={setting("/routes", "routes")} href="/waybills" more="كل البوالص">
+                <Panel i={4} title="الرحلات والشحنات" icon="waybill" settings={setting("/routes", "routes")} href="/waybills" more="كل الشحنات">
                   <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
                     <Stat label="الرحلات" value={ops.trips} prev={prevOps.trips} />
                     <Stat label="دولية (الكويت)" value={ops.international} sub={`${pct(ops.international, ops.trips)}%`} />
@@ -455,7 +455,7 @@ export default async function Dashboard({
                   sub={period.label}
                 >
                   {vehicles.length === 0 ? (
-                    <Empty>تظهر بعد اعتماد البوالص وإصدار فواتيرها.</Empty>
+                    <Empty>تظهر بعد اعتماد الشحنات وإصدار فواتيرها.</Empty>
                   ) : (
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">

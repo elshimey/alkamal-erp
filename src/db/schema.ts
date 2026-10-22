@@ -311,7 +311,7 @@ export const journalEntries = pgTable(
 );
 
 // سطر القيد: القلب الذي تُبنى منه كل التقارير.
-// الأبعاد: جهة الاتصال، مركز التكلفة (المركبة)، السائق، البوليصة.
+// الأبعاد: جهة الاتصال، مركز التكلفة (المركبة)، السائق، الشحنة.
 export const journalLines = pgTable(
   "journal_lines",
   {
@@ -535,7 +535,7 @@ export const routes = pgTable(
     toLocationId: ref("to_location_id").notNull().references(() => locations.id),
     distanceKm: integer("distance_km"),
     isInternational: boolean("is_international").notNull().default(false),
-    // العمولة الافتراضية للسائق، وتُعدَّل على البوليصة قبل الاعتماد
+    // العمولة الافتراضية للسائق، وتُعدَّل على الشحنة قبل الاعتماد
     driverCommission: money("driver_commission").notNull().default("0"),
     estimatedDieselLiters: integer("estimated_diesel_liters"),
     isActive: boolean("is_active").notNull().default(true),
@@ -609,7 +609,7 @@ export const contractRates = pgTable(
   ],
 );
 
-// أنواع الرسوم الإضافية على البوليصة (انتظار، تحميل، تخليص، مبيت...)
+// أنواع الرسوم الإضافية على الشحنة (انتظار، تحميل، تخليص، مبيت...)
 export const chargeTypes = pgTable("charge_types", {
   id: id(),
   nameAr: text("name_ar").notNull().unique(),
@@ -618,7 +618,7 @@ export const chargeTypes = pgTable("charge_types", {
   isActive: boolean("is_active").notNull().default(true),
 });
 
-// ───────────────────────── البوليصة (الرحلة) ─────────────────────────
+// ───────────────────────── الشحنة (الرحلة) ─────────────────────────
 
 // مسودة ← في الطريق ← مُسلَّمة ← معتمدة ← مفوترة؛ أو مرفوضة (تعود للتصحيح مع السبب)
 export const waybillStatus = pgEnum("waybill_status", ["draft", "in_transit", "delivered", "approved", "invoiced", "rejected"]);
@@ -742,7 +742,7 @@ export const waybillFuel = pgTable(
 export const expenseBillTo = pgEnum("expense_bill_to", ["company", "customer"]);
 export const expensePayer = pgEnum("expense_payer", ["driver_custody", "customs_broker"]);
 
-// مصاريف الحدود والطريق على البوليصة؛ ما يكون على العميل يُسحب للفاتورة كرسوم
+// مصاريف الحدود والطريق على الشحنة؛ ما يكون على العميل يُسحب للفاتورة كرسوم
 export const waybillExpenses = pgTable(
   "waybill_expenses",
   {
@@ -810,7 +810,7 @@ export const salesInvoices = pgTable(
 
 export const invoiceLineKind = pgEnum("invoice_line_kind", ["waybill", "expense", "manual"]);
 
-// سطر لكل بوليصة (والبوليصة لا تُفوتر مرتين)، أو مصروف محمّل على العميل، أو سطر حر (مستورد من Excel)
+// سطر لكل شحنة (والشحنة لا تُفوتر مرتين)، أو مصروف محمّل على العميل، أو سطر حر (مستورد من Excel)
 export const salesInvoiceLines = pgTable(
   "sales_invoice_lines",
   {
@@ -830,7 +830,7 @@ export const salesInvoiceLines = pgTable(
     vatRate: numeric("vat_rate", { precision: 5, scale: 2 }).notNull().default("0"),
     vatAmount: money("vat_amount").notNull().default("0"),
     accountId: ref("account_id").notNull().references(() => accounts.id),
-    // مركز التكلفة = مركبة البوليصة (أو مركز الناقلين الخارجيين)
+    // مركز التكلفة = مركبة الشحنة (أو مركز الناقلين الخارجيين)
     costCenterId: ref("cost_center_id").references(() => costCenters.id),
   },
   (t) => [
@@ -1309,7 +1309,7 @@ export const payrollLines = pgTable(
     absenceDeduction: money("absence_deduction").notNull().default("0"),
     additions: money("additions").notNull().default("0"),
     deductions: money("deductions").notNull().default("0"),
-    // للعرض فقط: العمولات قُيدت لحسابه عند اعتماد البوالص
+    // للعرض فقط: العمولات قُيدت لحسابه عند اعتماد الشحنات
     commissions: money("commissions").notNull().default("0"),
     // للعرض فقط: المخالفات قُيدت على حسابه عند تسجيلها، ويخصمها المسير من الصافي
     violations: money("violations").notNull().default("0"),

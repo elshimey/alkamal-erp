@@ -145,7 +145,7 @@ export async function setContractStatus(db: Db, contractId: number, status: "act
   });
 }
 
-/** العقد الساري للعميل في تاريخ معيّن (يُقترح على البوليصة). */
+/** العقد الساري للعميل في تاريخ معيّن (يُقترح على الشحنة). */
 export async function activeContract(db: Db | Tx, customerId: number, onDate: string) {
   const [row] = await db
     .select()

@@ -31,7 +31,7 @@ export const EXPENSE_BILL_TO = {
   customer: "على العميل (يُفوتر)",
 } as const;
 
-// الحسابات التي يستخدمها قيد اعتماد البوليصة (خريطة القيود التلقائية)
+// الحسابات التي يستخدمها قيد اعتماد الشحنة (خريطة القيود التلقائية)
 export const WAYBILL_ACCOUNTS = {
   fuelCost: "5101",
   driverCommission: "5102",
