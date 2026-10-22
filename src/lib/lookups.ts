@@ -87,3 +87,13 @@ export async function employeeOptions() {
     .orderBy(asc(s.employees.nameAr));
   return rows.map((r) => ({ value: String(r.id), label: r.nameAr }));
 }
+
+/** الأصناف لسطور الشراء، مع وصفها وسعر شرائها لتعبئة السطر. */
+export async function productOptions() {
+  const rows = await db
+    .select({ id: s.products.id, code: s.products.code, nameAr: s.products.nameAr, price: s.products.purchasePrice, unit: s.products.unit })
+    .from(s.products)
+    .where(eq(s.products.isActive, true))
+    .orderBy(asc(s.products.nameAr));
+  return rows.map((p) => ({ value: String(p.id), label: `${p.code ? `${p.code} – ` : ""}${p.nameAr}`, fill: { description: p.nameAr, price: String(Number(p.price) || "") } }));
+}

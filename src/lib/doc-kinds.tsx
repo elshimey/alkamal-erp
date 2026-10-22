@@ -12,6 +12,8 @@ import { violationDoc } from "@/lib/violations";
 import { orderDoc, requestDoc } from "@/lib/maintenance";
 import { custodyDoc } from "@/lib/hr";
 import { waybillDoc } from "@/lib/waybills";
+import { orderDoc as purchaseOrderDoc } from "@/lib/purchasing";
+import { quotationDoc } from "@/lib/quotations";
 import { invoiceQrSvg } from "@/lib/zatca-qr";
 import { TaxInvoiceDocument } from "@/components/tax-invoice";
 import { PurchaseInvoiceDocument } from "@/components/purchase-invoice";
@@ -22,6 +24,7 @@ import { ViolationDocument } from "@/components/violation-document";
 import { BreakdownRequestDocument, MaintenanceOrderDocument } from "@/components/maintenance-document";
 import { CustodyDocument } from "@/components/custody-document";
 import { WaybillDocument } from "@/components/waybill-document";
+import { PurchaseOrderDocument, QuotationDocument } from "@/components/commercial-documents";
 
 type Company = Awaited<ReturnType<typeof getCompany>>;
 type Template = Awaited<ReturnType<typeof getInvoiceTemplate>>;
@@ -108,6 +111,22 @@ export const DOC_KINDS: Record<string, DocKind> = {
     render: async (id, c, t) => {
       const d = await violationDoc(db, id);
       return d && { name: d.v.number, node: <ViolationDocument company={c} doc={d} template={t} /> };
+    },
+  },
+  quotations: {
+    title: "عروض الأسعار",
+    entity: "sales_invoices",
+    render: async (id, c, t) => {
+      const d = await quotationDoc(db, id);
+      return d && { name: d.q.number, node: <QuotationDocument company={c} doc={d} template={t} /> };
+    },
+  },
+  "purchase-orders": {
+    title: "أوامر الشراء",
+    entity: "purchase_invoices",
+    render: async (id, c, t) => {
+      const d = await purchaseOrderDoc(db, id);
+      return d && { name: d.o.number, node: <PurchaseOrderDocument company={c} doc={d} template={t} /> };
     },
   },
 };
