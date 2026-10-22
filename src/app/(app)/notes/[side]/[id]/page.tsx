@@ -7,6 +7,7 @@ import { getCompany, getInvoiceTemplate } from "@/lib/company";
 import { NOTE_KINDS, NOTE_SIDES, type NoteSide } from "@/data/sales";
 import { AutoPrint, PrintButton } from "@/components/print-button";
 import { NoteDocument } from "@/components/note-document";
+import { SendDocument } from "@/components/send-document";
 
 export default async function NotePage({ params, searchParams }: { params: Promise<{ side: string; id: string }>; searchParams: Promise<{ print?: string }> }) {
   const p = await params;
@@ -23,7 +24,8 @@ export default async function NotePage({ params, searchParams }: { params: Promi
         <Link href={`/notes/${side}?open=${id}`} className="text-sm text-brand-700 hover:underline">
           ← {NOTE_SIDES[side].title}
         </Link>
-        <span className="ms-auto">
+        <span className="ms-auto flex items-center gap-2">
+          <SendDocument kind="notes" id={id} label={`إشعار رقم ${doc.n.number}`} company={company.nameAr} phone={doc.party.mobile} email={doc.party.email} />
           <PrintButton />
         </span>
       </div>

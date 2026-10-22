@@ -12,7 +12,8 @@ import { EXPENSE_BILL_TO, EXPENSE_PAYERS, FUEL_SOURCES, TRIP_STAGES, WAYBILL_STA
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { SheetEditor } from "@/components/sheet-editor";
 import { Icon } from "@/components/icons";
-import { PrintButton } from "@/components/print-button";
+import { SendDocument } from "@/components/send-document";
+import { getBrand } from "@/lib/brand";
 import { Badge, Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { addStage, approveOne, deleteOne, rejectOne, removeItem, revertOne, saveExpenses, saveFuel, saveWaybillDetails } from "../actions";
 
@@ -31,6 +32,8 @@ export default async function WaybillPage({ params }: { params: Promise<{ id: st
     .select({
       w: s.waybills,
       customer: s.parties.nameAr,
+      customerMobile: s.parties.mobile,
+      customerEmail: s.parties.email,
       contract: s.contracts.number,
       plate: s.vehicles.plate,
       driver: s.employees.nameAr,
@@ -51,7 +54,8 @@ export default async function WaybillPage({ params }: { params: Promise<{ id: st
     .where(eq(s.waybills.id, id));
   if (!row) notFound();
   if (scopeFor(user.perms, "waybills", "view") === "own" && row.driverUserId !== user.id) redirect("/?denied=1");
-  const { w } = row;
+  const { w, customerMobile, customerEmail } = row;
+  const brand = await getBrand();
 
   const station = alias(s.parties, "station");
   const broker = alias(s.parties, "broker");
@@ -109,16 +113,15 @@ export default async function WaybillPage({ params }: { params: Promise<{ id: st
 
   return (
     <>
-      {/* المستند المطبوع يحمل اسمه الرسمي في النقل: بوليصة شحن */}
-      <h1 className="mb-4 hidden text-2xl font-bold print:block">
-        بوليصة شحن رقم <span className="ltr-nums">{w.number}</span> · <span className="ltr-nums">{w.waybillDate}</span>
-      </h1>
       <div className="print:hidden">
       <PageHeader title={`الشحنة ${w.number}`} description={`${w.waybillDate}${showPrices && w.priceNote ? ` · السعر: ${w.priceNote}` : ""}`}>
         <div className="flex items-center gap-3">
           <Badge tone={WAYBILL_STATUS[w.status].tone}>{WAYBILL_STATUS[w.status].label}</Badge>
           {row.entry && <span className="ltr-nums text-xs text-gray-500">القيد {row.entry}</span>}
-          <PrintButton label="طباعة البوليصة" />
+          <Link href={`/print/waybills?ids=${w.id}`} target="_blank" className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
+            طباعة البوليصة
+          </Link>
+          <SendDocument kind="waybills" id={w.id} label={`بوليصة شحن رقم ${w.number}`} company={brand.name} phone={customerMobile} email={customerEmail} />
           <Link href="/waybills" className="text-sm text-brand-700 hover:underline">
             ← الشحنات
           </Link>

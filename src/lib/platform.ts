@@ -49,6 +49,15 @@ export async function ensurePlatform(sql: Sql, homeName = "الكمال للنق
       schema_name text not null
     );
     create index if not exists logins_schema_idx on platform.logins (schema_name);
+    create table if not exists platform.share_links (
+      token varchar(40) primary key,
+      schema_name text not null,
+      kind varchar(30) not null,
+      doc_id bigint not null,
+      created_at timestamptz not null default now(),
+      expires_at timestamptz not null
+    );
+    create index if not exists share_links_doc_idx on platform.share_links (schema_name, kind, doc_id);
     create or replace function platform.sync_login() returns trigger language plpgsql as $$
     begin
       if tg_op in ('UPDATE', 'DELETE') then

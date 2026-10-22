@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
+import { downloadBlob, nodeToPdf, safeFileName } from "@/lib/pdf-client";
 
 /** يحوّل كل مستند في الصفحة إلى PDF مستقل ويجمعها في ملف مضغوط واحد للتنزيل. */
 export function BatchExporter({ title, auto }: { title: string; auto: boolean }) {
@@ -13,35 +14,19 @@ export function BatchExporter({ title, auto }: { title: string; auto: boolean })
     if (!nodes.length) return;
     setState({ done: 0, total: nodes.length, busy: true });
     try {
-      const [{ toCanvas }, { jsPDF }, { default: JSZip }] = await Promise.all([import("html-to-image"), import("jspdf"), import("jszip")]);
+      const { default: JSZip } = await import("jszip");
       const zip = new JSZip();
       const used = new Map<string, number>();
       for (const [i, node] of nodes.entries()) {
-        const canvas = await toCanvas(node, { pixelRatio: 2, backgroundColor: "#ffffff", cacheBust: false });
-        const pdf = new jsPDF({ unit: "mm", format: "a4", compress: true });
-        const pageW = 210;
-        const pageH = 297;
-        const margin = 8;
-        const w = pageW - margin * 2;
-        const h = (canvas.height * w) / canvas.width;
-        const img = canvas.toDataURL("image/jpeg", 0.92);
-        // المستند الطويل يُقسم على أكثر من صفحة
-        for (let y = 0, page = 0; y < h; y += pageH - margin * 2, page++) {
-          if (page) pdf.addPage();
-          pdf.addImage(img, "JPEG", margin, margin - y, w, h);
-        }
-        const base = (node.dataset.doc || `doc-${i + 1}`).replace(/[\\/:*?"<>|]/g, "-");
+        const pdf = await nodeToPdf(node);
+        const base = safeFileName(node.dataset.doc || `doc-${i + 1}`);
         const n = (used.get(base) ?? 0) + 1;
         used.set(base, n);
-        zip.file(`${n > 1 ? `${base}-${n}` : base}.pdf`, pdf.output("arraybuffer"));
+        zip.file(`${n > 1 ? `${base}-${n}` : base}.pdf`, pdf);
         setState((s) => ({ ...s, done: i + 1 }));
       }
       const blob = await zip.generateAsync({ type: "blob" });
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = `${title}.zip`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      downloadBlob(blob, `${title}.zip`);
       setState((s) => ({ ...s, busy: false }));
     } catch (err) {
       setState((s) => ({ ...s, busy: false, error: err instanceof Error ? err.message : "تعذر إنشاء الملفات" }));

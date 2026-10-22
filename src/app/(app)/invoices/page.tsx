@@ -1,3 +1,4 @@
+import { SendDocument } from "@/components/send-document";
 import Link from "next/link";
 import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
@@ -201,6 +202,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
                 </div>
               </div>
               <div className="ms-auto flex flex-wrap items-center gap-2">
+                {openDoc.i.status !== "draft" && <SendDocument kind="invoices" id={openDoc.i.id} label={`فاتورة ضريبية رقم ${openDoc.i.number}`} company={company.nameAr} phone={openDoc.customer.mobile} email={openDoc.customer.email} />}
                 <Link href={`/invoices/${openDoc.i.id}?print=1`} target="_blank" className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
                   طباعة
                 </Link>

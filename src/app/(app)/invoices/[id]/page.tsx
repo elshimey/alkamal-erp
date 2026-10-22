@@ -12,6 +12,7 @@ import { INVOICE_STATUS, PAYMENT_METHODS, ZATCA_STATUS, paymentState } from "@/d
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { AutoPrint, PrintButton } from "@/components/print-button";
 import { TaxInvoiceDocument } from "@/components/tax-invoice";
+import { SendDocument } from "@/components/send-document";
 import { Badge, Card, Input, PageHeader, Table, Td } from "@/components/ui";
 import { addWaybills, issue, remove, removeLine, revert } from "../actions";
 
@@ -73,6 +74,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
             {!draft && <Badge tone={pay.tone}>{pay.label}</Badge>}
             {row.entry && <span className="ltr-nums text-xs text-gray-500">القيد {row.entry}</span>}
             <PrintButton />
+            {!draft && <SendDocument kind="invoices" id={id} label={`فاتورة ضريبية رقم ${i.number}`} company={company.nameAr} phone={customer.mobile} email={customer.email} />}
             {draft && can(user.perms, "sales_invoices", "approve") && (
               <ActionForm action={issue.bind(null, id)} resetOnSuccess={false}>
                 <SubmitButton>إصدار وترحيل القيد</SubmitButton>

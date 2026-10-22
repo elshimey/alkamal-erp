@@ -6,6 +6,7 @@ import { receiptDoc } from "@/lib/receipts";
 import { getCompany, getInvoiceTemplate } from "@/lib/company";
 import { AutoPrint, PrintButton } from "@/components/print-button";
 import { ReceiptVoucher } from "@/components/receipt-voucher";
+import { SendDocument } from "@/components/send-document";
 
 export default async function ReceiptPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ print?: string }> }) {
   await requirePermission("receipts", "view");
@@ -21,7 +22,8 @@ export default async function ReceiptPage({ params, searchParams }: { params: Pr
         <Link href={`/receipts?open=${id}`} className="text-sm text-brand-700 hover:underline">
           ← سندات العملاء
         </Link>
-        <span className="ms-auto">
+        <span className="ms-auto flex items-center gap-2">
+          <SendDocument kind="receipts" id={id} label={`سند رقم ${doc.r.number}`} company={company.nameAr} phone={doc.customer.mobile} email={doc.customer.email} />
           <PrintButton />
         </span>
       </div>

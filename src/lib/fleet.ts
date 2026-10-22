@@ -296,6 +296,22 @@ export async function expiringDocuments(db: Db, today: string, days = EXPIRY_ALE
     .leftJoin(s.vehicles, eq(s.vehicles.id, s.fleetDocuments.vehicleId))
     .leftJoin(s.drivers, eq(s.drivers.id, s.fleetDocuments.driverId))
     .leftJoin(s.employees, eq(s.employees.id, s.drivers.employeeId))
-    .where(lte(s.fleetDocuments.expiryDate, sql`${today}::date + ${days}::int`))
+    .where(
+      and(
+        lte(s.fleetDocuments.expiryDate, sql`${today}::date + ${days}::int`),
+        // الوثيقة المجدَّدة (أحدث منها لنفس المركبة أو السائق ونفس النوع) لا تُنبَّه
+        sql`not exists (select 1 from fleet_documents f2 where f2.type = ${s.fleetDocuments.type}
+          and f2.vehicle_id is not distinct from ${s.fleetDocuments.vehicleId} and f2.driver_id is not distinct from ${s.fleetDocuments.driverId}
+          and f2.expiry_date > ${s.fleetDocuments.expiryDate})`,
+        sql`coalesce(${s.vehicles.status}::text, '') <> 'sold' and coalesce(${s.drivers.status}::text, '') <> 'terminated'`,
+      ),
+    )
     .orderBy(asc(s.fleetDocuments.expiryDate));
+}
+
+/** عدد الوثائق المنتهية والقريبة من الانتهاء، لتنبيه أعلى الشاشة. */
+export async function expiryCounts(db: Db, today: string, days = EXPIRY_ALERT_DAYS) {
+  const rows = await expiringDocuments(db, today, days);
+  const expired = rows.filter((r) => r.doc.expiryDate < today).length;
+  return { expired, soon: rows.length - expired };
 }
