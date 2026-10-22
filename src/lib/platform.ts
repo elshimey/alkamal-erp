@@ -10,7 +10,7 @@ import type { Db } from "@/db";
 import * as s from "@/db/schema";
 import { HOME_SCHEMA, isSchemaName, runInTenant, schemaForSlug } from "@/db/tenant";
 import { ensureAdminUser, seedReferenceData } from "@/lib/seed";
-import { MIN_PASSWORD_LENGTH } from "@/lib/password";
+import { hashPassword, MIN_PASSWORD_LENGTH } from "@/lib/password";
 
 type Sql = ReturnType<typeof postgres>;
 export type TenantStatus = "trial" | "active" | "suspended";
@@ -64,7 +64,7 @@ export async function ensurePlatform(sql: Sql, homeName = "الكمال للنق
         delete from platform.logins where login = old.login and schema_name = tg_table_schema;
       end if;
       if tg_op in ('INSERT', 'UPDATE') then
-        if exists (select 1 from platform.logins where login = new.login) then
+        if exists (select 1 from platform.logins where lower(login) = lower(new.login)) then
           raise exception 'اسم الدخول % مستخدم في شركة أخرى؛ اختر اسماً آخر', new.login using errcode = 'unique_violation';
         end if;
         insert into platform.logins (login, schema_name) values (new.login, tg_table_schema);
@@ -118,9 +118,14 @@ export async function listTenants(sql: Sql) {
   const stats = await Promise.all(
     tenants.map(async (t) => {
       const [r] = await sql.unsafe(
-        `select count(*)::int as users, max(last_login_at) as last_login, (select count(*)::int from "${t.schema_name}".journal_entries) as entries from "${t.schema_name}".users`,
+        `select count(*)::int as users, max(last_login_at) as last_login, (select count(*)::int from "${t.schema_name}".journal_entries) as entries,
+          (select u.login from "${t.schema_name}".users u join "${t.schema_name}".user_roles ur on ur.user_id = u.id join "${t.schema_name}".roles r on r.id = ur.role_id
+            where r.key = 'admin' and u.is_active order by u.id limit 1) as admin_login,
+          (select u.name from "${t.schema_name}".users u join "${t.schema_name}".user_roles ur on ur.user_id = u.id join "${t.schema_name}".roles r on r.id = ur.role_id
+            where r.key = 'admin' and u.is_active order by u.id limit 1) as admin_name
+         from "${t.schema_name}".users`,
       );
-      return r as unknown as { users: number; last_login: Date | null; entries: number };
+      return r as unknown as { users: number; last_login: Date | null; entries: number; admin_login: string | null; admin_name: string | null };
     }),
   );
   const now = Date.now();
@@ -144,7 +149,7 @@ export async function tenantState(sql: Sql, schema: string) {
 /** مخطط شركة صاحب اسم الدخول (شركة البداية إن لم يُعرف). */
 export async function schemaForLogin(sql: Sql, login: string) {
   try {
-    const [r] = await sql<{ schema_name: string }[]>`select schema_name from platform.logins where login = ${login}`;
+    const [r] = await sql<{ schema_name: string }[]>`select schema_name from platform.logins where lower(login) = lower(${login}) limit 1`;
     return r?.schema_name ?? HOME_SCHEMA;
   } catch {
     return HOME_SCHEMA;
@@ -188,7 +193,7 @@ export async function createTenant(sql: Sql, db: Db, input: NewTenant) {
   if (input.adminLogin.trim().length < 3) throw new Error("اسم دخول مدير الشركة إلزامي");
   if (input.adminPassword.length < MIN_PASSWORD_LENGTH) throw new Error(`كلمة المرور ${MIN_PASSWORD_LENGTH} أحرف على الأقل`);
   const login = input.adminLogin.trim();
-  const [taken] = await sql`select 1 from platform.logins where login = ${login}`;
+  const [taken] = await sql`select 1 from platform.logins where lower(login) = lower(${login})`;
   if (taken) throw new Error(`اسم الدخول ${login} مستخدم في شركة أخرى`);
   const schema = schemaForSlug(slug);
   const [exists] = await sql`select 1 from platform.tenants where slug = ${slug} or schema_name = ${schema}`;
@@ -216,6 +221,20 @@ async function dropTenantSchema(sql: Sql, schema: string) {
   if (!isSchemaName(schema) || schema === HOME_SCHEMA) return;
   await sql`delete from platform.logins where schema_name = ${schema}`;
   await sql.unsafe(`drop schema if exists "${schema}" cascade`);
+}
+
+/** كلمة مرور جديدة لمدير نظام شركة (حين ينساها أو لم تصله)؛ يعيد اسم دخوله واسمه. */
+export async function resetTenantAdminPassword(sql: Sql, db: Db, id: number, password: string) {
+  if (password.length < MIN_PASSWORD_LENGTH) throw new Error(`كلمة المرور ${MIN_PASSWORD_LENGTH} أحرف على الأقل`);
+  const t = await tenantById(sql, id);
+  guardHome(t);
+  const admin = (await listTenants(sql)).find((x) => x.id === Number(t.id));
+  if (!admin?.admin_login) throw new Error("لا يوجد مدير نظام نشط في هذه الشركة");
+  const passwordHash = await hashPassword(password);
+  await runInTenant(t.schema_name, async () => {
+    await db.update(s.users).set({ passwordHash }).where(eq(s.users.login, admin.admin_login!));
+  });
+  return { company: t.name, login: admin.admin_login, name: admin.admin_name ?? "" };
 }
 
 /** تحويل التجربة إلى اشتراك فعلي: تبقى كل البيانات كما هي. */

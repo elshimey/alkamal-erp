@@ -15,6 +15,7 @@ import postgres from "postgres";
 import * as s from "@/db/schema";
 import type { Db } from "@/db";
 import { ensureAdminUser, seedReferenceData } from "@/lib/seed";
+import { verifyPassword } from "@/lib/password";
 import { createJournalEntry } from "@/lib/ledger";
 import { getCompany, getInvoiceTemplate, invoiceReadiness, saveCompany, saveInvoiceTemplate } from "@/lib/company";
 import { assignVehicle, createDriver, deleteDriver, updateDriver, createVehicle, driverOnDate, expiringDocuments, releaseAssignment } from "@/lib/fleet";
@@ -1729,6 +1730,16 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     expect(t.schema_name).toBe("t_acme");
     await expect(platform.createTenant(client, tdb, { ...base, adminLogin: "other" })).rejects.toThrow("رمز الشركة مستخدم");
     expect(await platform.schemaForLogin(client, "acme_admin")).toBe("t_acme");
+    // الجوال يكبّر الحرف الأول: اسم الدخول لا يفرّق بين الحالتين، ولا يُقبل اسم يختلف بالحالة فقط
+    expect(await platform.schemaForLogin(client, "Acme_Admin")).toBe("t_acme");
+    await expect(platform.createTenant(client, tdb, { ...base, slug: "acme2", adminLogin: "ACME_ADMIN" })).rejects.toThrow("مستخدم في شركة أخرى");
+    expect((await platform.listTenants(client)).find((x) => x.slug === "acme")).toMatchObject({ admin_login: "acme_admin", admin_name: "مدير أكمي" });
+    await expect(platform.resetTenantAdminPassword(client, tdb, t.id, "short")).rejects.toThrow("أحرف");
+    expect(await platform.resetTenantAdminPassword(client, tdb, t.id, "new-pass-2026")).toMatchObject({ login: "acme_admin" });
+    await runInTenant("t_acme", async () => {
+      const [u] = await tdb.select().from(s.users).where(eq(s.users.login, "acme_admin"));
+      expect(await verifyPassword("new-pass-2026", u.passwordHash)).toBe(true);
+    });
 
     // بيانات الشركة الجديدة منفصلة: شجرة حسابات خاصة، لا قيود، ومركبة لا تظهر عند الكمال
     const publicVehicles = (await db.select().from(s.vehicles)).length;
