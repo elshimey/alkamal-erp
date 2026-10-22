@@ -9,6 +9,7 @@ import { driverOptions, vehicleOptions } from "@/lib/lookups";
 import { cashAccounts } from "@/lib/invoices";
 import { custodyBalances, expenseAccountOptions } from "@/lib/purchases";
 import { todayRiyadh } from "@/lib/dates";
+import { listAttachments } from "@/lib/attachments";
 import { EXPENSE_PAYERS, EXPENSE_STATUS } from "@/data/purchases";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { SheetEditor } from "@/components/sheet-editor";
@@ -53,6 +54,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
       .orderBy(desc(s.expenses.expenseDate), desc(s.expenses.id))
       .limit(300),
   ]);
+  const photos = new Map((await listAttachments(db, "expenses", list.map((r) => r.e.id))).map((a) => [a.entityId, a.id]));
   const pending = list.filter((x) => x.e.status === "pending").map((x) => x.e.id);
   const canApprove = can(user.perms, "expenses", "approve");
 
@@ -135,6 +137,11 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
             </Td>
             <Td>
               {e.description}
+              {photos.has(e.id) && (
+                <a href={`/files/${photos.get(e.id)}`} target="_blank" rel="noreferrer" className="ms-1 text-xs font-medium text-brand-700 hover:underline">
+                  📷 الإيصال
+                </a>
+              )}
               {waybill && <div className="ltr-nums text-xs text-gray-400">{waybill}</div>}
             </Td>
             <Td>{plate ?? "—"}</Td>

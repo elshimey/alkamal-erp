@@ -10,6 +10,7 @@ import { requestCommissionAdvance } from "@/lib/hr";
 import { addExpense, addFuel, deleteWaybillItem } from "@/lib/waybills";
 import { todayRiyadh } from "@/lib/dates";
 import { errorMessage } from "@/lib/errors";
+import { onceForOp, saveDataUrl } from "@/lib/attachments";
 import { DRIVER_EXPENSE_ACCOUNTS, DRIVER_LANGS, type DriverExpenseType, type DriverLang } from "@/data/driver-i18n";
 import type { FormState } from "@/components/action-form";
 
@@ -21,6 +22,9 @@ const num = (d: FormData, k: string) => {
   if (!Number.isFinite(n) || n < 0) throw new Error(`رقم غير صحيح: ${v}`);
   return n;
 };
+// كل نموذج من تطبيق السائق يحمل _op؛ إن أُعيد إرساله بعد انقطاع الشبكة لا يُسجَّل مرتين
+const op = (d: FormData) => str(d, "_op") || null;
+const photo = (d: FormData) => str(d, "photo") || null;
 const STAGES: TripStage[] = ["loading", "in_transit", "border", "delivery"];
 
 export async function startTripAction(_: FormState, data: FormData): Promise<FormState> {
@@ -53,7 +57,10 @@ export async function stageAction(_: FormState, data: FormData): Promise<FormSta
   const stage = str(data, "stage") as TripStage;
   try {
     if (!STAGES.includes(stage)) throw new Error("اختر المرحلة");
-    await recordDriverStage(db, driver.id, waybillId, stage, { odometer: num(data, "odometer"), note: str(data, "note") || null, userId: user.id });
+    await onceForOp(db, op(data), async () => {
+      await recordDriverStage(db, driver.id, waybillId, stage, { odometer: num(data, "odometer"), note: str(data, "note") || null, userId: user.id });
+      await saveDataUrl(db, { entity: "waybills", entityId: waybillId, kind: stage === "delivery" ? "pod" : "odometer", dataUrl: photo(data), userId: user.id });
+    });
   } catch (err) {
     return { error: errorMessage(err) };
   }
@@ -63,19 +70,22 @@ export async function stageAction(_: FormState, data: FormData): Promise<FormSta
 }
 
 export async function fuelAction(_: FormState, data: FormData): Promise<FormState> {
-  const { driver, t } = await requireDriver();
+  const { user, driver, t } = await requireDriver();
   const waybillId = Number(str(data, "waybillId"));
   try {
     await ownTrip(db, driver.id, waybillId);
     const amount = num(data, "amount");
     if (!amount) throw new Error("المبلغ إلزامي");
-    await addFuel(db, waybillId, {
-      source: str(data, "source") === "fuel_card" ? "fuel_card" : "custody",
-      liters: num(data, "liters"),
-      amount,
-      vatAmount: num(data, "vatAmount") ?? 0,
-      odometer: num(data, "odometer"),
-      invoiceNumber: str(data, "invoiceNumber") || null,
+    await onceForOp(db, op(data), async () => {
+      await addFuel(db, waybillId, {
+        source: str(data, "source") === "fuel_card" ? "fuel_card" : "custody",
+        liters: num(data, "liters"),
+        amount,
+        vatAmount: num(data, "vatAmount") ?? 0,
+        odometer: num(data, "odometer"),
+        invoiceNumber: str(data, "invoiceNumber") || null,
+      });
+      await saveDataUrl(db, { entity: "waybills", entityId: waybillId, kind: "fuel_receipt", dataUrl: photo(data), userId: user.id });
     });
   } catch (err) {
     return { error: errorMessage(err) };
@@ -85,18 +95,21 @@ export async function fuelAction(_: FormState, data: FormData): Promise<FormStat
 }
 
 export async function tripExpenseAction(_: FormState, data: FormData): Promise<FormState> {
-  const { driver, t } = await requireDriver();
+  const { user, driver, t } = await requireDriver();
   const waybillId = Number(str(data, "waybillId"));
   try {
     await ownTrip(db, driver.id, waybillId);
     const amount = num(data, "amount");
     if (!amount) throw new Error("المبلغ إلزامي");
-    await addExpense(db, waybillId, {
-      chargeTypeId: Number(str(data, "chargeTypeId")),
-      amount,
-      currencyCode: str(data, "currencyCode") || "SAR",
-      payer: "driver_custody",
-      note: str(data, "note") || null,
+    await onceForOp(db, op(data), async () => {
+      await addExpense(db, waybillId, {
+        chargeTypeId: Number(str(data, "chargeTypeId")),
+        amount,
+        currencyCode: str(data, "currencyCode") || "SAR",
+        payer: "driver_custody",
+        note: str(data, "note") || null,
+      });
+      await saveDataUrl(db, { entity: "waybills", entityId: waybillId, kind: "expense_receipt", dataUrl: photo(data), userId: user.id });
     });
   } catch (err) {
     return { error: errorMessage(err) };
@@ -119,15 +132,18 @@ export async function expenseAction(_: FormState, data: FormData): Promise<FormS
     if (!(type in DRIVER_EXPENSE_ACCOUNTS)) throw new Error("اختر نوع المصروف");
     const amount = num(data, "amount");
     if (!amount) throw new Error("المبلغ إلزامي");
-    await createDriverExpense(db, driver, {
-      date: str(data, "date") || todayRiyadh(),
-      type,
-      description: str(data, "description") || t.expenseTypes[type],
-      amount,
-      vatAmount: num(data, "vatAmount") ?? 0,
-      vendorName: str(data, "vendorName") || null,
-      reference: str(data, "reference") || null,
-      userId: user.id,
+    await onceForOp(db, op(data), async () => {
+      const e = await createDriverExpense(db, driver, {
+        date: str(data, "date") || todayRiyadh(),
+        type,
+        description: str(data, "description") || t.expenseTypes[type],
+        amount,
+        vatAmount: num(data, "vatAmount") ?? 0,
+        vendorName: str(data, "vendorName") || null,
+        reference: str(data, "reference") || null,
+        userId: user.id,
+      });
+      await saveDataUrl(db, { entity: "expenses", entityId: e.id, kind: type === "diesel" ? "fuel_receipt" : "expense_receipt", dataUrl: photo(data), userId: user.id });
     });
   } catch (err) {
     return { error: errorMessage(err) };
@@ -141,11 +157,13 @@ export async function breakdownAction(_: FormState, data: FormData): Promise<For
   const { user, driver, t } = await requireDriver();
   try {
     const p = str(data, "priority");
-    await reportBreakdown(db, driver, {
-      date: todayRiyadh(),
-      description: str(data, "description"),
-      priority: p === "urgent" || p === "low" ? p : "normal",
-      userId: user.id,
+    await onceForOp(db, op(data), async () => {
+      await reportBreakdown(db, driver, {
+        date: todayRiyadh(),
+        description: str(data, "description"),
+        priority: p === "urgent" || p === "low" ? p : "normal",
+        userId: user.id,
+      });
     });
   } catch (err) {
     return { error: errorMessage(err) };

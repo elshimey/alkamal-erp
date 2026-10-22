@@ -1,10 +1,11 @@
 import { db } from "@/db";
 import { getDriverContext } from "@/lib/driver-auth";
 import { driverExpenses } from "@/lib/driver-app";
+import { listAttachments } from "@/lib/attachments";
 import { todayRiyadh } from "@/lib/dates";
 import { DRIVER_EXPENSE_ACCOUNTS, type DriverExpenseType } from "@/data/driver-i18n";
-import { ActionForm, SubmitButton } from "@/components/action-form";
-import { expenseAction } from "../../actions";
+import { SubmitButton } from "@/components/action-form";
+import { DriverForm, PhotoInput } from "../../offline";
 import { DField, DInput, fmt, Pill, Section } from "../../driver-ui";
 
 const TONE = { pending: "amber", approved: "green", rejected: "red" } as const;
@@ -13,12 +14,13 @@ export default async function DriverExpenses() {
   const { driver, t } = await getDriverContext();
   if (!driver) return null;
   const rows = await driverExpenses(db, driver.id);
+  const photos = new Map((await listAttachments(db, "expenses", rows.map((r) => r.e.id))).map((a) => [a.entityId, a.id]));
   const types = Object.keys(DRIVER_EXPENSE_ACCOUNTS) as DriverExpenseType[];
 
   return (
     <>
       <Section title={t.addExpense}>
-        <ActionForm action={expenseAction} className="flex flex-col gap-3">
+        <DriverForm actionKey="expense" savedOffline={t.savedOffline} className="flex flex-col gap-3">
           <DField label={t.expenseType}>
             <div className="grid grid-cols-2 gap-2">
               {types.map((k, i) => (
@@ -50,10 +52,11 @@ export default async function DriverExpenses() {
               <DInput name="date" type="date" defaultValue={todayRiyadh()} dir="ltr" />
             </DField>
           </div>
+          <PhotoInput label={t.receiptPhoto} />
           <SubmitButton pendingLabel={t.saving} className="w-full py-3 text-base">
             {t.save}
           </SubmitButton>
-        </ActionForm>
+        </DriverForm>
       </Section>
 
       <Section title={t.expensesTitle}>
@@ -62,7 +65,14 @@ export default async function DriverExpenses() {
           {rows.map(({ e }) => (
             <li key={e.id} className="flex items-center justify-between gap-3 py-2.5">
               <div className="min-w-0">
-                <div className="truncate text-sm font-medium">{e.description}</div>
+                <div className="truncate text-sm font-medium">
+                  {e.description}
+                  {photos.has(e.id) && (
+                    <a href={`/files/${photos.get(e.id)}`} target="_blank" rel="noreferrer" className="ms-1" aria-label={t.photos}>
+                      📷
+                    </a>
+                  )}
+                </div>
                 <div className="text-xs text-gray-400"><span className="ltr-nums">
                   {e.expenseDate} · {e.number}
                 </span></div>

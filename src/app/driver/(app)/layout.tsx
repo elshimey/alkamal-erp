@@ -5,6 +5,7 @@ import { BrandMark } from "@/components/logo";
 import { getBrand } from "@/lib/brand";
 import { TabBar } from "../tab-bar";
 import { driverLogout } from "../actions";
+import { OfflineSync } from "../offline";
 
 export default async function DriverLayout({ children }: { children: React.ReactNode }) {
   const { user, driver, lang, t } = await getDriverContext();
@@ -29,6 +30,7 @@ export default async function DriverLayout({ children }: { children: React.React
         </div>
       </header>
       <main className="mx-auto max-w-md px-4 pt-4">
+        {driver && <OfflineSync labels={{ offline: t.offline, pending: t.pendingSync, sending: t.sending, retry: t.sendNow, failed: t.syncFailed }} />}
         {driver ? (
           children
         ) : (

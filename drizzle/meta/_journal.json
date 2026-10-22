@@ -141,6 +141,13 @@
       "when": 1792691660114,
       "tag": "0019_audit_triggers",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1792692827178,
+      "tag": "0020_driver_photos_offline",
+      "breakpoints": true
     }
   ]
 }
