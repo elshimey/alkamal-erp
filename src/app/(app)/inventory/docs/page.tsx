@@ -8,8 +8,8 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Icon } from "@/components/icons";
 import { Badge, EmptyRow, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { postDoc, removeDoc, revertDoc, saveCounted } from "../actions";
+import { fmt } from "@/lib/format";
 
-const fmt = (v: number | string) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const qfmt = (v: number | string) => Number(v).toLocaleString("en", { maximumFractionDigits: 3 });
 
 export default async function StockDocsPage({ searchParams }: { searchParams: Promise<{ kind?: string; open?: string; from?: string; to?: string }> }) {

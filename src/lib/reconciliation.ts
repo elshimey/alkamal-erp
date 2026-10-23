@@ -2,7 +2,7 @@
 // الرصيد المطابَق = كل الحركات المؤشر عليها حتى الآن (في التسويات المكتملة وهذه التسوية)،
 // ويجب أن يساوي رصيد الكشف قبل الإكمال. ما لم يُؤشر عليه يبقى «معلقاً» للتسوية التالية.
 // المبالغ بعملة الحساب (مبلغ السطر)، لأن كشف البنك بعملته.
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
 import { CASH_PARENTS } from "@/lib/banks";
@@ -220,5 +220,3 @@ export async function listReconciliations(db: Db | Tx) {
   return rows;
 }
 
-export const reconciledLineIds = (db: Db | Tx, lineIds: number[]) =>
-  lineIds.length ? db.select({ id: s.bankReconciliationItems.journalLineId }).from(s.bankReconciliationItems).where(inArray(s.bankReconciliationItems.journalLineId, lineIds)) : Promise.resolve([]);

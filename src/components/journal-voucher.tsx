@@ -6,8 +6,8 @@ import { DEFAULT_TEMPLATE, TEMPLATE_ACCENTS, type InvoiceTemplate } from "@/lib/
 import { amountInWords } from "@/lib/tafqit";
 import { ENTRY_SOURCES } from "@/data/journal";
 import { LogoMark } from "@/components/logo";
+import { fmt } from "@/lib/format";
 
-const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 type Doc = NonNullable<Awaited<ReturnType<typeof entryDoc>>>;
 
 /** قيد اليومية كما يُطبع: السطور بالحساب ومركز التكلفة والجهة، والمجموع بالحروف. */

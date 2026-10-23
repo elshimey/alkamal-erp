@@ -4,8 +4,8 @@ import { DEFAULT_TEMPLATE, type InvoiceTemplate } from "@/lib/invoice-template";
 import { CUSTODY_KIND, CUSTODY_STATUS } from "@/data/hr";
 import { amountInWords } from "@/lib/tafqit";
 import { Facts, Frame } from "@/components/maintenance-document";
+import { fmt } from "@/lib/format";
 
-const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 type Doc = NonNullable<Awaited<ReturnType<typeof custodyDoc>>>;
 
 /** إقرار استلام عهدة: ما سُلّم للموظف وحالته، ويوقعه المستلم والمسلّم والمعتمد. */

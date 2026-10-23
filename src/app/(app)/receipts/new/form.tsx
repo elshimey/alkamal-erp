@@ -6,12 +6,12 @@ import type { ReceiptKind } from "@/lib/receipts";
 import { PAYMENT_METHODS } from "@/data/sales";
 import { Icon, Truck } from "@/components/icons";
 import { customerOpenItems, saveReceipt } from "../actions";
+import { fmt } from "@/lib/format";
 
 type Option = { value: string; label: string };
 type OpenInvoice = Awaited<ReturnType<typeof customerOpenItems>>["invoices"][number];
 type Credit = Awaited<ReturnType<typeof customerOpenItems>>["credit"];
 
-const fmt = (v: number) => v.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 const toNum = (v: string) => {
   const n = Number(v.replace(/[,\s]/g, "").replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d))));

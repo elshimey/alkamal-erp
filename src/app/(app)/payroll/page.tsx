@@ -10,8 +10,7 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Badge, Card, EmptyRow, Field, Input, PageHeader, Table, Td } from "@/components/ui";
 import { PayrollTabs } from "./tabs";
 import { createRun } from "./actions";
-
-const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+import { fmt } from "@/lib/format";
 
 export default async function PayrollPage() {
   const user = await requirePermission("payroll", "view");

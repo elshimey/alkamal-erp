@@ -21,8 +21,8 @@
     "drizzle-orm": "^0.45.4",
     "exceljs": "^4.4.0",
     "html-to-image": "^1.11.13",
-    "jspdf": "^3.0.3",
-    "jszip": "^3.10.1",
+    "jspdf": "^4.2.1",
+    "jszip": "^3.10.2",
     "next": "^16.4.2",
     "postgres": "^3.4.9",
     "qrcode": "^1.5.4",
@@ -47,5 +47,8 @@
     "typescript": "^6.0.3",
     "vitest": "^5.0.5",
     "xmldsigjs": "^2.8.8"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
   }
 }

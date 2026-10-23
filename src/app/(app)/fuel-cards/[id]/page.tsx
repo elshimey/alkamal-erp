@@ -7,8 +7,7 @@ import { statementDetail } from "@/lib/fuel-cards";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Badge, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
 import { autoMatchAction, deleteStatementAction, matchAction, postExpenseAction, statusAction, unpostAction } from "../actions";
-
-const fmt = (v: number | string) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+import { fmt } from "@/lib/format";
 
 export default async function StatementPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requirePermission("fuel_cards", "view");

@@ -2,6 +2,7 @@
 
 import { useState, type ClipboardEvent } from "react";
 import { Icon } from "./icons";
+import { fmt } from "@/lib/format";
 
 // محرر سطور مستند (طلب شراء، أمر شراء، عرض سعر): إضافة وحذف ولصق من Excel، والإجمالي مباشرة.
 // السطور تُرسل مع النموذج كنص JSON في حقل مخفي.
@@ -29,7 +30,6 @@ const toNum = (v: string | undefined) => {
   const n = Number((v ?? "").replace(/[,\s]/g, "").replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d))));
   return Number.isFinite(n) ? n : 0;
 };
-const fmt = (v: number) => v.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const cell =
   "h-9 w-full rounded-md border border-gray-200 bg-white px-2 text-sm transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none";
 

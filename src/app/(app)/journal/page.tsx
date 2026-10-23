@@ -13,10 +13,10 @@ import { DocToolbar } from "@/components/doc-toolbar";
 import { Icon } from "@/components/icons";
 import { ImportLink } from "@/components/import-link";
 import { JournalVoucher } from "@/components/journal-voucher";
-import { Badge, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
+import { Badge, EmptyRow, LimitRow, PageHeader, Table, Td } from "@/components/ui";
 import { post, remove, revert } from "./actions";
+import { fmt } from "@/lib/format";
 
-const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const SORTS = { date_desc: "الأحدث أولاً", date_asc: "الأقدم أولاً", amount_desc: "الأعلى مبلغاً", amount_asc: "الأقل مبلغاً" } as const;
 const BASE = "/journal";
 const btn = "rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50";
@@ -127,6 +127,7 @@ export default async function JournalPage({ searchParams }: { searchParams: Prom
           </div>
           <Table head={["التاريخ", "الرقم", "الوصف", "المصدر", "المرجع", "السطور", "المبلغ", "الحالة"]}>
             {list.length === 0 && <EmptyRow cols={8}>{f.q || f.status || f.from ? "لا توجد قيود بهذه الشروط" : "لا توجد قيود بعد"}</EmptyRow>}
+            <LimitRow cols={8} shown={list.length} limit={500} />
             {list.map(({ e, total, lines }) => {
               const open = listHref(BASE, sp, { open: String(e.id) });
               return (

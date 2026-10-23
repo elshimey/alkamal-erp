@@ -406,19 +406,6 @@ export async function planSchedule(db: Db | Tx, today: string) {
     .sort((a, b) => a.days - b.days);
 }
 
-/** تكلفة صيانة كل مركبة من القيود المرحّلة (5107 و5108) في فترة. */
-export async function maintenanceCostByVehicle(db: Db | Tx, from: string, to: string) {
-  const rows = (await db.execute(sql`
-    select v.id, v.plate, sum(l.debit_base - l.credit_base) as cost
-    from journal_lines l
-    join journal_entries e on e.id = l.entry_id and e.status = 'posted' and e.source_type is distinct from 'year_close'
-    join accounts a on a.id = l.account_id
-    join vehicles v on v.cost_center_id = l.cost_center_id
-    where (a.code like '5107%' or a.code like '5108%') and e.entry_date between ${from} and ${to}
-    group by v.id, v.plate order by cost desc`)) as unknown as { id: number; plate: string; cost: string }[];
-  return rows.map((r) => ({ id: Number(r.id), plate: r.plate, cost: Number(r.cost) }));
-}
-
 // ───────────── القوائم والمعاينة (بآلية الفواتير) ─────────────
 
 const like = (q: string) => `%${q.replace(/[%_\\]/g, "\\$&")}%`;

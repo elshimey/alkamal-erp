@@ -10,8 +10,7 @@ import { Badge, Card, PageHeader } from "@/components/ui";
 import { accrualPreview, listAccruals } from "@/lib/accruals";
 import { errorMessage } from "@/lib/errors";
 import { addYear, closeYearAction, postAccrualAction, reopenYearAction, togglePeriod, undoAccrualAction } from "./actions";
-
-const fmt = (v: number) => v.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+import { fmt } from "@/lib/format";
 
 const previousMonth = (today: string) => {
   const [y, m] = today.split("-").map(Number);

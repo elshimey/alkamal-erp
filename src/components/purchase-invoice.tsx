@@ -2,8 +2,7 @@ import type { purchaseInvoiceDoc } from "@/lib/purchases";
 import { PURCHASE_STATUS } from "@/data/purchases";
 import { paymentState } from "@/data/sales";
 import { Badge } from "@/components/ui";
-
-const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+import { fmt } from "@/lib/format";
 
 type Doc = NonNullable<Awaited<ReturnType<typeof purchaseInvoiceDoc>>>;
 

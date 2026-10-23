@@ -7,8 +7,7 @@ import { amountInWords } from "@/lib/tafqit";
 import { PAYMENT_METHODS, RECEIPT_KINDS } from "@/data/sales";
 import { LogoMark } from "@/components/logo";
 import { companyAddress } from "@/components/tax-invoice";
-
-const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+import { fmt } from "@/lib/format";
 
 type Doc = NonNullable<Awaited<ReturnType<typeof receiptDoc>>>;
 

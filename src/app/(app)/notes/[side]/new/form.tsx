@@ -5,12 +5,12 @@ import { useEffect, useState, useTransition, type ReactNode } from "react";
 import { NOTE_KINDS, NOTE_SIDES, type NoteKind, type NoteSide } from "@/data/sales";
 import { Icon, Truck } from "@/components/icons";
 import { invoiceLines, partyInvoices, saveNote } from "../actions";
+import { fmt } from "@/lib/format";
 
 type Option = { value: string; label: string };
 type Inv = Awaited<ReturnType<typeof partyInvoices>>[number];
 type Line = { description: string; accountId: string; costCenterId: string; amount: string; vatRate: string };
 
-const fmt = (v: number) => v.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 const toNum = (v: string) => {
   const n = Number(v.replace(/[,\s]/g, ""));

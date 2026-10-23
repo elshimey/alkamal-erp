@@ -4,10 +4,10 @@ import Link from "next/link";
 import { useState, useTransition } from "react";
 import { Field, Input, Select } from "@/components/ui";
 import { findReclassLines, reclassifyAction } from "../actions";
+import { fmt } from "@/lib/format";
 
 type Opt = { value: string; label: string };
 type Line = Awaited<ReturnType<typeof findReclassLines>>[number];
-const fmt = (v: number) => v.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export function ReclassifyForm({ accounts, centers, today }: { accounts: Opt[]; centers: Opt[]; today: string }) {
   const [filter, setFilter] = useState({ accountId: "", costCenterId: "", from: "", to: "", q: "" });

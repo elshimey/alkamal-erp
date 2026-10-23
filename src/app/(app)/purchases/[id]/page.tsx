@@ -12,8 +12,7 @@ import { PurchaseInvoiceDocument } from "@/components/purchase-invoice";
 import { Badge, Card, Input, PageHeader, Table, Td } from "@/components/ui";
 import { purchaseInvoiceDoc } from "@/lib/purchases";
 import { post, remove, revert } from "../actions";
-
-const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+import { fmt } from "@/lib/format";
 
 export default async function PurchasePage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requirePermission("purchase_invoices", "view");

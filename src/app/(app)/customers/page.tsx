@@ -10,8 +10,8 @@ import { DocToolbar } from "@/components/doc-toolbar";
 import { Icon } from "@/components/icons";
 import { ImportLink } from "@/components/import-link";
 import { Badge, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
+import { fmt } from "@/lib/format";
 
-const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const BASE = "/customers";
 const btn = "rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50";
 

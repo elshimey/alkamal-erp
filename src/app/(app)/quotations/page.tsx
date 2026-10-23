@@ -12,8 +12,8 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { LinesEditor } from "@/components/lines-editor";
 import { Badge, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { saveQuotation } from "./actions";
+import { fmt } from "@/lib/format";
 
-const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const plusDays = (d: string, n: number) => {
   const x = new Date(`${d}T00:00:00Z`);
   x.setUTCDate(x.getUTCDate() + n);

@@ -7,8 +7,7 @@ import { partyOptions } from "@/lib/lookups";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Badge, Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { newStatement } from "./actions";
-
-const fmt = (v: number) => v.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+import { fmt } from "@/lib/format";
 
 export default async function FuelCardsPage() {
   const user = await requirePermission("fuel_cards", "view");

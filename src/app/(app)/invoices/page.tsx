@@ -18,11 +18,11 @@ import { DocToolbar } from "@/components/doc-toolbar";
 import { Icon } from "@/components/icons";
 import { RowCheck, SelectAll, SelectionTotal } from "@/components/row-selection";
 import { TaxInvoiceDocument } from "@/components/tax-invoice";
-import { Badge, EmptyRow, Input, PageHeader, Table, Td } from "@/components/ui";
+import { Badge, EmptyRow, LimitRow, Input, PageHeader, Table, Td } from "@/components/ui";
 import { ImportLink } from "@/components/import-link";
 import { invoiceAll, invoiceCustomer, issue, issueMany, saveInvoiceSheet, sendToZatca } from "./actions";
+import { fmt } from "@/lib/format";
 
-const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const BASE = "/invoices";
 const ISSUE_FORM = "issue-invoices";
 const STATUSES = { draft: INVOICE_STATUS.draft.label, issued: INVOICE_STATUS.issued.label };
@@ -262,6 +262,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
             ]}
           >
             {invoices.length === 0 && <EmptyRow cols={10}>{filter.q || filter.status || filter.pay || filter.from ? "لا توجد فواتير بهذه الشروط" : "لا توجد فواتير بعد"}</EmptyRow>}
+            <LimitRow cols={10} shown={invoices.length} limit={500} />
             {invoices.map(({ i, customer }) => {
               const st = state(i);
               const open = listHref(BASE, sp, { open: String(i.id) });

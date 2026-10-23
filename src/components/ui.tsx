@@ -95,6 +95,18 @@ export function Badge({ children, tone = "gray" }: { children: ReactNode; tone?:
   return <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap ${tones[tone]}`}>{children}</span>;
 }
 
+/** سطر تنبيه حين تبلغ القائمة حدها الأقصى: الأقدم لا يظهر إلا بالتصفية. */
+export function LimitRow({ cols, shown, limit }: { cols: number; shown: number; limit: number }) {
+  if (shown < limit) return null;
+  return (
+    <tr>
+      <td colSpan={cols} className="bg-amber-50 px-4 py-3 text-center text-xs text-amber-800">
+        يظهر أحدث {limit} سجل فقط؛ استخدم البحث أو التاريخ للوصول إلى الأقدم
+      </td>
+    </tr>
+  );
+}
+
 export function EmptyRow({ cols, children }: { cols: number; children: ReactNode }) {
   return (
     <tr>
