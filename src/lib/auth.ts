@@ -109,3 +109,10 @@ export async function requireAdmin() {
   if (!user.perms.isAdmin) redirect("/?denied=1");
   return user;
 }
+
+/** مالك المنصة (صاحب الحساب الرئيسي في شركة البداية): وحده يحذف شركات العملاء نهائياً. */
+export const PLATFORM_OWNER_LOGIN = (process.env.PLATFORM_OWNER_LOGIN || "admin").toLowerCase();
+
+export async function isPlatformOwner(user: CurrentUser) {
+  return (await getTenant()).isHome && user.login.toLowerCase() === PLATFORM_OWNER_LOGIN;
+}
