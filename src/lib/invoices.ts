@@ -78,7 +78,7 @@ async function buildLines(tx: Tx, waybillIds: number[], currencyCode: string, ra
       await tx.execute<{ id: number; label: string }>(sql`
         select r.id, f.name_ar || ' ← ' || t.name_ar as label
         from routes r join locations f on f.id = r.from_location_id join locations t on t.id = r.to_location_id
-        where r.id in (select route_id from waybills where id in ${sql.raw(`(${waybillIds.join(",")})`)})`)
+        where r.id in (select route_id from waybills where id in (${sql.join(waybillIds.map((x) => sql`${x}`), sql`, `)}))`)
     ).map((r) => [Number(r.id), r.label]),
   );
   const expenses = await tx

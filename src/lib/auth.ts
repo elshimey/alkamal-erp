@@ -41,6 +41,12 @@ export async function createSession(userId: number) {
   store.set(TENANT_COOKIE, await currentSchema(), cookieOptions(new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)));
 }
 
+/** معرّف جلسة هذا الجهاز (مخزن مُجزّأً كما في الجدول). */
+export async function currentSessionId() {
+  const token = (await cookies()).get(COOKIE)?.value;
+  return token ? hashToken(token) : null;
+}
+
 export async function destroySession() {
   const store = await cookies();
   const token = store.get(COOKIE)?.value;

@@ -140,7 +140,7 @@ export async function listAccruals(db: Db) {
   const totals = (await db.execute(sql`
     select l.entry_id, sum(l.debit_base)::float8 as total from journal_lines l
     join accounts a on a.id = l.account_id and a.code = ${UNBILLED_REVENUE}
-    where l.entry_id in ${sql.raw(`(${rows.map((r) => r.id).join(",") || 0})`)} group by l.entry_id`)) as unknown as { entry_id: number; total: number }[];
+    where l.entry_id in (${sql.join((rows.length ? rows.map((r) => r.id) : [0]).map((id) => sql`${id}`), sql`, `)}) group by l.entry_id`)) as unknown as { entry_id: number; total: number }[];
   return rows.map((r) => ({
     ...r,
     month: `${Math.floor(Number(r.sourceId) / 100)}-${String(Number(r.sourceId) % 100).padStart(2, "0")}`,
