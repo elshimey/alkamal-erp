@@ -13,13 +13,13 @@ import { BulkPdfButton } from "@/components/bulk-pdf";
 import { DocToolbar } from "@/components/doc-toolbar";
 import { Icon } from "@/components/icons";
 import { NoteDocument } from "@/components/note-document";
-import { Badge, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
+import { Badge, EmptyRow, LimitRow, PageHeader, Table, Td } from "@/components/ui";
 import { post, remove, revert, sendToZatca } from "./actions";
 import { getSettings, latestDocument, noteQr, sendBlocker } from "@/lib/zatca/service";
 import { qrSvg } from "@/lib/zatca-qr";
 import { ZatcaPanel } from "@/components/zatca-panel";
+import { fmt } from "@/lib/format";
 
-const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const SORTS = { date_desc: "الأحدث أولاً", date_asc: "الأقدم أولاً", amount_desc: "الأعلى مبلغاً", amount_asc: "الأقل مبلغاً" } as const;
 const btn = "rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50";
 
@@ -131,6 +131,7 @@ export default async function NotesPage({ params, searchParams }: { params: Prom
       ) : (
         <Table head={["التاريخ", "الرقم", cfg.party, "النوع", "الفاتورة الأصلية", "السبب", "الإجمالي", "الحالة"]}>
           {list.length === 0 && <EmptyRow cols={8}>{f.q || f.status || f.from ? "لا توجد إشعارات بهذه الشروط" : "لا توجد إشعارات بعد"}</EmptyRow>}
+          <LimitRow cols={8} shown={list.length} limit={500} />
           {list.map(({ n, party, invoice }) => {
             const open = listHref(base, sp, { open: String(n.id) });
             return (

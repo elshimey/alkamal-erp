@@ -7,8 +7,7 @@ import { todayRiyadh } from "@/lib/dates";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Badge, Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { createReconciliationAction } from "./actions";
-
-const fmt = (v: number) => v.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+import { fmt } from "@/lib/format";
 
 export default async function ReconciliationsPage() {
   const user = await requirePermission("accounts", "view");

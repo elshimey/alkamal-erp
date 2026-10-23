@@ -11,8 +11,7 @@ import { SheetEditor } from "@/components/sheet-editor";
 import { Badge, Card, EmptyRow, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { PayrollTabs } from "../tabs";
 import { deleteAdvanceAction, payAdvanceAction, revertAdvanceAction, saveAdvances } from "../actions";
-
-const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+import { fmt } from "@/lib/format";
 
 export default async function AdvancesPage() {
   const user = await requirePermission("payroll", "view");

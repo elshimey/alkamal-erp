@@ -4,8 +4,7 @@ import type * as s from "@/db/schema";
 import type { CompanyProfile } from "@/lib/company";
 import { DEFAULT_TEMPLATE, TEMPLATE_ACCENTS, formatIban, type InvoiceTemplate } from "@/lib/invoice-template";
 import { LogoMark } from "@/components/logo";
-
-const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+import { fmt } from "@/lib/format";
 
 type Invoice = typeof s.salesInvoices.$inferSelect;
 type Party = typeof s.parties.$inferSelect;

@@ -71,7 +71,7 @@ export function EntryPanel({ icon, title, hint, children, open }: { icon: IconNa
   );
 }
 
-export const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+export { fmt } from "@/lib/format";
 export const YES_NO = [
   { value: "yes", label: "نعم" },
   { value: "no", label: "لا" },

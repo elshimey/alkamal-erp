@@ -7,8 +7,7 @@ import { todayRiyadh } from "@/lib/dates";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Card, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
 import { postProvision, removeProvision } from "./actions";
-
-const fmt = (v: number) => v.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+import { fmt } from "@/lib/format";
 
 export default async function EclPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const user = await requirePermission("journal_entries", "view");

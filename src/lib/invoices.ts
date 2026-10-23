@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, like, lte, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, lte, sql } from "drizzle-orm";
 import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
 import { createJournalEntryTx, deleteEntryTx, nextDocumentNumber } from "@/lib/ledger";
@@ -78,7 +78,7 @@ async function buildLines(tx: Tx, waybillIds: number[], currencyCode: string, ra
       await tx.execute<{ id: number; label: string }>(sql`
         select r.id, f.name_ar || ' ← ' || t.name_ar as label
         from routes r join locations f on f.id = r.from_location_id join locations t on t.id = r.to_location_id
-        where r.id in (select route_id from waybills where id in ${sql.raw(`(${waybillIds.join(",")})`)})`)
+        where r.id in (select route_id from waybills where id in (${sql.join(waybillIds.map((x) => sql`${x}`), sql`, `)}))`)
     ).map((r) => [Number(r.id), r.label]),
   );
   const expenses = await tx
@@ -499,16 +499,5 @@ export async function cashAccounts(db: Db | Tx) {
     .from(s.accounts)
     .where(and(eq(s.accounts.isPostable, true), eq(s.accounts.isActive, true), sql`(${s.accounts.code} like '1101%' or ${s.accounts.code} like '1102%')`))
     .orderBy(asc(s.accounts.code));
-}
-
-/** رصيد العميل المستحق من القيود المرحّلة على حساب العملاء. */
-export async function customerBalance(db: Db | Tx, customerId: number) {
-  const [row] = await db
-    .select({ balance: sql<string>`coalesce(sum(${s.journalLines.debitBase} - ${s.journalLines.creditBase}), 0)` })
-    .from(s.journalLines)
-    .innerJoin(s.journalEntries, eq(s.journalEntries.id, s.journalLines.entryId))
-    .innerJoin(s.accounts, eq(s.accounts.id, s.journalLines.accountId))
-    .where(and(eq(s.journalLines.partyId, customerId), eq(s.journalEntries.status, "posted"), like(s.accounts.code, `${SALES_ACCOUNTS.receivable}%`)));
-  return num(row.balance);
 }
 

@@ -58,6 +58,11 @@ export async function ensurePlatform(sql: Sql, homeName = "الكمال للنق
       expires_at timestamptz not null
     );
     create index if not exists share_links_doc_idx on platform.share_links (schema_name, kind, doc_id);
+    create table if not exists platform.login_failures (
+      login varchar(120) not null,
+      at timestamptz not null default now()
+    );
+    create index if not exists login_failures_idx on platform.login_failures (login, at);
     create or replace function platform.sync_login() returns trigger language plpgsql as $$
     begin
       if tg_op in ('UPDATE', 'DELETE') then
@@ -75,6 +80,25 @@ export async function ensurePlatform(sql: Sql, homeName = "الكمال للنق
   await sql`insert into platform.tenants (slug, name, schema_name, status, activated_at)
     values ('home', ${homeName}, ${HOME_SCHEMA}, 'active', now()) on conflict (schema_name) do nothing`;
   await installLoginTrigger(sql, HOME_SCHEMA);
+}
+
+export const LOGIN_MAX_FAILURES = 10;
+export const LOGIN_LOCK_MINUTES = 15;
+
+/** اسم دخول تجاوز عدد المحاولات الخاطئة في آخر 15 دقيقة: يُوقف دخوله مؤقتاً حتى بكلمة مرور صحيحة. */
+export async function loginThrottled(sql: Sql, login: string) {
+  const [r] = await sql<{ n: number }[]>`select count(*)::int as n from platform.login_failures
+    where login = lower(${login}) and at > now() - make_interval(mins => ${LOGIN_LOCK_MINUTES})`;
+  return r.n >= LOGIN_MAX_FAILURES;
+}
+
+export async function recordLoginFailure(sql: Sql, login: string) {
+  await sql`delete from platform.login_failures where at < now() - interval '1 day'`;
+  await sql`insert into platform.login_failures (login) values (lower(${login}))`;
+}
+
+export async function clearLoginFailures(sql: Sql, login: string) {
+  await sql`delete from platform.login_failures where login = lower(${login})`;
 }
 
 async function installLoginTrigger(sql: Sql, schema: string) {
@@ -246,7 +270,9 @@ export async function resetTenantAdminPassword(sql: Sql, db: Db, id: number, pas
   if (!admin?.admin_login) throw new Error("لا يوجد مدير نظام نشط في هذه الشركة");
   const passwordHash = await hashPassword(password);
   await runInTenant(t.schema_name, async () => {
-    await db.update(s.users).set({ passwordHash }).where(eq(s.users.login, admin.admin_login!));
+    const [u] = await db.update(s.users).set({ passwordHash }).where(eq(s.users.login, admin.admin_login!)).returning({ id: s.users.id });
+    // كلمة مرور جديدة تُخرج كل الأجهزة المسجّلة بالقديمة
+    if (u) await db.delete(s.sessions).where(eq(s.sessions.userId, u.id));
   });
   return { company: t.name, login: admin.admin_login, name: admin.admin_name ?? "" };
 }

@@ -19,10 +19,10 @@ import { Icon } from "@/components/icons";
 import { PurchaseInvoiceDocument } from "@/components/purchase-invoice";
 import { RowCheck, SelectAll, SelectionTotal } from "@/components/row-selection";
 import { SheetEditor } from "@/components/sheet-editor";
-import { Badge, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
+import { Badge, EmptyRow, LimitRow, PageHeader, Table, Td } from "@/components/ui";
 import { post, postMany, savePurchaseSheet, savePurchases } from "./actions";
+import { fmt } from "@/lib/format";
 
-const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const BASE = "/purchases";
 const POST_FORM = "post-purchases";
 const STATUSES = { draft: PURCHASE_STATUS.draft.label, posted: PURCHASE_STATUS.posted.label };
@@ -242,6 +242,7 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
           )}
           <Table head={[canPost && drafts.length ? <SelectAll key="all" form={POST_FORM} /> : "", "الرقم", "التاريخ", "المورد", "رقم فاتورته", "الإجمالي", "المتبقي", "الاستحقاق", "الحالة", "السداد", ""]}>
             {list.length === 0 && <EmptyRow cols={11}>{filter.q || filter.status || filter.pay || filter.from ? "لا توجد فواتير بهذه الشروط" : "لا توجد فواتير موردين بعد"}</EmptyRow>}
+            <LimitRow cols={11} shown={list.length} limit={500} />
             {list.map(({ i, supplier }) => {
               const st = state(i);
               const open = listHref(BASE, sp, { open: String(i.id) });

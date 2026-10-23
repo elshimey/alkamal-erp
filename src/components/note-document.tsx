@@ -7,8 +7,8 @@ import { amountInWords } from "@/lib/tafqit";
 import { NOTE_KINDS, NOTE_SIDES } from "@/data/sales";
 import { LogoMark } from "@/components/logo";
 import { companyAddress } from "@/components/tax-invoice";
+import { fmt } from "@/lib/format";
 
-const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 type Doc = NonNullable<Awaited<ReturnType<typeof noteDoc>>>;
 
 /** الإشعار الدائن/المدين كما يُطبع: مرجع الفاتورة الأصلية والسبب والسطور والضريبة. */

@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition, type ClipboardEvent } from "react";
 import { Icon, Truck } from "@/components/icons";
 import { saveEntry } from "./actions";
+import { fmt } from "@/lib/format";
 
 type Option = { value: string; label: string; code?: string; cc?: boolean };
 export type EntryLine = { accountId: string; description: string; costCenterId: string; partyId: string; debit: string; credit: string };
@@ -14,7 +15,6 @@ export interface EntryInitial {
   lines: EntryLine[];
 }
 
-const fmt = (v: number) => v.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 const toNum = (v: string) => {
   const n = Number(v.replace(/[,\s]/g, "").replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d))));

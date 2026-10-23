@@ -21,8 +21,8 @@ import { Badge, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/
 import { MaintenanceTabs } from "./tabs";
 import { NewOrderForm } from "./new-order-form";
 import { approveOrder, bulkOrders, completeOrder, revertOrder, saveOrderSheet } from "./actions";
+import { fmt } from "@/lib/format";
 
-const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 type Status = keyof typeof MAINTENANCE_STATUS;
 const BASE = "/maintenance";
 const BULK_FORM = "bulk-orders";

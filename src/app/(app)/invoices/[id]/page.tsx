@@ -17,8 +17,7 @@ import { TaxInvoiceDocument } from "@/components/tax-invoice";
 import { SendDocument } from "@/components/send-document";
 import { Badge, Card, Input, PageHeader, Table, Td } from "@/components/ui";
 import { addWaybills, issue, remove, removeLine, revert, sendToZatca } from "../actions";
-
-const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+import { fmt } from "@/lib/format";
 
 export default async function InvoicePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ print?: string }> }) {
   const user = await requirePermission("sales_invoices", "view");

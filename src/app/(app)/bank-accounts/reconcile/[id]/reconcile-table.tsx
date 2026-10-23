@@ -4,11 +4,11 @@ import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import type { FormState } from "@/components/action-form";
 import { saveClearedAction } from "../actions";
+import { fmt } from "@/lib/format";
 
 type Item = { id: number; date: string; entry: string; entryId: number; description: string; debit: number; credit: number; cleared: boolean };
 
 const r2 = (v: number) => Math.round(v * 100) / 100 + 0;
-const fmt = (v: number) => v.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export function ReconcileTable(props: { id: number; editable: boolean; statement: number; priorCleared: number; book: number; items: Item[] }) {
   const { id, editable, statement, priorCleared, book, items } = props;

@@ -130,6 +130,7 @@ const ar = {
   signingIn: "جارٍ الدخول…",
   wrongLogin: "اسم الدخول أو كلمة المرور غير صحيحة",
   accountLocked: "الحساب موقوف؛ تواصل مع المكتب",
+  tooManyAttempts: "محاولات خاطئة كثيرة؛ أعد المحاولة بعد 15 دقيقة",
   forgot: "نسيت كلمة المرور؟ اطلب من المكتب تغييرها.",
   chooseLanguage: "اختر لغتك",
 };
@@ -258,6 +259,7 @@ const ur: DriverDict = {
   signingIn: "لاگ اِن ہو رہا ہے…",
   wrongLogin: "یوزر نیم یا پاس ورڈ غلط ہے",
   accountLocked: "اکاؤنٹ بند ہے؛ دفتر سے رابطہ کریں",
+  tooManyAttempts: "بہت زیادہ غلط کوششیں؛ 15 منٹ بعد دوبارہ کوشش کریں",
   forgot: "پاس ورڈ بھول گئے؟ دفتر سے نیا لیں۔",
   chooseLanguage: "اپنی زبان منتخب کریں",
 };
@@ -384,6 +386,7 @@ const hi: DriverDict = {
   signingIn: "लॉगिन हो रहा है…",
   wrongLogin: "यूज़रनेम या पासवर्ड गलत है",
   accountLocked: "खाता बंद है; ऑफिस से संपर्क करें",
+  tooManyAttempts: "बहुत अधिक गलत प्रयास; 15 मिनट बाद फिर कोशिश करें",
   forgot: "पासवर्ड भूल गए? ऑफिस से नया लें।",
   chooseLanguage: "अपनी भाषा चुनें",
 };
@@ -510,6 +513,7 @@ const en: DriverDict = {
   signingIn: "Signing in…",
   wrongLogin: "Wrong username or password",
   accountLocked: "Account is locked; contact the office",
+  tooManyAttempts: "Too many wrong attempts; try again in 15 minutes",
   forgot: "Forgot your password? Ask the office to reset it.",
   chooseLanguage: "Choose your language",
 };

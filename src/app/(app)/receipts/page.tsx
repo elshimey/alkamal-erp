@@ -13,11 +13,11 @@ import { DocToolbar } from "@/components/doc-toolbar";
 import { Icon } from "@/components/icons";
 import { ImportLink } from "@/components/import-link";
 import { ReceiptVoucher } from "@/components/receipt-voucher";
-import { Badge, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
+import { Badge, EmptyRow, LimitRow, PageHeader, Table, Td } from "@/components/ui";
 import { NewReceiptMenu } from "./new-menu";
 import { post, remove, revert } from "./actions";
+import { fmt } from "@/lib/format";
 
-const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const BASE = "/receipts";
 const KINDS = Object.fromEntries(Object.entries(RECEIPT_KINDS).map(([k, v]) => [k, v.label]));
 const SORTS = { date_desc: "الأحدث أولاً", date_asc: "الأقدم أولاً", amount_desc: "الأعلى مبلغاً", amount_asc: "الأقل مبلغاً" } as const;
@@ -155,6 +155,7 @@ export default async function ReceiptsPage({ searchParams }: { searchParams: Pro
         <>
           <Table head={["التاريخ", "الرقم", "العميل", "النوع", "إلى / من", "المبلغ", "الحالة"]}>
             {list.length === 0 && <EmptyRow cols={7}>{f.q || f.status || f.from ? "لا توجد سندات بهذه الشروط" : "لا توجد سندات بعد"}</EmptyRow>}
+            <LimitRow cols={7} shown={list.length} limit={500} />
             {list.map(({ r, customer, account, invoiceCount, allocated }) => {
               const open = listHref(BASE, sp, { open: String(r.id) });
               const left = r.status === "posted" && r.kind !== "refund" ? Number(r.amount) - Number(allocated) : 0;

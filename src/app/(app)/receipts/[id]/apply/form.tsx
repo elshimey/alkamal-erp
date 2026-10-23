@@ -3,9 +3,9 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { applyAdvanceAction } from "../../actions";
+import { fmt } from "@/lib/format";
 
 type Inv = { id: number; number: string; invoiceDate: string; dueDate: string; total: string; paid: string };
-const fmt = (v: number) => v.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
 export function ApplyForm({ receiptId, remaining, invoices, today, minDate, posted }: { receiptId: number; remaining: number; invoices: Inv[]; today: string; minDate: string; posted: boolean }) {

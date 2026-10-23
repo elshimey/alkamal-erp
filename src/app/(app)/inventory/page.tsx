@@ -8,8 +8,7 @@ import { STOCK_DOC_KINDS } from "@/data/inventory";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Badge, Card, Input, PageHeader } from "@/components/ui";
 import { addWarehouse } from "./actions";
-
-const fmt = (v: number | string) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+import { fmt } from "@/lib/format";
 
 export default async function InventoryPage() {
   const user = await requirePermission("inventory", "view");

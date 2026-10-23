@@ -2,7 +2,7 @@
 // الرصيد المطابَق = كل الحركات المؤشر عليها حتى الآن (في التسويات المكتملة وهذه التسوية)،
 // ويجب أن يساوي رصيد الكشف قبل الإكمال. ما لم يُؤشر عليه يبقى «معلقاً» للتسوية التالية.
 // المبالغ بعملة الحساب (مبلغ السطر)، لأن كشف البنك بعملته.
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
 import { CASH_PARENTS } from "@/lib/banks";
@@ -119,7 +119,7 @@ export async function saveCleared(db: Db, id: number, lineIds: number[]) {
         join journal_entries e on e.id = l.entry_id and e.status = 'posted'
         left join bank_reconciliation_items i on i.journal_line_id = l.id and i.reconciliation_id <> ${id}
         where l.account_id = ${r.accountId} and e.entry_date <= ${r.statementDate} and i.id is null
-          and l.id in ${sql.raw(`(${ids.join(",")})`)}`)) as unknown as { id: number }[];
+          and l.id in (${sql.join(ids.map((x) => sql`${x}`), sql`, `)})`)) as unknown as { id: number }[];
       if (ok.length !== ids.length) throw new Error("بعض الحركات ليست على هذا الحساب، أو بعد تاريخ الكشف، أو مطابقة في تسوية أخرى");
     }
     await tx.delete(s.bankReconciliationItems).where(eq(s.bankReconciliationItems.reconciliationId, id));
@@ -220,5 +220,3 @@ export async function listReconciliations(db: Db | Tx) {
   return rows;
 }
 
-export const reconciledLineIds = (db: Db | Tx, lineIds: number[]) =>
-  lineIds.length ? db.select({ id: s.bankReconciliationItems.journalLineId }).from(s.bankReconciliationItems).where(inArray(s.bankReconciliationItems.journalLineId, lineIds)) : Promise.resolve([]);

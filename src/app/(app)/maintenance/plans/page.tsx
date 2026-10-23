@@ -18,8 +18,8 @@ import { SheetEditor } from "@/components/sheet-editor";
 import { Badge, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { MaintenanceTabs } from "../tabs";
 import { bulkPlanOrders, savePlans } from "../actions";
+import { fmt } from "@/lib/format";
 
-const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const BASE = "/maintenance/plans";
 const BULK_FORM = "plan-orders";
 const STATUSES = { overdue: "متأخرة", soon: `مستحقة خلال ${PLAN_ALERT_DAYS} أيام`, ok: "في موعدها" };

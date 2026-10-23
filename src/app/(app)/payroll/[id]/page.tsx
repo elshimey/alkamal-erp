@@ -13,8 +13,8 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { SheetEditor } from "@/components/sheet-editor";
 import { Badge, Card, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { adjustLines, approveRun, deleteRun, payRun, refreshRun, revertPay, revertRun } from "../actions";
+import { fmt } from "@/lib/format";
 
-const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const dash = (v: string | number) => (Number(v) ? fmt(v) : "—");
 
 export default async function PayrollRunPage({ params }: { params: Promise<{ id: string }> }) {

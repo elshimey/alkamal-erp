@@ -15,8 +15,7 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { SheetEditor } from "@/components/sheet-editor";
 import { Badge, Card, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
 import { post, remove, revert, savePayments } from "./actions";
-
-const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+import { fmt } from "@/lib/format";
 
 export default async function PaymentsPage() {
   const user = await requirePermission("payments", "view");

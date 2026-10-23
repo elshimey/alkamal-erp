@@ -8,7 +8,7 @@ import { listViolations, violationSummary, type ViolationFilter } from "@/lib/vi
 import { todayRiyadh } from "@/lib/dates";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { SheetEditor } from "@/components/sheet-editor";
-import { Badge, Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
+import { Badge, Card, EmptyRow, LimitRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { pay, remove, revertPayment, saveViolations } from "./actions";
 import { RowCheck, SelectAll, SelectionTotal } from "@/components/row-selection";
 import { violationDoc } from "@/lib/violations";
@@ -19,8 +19,8 @@ import { DocToolbar } from "@/components/doc-toolbar";
 import { Icon } from "@/components/icons";
 import { ImportLink } from "@/components/import-link";
 import { ViolationDocument } from "@/components/violation-document";
+import { fmt } from "@/lib/format";
 
-const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const PAY_FORM = "pay-violations";
 const STATUSES = { posted: "غير مسددة للمرور", paid: "مسددة" };
 const BASE = "/violations";
@@ -193,6 +193,7 @@ export default async function ViolationsPage({ searchParams }: { searchParams: P
 
       <Table head={[canPay && unpaid.length ? <SelectAll key="all" form={PAY_FORM} /> : "", "الرقم", "التاريخ", "المركبة", "المخالفة", "على", "المبلغ", "الخصم من الراتب", "الحالة", ""]}>
         {list.length === 0 && <EmptyRow cols={10}>لا توجد مخالفات</EmptyRow>}
+        <LimitRow cols={10} shown={list.length} limit={300} />
         {list.map(({ v, plate, driver, entry, run, runStatus }) => (
           <tr key={v.id} className={v.id === openId ? "bg-brand-50/70" : undefined}>
             <Td>{canPay && v.status === "posted" && <RowCheck form={PAY_FORM} id={v.id} amount={v.amount} />}</Td>

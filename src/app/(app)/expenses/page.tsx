@@ -15,8 +15,8 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { SheetEditor } from "@/components/sheet-editor";
 import { Badge, Card, EmptyRow, Input, PageHeader, Table, Td } from "@/components/ui";
 import { approve, approveMany, reject, remove, revert, saveExpenses } from "./actions";
+import { fmt } from "@/lib/format";
 
-const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 type Status = keyof typeof EXPENSE_STATUS;
 
 export default async function ExpensesPage({ searchParams }: { searchParams: Promise<{ status?: string }> }) {

@@ -5,8 +5,8 @@ import { DEFAULT_TEMPLATE, TEMPLATE_ACCENTS, type InvoiceTemplate } from "@/lib/
 import { BREAKDOWN_APPROVAL_LIMIT, BREAKDOWN_STATUS, LINE_KINDS, MAINTENANCE_PROVIDERS, MAINTENANCE_STATUS, MAINTENANCE_TYPES, PRIORITIES } from "@/data/maintenance";
 import { amountInWords } from "@/lib/tafqit";
 import { LogoMark } from "@/components/logo";
+import { fmt } from "@/lib/format";
 
-const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 type Order = NonNullable<Awaited<ReturnType<typeof orderDoc>>>;
 type Request = NonNullable<Awaited<ReturnType<typeof requestDoc>>>;
 

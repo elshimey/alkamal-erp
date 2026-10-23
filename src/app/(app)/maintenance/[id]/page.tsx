@@ -14,8 +14,7 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { SheetEditor } from "@/components/sheet-editor";
 import { Badge, Card, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { approveOrder, completeOrder, deleteOrder, removeLine, revertOrder, saveLines } from "../actions";
-
-const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+import { fmt } from "@/lib/format";
 
 export default async function MaintenanceOrderPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requirePermission("maintenance", "view");

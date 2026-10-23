@@ -5,11 +5,11 @@ import { useState, useTransition } from "react";
 import { Field, Input, Select } from "@/components/ui";
 import type { StockDocKind } from "@/data/inventory";
 import { saveStockDoc } from "../../actions";
+import { fmt } from "@/lib/format";
 
 type Product = { id: number; label: string; unit: string; avg: number };
 type Line = { productId: string; quantity: string; unitCost: string };
 const empty = (): Line => ({ productId: "", quantity: "", unitCost: "" });
-const fmt = (v: number) => v.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const cell = "w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm focus:border-brand-500 focus:outline-none";
 
 export function StockDocForm(props: {

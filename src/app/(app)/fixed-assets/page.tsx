@@ -10,8 +10,8 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Icon } from "@/components/icons";
 import { Badge, Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { addAsset, depreciate, dispose, removeAsset, undoDepreciation } from "./actions";
+import { fmt } from "@/lib/format";
 
-const fmt = (v: number | string) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const life = (m: number) => (m % 12 === 0 ? `${m / 12} سنوات` : `${m} شهراً`);
 
 export default async function FixedAssetsPage({ searchParams }: { searchParams: Promise<{ open?: string }> }) {

@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
-import { signIn } from "@/app/login/actions";
+import { signIn } from "@/lib/sign-in";
 import { driverForUser, setDriverLanguage } from "@/lib/driver-app";
 import { runInTenant } from "@/db/tenant";
 import { DRIVER_DICT, DRIVER_LANG_COOKIE, DRIVER_LANGS, type DriverLang } from "@/data/driver-i18n";
@@ -16,7 +16,7 @@ export async function driverLogin(lang: DriverLang, _: FormState, data: FormData
   const password = String(data.get("password") ?? "");
   if (!loginName || !password) return { error: t.wrongLogin };
   const result = await signIn(loginName, password);
-  if ("error" in result) return { error: result.locked ? t.accountLocked : t.wrongLogin };
+  if ("error" in result) return { error: result.throttled ? t.tooManyAttempts : result.locked ? t.accountLocked : t.wrongLogin };
 
   // اللغة التي اختارها في صفحة الدخول تصبح لغة تطبيقه
   await runInTenant(result.schema, async () => {

@@ -10,8 +10,8 @@ import { todayRiyadh } from "@/lib/dates";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Card, Field, Input, PageHeader, Select } from "@/components/ui";
 import { createBank, saveBankDetails } from "./actions";
+import { fmt } from "@/lib/format";
 
-const fmt = (v: number) => v.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const ibanFmt = (v: string) => v.replace(/(.{4})/g, "$1 ").trim();
 
 export default async function BankAccountsPage() {

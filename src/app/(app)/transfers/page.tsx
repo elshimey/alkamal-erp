@@ -7,8 +7,7 @@ import { todayRiyadh } from "@/lib/dates";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { removeTransfer, saveTransfer } from "./actions";
-
-const fmt = (v: string | number) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+import { fmt } from "@/lib/format";
 
 export default async function TransfersPage() {
   const user = await requirePermission("payments", "view");

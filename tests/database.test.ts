@@ -1721,6 +1721,14 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     const tdb = drizzle(tenantClient(client), { schema: s }) as unknown as Db;
     await platform.ensurePlatform(client);
     await platform.ensurePlatform(client); // التكرار آمن
+    // قفل الدخول: 10 محاولات خاطئة في 15 دقيقة توقف الاسم مؤقتاً، بلا فرق بين الحروف، والدخول الناجح يمسح العدّاد
+    for (let i = 0; i < platform.LOGIN_MAX_FAILURES - 1; i++) await platform.recordLoginFailure(client, "Guess_Me");
+    expect(await platform.loginThrottled(client, "guess_me")).toBe(false);
+    await platform.recordLoginFailure(client, "guess_me");
+    expect(await platform.loginThrottled(client, "GUESS_ME")).toBe(true);
+    expect(await platform.loginThrottled(client, "someone_else")).toBe(false);
+    await platform.clearLoginFailures(client, "guess_me");
+    expect(await platform.loginThrottled(client, "guess_me")).toBe(false);
     expect(await platform.schemaForLogin(client, "admin")).toBe("public");
 
     const base = { name: "شركة التجربة", slug: "acme", trialDays: 15, adminName: "مدير أكمي", adminLogin: "acme_admin", adminPassword: "acme-pass-1" };

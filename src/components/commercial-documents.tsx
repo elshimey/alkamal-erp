@@ -3,10 +3,10 @@ import type { orderDoc } from "@/lib/purchasing";
 import type { quotationDoc } from "@/lib/quotations";
 import { DEFAULT_TEMPLATE, type InvoiceTemplate } from "@/lib/invoice-template";
 import { Facts, Frame } from "@/components/maintenance-document";
+import { fmt } from "@/lib/format";
 
 type Order = NonNullable<Awaited<ReturnType<typeof orderDoc>>>;
 type Quote = NonNullable<Awaited<ReturnType<typeof quotationDoc>>>;
-const fmt = (v: number | string) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 function Lines({ rows, currency, totals }: { rows: { description: string; quantity: string; unitPrice: string; vatRate: string }[]; currency: string; totals: { subtotal: number; vat: number; total: number } }) {
   return (

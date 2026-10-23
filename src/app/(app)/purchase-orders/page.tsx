@@ -10,8 +10,7 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { LinesEditor } from "@/components/lines-editor";
 import { Badge, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { saveOrder } from "../purchase-requests/actions";
-
-const fmt = (n: number) => n.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+import { fmt } from "@/lib/format";
 
 export default async function PurchaseOrdersPage({ searchParams }: { searchParams: Promise<{ request?: string }> }) {
   const user = await requirePermission("purchase_invoices", "view");

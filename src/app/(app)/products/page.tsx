@@ -12,8 +12,8 @@ import { ImportLink } from "@/components/import-link";
 import { Badge, Card, EmptyRow, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { ProductFields } from "./product-fields";
 import { addProduct, editProduct } from "./actions";
+import { fmt } from "@/lib/format";
 
-const fmt = (v: number | string) => Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const qfmt = (v: number) => v.toLocaleString("en", { maximumFractionDigits: 3 });
 
 export default async function ProductsPage({ searchParams }: { searchParams: Promise<{ q?: string; kind?: string; wh?: string; low?: string; open?: string }> }) {
