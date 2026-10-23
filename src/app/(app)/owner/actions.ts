@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { baseSql, db } from "@/db";
-import { getTenant, requireAdmin } from "@/lib/auth";
+import { getTenant, isPlatformOwner, requireAdmin } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
 import { activateTenant, createTenant, deleteTenant, extendTrial, resetTenantAdminPassword, setSuspended } from "@/lib/platform";
 import type { FormState } from "@/components/action-form";
@@ -84,5 +84,7 @@ export const activateAction = async (id: number, _: FormState) => run(() => acti
 export const extendAction = async (id: number, _: FormState) => run(() => extendTrial(baseSql, id, 15), "مُدّدت التجربة 15 يوماً");
 export const suspendAction = async (id: number, suspended: boolean, _: FormState) =>
   run(() => setSuspended(baseSql, id, suspended), suspended ? "أُوقف الدخول لهذه الشركة" : "أُعيد تشغيل الشركة");
-export const deleteAction = async (id: number, _: FormState, data: FormData) =>
-  run(() => deleteTenant(baseSql, id, String(data.get("confirm") ?? "")), "حُذفت الشركة وكل بياناتها نهائياً");
+export const deleteAction = async (id: number, _: FormState, data: FormData) => {
+  if (!(await isPlatformOwner(await requireOwner()))) return { error: "حذف الشركات لمالك المنصة فقط" };
+  return run(() => deleteTenant(baseSql, id, String(data.get("confirm") ?? "")), "حُذفت الشركة وكل بياناتها نهائياً");
+};

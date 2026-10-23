@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { baseSql } from "@/db";
-import { getTenant, requireAdmin } from "@/lib/auth";
+import { getTenant, isPlatformOwner, requireAdmin } from "@/lib/auth";
 import { listTenants } from "@/lib/platform";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Badge, Card, Input, PageHeader, Table, Td } from "@/components/ui";
@@ -12,8 +12,9 @@ export const maxDuration = 60; // إنشاء شركة يبني جداولها ك
 const date = (d: Date | null) => (d ? new Date(d).toLocaleDateString("en-GB") : "—");
 
 export default async function OwnerPage() {
-  await requireAdmin();
+  const user = await requireAdmin();
   if (!(await getTenant()).isHome) redirect("/?denied=1");
+  const canDelete = await isPlatformOwner(user);
   const tenants = await listTenants(baseSql);
   const others = tenants.filter((t) => t.schema_name !== "public");
   const welcome = new Map(await Promise.all(others.filter((t) => t.admin_login).map(async (t) => [t.id, await tenantWelcome(t.name, t.admin_name ?? "", t.admin_login!)] as const)));
@@ -85,18 +86,20 @@ export default async function OwnerPage() {
                     <ActionForm action={suspendAction.bind(null, t.id, t.status !== "suspended")} resetOnSuccess={false}>
                       <SubmitButton variant="secondary" className="!px-3 !py-1.5 text-xs">{t.status === "suspended" ? "إعادة التشغيل" : "إيقاف"}</SubmitButton>
                     </ActionForm>
-                    <details className="relative">
-                      <summary className="cursor-pointer list-none rounded-lg border border-red-200 px-3 py-1.5 text-xs text-red-700 hover:bg-red-50">حذف</summary>
-                      <div className="absolute end-0 z-20 mt-2 w-64 rounded-xl border border-red-200 bg-white p-3 shadow-lg">
-                        <p className="mb-2 text-xs leading-relaxed text-gray-600">
-                          تُحذف الشركة وكل بياناتها نهائياً ولا يمكن استرجاعها. اكتب <b dir="ltr">{t.slug}</b> للتأكيد.
-                        </p>
-                        <ActionForm action={deleteAction.bind(null, t.id)} resetOnSuccess={false} className="flex gap-2">
-                          <Input name="confirm" required dir="ltr" className="!py-1.5 text-xs" />
-                          <SubmitButton className="!bg-red-600 !px-3 !py-1.5 text-xs !text-white">حذف</SubmitButton>
-                        </ActionForm>
-                      </div>
-                    </details>
+                    {canDelete && (
+                      <details className="relative">
+                        <summary className="cursor-pointer list-none rounded-lg border border-red-200 px-3 py-1.5 text-xs text-red-700 hover:bg-red-50">حذف</summary>
+                        <div className="absolute end-0 z-20 mt-2 w-64 rounded-xl border border-red-200 bg-white p-3 shadow-lg">
+                          <p className="mb-2 text-xs leading-relaxed text-gray-600">
+                            تُحذف الشركة وكل بياناتها نهائياً ولا يمكن استرجاعها. اكتب <b dir="ltr">{t.slug}</b> للتأكيد.
+                          </p>
+                          <ActionForm action={deleteAction.bind(null, t.id)} resetOnSuccess={false} className="flex gap-2">
+                            <Input name="confirm" required dir="ltr" className="!py-1.5 text-xs" />
+                            <SubmitButton className="!bg-red-600 !px-3 !py-1.5 text-xs !text-white">حذف</SubmitButton>
+                          </ActionForm>
+                        </div>
+                      </details>
+                    )}
                   </div>
                 )}
               </Td>
