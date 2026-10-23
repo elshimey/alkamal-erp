@@ -42,7 +42,9 @@ export default async function OwnerPage() {
                 </div>
               </Td>
               <Td>
-                {t.status === "active" ? (
+                {t.broken ? (
+                  <Badge tone="red">لم يكتمل إنشاؤها · احذفها أو أعد إنشاءها بنفس الرمز</Badge>
+                ) : t.status === "active" ? (
                   <Badge tone="green">{home ? "رئيسية" : "مشترك"}</Badge>
                 ) : t.status === "suspended" ? (
                   <Badge tone="red">موقوف</Badge>

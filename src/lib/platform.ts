@@ -94,16 +94,14 @@ export async function migrateSchema(sql: Sql, schema: string, dir = path.join(pr
   const done = new Set((await sql.unsafe(`select tag from "${schema}".__migrations`)).map((r) => r.tag as string));
   for (const { tag } of journal.entries) {
     if (done.has(tag)) continue;
-    const statements = readFileSync(path.join(dir, `${tag}.sql`), "utf8")
+    const body = readFileSync(path.join(dir, `${tag}.sql`), "utf8")
       .replaceAll('"public".', `"${schema}".`)
       .split("--> statement-breakpoint")
       .map((x) => x.trim())
-      .filter(Boolean);
-    await sql.begin(async (tx) => {
-      await tx.unsafe(`set local search_path to "${schema}"`);
-      for (const st of statements) await tx.unsafe(st);
-      await tx.unsafe(`insert into "${schema}".__migrations (tag) values ($1)`, [tag]);
-    });
+      .filter(Boolean)
+      .join("\n;\n");
+    // الملف كله في طلب واحد داخل معاملة: رحلة واحدة لقاعدة البيانات بدل رحلة لكل أمر (مئات الرحلات كانت تتجاوز مهلة الخادم)
+    await sql.begin((tx) => tx.unsafe(`set local search_path to "${schema}";\n${body}\n;\ninsert into "${schema}".__migrations (tag) values ('${tag.replaceAll("'", "''")}');`));
   }
 }
 
@@ -115,17 +113,24 @@ export async function migrateAllTenants(sql: Sql) {
 
 export async function listTenants(sql: Sql) {
   const tenants = await sql<Tenant[]>`select * from platform.tenants order by (schema_name = ${HOME_SCHEMA}) desc, created_at desc`;
+  type Stats = { users: number; last_login: Date | null; entries: number; admin_login: string | null; admin_name: string | null; broken?: boolean };
   const stats = await Promise.all(
-    tenants.map(async (t) => {
-      const [r] = await sql.unsafe(
-        `select count(*)::int as users, max(last_login_at) as last_login, (select count(*)::int from "${t.schema_name}".journal_entries) as entries,
-          (select u.login from "${t.schema_name}".users u join "${t.schema_name}".user_roles ur on ur.user_id = u.id join "${t.schema_name}".roles r on r.id = ur.role_id
-            where r.key = 'admin' and u.is_active order by u.id limit 1) as admin_login,
-          (select u.name from "${t.schema_name}".users u join "${t.schema_name}".user_roles ur on ur.user_id = u.id join "${t.schema_name}".roles r on r.id = ur.role_id
-            where r.key = 'admin' and u.is_active order by u.id limit 1) as admin_name
-         from "${t.schema_name}".users`,
-      );
-      return r as unknown as { users: number; last_login: Date | null; entries: number; admin_login: string | null; admin_name: string | null };
+    tenants.map(async (t): Promise<Stats> => {
+      try {
+        const [r] = await sql.unsafe(
+          `select count(*)::int as users, max(last_login_at) as last_login, (select count(*)::int from "${t.schema_name}".journal_entries) as entries,
+            (select u.login from "${t.schema_name}".users u join "${t.schema_name}".user_roles ur on ur.user_id = u.id join "${t.schema_name}".roles r on r.id = ur.role_id
+              where r.key = 'admin' and u.is_active order by u.id limit 1) as admin_login,
+            (select u.name from "${t.schema_name}".users u join "${t.schema_name}".user_roles ur on ur.user_id = u.id join "${t.schema_name}".roles r on r.id = ur.role_id
+              where r.key = 'admin' and u.is_active order by u.id limit 1) as admin_name
+           from "${t.schema_name}".users`,
+        );
+        const s = r as unknown as Stats;
+        return { ...s, broken: s.users === 0 && t.schema_name !== HOME_SCHEMA };
+      } catch {
+        // شركة لم يكتمل إنشاؤها (انقطع التجهيز): تظهر ليُعاد إنشاؤها أو تُحذف
+        return { users: 0, last_login: null, entries: 0, admin_login: null, admin_name: null, broken: true };
+      }
     }),
   );
   const now = Date.now();
@@ -167,12 +172,16 @@ const guardHome = (t: Tenant) => {
 
 /** يجهّز بيانات الشركة الأساسية (شجرة الحسابات، الأدوار، الفترات…) ومدير نظامها. */
 async function seedTenant(db: Db, schema: string, admin: { name: string; login: string; password: string }, companyName: string) {
-  await runInTenant(schema, async () => {
-    await seedReferenceData(db);
-    await ensureAdminUser(db, admin.login, admin.password);
-    await db.update(s.users).set({ name: admin.name }).where(eq(s.users.login, admin.login));
-    await db.insert(s.companyProfile).values({ nameAr: companyName }).onConflictDoNothing();
-  });
+  // معاملة واحدة: يُضبط المخطط مرة واحدة بدل معاملة لكل أمر، ولا تبقى بيانات ناقصة إن فشل شيء
+  await runInTenant(schema, () =>
+    db.transaction(async (tx) => {
+      const t = tx as unknown as Db;
+      await seedReferenceData(t);
+      await ensureAdminUser(t, admin.login, admin.password);
+      await t.update(s.users).set({ name: admin.name }).where(eq(s.users.login, admin.login));
+      await t.insert(s.companyProfile).values({ nameAr: companyName }).onConflictDoNothing();
+    }),
+  );
 }
 
 export interface NewTenant {
@@ -193,6 +202,11 @@ export async function createTenant(sql: Sql, db: Db, input: NewTenant) {
   if (input.adminLogin.trim().length < 3) throw new Error("اسم دخول مدير الشركة إلزامي");
   if (input.adminPassword.length < MIN_PASSWORD_LENGTH) throw new Error(`كلمة المرور ${MIN_PASSWORD_LENGTH} أحرف على الأقل`);
   const login = input.adminLogin.trim();
+  // محاولة سابقة انقطعت قبل اكتمالها بنفس الرمز: تُمسح بقاياها ويُعاد الإنشاء
+  for (const b of (await listTenants(sql)).filter((x) => x.broken && x.slug === slug)) {
+    await dropTenantSchema(sql, b.schema_name);
+    await sql`delete from platform.tenants where id = ${b.id}`;
+  }
   const [taken] = await sql`select 1 from platform.logins where lower(login) = lower(${login})`;
   if (taken) throw new Error(`اسم الدخول ${login} مستخدم في شركة أخرى`);
   const schema = schemaForSlug(slug);
