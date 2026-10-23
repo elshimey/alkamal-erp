@@ -1734,6 +1734,13 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     expect(await platform.schemaForLogin(client, "Acme_Admin")).toBe("t_acme");
     await expect(platform.createTenant(client, tdb, { ...base, slug: "acme2", adminLogin: "ACME_ADMIN" })).rejects.toThrow("مستخدم في شركة أخرى");
     expect((await platform.listTenants(client)).find((x) => x.slug === "acme")).toMatchObject({ admin_login: "acme_admin", admin_name: "مدير أكمي" });
+    // إنشاء انقطع في منتصفه (مهلة الخادم): يظهر «لم يكتمل»، وإعادة الإنشاء بنفس الرمز تمسح بقاياه
+    await client`insert into platform.tenants (slug, name, schema_name, status) values ('halfco', 'نصف', 't_halfco', 'active')`;
+    await client.unsafe(`create schema t_halfco`);
+    expect((await platform.listTenants(client)).find((x) => x.slug === "halfco")).toMatchObject({ broken: true });
+    const half = await platform.createTenant(client, tdb, { ...base, slug: "halfco", adminLogin: "half_admin" });
+    expect((await platform.listTenants(client)).find((x) => x.slug === "halfco")).toMatchObject({ broken: false, admin_login: "half_admin" });
+    await platform.deleteTenant(client, half.id, "halfco");
     await expect(platform.resetTenantAdminPassword(client, tdb, t.id, "short")).rejects.toThrow("أحرف");
     expect(await platform.resetTenantAdminPassword(client, tdb, t.id, "new-pass-2026")).toMatchObject({ login: "acme_admin" });
     await runInTenant("t_acme", async () => {
@@ -1795,7 +1802,7 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     await platform.deleteTenant(client, t.id, "acme");
     expect(await client`select 1 from pg_namespace where nspname = 't_acme'`).toHaveLength(0);
     expect(await platform.schemaForLogin(client, "acme_admin")).toBe("public");
-  });
+  }, 20_000);
 
   it("يعدّل السائق ويحذفه ويربط حسابه ويدير دخوله", async () => {
     const d = await createDriver(db, { nameAr: "سائق للتعديل" });
