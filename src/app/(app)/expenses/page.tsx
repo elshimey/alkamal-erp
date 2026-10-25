@@ -71,10 +71,10 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
               columns={[
                 { key: "date", label: "التاريخ", type: "date", required: true, placeholder: today },
                 { key: "payer", label: "الدافع", type: "select", required: true, options: Object.entries(EXPENSE_PAYERS).map(([value, label]) => ({ value, label })), width: "8rem" },
-                { key: "driverId", label: "السائق", type: "select", options: drivers, width: "9rem" },
+                { key: "driverId", label: "السائق", type: "select", options: drivers, width: "9rem", create: "driver" },
                 { key: "cashAccountId", label: "أو الصندوق", type: "select", options: cashes.map((a) => ({ value: String(a.id), label: a.nameAr })), width: "9rem" },
                 { key: "accountId", label: "نوع المصروف", type: "select", required: true, options: accounts, width: "13rem" },
-                { key: "vehicleId", label: "المركبة", type: "select", options: vehicles, width: "8rem" },
+                { key: "vehicleId", label: "المركبة", type: "select", options: vehicles, width: "8rem", create: "vehicle" },
                 { key: "waybillId", label: "الشحنة", type: "select", options: waybills.map((w) => ({ value: String(w.id), label: `${w.number} · ${w.date}` })), width: "11rem" },
                 { key: "description", label: "البيان", width: "10rem" },
                 { key: "amount", label: "المبلغ قبل الضريبة", type: "number", required: true, width: "6rem" },

@@ -1,4 +1,5 @@
 import { db } from "@/db";
+import { ComboField } from "@/components/combo-box";
 import { vehicleOptions } from "@/lib/lookups";
 import { cashAccounts } from "@/lib/invoices";
 import { supplierOptions } from "@/lib/purchases";
@@ -26,14 +27,7 @@ export async function NewOrderForm({ sp }: { sp: { vehicle?: string; request?: s
               <input type="hidden" name="breakdownRequestId" value={sp.request ?? ""} />
               <input type="hidden" name="planId" value={sp.plan ?? ""} />
               <Field label="المركبة">
-                <Select name="vehicleId" defaultValue={sp.vehicle ?? ""} required>
-                  <option value="">اختر</option>
-                  {vehicles.map((v) => (
-                    <option key={v.value} value={v.value}>
-                      {v.label}
-                    </option>
-                  ))}
-                </Select>
+                <ComboField name="vehicleId" options={vehicles} create="vehicle" defaultValue={sp.vehicle ?? ""} required />
               </Field>
               <Field label="التاريخ">
                 <Input name="orderDate" type="date" defaultValue={todayRiyadh()} />
@@ -57,14 +51,7 @@ export async function NewOrderForm({ sp }: { sp: { vehicle?: string; request?: s
                 </Select>
               </Field>
               <Field label="الورشة / المورد" hint="للجهة الخارجية: تصبح دائنة بقيمة الأمر">
-                <Select name="supplierId" defaultValue="">
-                  <option value="">—</option>
-                  {suppliers.map((v) => (
-                    <option key={v.value} value={v.value}>
-                      {v.label}
-                    </option>
-                  ))}
-                </Select>
+                <ComboField name="supplierId" options={suppliers} create="workshop" placeholder="ابحث عن الورشة أو المورد…" />
               </Field>
               <Field label="رقم فاتورة الورشة">
                 <Input name="supplierInvoiceNo" className="ltr-nums" />

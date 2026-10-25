@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ComboField } from "@/components/combo-box";
 import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
@@ -41,16 +42,7 @@ export default async function PurchaseOrdersPage({ searchParams }: { searchParam
           <ActionForm action={saveOrder} className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {requestId && <input type="hidden" name="requestId" value={requestId} />}
             <Field label="المورد">
-              <Select name="supplierId" required defaultValue="">
-                <option value="" disabled>
-                  اختر المورد
-                </option>
-                {suppliers.map((p) => (
-                  <option key={p.value} value={p.value}>
-                    {p.label}
-                  </option>
-                ))}
-              </Select>
+              <ComboField name="supplierId" options={suppliers} create="supplier" required />
             </Field>
             <Field label="التاريخ">
               <Input name="date" type="date" required defaultValue={todayRiyadh()} />
@@ -60,14 +52,7 @@ export default async function PurchaseOrdersPage({ searchParams }: { searchParam
             </Field>
             {!requestId && (
               <Field label="للمركبة" hint="اختياري">
-                <Select name="vehicleId" defaultValue="">
-                  <option value="">—</option>
-                  {vehicles.map((v) => (
-                    <option key={v.value} value={v.value}>
-                      {v.label}
-                    </option>
-                  ))}
-                </Select>
+                <ComboField name="vehicleId" options={vehicles} create="vehicle" />
               </Field>
             )}
             <Field label="ملاحظات">
@@ -78,7 +63,7 @@ export default async function PurchaseOrdersPage({ searchParams }: { searchParam
                 initial={initial}
                 totals={{ qty: "quantity", price: "price", vat: "vatRate" }}
                 columns={[
-                  { key: "productId", label: "الصنف (للمخزون)", type: "select", width: "14rem", options: products, placeholder: "—" },
+                  { key: "productId", label: "الصنف (للمخزون)", type: "select", width: "14rem", options: products, placeholder: "—", create: "product" },
                   { key: "accountId", label: "أو حساب المصروف", type: "select", width: "13rem", options: accounts, placeholder: "—" },
                   { key: "description", label: "الوصف" },
                   { key: "quantity", label: "الكمية", type: "number", width: "6rem", defaultValue: "1" },

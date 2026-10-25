@@ -544,6 +544,8 @@ export const locations = pgTable(
     // رمز الدولة (SA، KW) للدولة، ويُورَّث للمدن والمواقع لمعرفة الرحلة الدولية
     countryCode: varchar("country_code", { length: 2 }).notNull(),
     isBorderCrossing: boolean("is_border_crossing").notNull().default(false),
+    // مدينة أُضيفت من داخل مستند دون حفظها للاستخدام لاحقاً: تبقى على المستند وتختفي من القوائم
+    isActive: boolean("is_active").notNull().default(true),
     createdAt: createdAt(),
   },
   (t) => [

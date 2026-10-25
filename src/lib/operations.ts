@@ -104,7 +104,7 @@ export async function createRoute(
 // ───────────── العقود ─────────────
 
 export async function createContract(
-  db: Db,
+  db: Db | Tx,
   input: { customerId: number; number: string; fromDate: string; toDate: string; currencyCode?: string; creditLimit?: number | null; paymentTermsDays?: number; notes?: string | null },
 ) {
   if (input.toDate < input.fromDate) throw new Error("تاريخ نهاية العقد قبل بدايته");

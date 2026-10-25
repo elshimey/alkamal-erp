@@ -68,15 +68,6 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
             <span className="ms-auto text-xs text-gray-500 group-open:hidden">فتح</span>
           </summary>
           <div className="px-5 pb-4">
-            {suppliers.length === 0 ? (
-              <p className="text-sm text-gray-500">
-                أضف الموردين والورش من{" "}
-                <Link href="/parties" className="text-brand-700 underline">
-                  جهات الاتصال
-                </Link>{" "}
-                أولاً.
-              </p>
-            ) : (
               <>
                 <SheetEditor
                   templateName="فواتير الموردين"
@@ -84,13 +75,13 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
                   initialRows={4}
                   columns={[
                     { key: "date", label: "التاريخ", type: "date", required: true, placeholder: today },
-                    { key: "supplierId", label: "المورد", type: "select", required: true, options: suppliers, width: "11rem" },
+                    { key: "supplierId", label: "المورد", type: "select", required: true, options: suppliers, width: "11rem", create: "supplier" },
                     { key: "supplierInvoiceNo", label: "رقم فاتورته", required: true, ltr: true, width: "7rem" },
-                    { key: "productId", label: "الصنف", type: "select", options: products, width: "11rem" },
+                    { key: "productId", label: "الصنف", type: "select", options: products, width: "11rem", create: "product" },
                     { key: "warehouseId", label: "المستودع", type: "select", options: warehouses, width: "8rem" },
                     { key: "quantity", label: "الكمية", type: "number", width: "5rem" },
                     { key: "accountId", label: "الحساب", type: "select", options: accounts, width: "14rem", placeholder: "حساب الصنف" },
-                    { key: "vehicleId", label: "المركبة", type: "select", options: vehicles, width: "8rem" },
+                    { key: "vehicleId", label: "المركبة", type: "select", options: vehicles, width: "8rem", create: "vehicle" },
                     { key: "description", label: "البيان", width: "12rem" },
                     { key: "amount", label: "المبلغ قبل الضريبة", type: "number", required: true, width: "7rem" },
                     { key: "vat", label: "الضريبة", type: "select", options: [{ value: "15", label: "15%" }, { value: "0", label: "بدون" }], width: "5rem", placeholder: "15%" },
@@ -106,7 +97,6 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
                   .
                 </p>
               </>
-            )}
           </div>
         </details>
       )}

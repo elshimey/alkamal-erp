@@ -3,6 +3,8 @@
 import { useState, type ClipboardEvent } from "react";
 import { Icon } from "./icons";
 import { fmt } from "@/lib/format";
+import type { QuickKind } from "@/lib/quick-add-types";
+import { ComboBox, useCreatedOptions } from "./combo-box";
 
 // محرر سطور مستند (طلب شراء، أمر شراء، عرض سعر): إضافة وحذف ولصق من Excel، والإجمالي مباشرة.
 // السطور تُرسل مع النموذج كنص JSON في حقل مخفي.
@@ -23,6 +25,8 @@ export interface LineColumn {
   required?: boolean;
   // القيمة الأولية في السطر الجديد (مثل نسبة الضريبة 15)
   defaultValue?: string;
+  // زر «+ إضافة» في القائمة (مسار، صنف…)
+  create?: QuickKind;
 }
 type Row = Record<string, string>;
 
@@ -34,7 +38,7 @@ const cell =
   "h-9 w-full rounded-md border border-gray-200 bg-white px-2 text-sm transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none";
 
 export function LinesEditor({
-  columns,
+  columns: baseColumns,
   initial,
   name = "lines",
   totals,
@@ -47,17 +51,19 @@ export function LinesEditor({
   totals?: { qty: string; price: string; vat?: string };
   minRows?: number;
 }) {
+  const withCreated = useCreatedOptions();
+  const columns = baseColumns.map((c) => (c.create ? { ...c, options: withCreated(c.create, c.options) } : c));
   const empty = (): Row => Object.fromEntries(columns.map((c) => [c.key, c.defaultValue ?? (c.type === "select" && c.options?.length === 1 ? c.options[0].value : "")]));
   const [rows, setRows] = useState<Row[]>(() => {
     const base = initial?.length ? initial : [];
     return [...base, ...Array.from({ length: Math.max(0, minRows - base.length) }, empty)];
   });
-  const set = (n: number, key: string, value: string) =>
+  const set = (n: number, key: string, value: string, picked?: Record<string, string>) =>
     setRows((prev) =>
       prev.map((r, i) => {
         if (i !== n) return r;
         const col = columns.find((c) => c.key === key);
-        const fill = col?.options?.find((o) => o.value === value)?.fill ?? {};
+        const fill = picked ?? col?.options?.find((o) => o.value === value)?.fill ?? {};
         // التعبئة لا تكتب فوق ما أدخله المستخدم
         const patch = Object.fromEntries(Object.entries(fill).filter(([k]) => !r[k]?.trim()));
         return { ...r, ...patch, [key]: value };
@@ -72,6 +78,7 @@ export function LinesEditor({
   const vat = totals?.vat ? rows.reduce((t, r) => t + (lineTotal(r) * toNum(r[totals.vat!])) / 100, 0) : 0;
 
   const onPaste = (n: number, start: number) => (e: ClipboardEvent<HTMLElement>) => {
+    if (!e.currentTarget.contains(e.target as Node)) return;
     const text = e.clipboardData.getData("text");
     if (!text.includes("\t") && !text.includes("\n")) return;
     e.preventDefault();
@@ -117,14 +124,7 @@ export function LinesEditor({
                 {columns.map((c, ci) => (
                   <td key={c.key} className="px-1 py-1" onPaste={onPaste(n, ci)}>
                     {c.type === "select" ? (
-                      <select value={r[c.key] ?? ""} onChange={(e) => set(n, c.key, e.target.value)} className={cell}>
-                        <option value="">{c.placeholder ?? "—"}</option>
-                        {c.options?.map((o) => (
-                          <option key={o.value} value={o.value}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
+                      <ComboBox value={r[c.key] ?? ""} options={c.options ?? []} create={c.create} placeholder={c.placeholder ?? "ابحث…"} onChange={(v, o) => set(n, c.key, v, o?.fill)} className={cell} />
                     ) : (
                       <input
                         value={r[c.key] ?? ""}

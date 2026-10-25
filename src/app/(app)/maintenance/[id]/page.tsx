@@ -139,7 +139,7 @@ export default async function MaintenanceOrderPage({ params }: { params: Promise
               initialRows={3}
               columns={[
                 { key: "kind", label: "النوع", type: "select", required: true, options: Object.entries(LINE_KINDS).map(([value, label]) => ({ value, label })), width: "8rem" },
-                { key: "productId", label: "الصنف", type: "select", options: products.map((p) => ({ value: String(p.id), label: `${p.code} ${p.nameAr}` })), width: "12rem" },
+                { key: "productId", label: "الصنف", type: "select", options: products.map((p) => ({ value: String(p.id), label: `${p.code} ${p.nameAr}` })), width: "12rem", create: "product" },
                 { key: "warehouseId", label: "يُصرف من", type: "select", options: warehouses.map((w) => ({ value: String(w.id), label: w.nameAr })), width: "9rem" },
                 { key: "description", label: "الوصف", width: "14rem" },
                 { key: "quantity", label: "الكمية", type: "number", width: "5rem", placeholder: "1" },

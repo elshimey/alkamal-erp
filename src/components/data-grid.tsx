@@ -6,6 +6,8 @@
 
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from "react";
 import { parseDelimited } from "@/lib/sheet";
+import type { QuickKind } from "@/lib/quick-add-types";
+import { ComboBox, useCreatedOptions } from "./combo-box";
 
 export interface GridColumn {
   key: string;
@@ -17,6 +19,10 @@ export interface GridColumn {
   width?: string;
   placeholder?: string;
   readOnly?: boolean;
+  /** زر «+ إضافة» في القائمة يفتح نافذة إضافة سريعة من هذا النوع */
+  create?: QuickKind;
+  /** نص حر مع اقتراحات أثناء الكتابة (مثل المرسل والمستلم من جهات الاتصال) */
+  suggest?: string[];
 }
 
 export type GridRow = Record<string, string>;
@@ -58,7 +64,7 @@ export function useGridHistory(initial: () => GridRow[]) {
 }
 
 export function DataGrid({
-  columns,
+  columns: baseColumns,
   rows,
   onChange,
   onUndo,
@@ -84,6 +90,10 @@ export function DataGrid({
   /** عمود ثابت إضافي قبل الأعمدة (مثل زر فتح السجل) */
   startColumn?: { label: string; render: (r: number) => ReactNode };
 }) {
+  const withCreated = useCreatedOptions();
+  // ما أُضيف من نافذة الإضافة السريعة يدخل خيارات العمود (للصق والنسخ وبقية الصفوف)
+  const columns = baseColumns.map((c) => (c.create ? { ...c, options: withCreated(c.create, c.options) } : c));
+  const suggestions = new Map(baseColumns.filter((c) => c.suggest).map((c) => [c.key, c.suggest!.map((v) => ({ value: v, label: v }))]));
   const tableRef = useRef<HTMLTableElement>(null);
   const [anchor, setAnchor] = useState<Cell | null>(null);
   const [focus, setFocus] = useState<Cell | null>(null);
@@ -115,7 +125,7 @@ export function DataGrid({
     });
 
   const onCopy = (e: ClipboardEvent) => {
-    if (!range) return;
+    if (!range || !tableRef.current?.contains(e.target as Node)) return;
     const el = e.target as HTMLInputElement;
     // خلية واحدة فيها نص محدد جزئياً: نسخ عادي
     if (!multi && typeof el.selectionStart === "number" && el.selectionStart !== el.selectionEnd) return;
@@ -130,7 +140,7 @@ export function DataGrid({
   };
 
   const onPaste = (e: ClipboardEvent) => {
-    if (!range) return;
+    if (!range || !tableRef.current?.contains(e.target as Node)) return;
     const text = e.clipboardData.getData("text/plain").replace(/\r?\n$/, "");
     const grid = /[\t\n]/.test(text) ? parseDelimited(text, "\t") : [[text]];
     const single = grid.length === 1 && grid[0].length === 1;
@@ -261,17 +271,19 @@ export function DataGrid({
                       if (dragging.current) setFocus([r, c]);
                     }}
                   >
-                    {col.type === "select" ? (
-                      <select {...common} onChange={(e) => setCell(r, col.key, e.target.value)}>
-                        <option value="" />
-                        {col.options?.map((o) => (
-                          <option key={o.value} value={o.value}>
-                            {o.label}
-                          </option>
-                        ))}
-                        {/* قيمة ملصوقة لا تطابق أي خيار تبقى ظاهرة ليصححها المستخدم */}
-                        {row[col.key] && !col.options?.some((o) => o.value === row[col.key]) && <option value={row[col.key]}>{row[col.key]}</option>}
-                      </select>
+                    {col.type === "select" || col.suggest ? (
+                      <ComboBox
+                        value={row[col.key] ?? ""}
+                        options={col.suggest ? (suggestions.get(col.key) ?? []) : (col.options ?? [])}
+                        free={!!col.suggest}
+                        create={col.create}
+                        disabled={col.readOnly}
+                        placeholder={r === 0 ? col.placeholder : undefined}
+                        onChange={(v) => setCell(r, col.key, v)}
+                        onKeyDownClosed={common.onKeyDown}
+                        className={common.className}
+                        inputProps={{ "data-cell": common["data-cell"], "aria-label": common["aria-label"], onFocus: common.onFocus, dir: col.ltr ? "ltr" : undefined }}
+                      />
                     ) : (
                       <input
                         {...common}
