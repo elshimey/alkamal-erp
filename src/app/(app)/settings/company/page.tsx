@@ -18,9 +18,14 @@ export default async function CompanyPage() {
   return (
     <>
       <PageHeader title="بيانات المنشأة" description="الاسم والشعار والرقم الضريبي والعنوان الوطني. تظهر في رأس الفواتير الضريبية والتقارير المطبوعة.">
-        <Link href="/settings" className="text-sm text-brand-700 hover:underline">
-          → الإعدادات
-        </Link>
+        <div className="flex items-center gap-4 text-sm">
+          <Link href="/fleet-documents/owner/company-0" className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 font-medium text-brand-700 hover:bg-brand-50">
+            وثائق المنشأة (السجل، الترخيص…)
+          </Link>
+          <Link href="/settings" className="text-brand-700 hover:underline">
+            → الإعدادات
+          </Link>
+        </div>
       </PageHeader>
 
       <div className={`mb-6 flex items-center gap-4 rounded-2xl p-4 ${ready.missing.length ? "bg-amber-50" : "bg-green-50"}`}>

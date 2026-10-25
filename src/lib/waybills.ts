@@ -54,6 +54,7 @@ export interface WaybillInput {
   shipper: string;
   consignee: string;
   vehicleId?: number | null;
+  trailerId?: number | null;
   driverId?: number | null;
   carrierId?: number | null;
   carrierCost?: number | null;
@@ -71,6 +72,16 @@ export interface WaybillInput {
   userId?: number;
 }
 
+/** المقطورة المختارة يجب أن تكون مقطورة غير مباعة. */
+async function checkTrailer(tx: Db | Tx, trailerId: number | null | undefined) {
+  if (!trailerId) return null;
+  const [t] = await tx.select({ plate: s.vehicles.plate, kind: s.vehicles.assetKind, status: s.vehicles.status }).from(s.vehicles).where(eq(s.vehicles.id, trailerId));
+  if (!t) throw new Error("المقطورة غير موجودة");
+  if (t.kind !== "trailer") throw new Error(`${t.plate} ليست مقطورة؛ حدّد «نوع الأصل: مقطورة» في بيانات المركبة`);
+  if (t.status === "sold") throw new Error(`المقطورة ${t.plate} مباعة`);
+  return trailerId;
+}
+
 export async function createWaybill(db: Db, input: WaybillInput) {
   return db.transaction(async (tx) => {
     const [route] = await tx.select().from(s.routes).where(eq(s.routes.id, input.routeId));
@@ -78,7 +89,7 @@ export async function createWaybill(db: Db, input: WaybillInput) {
     if (!(await hasRole(tx, input.customerId, "customer"))) throw new Error("الجهة المختارة ليست عميلاً");
 
     const carrier = input.carrierId ?? null;
-    if (carrier && (input.vehicleId || input.driverId)) throw new Error("اختر مركبة من الأسطول أو ناقلاً خارجياً، لا الاثنين");
+    if (carrier && (input.vehicleId || input.driverId || input.trailerId)) throw new Error("اختر مركبة من الأسطول أو ناقلاً خارجياً، لا الاثنين");
     let vehicleId: number | null = null;
     let driverId: number | null = null;
     let vehicleTypeId: number | null = null;
@@ -89,6 +100,7 @@ export async function createWaybill(db: Db, input: WaybillInput) {
       if (!input.vehicleId) throw new Error("اختر المركبة أو الناقل الخارجي");
       const [v] = await tx.select().from(s.vehicles).where(eq(s.vehicles.id, input.vehicleId));
       if (!v) throw new Error("المركبة غير موجودة");
+      if (v.assetKind === "trailer") throw new Error(`${v.plate} مقطورة؛ اختر الرأس في «المركبة» والمقطورة في حقلها`);
       vehicleId = v.id;
       vehicleTypeId = v.vehicleTypeId;
       // السائق المسند للمركبة في تاريخ الرحلة إن لم يُحدَّد
@@ -136,6 +148,7 @@ export async function createWaybill(db: Db, input: WaybillInput) {
         currencyCode: contract?.currencyCode ?? "SAR",
         execution: carrier ? "carrier" : "fleet",
         vehicleId,
+        trailerId: carrier ? null : await checkTrailer(tx, input.trailerId),
         driverId,
         carrierId: carrier,
         carrierCost: carrier ? String(input.carrierCost) : null,
@@ -173,6 +186,7 @@ export interface WaybillUpdate {
   weightTons?: number | null;
   containerNumber?: string | null;
   notes?: string | null;
+  trailerId?: number | null;
 }
 
 export async function updateWaybill(db: Db, id: number, patch: WaybillUpdate) {
@@ -202,6 +216,7 @@ export async function updateWaybill(db: Db, id: number, patch: WaybillUpdate) {
     if (patch.weightTons !== undefined) set.weightTons = patch.weightTons != null ? String(patch.weightTons) : null;
     if (patch.containerNumber !== undefined) set.containerNumber = patch.containerNumber || null;
     if (patch.notes !== undefined) set.notes = patch.notes || null;
+    if (patch.trailerId !== undefined && w.execution === "fleet") set.trailerId = await checkTrailer(tx, patch.trailerId);
     await tx.update(s.waybills).set(set).where(eq(s.waybills.id, id));
   });
 }

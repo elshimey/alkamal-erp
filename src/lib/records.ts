@@ -8,8 +8,8 @@ import type { Entity } from "@/lib/permissions";
 import { hashPassword, MIN_PASSWORD_LENGTH } from "@/lib/password";
 import { normalizeIban } from "@/lib/banks";
 import { PARTY_ROLES } from "@/data/operations";
-import { DOCUMENT_TYPES } from "@/data/fleet";
 import { deleteDriver, updateDriver } from "@/lib/fleet";
+import { OWNER_KINDS } from "@/lib/documents";
 
 // صفحة تعديل وحذف موحّدة للبيانات الأساسية: كل كيان يُعرَّف هنا بحقوله وقواعده،
 // وصفحة /records/[kind]/[id] تعرض نموذج التعديل والحذف الآمن وسجل التعديلات.
@@ -117,6 +117,7 @@ export const RECORDS: Record<string, RecordDef> = {
       { key: "ownershipDate", label: "تاريخ التملك", type: "date" },
       { key: "customsDocument", label: "البيان الجمركي" },
       { key: "odometer", label: "العداد (كم)", type: "number" },
+      { key: "assetKind", label: "نوع الأصل", type: "select", required: true, options: [{ value: "head", label: "رأس (شاحنة)" }, { value: "trailer", label: "مقطورة (سطحة)" }], hint: "المقطورة تُختار في حقل «المقطورة» بالشحنة ولها وثائقها" },
       {
         key: "status",
         label: "الحالة",
@@ -130,6 +131,14 @@ export const RECORDS: Record<string, RecordDef> = {
       },
     ],
     after: async (tx, id, v, before) => {
+      if (v.assetKind !== before.assetKind) {
+        const [doc] = await tx
+          .select({ id: s.fleetDocuments.id })
+          .from(s.fleetDocuments)
+          .where(eq(s.fleetDocuments.vehicleId, id))
+          .limit(1);
+        if (doc) throw new Error("لها وثائق مسجلة بنوعها الحالي؛ احذفها أولاً ثم غيّر نوع الأصل");
+      }
       if (v.plate !== before.plate) {
         await tx.update(s.costCenters).set({ code: `V-${v.plate}`, nameAr: `المركبة ${v.plate}` }).where(eq(s.costCenters.id, before.costCenterId as number));
       }
@@ -247,18 +256,41 @@ export const RECORDS: Record<string, RecordDef> = {
     noun: "الوثيقة",
     perm: "fleet_documents",
     listHref: "/fleet-documents",
-    listLabel: "وثائق الأسطول",
+    listLabel: "سجل الوثائق",
     table: table(s.fleetDocuments),
-    heading: (r) => `${DOCUMENT_TYPES[r.type as keyof typeof DOCUMENT_TYPES] ?? "وثيقة"} ${r.number ?? ""}`,
+    heading: async (r) => {
+      const [t] = await db.select({ nameAr: s.documentTypes.nameAr }).from(s.documentTypes).where(eq(s.documentTypes.id, r.documentTypeId as number));
+      return `${t?.nameAr ?? "وثيقة"} ${r.number ?? ""}`;
+    },
     fields: [
-      { key: "type", label: "النوع", type: "select", options: Object.entries(DOCUMENT_TYPES).map(([value, label]) => ({ value, label })) },
+      {
+        key: "documentTypeId",
+        label: "النوع",
+        type: "select",
+        numeric: true,
+        required: true,
+        hint: "يجب أن يناسب صاحب الوثيقة",
+        options: async () => (await db.select().from(s.documentTypes).orderBy(asc(s.documentTypes.sortOrder))).map((t) => ({ value: String(t.id), label: `${t.nameAr} (${OWNER_KINDS[t.ownerKind].label})` })),
+      },
       { key: "number", label: "الرقم", ltr: true },
       { key: "issueDate", label: "تاريخ الإصدار", type: "date" },
-      { key: "expiryDate", label: "تاريخ الانتهاء", type: "date", required: true },
+      { key: "expiryDate", label: "تاريخ الانتهاء", type: "date", hint: "فارغ = لا تنتهي" },
       { key: "authority", label: "جهة الإصدار" },
       { key: "cost", label: "التكلفة", type: "number" },
       { key: "notes", label: "ملاحظات", type: "textarea" },
     ],
+    after: async (tx, id, v) => {
+      const [row] = await tx
+        .select({ kind: s.documentTypes.ownerKind, asset: s.vehicles.assetKind, doc: s.fleetDocuments })
+        .from(s.fleetDocuments)
+        .innerJoin(s.documentTypes, eq(s.documentTypes.id, s.fleetDocuments.documentTypeId))
+        .leftJoin(s.vehicles, eq(s.vehicles.id, s.fleetDocuments.vehicleId))
+        .where(eq(s.fleetDocuments.id, id));
+      const d = row.doc;
+      const owner = d.vehicleId ? (row.asset === "trailer" ? "trailer" : "vehicle") : d.driverId ? "driver" : d.employeeId ? "employee" : d.partyId ? "customer" : "company";
+      if (row.kind !== owner) throw new Error(`هذا النوع وثيقة ${OWNER_KINDS[row.kind].label}، وصاحب الوثيقة ${OWNER_KINDS[owner].label}`);
+      if (v.issueDate && v.expiryDate && String(v.issueDate) > String(v.expiryDate)) throw new Error("تاريخ الإصدار بعد تاريخ الانتهاء");
+    },
     instead: "",
   },
 

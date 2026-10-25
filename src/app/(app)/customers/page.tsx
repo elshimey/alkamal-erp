@@ -91,6 +91,9 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
                   {open.p.email && <span dir="ltr">{open.p.email}</span>}
                 </div>
               </div>
+              <Link href={`/fleet-documents/owner/customer-${open.p.id}`} className="rounded-lg border border-gray-200 px-2.5 py-1 text-xs text-brand-700 hover:bg-brand-50">
+                الوثائق
+              </Link>
               <Link href={listHref(BASE, sp, { open: undefined })} scroll={false} aria-label="إغلاق" className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100">
                 <Icon name="close" className="size-4" />
               </Link>

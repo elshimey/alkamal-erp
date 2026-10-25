@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { EditLink } from "@/components/edit-link";
 import { AddModeBar, ListActions } from "@/components/list-actions";
 import { asc, eq } from "drizzle-orm";
@@ -70,6 +71,9 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
               <Td className="font-medium">
                 {e.nameAr}
                 <EditLink href={driverId ? `/drivers/${driverId}` : `/records/employees/${e.id}`} />
+                <Link href={driverId ? `/fleet-documents/owner/driver-${driverId}` : `/fleet-documents/owner/employee-${e.id}`} className="ms-2 text-xs font-normal text-gray-500 hover:text-brand-700 hover:underline">
+                  الوثائق
+                </Link>
                 <div className="ltr-nums text-xs font-normal text-gray-500">{account}</div>
               </Td>
               <Td>

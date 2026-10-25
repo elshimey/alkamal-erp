@@ -21,7 +21,7 @@ export function ExpiryBanner({ expired, soon, today }: { expired: number; soon: 
   return (
     <div className={`${home ? "flex" : "hidden md:flex"} flex-wrap items-center justify-center gap-x-3 gap-y-1 border-b px-4 py-2 text-center text-xs print:hidden ${expired ? "border-red-200 bg-red-50 text-red-800" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
       <span>
-        وثائق الأسطول:
+        الوثائق:
         {expired > 0 && (
           <>
             {" "}
@@ -32,10 +32,10 @@ export function ExpiryBanner({ expired, soon, today }: { expired: number; soon: 
         {soon > 0 && (
           <>
             {" "}
-            <b className="ltr-nums">{soon}</b> تنتهي خلال 30 يوماً
+            <b className="ltr-nums">{soon}</b> تقترب من الانتهاء
           </>
         )}
-        {" "}(استمارات، رخص، إقامات، تأمين).
+        .
       </span>
       <Link href="/fleet-documents" className="font-semibold underline underline-offset-2">
         عرض وتجديد

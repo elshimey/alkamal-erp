@@ -22,6 +22,7 @@ export async function saveVehicles(rows: SheetRow[]) {
       year,
       ownership: r.ownership === "leased" ? "leased" : "owned",
       odometer: cell.number(r.odometer, "العداد") ?? 0,
+      assetKind: r.assetKind === "trailer" ? "trailer" : "head",
     });
   });
   revalidatePath("/vehicles");

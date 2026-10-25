@@ -18,7 +18,8 @@ import { ensureAdminUser, seedReferenceData } from "@/lib/seed";
 import { verifyPassword } from "@/lib/password";
 import { createJournalEntry } from "@/lib/ledger";
 import { getCompany, getInvoiceTemplate, invoiceReadiness, saveCompany, saveInvoiceTemplate } from "@/lib/company";
-import { assignVehicle, createDriver, deleteDriver, updateDriver, createVehicle, driverOnDate, expiringDocuments, releaseAssignment } from "@/lib/fleet";
+import { assignVehicle, createDriver, deleteDriver, updateDriver, createVehicle, driverOnDate, releaseAssignment } from "@/lib/fleet";
+import { addDocument, documentRegister, expiringDocuments, ownerDocuments } from "@/lib/documents";
 import { addSubAccount } from "@/lib/accounts";
 import { activeContract, createContract, createLocation, createParty, createRoute, priceTrip, setContractStatus } from "@/lib/operations";
 import { createInvoice, createReceipt, invoicingQueue, issueInvoice, listSalesInvoices, revertInvoice, revertReceipt, updateDraftInvoice } from "@/lib/invoices";
@@ -54,7 +55,7 @@ import { IMPORT_SPECS } from "@/data/import-specs";
 import * as hr from "@/lib/hr";
 import * as platform from "@/lib/platform";
 import { runInTenant, tenantClient } from "@/db/tenant";
-import { addExpense, addFuel, approveWaybill, createWaybill, deleteWaybill, recordStage, rejectWaybill, revertWaybill } from "@/lib/waybills";
+import { addExpense, addFuel, approveWaybill, createWaybill, deleteWaybill, recordStage, rejectWaybill, revertWaybill, updateWaybill } from "@/lib/waybills";
 
 const url = process.env.TEST_DATABASE_URL;
 const YEAR = 2026;
@@ -301,15 +302,36 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(await driverOnDate(db, vehicleId, `${YEAR}-05-20`)).toBeNull();
     });
 
-    it("تنبيه الوثائق قبل 30 يوماً من الانتهاء", async () => {
-      await db.insert(s.fleetDocuments).values([
-        { vehicleId, type: "insurance", expiryDate: `${YEAR}-07-15` },
-        { driverId: driverA, type: "license", expiryDate: `${YEAR}-09-30` },
-      ]);
-      const due = await expiringDocuments(db, `${YEAR}-07-01`);
-      expect(due.map((d) => d.doc.type)).toEqual(["insurance"]);
-      expect(due[0].plate).toBe("د هـ و 5678");
-      await expect(db.insert(s.fleetDocuments).values({ type: "other", expiryDate: `${YEAR}-01-01` })).rejects.toThrow();
+    it("سجل الوثائق: التنبيه حسب أيام النوع، والتجديد، والناقص، والمقطورة", async () => {
+      const types = await db.select().from(s.documentTypes);
+      const code = (c: string) => types.find((t) => t.code === c)!.id;
+      // التأمين ينبّه قبل 60 يوماً (الافتراضي)، والرخصة بعد 91 يوماً خارج المدة
+      await addDocument(db, { documentTypeId: code("v_insurance"), owner: { kind: "vehicle", id: vehicleId }, expiryDate: `${YEAR}-08-20` });
+      await addDocument(db, { documentTypeId: code("d_license"), owner: { kind: "driver", id: driverA }, expiryDate: `${YEAR}-09-30` });
+      let due = await expiringDocuments(db, `${YEAR}-07-01`);
+      expect(due.map((d) => d.type.code)).toEqual(["v_insurance"]);
+      expect(due[0].owner).toBe("د هـ و 5678");
+      // التجديد سجل جديد يُسقط تنبيه القديم ويبقيه في التاريخ
+      await addDocument(db, { documentTypeId: code("v_insurance"), owner: { kind: "vehicle", id: vehicleId }, expiryDate: `${YEAR + 1}-08-20` });
+      due = await expiringDocuments(db, `${YEAR}-07-01`);
+      expect(due).toHaveLength(0);
+      const docs = await ownerDocuments(db, "vehicle", vehicleId, `${YEAR}-07-01`);
+      const ins = docs.find((d) => d.type.code === "v_insurance")!;
+      expect(ins.state).toBe("valid");
+      expect(ins.history).toHaveLength(1);
+      // الاستمارة إلزامية ولم تُسجَّل: ناقصة؛ والتأمين الخليجي اختياري: غير مُدخل
+      expect(docs.find((d) => d.type.code === "v_registration")!.state).toBe("missing");
+      expect(docs.find((d) => d.type.code === "v_gcc_insurance")!.state).toBe("none");
+      const reg = (await documentRegister(db, `${YEAR}-07-01`)).find((r) => r.kind === "vehicle" && r.id === vehicleId)!;
+      expect(reg.counts.valid).toBe(1);
+      expect(reg.counts.missing).toBeGreaterThan(3);
+      // نوع الوثيقة يجب أن يناسب صاحبها، والشركة بلا صاحب
+      await expect(addDocument(db, { documentTypeId: code("d_license"), owner: { kind: "vehicle", id: vehicleId }, expiryDate: `${YEAR}-01-01` })).rejects.toThrow();
+      await expect(addDocument(db, { documentTypeId: code("t_registration"), owner: { kind: "trailer", id: vehicleId }, expiryDate: `${YEAR}-01-01` })).rejects.toThrow("رأس");
+      const { row } = await addDocument(db, { documentTypeId: code("c_cr"), owner: { kind: "company", id: 0 }, expiryDate: `${YEAR}-07-05` });
+      expect([row.vehicleId, row.driverId, row.employeeId, row.partyId]).toEqual([null, null, null, null]);
+      expect((await expiringDocuments(db, `${YEAR}-07-01`)).map((d) => d.owner)).toEqual(["الشركة"]);
+      await db.delete(s.fleetDocuments).where(eq(s.fleetDocuments.id, row.id));
     });
   });
 
@@ -397,6 +419,12 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(Number(w.driverCommission)).toBe(200);
       expect(w.execution).toBe("fleet");
       await expect(createWaybill(db, { waybillDate: D, customerId, routeId, shipper: "أ", consignee: "ب", vehicleId: vehicle.id, carrierId })).rejects.toThrow("لا الاثنين");
+      // المقطورة (السطحة) أصل مستقل: تُختار في حقلها، ولا تكون هي «المركبة»
+      const trailer = await createVehicle(db, { plate: "سطحة 77", chassis: "TRL-77", assetKind: "trailer" });
+      await expect(updateWaybill(db, w.id, { trailerId: vehicle.id })).rejects.toThrow("ليست مقطورة");
+      await updateWaybill(db, w.id, { trailerId: trailer.id });
+      expect((await db.select().from(s.waybills).where(eq(s.waybills.id, w.id)))[0].trailerId).toBe(trailer.id);
+      await expect(createWaybill(db, { waybillDate: D, customerId, routeId, shipper: "أ", consignee: "ب", vehicleId: trailer.id })).rejects.toThrow("مقطورة");
     });
 
     it("المراحل تغيّر الحالة وتسجل العداد", async () => {

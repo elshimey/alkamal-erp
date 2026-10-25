@@ -1,11 +1,9 @@
-import { and, asc, desc, eq, gte, isNull, lte, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lte, or, sql } from "drizzle-orm";
 import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
 import { addSubAccountTx } from "@/lib/accounts";
-import { EXPIRY_ALERT_DAYS } from "@/data/fleet";
 import { findPgError } from "@/lib/errors";
 
-export { EXPIRY_ALERT_DAYS };
 
 export interface VehicleInput {
   plate: string;
@@ -17,6 +15,7 @@ export interface VehicleInput {
   ownership?: "owned" | "leased";
   odometer?: number;
   assetAccountId?: number | null;
+  assetKind?: "head" | "trailer";
 }
 
 /** يضيف المركبة وينشئ مركز تكلفتها في معاملة واحدة (القرار 8). */
@@ -38,6 +37,7 @@ export async function createVehicle(db: Db | Tx, input: VehicleInput) {
         year: input.year ?? null,
         ownership: input.ownership ?? "owned",
         odometer: input.odometer ?? 0,
+        assetKind: input.assetKind ?? "head",
         assetAccountId: input.assetAccountId ?? null,
         costCenterId: cc.id,
       })
@@ -284,34 +284,3 @@ export async function driverOnDate(db: Db | Tx, vehicleId: number, onDate: strin
 // ───────────── الوثائق ─────────────
 
 
-/** الوثائق المنتهية أو التي تنتهي خلال المدة المحددة، الأقرب أولاً. */
-export async function expiringDocuments(db: Db, today: string, days = EXPIRY_ALERT_DAYS) {
-  return db
-    .select({
-      doc: s.fleetDocuments,
-      plate: s.vehicles.plate,
-      driverName: s.employees.nameAr,
-    })
-    .from(s.fleetDocuments)
-    .leftJoin(s.vehicles, eq(s.vehicles.id, s.fleetDocuments.vehicleId))
-    .leftJoin(s.drivers, eq(s.drivers.id, s.fleetDocuments.driverId))
-    .leftJoin(s.employees, eq(s.employees.id, s.drivers.employeeId))
-    .where(
-      and(
-        lte(s.fleetDocuments.expiryDate, sql`${today}::date + ${days}::int`),
-        // الوثيقة المجدَّدة (أحدث منها لنفس المركبة أو السائق ونفس النوع) لا تُنبَّه
-        sql`not exists (select 1 from fleet_documents f2 where f2.type = ${s.fleetDocuments.type}
-          and f2.vehicle_id is not distinct from ${s.fleetDocuments.vehicleId} and f2.driver_id is not distinct from ${s.fleetDocuments.driverId}
-          and f2.expiry_date > ${s.fleetDocuments.expiryDate})`,
-        sql`coalesce(${s.vehicles.status}::text, '') <> 'sold' and coalesce(${s.drivers.status}::text, '') <> 'terminated'`,
-      ),
-    )
-    .orderBy(asc(s.fleetDocuments.expiryDate));
-}
-
-/** عدد الوثائق المنتهية والقريبة من الانتهاء، لتنبيه أعلى الشاشة. */
-export async function expiryCounts(db: Db, today: string, days = EXPIRY_ALERT_DAYS) {
-  const rows = await expiringDocuments(db, today, days);
-  const expired = rows.filter((r) => r.doc.expiryDate < today).length;
-  return { expired, soon: rows.length - expired };
-}

@@ -389,6 +389,8 @@ export const vehicleTypes = pgTable("vehicle_types", {
 
 export const vehicleOwnership = pgEnum("vehicle_ownership", ["owned", "leased"]);
 export const vehicleStatus = pgEnum("vehicle_status", ["active", "maintenance", "stopped", "sold"]);
+// الرأس (الشاحنة) أو المقطورة (السطحة) التي تتبدّل بين الرؤوس
+export const vehicleAssetKind = pgEnum("vehicle_asset_kind", ["head", "trailer"]);
 
 export const vehicles = pgTable("vehicles", {
   id: id(),
@@ -406,6 +408,7 @@ export const vehicles = pgTable("vehicles", {
   customsDocument: text("customs_document"),
   odometer: integer("odometer").notNull().default(0),
   status: vehicleStatus("status").notNull().default("active"),
+  assetKind: vehicleAssetKind("asset_kind").notNull().default("head"),
   // حساب الأصل في الشجرة (الشاحنات، المقطورات، السيارات الخفيفة)
   assetAccountId: ref("asset_account_id").references(() => accounts.id),
   // القرار 8: كل مركبة لها مركز تكلفة واحد يُنشأ تلقائياً عند إضافتها
@@ -496,36 +499,56 @@ export const vehicleAssignments = pgTable(
   ],
 );
 
-export const fleetDocumentType = pgEnum("fleet_document_type", [
-  "registration",
-  "periodic_inspection",
-  "operating_card",
-  "insurance",
-  "authorization",
-  "license",
-  "residency",
-  "other",
-]);
+
+// ───────────── سجل الوثائق ─────────────
+
+export const documentOwnerKind = pgEnum("document_owner_kind", ["vehicle", "trailer", "driver", "employee", "company", "customer"]);
+// مانعة دائماً، أو مانعة للرحلات الدولية فقط، أو تنبيه فقط
+export const documentBlocking = pgEnum("document_blocking", ["block", "international", "alert"]);
+
+// أنواع الوثائق قابلة للتعديل من الإعدادات: صاحبها، وإلزاميتها، وهل تمنع، ومراحل التنبيه
+export const documentTypes = pgTable(
+  "document_types",
+  {
+    id: id(),
+    code: varchar("code", { length: 40 }).notNull().unique(),
+    nameAr: text("name_ar").notNull(),
+    ownerKind: documentOwnerKind("owner_kind").notNull(),
+    required: boolean("required").notNull().default(true),
+    blocking: documentBlocking("blocking").notNull().default("alert"),
+    // أيام التنبيه قبل الانتهاء، مثل 60,30,7
+    alertDays: varchar("alert_days", { length: 40 }).notNull().default("60,30,7"),
+    authority: text("authority"),
+    sortOrder: smallint("sort_order").notNull().default(0),
+    isActive: boolean("is_active").notNull().default(true),
+  },
+  (t) => [uniqueIndex("document_types_owner_name").on(t.ownerKind, t.nameAr)],
+);
 
 export const fleetDocuments = pgTable(
   "fleet_documents",
   {
     id: id(),
-    // صاحب الوثيقة: مركبة أو سائق
+    documentTypeId: ref("document_type_id").notNull().references(() => documentTypes.id),
+    // صاحب الوثيقة: مركبة أو مقطورة (vehicle_id)، أو سائق أو موظف أو عميل؛ وبلا صاحب = وثيقة الشركة
     vehicleId: ref("vehicle_id").references(() => vehicles.id, { onDelete: "cascade" }),
     driverId: ref("driver_id").references(() => drivers.id, { onDelete: "cascade" }),
-    type: fleetDocumentType("type").notNull(),
+    employeeId: ref("employee_id").references(() => employees.id, { onDelete: "cascade" }),
+    partyId: ref("party_id").references(() => parties.id, { onDelete: "cascade" }),
     number: varchar("number", { length: 40 }),
     issueDate: date("issue_date"),
-    expiryDate: date("expiry_date").notNull(),
+    // فارغ = لا تنتهي (العنوان الوطني مثلاً)
+    expiryDate: date("expiry_date"),
     authority: text("authority"),
     cost: money("cost"),
     notes: text("notes"),
+    createdBy: ref("created_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: createdAt(),
   },
   (t) => [
     index("fleet_documents_expiry_idx").on(t.expiryDate),
-    check("fleet_documents_one_owner", sql`(${t.vehicleId} is null) <> (${t.driverId} is null)`),
+    index("fleet_documents_type_idx").on(t.documentTypeId),
+    check("fleet_documents_one_owner", sql`num_nonnulls(${t.vehicleId}, ${t.driverId}, ${t.employeeId}, ${t.partyId}) <= 1`),
   ],
 );
 
@@ -668,6 +691,8 @@ export const waybills = pgTable(
     // التنفيذ: أسطول داخلي (مركبة + سائق) أو ناقل خارجي، لا الاثنين
     execution: waybillExecution("execution").notNull().default("fleet"),
     vehicleId: ref("vehicle_id").references(() => vehicles.id),
+    // المقطورة (السطحة) المسحوبة في هذه الرحلة
+    trailerId: ref("trailer_id").references(() => vehicles.id),
     driverId: ref("driver_id").references(() => drivers.id),
     carrierId: ref("carrier_id").references(() => parties.id),
     carrierCost: money("carrier_cost"),

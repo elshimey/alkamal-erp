@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { EditLink } from "@/components/edit-link";
 import { and, asc, eq, like } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
@@ -40,7 +41,7 @@ export default async function VehiclesPage({ searchParams }: { searchParams: Pro
 
   return (
     <>
-      <PageHeader title="المركبات" description="كل مركبة تُضاف تنشئ مركز تكلفتها تلقائياً، وتُربط بحساب أصلها في شجرة الحسابات.">
+      <PageHeader title="المركبات" description="الرؤوس والمقطورات (السطحات). كل مركبة تنشئ مركز تكلفتها تلقائياً، وتُربط بحساب أصلها في شجرة الحسابات.">
         {!adding && <ListActions bulkHref={can(user.perms, "vehicles", "update") && "/records/vehicles/bulk"} addHref={canCreate && "/vehicles?add=1"} importHref={canCreate && "/import/vehicles"} />}
       </PageHeader>
       {adding && <AddModeBar backHref="/vehicles" backLabel="المركبات" title="إضافة جماعية" />}
@@ -60,6 +61,7 @@ export default async function VehiclesPage({ searchParams }: { searchParams: Pro
                 width: "12rem",
                 options: assetAccounts.map((a) => ({ value: String(a.id), label: `${a.code} ${a.nameAr}` })),
               },
+              { key: "assetKind", label: "رأس أم مقطورة", type: "select", width: "8rem", options: [{ value: "head", label: "رأس (شاحنة)" }, { value: "trailer", label: "مقطورة (سطحة)" }] },
               { key: "vehicleTypeId", label: "النوع", type: "select", options: types.map((t) => ({ value: String(t.id), label: t.nameAr })) },
               { key: "make", label: "الماركة" },
               { key: "model", label: "الطراز" },
@@ -71,15 +73,17 @@ export default async function VehiclesPage({ searchParams }: { searchParams: Pro
         </Card>
       )}
       {!adding && (
-      <Table head={["اللوحة", "النوع", "الماركة والطراز", "السنة", "العداد", "الملكية", "الحالة", "حساب الأصل", "مركز التكلفة"]}>
-        {rows.length === 0 && <EmptyRow cols={9}>لا توجد مركبات بعد</EmptyRow>}
+      <Table head={["اللوحة", "النوع", "الماركة والطراز", "السنة", "العداد", "الملكية", "الحالة", "حساب الأصل", "مركز التكلفة", ""]}>
+        {rows.length === 0 && <EmptyRow cols={10}>لا توجد مركبات بعد</EmptyRow>}
         {rows.map(({ v, typeName, ccCode, accCode, accName }) => (
           <tr key={v.id}>
             <Td className="font-medium">
               {v.plate}
               <EditLink href={`/records/vehicles/${v.id}`} />
             </Td>
-            <Td>{typeName ?? "—"}</Td>
+            <Td>
+              {v.assetKind === "trailer" && <Badge tone="blue">مقطورة</Badge>} {typeName ?? (v.assetKind === "trailer" ? "" : "—")}
+            </Td>
             <Td>{[v.make, v.model].filter(Boolean).join(" ") || "—"}</Td>
             <Td className="ltr-nums">{v.year ?? "—"}</Td>
             <Td className="ltr-nums">{v.odometer.toLocaleString("en")}</Td>
@@ -89,6 +93,11 @@ export default async function VehiclesPage({ searchParams }: { searchParams: Pro
             </Td>
             <Td className="text-xs">{accCode ? `${accCode} ${accName}` : <span className="text-amber-700">غير مربوطة</span>}</Td>
             <Td className="text-gray-500">{ccCode}</Td>
+            <Td>
+              <Link href={`/fleet-documents/owner/${v.assetKind === "trailer" ? "trailer" : "vehicle"}-${v.id}`} className="text-xs font-medium text-brand-700 hover:underline">
+                الوثائق
+              </Link>
+            </Td>
           </tr>
         ))}
       </Table>

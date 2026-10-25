@@ -129,7 +129,7 @@ export default async function Dashboard({
       show: can(user.perms, "fleet_documents", "view") && alerts.docsExpired > 0,
       tone: "red",
       icon: "document",
-      text: `${alerts.docsExpired} وثيقة منتهية (استمارات، رخص، تأمين)`,
+      text: `${alerts.docsExpired} وثيقة منتهية لم تُجدَّد`,
       href: "/fleet-documents",
     },
     {
@@ -157,7 +157,7 @@ export default async function Dashboard({
       show: can(user.perms, "fleet_documents", "view") && alerts.docsExpiring > 0,
       tone: "amber",
       icon: "calendar",
-      text: `${alerts.docsExpiring} وثيقة تنتهي خلال 30 يوماً`,
+      text: `${alerts.docsExpiring} وثيقة تقترب من الانتهاء`,
       href: "/fleet-documents",
     },
     {
