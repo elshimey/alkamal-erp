@@ -98,6 +98,24 @@ export async function updateManualEntry(db: Db, id: number, input: ManualEntryIn
   });
 }
 
+/** تعديل رأس مسودة قيد يدوي من الورقة (التاريخ والوصف والمرجع) دون لمس سطوره. */
+export async function updateManualEntryHeader(db: Db, id: number, patch: { entryDate?: string; description?: string; reference?: string }) {
+  return db.transaction(async (tx) => {
+    const e = await lockManual(tx, id);
+    if (e.status === "posted") throw new Error(`القيد ${e.number} مرحّل؛ أرجعه لمسودة أولاً`);
+    if (patch.description !== undefined && !patch.description.trim()) throw new Error("اكتب وصف القيد");
+    await tx
+      .update(s.journalEntries)
+      .set({
+        ...(patch.entryDate ? { entryDate: patch.entryDate } : {}),
+        ...(patch.description !== undefined ? { description: patch.description.trim() } : {}),
+        ...(patch.reference !== undefined ? { reference: patch.reference.trim() || null } : {}),
+        updatedAt: new Date(),
+      })
+      .where(eq(s.journalEntries.id, id));
+  });
+}
+
 export async function postManualEntry(db: Db, id: number, userId?: number) {
   return db.transaction(async (tx) => {
     const e = await lockManual(tx, id);

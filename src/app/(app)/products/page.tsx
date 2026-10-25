@@ -8,7 +8,7 @@ import { SOURCE_HREF, listProducts, productCard, stockByWarehouse } from "@/lib/
 import { isExpenseAccount } from "@/data/purchases";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Icon } from "@/components/icons";
-import { ImportLink } from "@/components/import-link";
+import { ListActions } from "@/components/list-actions";
 import { Badge, Card, EmptyRow, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { ProductFields } from "./product-fields";
 import { addProduct, editProduct } from "./actions";
@@ -16,7 +16,7 @@ import { fmt } from "@/lib/format";
 
 const qfmt = (v: number) => v.toLocaleString("en", { maximumFractionDigits: 3 });
 
-export default async function ProductsPage({ searchParams }: { searchParams: Promise<{ q?: string; kind?: string; wh?: string; low?: string; open?: string }> }) {
+export default async function ProductsPage({ searchParams }: { searchParams: Promise<{ q?: string; kind?: string; wh?: string; low?: string; open?: string; add?: string }> }) {
   const user = await requirePermission("inventory", "view");
   const sp = await searchParams;
   const warehouseId = Number(sp.wh) || null;
@@ -37,6 +37,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
   const categories = cats.map((c) => c.c!).sort();
   const canCreate = can(user.perms, "inventory", "create");
   const canEdit = can(user.perms, "inventory", "update");
+  const adding = sp.add === "1" && canCreate;
   const stock = rows.filter((r) => r.p.kind === "stock");
   const total = stock.reduce((t, r) => t + r.value, 0);
   const lowCount = stock.filter((r) => r.low).length;
@@ -50,12 +51,27 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
     <>
       <PageHeader title="الأصناف والخدمات" description="قطع الغيار والزيوت والإطارات بأرصدتها ومتوسط تكلفتها، والخدمات التي تُستخدم في فواتير الموردين وأوامر الصيانة.">
         <div className="flex flex-wrap items-center gap-2">
-          <ImportLink entity="products" />
           <Link href="/inventory" className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
             المخزون والمستودعات
           </Link>
+          <ListActions bulkHref={canEdit && "/records/products/bulk"} newHref={canCreate && "/products?add=1"} newLabel="إضافة صنف أو خدمة" importHref={canCreate && "/import/products"} />
         </div>
       </PageHeader>
+
+      {adding && (
+        <Card title="إضافة صنف أو خدمة" className="mb-6">
+          <ActionForm action={addProduct} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <ProductFields stockAccounts={stockAccounts} serviceAccounts={serviceAccounts} categories={categories} />
+            <div className="flex items-end gap-3">
+              <SubmitButton>إضافة</SubmitButton>
+              <Link href="/products" className="text-sm text-gray-500 hover:text-gray-800">
+                إغلاق
+              </Link>
+            </div>
+          </ActionForm>
+          <p className="mt-3 text-xs text-gray-500">الرصيد يدخل من فواتير الموردين (اختر الصنف والمستودع والكمية في السطر)، أو بتسوية افتتاحية من مستندات المخزون.</p>
+        </Card>
+      )}
 
       <div className="mb-4 grid gap-3 sm:grid-cols-3">
         <div className="rounded-2xl border border-black/[0.06] bg-white p-4 shadow-sm">
@@ -185,7 +201,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
       )}
 
       <Table head={["الرمز", "الصنف", "الفئة", "الوحدة", "الرصيد", "متوسط التكلفة", "القيمة", "سعر الشراء", ""]}>
-        {rows.length === 0 && <EmptyRow cols={9}>{sp.q || sp.kind || sp.low ? "لا أصناف بهذه الشروط" : "لا أصناف بعد؛ أضفها أدناه أو استوردها من Excel"}</EmptyRow>}
+        {rows.length === 0 && <EmptyRow cols={9}>{sp.q || sp.kind || sp.low ? "لا أصناف بهذه الشروط" : "لا أصناف بعد؛ أضفها من زر «إضافة» أو استوردها من Excel"}</EmptyRow>}
         {rows.map((r) => (
           <tr key={r.p.id} className={r.p.id === openId ? "bg-brand-50/70" : !r.p.isActive ? "opacity-60" : undefined}>
             <Td>
@@ -205,17 +221,6 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
         ))}
       </Table>
 
-      {canCreate && (
-        <Card title="إضافة صنف أو خدمة" className="mt-6">
-          <ActionForm action={addProduct} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <ProductFields stockAccounts={stockAccounts} serviceAccounts={serviceAccounts} categories={categories} />
-            <div className="flex items-end">
-              <SubmitButton>إضافة</SubmitButton>
-            </div>
-          </ActionForm>
-          <p className="mt-3 text-xs text-gray-500">الرصيد يدخل من فواتير الموردين (اختر الصنف والمستودع والكمية في السطر)، أو بتسوية افتتاحية من مستندات المخزون.</p>
-        </Card>
-      )}
     </>
   );
 }

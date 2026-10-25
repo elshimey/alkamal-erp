@@ -9,6 +9,7 @@ import { hashPassword, MIN_PASSWORD_LENGTH } from "@/lib/password";
 import { normalizeIban } from "@/lib/banks";
 import { PARTY_ROLES } from "@/data/operations";
 import { DOCUMENT_TYPES } from "@/data/fleet";
+import { deleteDriver, updateDriver } from "@/lib/fleet";
 
 // صفحة تعديل وحذف موحّدة للبيانات الأساسية: كل كيان يُعرَّف هنا بحقوله وقواعده،
 // وصفحة /records/[kind]/[id] تعرض نموذج التعديل والحذف الآمن وسجل التعديلات.
@@ -52,6 +53,9 @@ export interface RecordDef {
   instead: string;
   /** صفحة بديلة أغنى لهذا الكيان */
   redirect?: (id: number) => Promise<string | null>;
+  /** حفظ وحذف بدالة الكيان نفسها بدل التعديل المباشر للجدول (السائق: موظفه وحساباته) */
+  save?: (id: number, values: Row) => Promise<void>;
+  del?: (id: number) => Promise<void>;
 }
 
 const yesNo = { type: "bool" as const };
@@ -62,6 +66,16 @@ const STATUS_EMP: Opt[] = [
   { value: "on_leave", label: "إجازة" },
   { value: "terminated", label: "منتهية خدمته" },
 ];
+
+/** بيانات موظف السائق (الاسم والهوية والتعيين والراتب) لسائق واحد أو للجميع. */
+async function driverEmployees(id?: number) {
+  const rows = await db
+    .select({ id: s.drivers.id, nameAr: s.employees.nameAr, nationalId: s.employees.nationalId, hireDate: s.employees.hireDate, basicSalary: s.employees.basicSalary, birthDate: s.drivers.birthDate })
+    .from(s.drivers)
+    .innerJoin(s.employees, eq(s.employees.id, s.drivers.employeeId))
+    .where(id ? eq(s.drivers.id, id) : undefined);
+  return new Map(rows.map(({ id, ...r }) => [id, r as Row]));
+}
 
 const currencies = async () => (await db.select().from(s.currencies).orderBy(asc(s.currencies.code))).map((c) => ({ value: c.code, label: `${c.code} ${c.nameAr}` }));
 
@@ -328,6 +342,78 @@ export const RECORDS: Record<string, RecordDef> = {
     instead: "أوقف العقد من صفحته",
   },
 
+  drivers: {
+    noun: "السائق",
+    perm: "drivers",
+    listHref: "/drivers",
+    listLabel: "السائقون",
+    table: table(s.drivers),
+    heading: () => "السائق",
+    redirect: async (id) => `/drivers/${id}`,
+    fields: [
+      { key: "nameAr", label: "الاسم", required: true, virtual: true },
+      { key: "mobile", label: "الجوال", ltr: true },
+      { key: "nationality", label: "الجنسية" },
+      { key: "nationalId", label: "الهوية", ltr: true, virtual: true },
+      { key: "residencyNumber", label: "رقم الإقامة", ltr: true },
+      { key: "licenseNumber", label: "رقم الرخصة", ltr: true },
+      { key: "transportCardNumber", label: "بطاقة النقل", ltr: true },
+      { key: "commissionClass", label: "فئة العمولة", type: "select", options: [{ value: "domestic", label: "داخلي" }, { value: "international", label: "دولي" }] },
+      { key: "appLanguage", label: "لغة التطبيق", type: "select", options: [{ value: "ar", label: "العربية" }, { value: "ur", label: "الأردية" }, { value: "hi", label: "الهندية" }, { value: "en", label: "الإنجليزية" }] },
+      { key: "hireDate", label: "تاريخ التعيين", type: "date", virtual: true },
+      { key: "basicSalary", label: "الراتب الأساسي", type: "number", virtual: true },
+      { key: "custodyLimit", label: "سقف العهدة", type: "number" },
+      { key: "status", label: "الحالة", type: "select", options: STATUS_EMP },
+    ],
+    load: async (id) => (await driverEmployees(id)).get(id) ?? {},
+    loadAll: () => driverEmployees(),
+    save: (id, v) =>
+      updateDriver(db, id, {
+        nameAr: String(v.nameAr ?? ""),
+        mobile: (v.mobile as string) ?? null,
+        nationality: (v.nationality as string) ?? null,
+        nationalId: (v.nationalId as string) ?? null,
+        residencyNumber: (v.residencyNumber as string) ?? null,
+        licenseNumber: (v.licenseNumber as string) ?? null,
+        transportCardNumber: (v.transportCardNumber as string) ?? null,
+        birthDate: v.birthDate ? String(v.birthDate) : null,
+        appLanguage: (v.appLanguage as "ar") ?? undefined,
+        commissionClass: (v.commissionClass as "domestic") ?? undefined,
+        hireDate: v.hireDate ? String(v.hireDate) : null,
+        basicSalary: v.basicSalary != null ? Number(v.basicSalary) : undefined,
+        custodyLimit: v.custodyLimit != null ? Number(v.custodyLimit) : null,
+        status: (v.status as "active") ?? "active",
+      }),
+    del: async (id) => {
+      await deleteDriver(db, id);
+    },
+    instead: "غيّر حالته إلى «منتهية خدمته»",
+  },
+
+  products: {
+    noun: "الصنف",
+    perm: "inventory",
+    listHref: "/products",
+    listLabel: "الأصناف والخدمات",
+    table: table(s.products),
+    heading: (r) => String(r.nameAr),
+    redirect: async (id) => `/products?open=${id}`,
+    fields: [
+      { key: "code", label: "الرمز", required: true, ltr: true },
+      { key: "nameAr", label: "الاسم", required: true },
+      { key: "nameEn", label: "الاسم بالإنجليزية", ltr: true },
+      { key: "kind", label: "النوع", type: "select", required: true, options: [{ value: "stock", label: "صنف مخزني" }, { value: "service", label: "خدمة" }] },
+      { key: "category", label: "الفئة" },
+      { key: "unit", label: "الوحدة" },
+      { key: "barcode", label: "الباركود", ltr: true },
+      { key: "purchasePrice", label: "سعر الشراء", type: "number", required: true },
+      { key: "salePrice", label: "سعر البيع", type: "number", required: true },
+      { key: "reorderLevel", label: "حد إعادة الطلب", type: "number", required: true },
+      { key: "isActive", label: "نشط", ...yesNo },
+    ],
+    instead: "ألغِ علامة «نشط»",
+  },
+
   bank_accounts: {
     noun: "الحساب البنكي",
     perm: "accounts",
@@ -517,10 +603,11 @@ export function parseForm(def: RecordDef, data: FormData): Row {
 }
 
 /** الأعمدة الرقمية العشرية تُخزن نصاً في drizzle */
-const MONEY_KEYS = new Set(["basicSalary", "housingAllowance", "allowances", "driverCommission", "cost", "creditLimit"]);
+const MONEY_KEYS = new Set(["basicSalary", "housingAllowance", "allowances", "driverCommission", "cost", "creditLimit", "purchasePrice", "salePrice", "reorderLevel", "custodyLimit"]);
 
 export async function saveRecord(kind: RecordKind, id: number, values: Row) {
   const def = RECORDS[kind];
+  if (def.save) return def.save(id, values);
   const t = def.table as unknown as typeof s.vehicles;
   await db.transaction(async (tx) => {
     const [before] = (await tx.select().from(t).where(eq(t.id, id)).for("update")) as Row[];
@@ -539,6 +626,7 @@ export async function saveRecord(kind: RecordKind, id: number, values: Row) {
 
 export async function deleteRecord(kind: RecordKind, id: number) {
   const def = RECORDS[kind];
+  if (def.del) return def.del(id);
   const t = def.table as unknown as typeof s.vehicles;
   await db.transaction(async (tx) => {
     const [row] = (await tx.select().from(t).where(eq(t.id, id)).for("update")) as Row[];
@@ -599,4 +687,6 @@ export const TABLE_NAME: Record<RecordKind, string> = {
   charge_types: "charge_types",
   warehouses: "warehouses",
   users: "users",
+  drivers: "drivers",
+  products: "products",
 };

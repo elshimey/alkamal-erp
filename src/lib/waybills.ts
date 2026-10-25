@@ -12,7 +12,7 @@ import { WAYBILL_ACCOUNTS, type WaybillAccountKey, type WaybillStatus } from "@/
 
 // الشحنة = رحلة واحدة (القرار 2). لا قيد قبل الاعتماد (القرار 3).
 
-const EDITABLE: WaybillStatus[] = ["draft", "in_transit", "delivered", "rejected"];
+export const EDITABLE: WaybillStatus[] = ["draft", "in_transit", "delivered", "rejected"];
 const APPROVABLE: WaybillStatus[] = ["draft", "in_transit", "delivered"];
 
 const num = (v: string | null | undefined) => (v == null ? 0 : Number(v));
@@ -168,6 +168,10 @@ export interface WaybillUpdate {
   odometerEnd?: number | null;
   deliveryNoteNumber?: string | null;
   customsDeclaration?: string | null;
+  shipper?: string;
+  consignee?: string;
+  weightTons?: number | null;
+  containerNumber?: string | null;
   notes?: string | null;
 }
 
@@ -187,6 +191,16 @@ export async function updateWaybill(db: Db, id: number, patch: WaybillUpdate) {
     if (patch.odometerEnd !== undefined) set.odometerEnd = patch.odometerEnd;
     if (patch.deliveryNoteNumber !== undefined) set.deliveryNoteNumber = patch.deliveryNoteNumber || null;
     if (patch.customsDeclaration !== undefined) set.customsDeclaration = patch.customsDeclaration || null;
+    if (patch.shipper !== undefined) {
+      if (!patch.shipper.trim()) throw new Error("المرسل مطلوب");
+      set.shipper = patch.shipper.trim();
+    }
+    if (patch.consignee !== undefined) {
+      if (!patch.consignee.trim()) throw new Error("المستلم مطلوب");
+      set.consignee = patch.consignee.trim();
+    }
+    if (patch.weightTons !== undefined) set.weightTons = patch.weightTons != null ? String(patch.weightTons) : null;
+    if (patch.containerNumber !== undefined) set.containerNumber = patch.containerNumber || null;
     if (patch.notes !== undefined) set.notes = patch.notes || null;
     await tx.update(s.waybills).set(set).where(eq(s.waybills.id, id));
   });

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AddModeBar, ListActions } from "@/components/list-actions";
 import { asc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
@@ -10,8 +11,10 @@ import { SheetEditor } from "@/components/sheet-editor";
 import { Badge, Card, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
 import { saveContracts } from "./actions";
 
-export default async function ContractsPage() {
+export default async function ContractsPage({ searchParams }: { searchParams: Promise<{ add?: string }> }) {
   const user = await requirePermission("contracts", "view");
+  const canCreate = can(user.perms, "contracts", "create");
+  const adding = (await searchParams).add === "1" && canCreate;
   const showPrices = hasSpecial(user.perms, "view_prices");
   const [customers, rows] = await Promise.all([
     customerOptions(),
@@ -28,8 +31,11 @@ export default async function ContractsPage() {
 
   return (
     <>
-      <PageHeader title="العقود" description="عقد العميل وبنود تسعيره. الشحنة تأخذ سعرها من العقد الساري تلقائياً." />
-      {can(user.perms, "contracts", "create") && (
+      <PageHeader title="العقود" description="عقد العميل وبنود تسعيره. الشحنة تأخذ سعرها من العقد الساري تلقائياً.">
+        {!adding && <ListActions bulkHref={can(user.perms, "contracts", "update") && "/records/contracts/bulk"} addHref={canCreate && "/contracts?add=1"} />}
+      </PageHeader>
+      {adding && <AddModeBar backHref="/contracts" backLabel="العقود" title="إضافة جماعية" />}
+      {adding && (
         <Card title="إدخال عقود جديدة" className="mb-6">
           {customers.length === 0 ? (
             <p className="text-sm text-gray-500">
@@ -57,6 +63,7 @@ export default async function ContractsPage() {
           )}
         </Card>
       )}
+      {!adding && (
       <Table head={["رقم العقد", "العميل", "من", "إلى", "العملة", "الحد الائتماني", "بنود التسعير", "الحالة"]}>
         {rows.length === 0 && <EmptyRow cols={8}>لا توجد عقود بعد</EmptyRow>}
         {rows.map(({ c, customer, rates }) => (
@@ -78,6 +85,7 @@ export default async function ContractsPage() {
           </tr>
         ))}
       </Table>
+      )}
     </>
   );
 }

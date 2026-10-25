@@ -23,6 +23,7 @@ import {
 } from "@/lib/waybills";
 import { EXPENSE_BILL_TO, EXPENSE_PAYERS, FUEL_SOURCES, TRIP_STAGES } from "@/data/waybills";
 import type { FormState } from "@/components/action-form";
+import type { DocSheetResult, SheetChange } from "@/components/doc-sheet";
 
 /** صلاحية على شحنة محددة؛ صاحب النطاق «الخاص» (السائق) لا يصل إلا لشحناته. */
 async function guard(action: Action, waybillId?: number): Promise<CurrentUser> {
@@ -232,4 +233,33 @@ export async function removeItem(id: number, kind: "fuel" | "expense", itemId: n
   await guard("update", id);
   await deleteWaybillItem(db, id, kind, itemId);
   refresh(id);
+}
+
+/** حفظ ورقة الشحنات: الشحنات غير المعتمدة فقط، وكل خلية تمر على قواعد تعديل الشحنة نفسها. */
+export async function saveWaybillSheet(payload: string): Promise<DocSheetResult> {
+  const changes = JSON.parse(payload) as SheetChange[];
+  const errors: Record<number, string> = {};
+  let saved = 0;
+  for (const { id, values: v } of changes) {
+    try {
+      const user = await guard("update", id);
+      const n = (key: string, label: string) => (v[key] === undefined ? undefined : cell.number(v[key].replace(/[,\s]/g, ""), label));
+      await updateWaybill(db, id, {
+        amount: hasSpecial(user.perms, "view_prices") && v.amount !== undefined ? (n("amount", "المبلغ") ?? 0) : undefined,
+        driverCommission: v.commission !== undefined ? (n("commission", "العمولة") ?? 0) : undefined,
+        carrierCost: v.carrierCost !== undefined ? (n("carrierCost", "تكلفة الناقل") ?? 0) : undefined,
+        shipper: v.shipper,
+        consignee: v.consignee,
+        weightTons: v.weight !== undefined ? (n("weight", "الوزن") ?? null) : undefined,
+        containerNumber: v.container,
+        deliveryNoteNumber: v.deliveryNote,
+        notes: v.notes,
+      });
+      saved++;
+    } catch (err) {
+      errors[id] = errorMessage(err);
+    }
+  }
+  revalidatePath("/waybills");
+  return { ok: saved ? `حُفظت تعديلات ${saved} شحنة` : undefined, errors };
 }

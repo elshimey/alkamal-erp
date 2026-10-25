@@ -1,4 +1,5 @@
 import { EditLink } from "@/components/edit-link";
+import { AddModeBar, ListActions } from "@/components/list-actions";
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
@@ -6,7 +7,7 @@ import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { SheetEditor } from "@/components/sheet-editor";
 import { Badge, Card, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
-import { saveEmployees, updateEmployees } from "./actions";
+import { saveEmployees } from "./actions";
 
 const fmt = (v: string | number) => Number(v).toLocaleString("en", { maximumFractionDigits: 2 });
 const STATUS = { active: { label: "على رأس العمل", tone: "green" }, on_leave: { label: "إجازة", tone: "amber" }, terminated: { label: "منتهية خدمته", tone: "gray" } } as const;
@@ -15,24 +16,28 @@ const YES_NO = [
   { value: "no", label: "لا" },
 ];
 
-export default async function EmployeesPage() {
+export default async function EmployeesPage({ searchParams }: { searchParams: Promise<{ add?: string }> }) {
   const user = await requirePermission("employees", "view");
+  const canCreate = can(user.perms, "employees", "create");
+  const adding = (await searchParams).add === "1" && canCreate;
   const rows = await db
     .select({ e: s.employees, driverId: s.drivers.id, account: s.accounts.code })
     .from(s.employees)
     .leftJoin(s.drivers, eq(s.drivers.employeeId, s.employees.id))
     .leftJoin(s.accounts, eq(s.accounts.id, s.employees.payableAccountId))
     .orderBy(asc(s.employees.status), asc(s.employees.nameAr));
-  const employeeOptions = rows.map(({ e }) => ({ value: String(e.id), label: e.nameAr }));
 
   return (
     <>
       <PageHeader
         title="الموظفون"
-        description="بيانات الرواتب لكل موظف: الأساسي والسكن والبدلات والتأمينات والآيبان. السائق يُضاف من شاشة السائقين ويظهر هنا لاستكمال راتبه."
-      />
-      <div className="mb-6 space-y-6">
-        {can(user.perms, "employees", "create") && (
+        description="بيانات الرواتب لكل موظف: الأساسي والسكن والبدلات والتأمينات والآيبان. السائق يُضاف من شاشة السائقين ويظهر هنا لاستكمال راتبه. لتحديث الرواتب دفعة واحدة استخدم «تعديل جماعي»."
+      >
+        {!adding && <ListActions bulkHref={can(user.perms, "employees", "update") && "/records/employees/bulk"} addHref={canCreate && "/employees?add=1"} />}
+      </PageHeader>
+      {adding && <AddModeBar backHref="/employees" backLabel="الموظفون" title="إضافة جماعية" />}
+      <div className={adding ? "mb-6 space-y-6" : "hidden"}>
+        {adding && (
           <Card title="إضافة موظفين">
             <SheetEditor
               templateName="الموظفون"
@@ -54,29 +59,8 @@ export default async function EmployeesPage() {
             />
           </Card>
         )}
-        {can(user.perms, "employees", "update") && rows.length > 0 && (
-          <Card title="تحديث بيانات الرواتب (الخلية الفارغة تبقى كما هي)">
-            <SheetEditor
-              templateName="تحديث الموظفين"
-              action={updateEmployees}
-              initialRows={2}
-              columns={[
-                { key: "employeeId", label: "الموظف", type: "select", required: true, options: employeeOptions, width: "11rem" },
-                { key: "jobTitle", label: "الوظيفة", width: "7rem" },
-                { key: "hireDate", label: "تاريخ التعيين", type: "date" },
-                { key: "basicSalary", label: "الأساسي", type: "number", width: "6rem" },
-                { key: "housingAllowance", label: "السكن", type: "number", width: "6rem" },
-                { key: "allowances", label: "بدلات أخرى", type: "number", width: "6rem" },
-                { key: "isSaudi", label: "سعودي", type: "select", options: YES_NO, width: "5rem" },
-                { key: "gosiSubject", label: "بالتأمينات", type: "select", options: YES_NO, width: "5rem" },
-                { key: "bankName", label: "البنك", width: "7rem" },
-                { key: "iban", label: "الآيبان", ltr: true, width: "13rem" },
-                { key: "status", label: "الحالة", type: "select", options: Object.entries(STATUS).map(([value, v]) => ({ value, label: v.label })), width: "7rem" },
-              ]}
-            />
-          </Card>
-        )}
       </div>
+      {!adding && (
       <Table head={["الموظف", "الوظيفة", "التعيين", "الأساسي", "السكن", "بدلات أخرى", "الإجمالي", "التأمينات", "الآيبان", "الحالة"]}>
         {rows.length === 0 && <EmptyRow cols={10}>لا يوجد موظفون بعد</EmptyRow>}
         {rows.map(({ e, driverId, account }) => {
@@ -106,6 +90,7 @@ export default async function EmployeesPage() {
           );
         })}
       </Table>
+      )}
     </>
   );
 }

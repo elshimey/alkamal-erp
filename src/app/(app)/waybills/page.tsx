@@ -9,8 +9,11 @@ import { customerOptions, driverOptions, partyOptions, routeOptions, shipperSugg
 import { todayRiyadh } from "@/lib/dates";
 import { WAYBILL_STATUS, type WaybillStatus } from "@/data/waybills";
 import { SheetEditor } from "@/components/sheet-editor";
+import { DocSheet, type DocSheetRow } from "@/components/doc-sheet";
+import { AddModeBar, ListActions, ViewToggle } from "@/components/list-actions";
 import { Card, PageHeader } from "@/components/ui";
-import { bulkWaybills, saveWaybills } from "./actions";
+import { EDITABLE } from "@/lib/waybills";
+import { bulkWaybills, saveWaybillSheet, saveWaybills } from "./actions";
 import { WaybillTable } from "./waybill-table";
 
 const TABS: { key: WaybillStatus | "all"; label: string }[] = [
@@ -18,12 +21,24 @@ const TABS: { key: WaybillStatus | "all"; label: string }[] = [
   ...(Object.entries(WAYBILL_STATUS) as [WaybillStatus, { label: string }][]).map(([key, v]) => ({ key, label: v.label })),
 ];
 
-export default async function WaybillsPage({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
+const SHEET_TONE: Record<WaybillStatus, "gray" | "green" | "blue" | "amber" | "red"> = {
+  draft: "gray",
+  in_transit: "amber",
+  delivered: "blue",
+  approved: "green",
+  invoiced: "green",
+  rejected: "red",
+};
+
+export default async function WaybillsPage({ searchParams }: { searchParams: Promise<{ status?: string; add?: string; view?: string }> }) {
   const user = await requirePermission("waybills", "view");
-  const { status: rawStatus } = await searchParams;
+  const { status: rawStatus, add, view: rawView } = await searchParams;
   const status = rawStatus && rawStatus in WAYBILL_STATUS ? (rawStatus as WaybillStatus) : undefined;
   const showPrices = hasSpecial(user.perms, "view_prices");
   const canCreate = can(user.perms, "waybills", "create");
+  const canUpdate = can(user.perms, "waybills", "update");
+  const adding = add === "1" && canCreate;
+  const view = rawView === "sheet" ? "sheet" : "table";
 
   const carrier = alias(s.parties, "carrier");
   const where: SQL[] = [];
@@ -43,7 +58,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
     vehicleOptions(),
     driverOptions(),
     partyOptions("carrier"),
-    canCreate ? shipperSuggestions() : Promise.resolve([]),
+    adding ? shipperSuggestions() : Promise.resolve([]),
     db
       .select({
         w: s.waybills,
@@ -67,9 +82,12 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
 
   return (
     <>
-      <PageHeader title="الشحنات" description="كل شحنة رحلة واحدة. السعر من العقد الساري والعمولة من المسار تلقائياً، والقيد يُرحّل عند الاعتماد." />
-      {canCreate && (
-        <Card title="إدخال شحنات" className="mb-6">
+      <PageHeader title="الشحنات" description="كل شحنة رحلة واحدة. السعر من العقد الساري والعمولة من المسار تلقائياً، والقيد يُرحّل عند الاعتماد.">
+        {!adding && <ListActions bulkHref={canUpdate && `/waybills?view=sheet${status ? `&status=${status}` : ""}`} addHref={canCreate && "/waybills?add=1"} addLabel="إدخال شحنات" />}
+      </PageHeader>
+      {adding && <AddModeBar backHref="/waybills" backLabel="الشحنات" title="إدخال شحنات" />}
+      {adding && (
+        <Card className="mb-6">
           <>
             <SheetEditor
                 templateName="الشحنات"
@@ -98,13 +116,16 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
           </>
         </Card>
       )}
-      <nav className="mb-4 flex flex-wrap gap-2 text-sm">
+      {!adding && (
+        <>
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+      <nav className="flex flex-1 flex-wrap gap-2 text-sm">
         {TABS.map((t) => {
           const active = (t.key === "all" && !status) || t.key === status;
           return (
             <Link
               key={t.key}
-              href={t.key === "all" ? "/waybills" : `/waybills?status=${t.key}`}
+              href={`/waybills?${new URLSearchParams({ ...(t.key === "all" ? {} : { status: t.key }), ...(view === "sheet" ? { view } : {}) })}`}
               className={`flex items-center gap-2 rounded-full px-3.5 py-1.5 transition ${
                 active ? "bg-asphalt-900 font-semibold text-brand-500" : "bg-white text-gray-600 shadow-sm hover:bg-brand-50"
               }`}
@@ -115,6 +136,55 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
           );
         })}
       </nav>
+        <ViewToggle base="/waybills" params={{ status }} view={view} />
+      </div>
+      {view === "sheet" ? (
+        <>
+          <DocSheet
+            action={saveWaybillSheet}
+            emptyText="لا توجد شحنات بهذه الحالة"
+            columns={[
+              { key: "status", label: "الحالة", type: "badge", width: "6rem" },
+              { key: "number", label: "الرقم", ltr: true, width: "8rem" },
+              { key: "date", label: "التاريخ", type: "date", width: "7rem" },
+              { key: "customer", label: "العميل", width: "11rem" },
+              { key: "route", label: "المسار", width: "12rem" },
+              { key: "executor", label: "المنفّذ", width: "8rem" },
+              { key: "shipper", label: "المرسل", editable: true, width: "10rem" },
+              { key: "consignee", label: "المستلم", editable: true, width: "10rem" },
+              ...(showPrices ? [{ key: "amount", label: "المبلغ", type: "number" as const, editable: true, width: "6.5rem" }] : []),
+              { key: "commission", label: "عمولة السائق", type: "number", editable: true, width: "6.5rem" },
+              { key: "carrierCost", label: "تكلفة الناقل", type: "number", editable: true, width: "6.5rem" },
+              { key: "weight", label: "الوزن (طن)", type: "number", editable: true, width: "5.5rem" },
+              { key: "container", label: "رقم الحاوية", ltr: true, editable: true, width: "7rem" },
+              { key: "deliveryNote", label: "رقم إذن التسليم", ltr: true, editable: true, width: "7rem" },
+              { key: "notes", label: "ملاحظات", editable: true, width: "12rem" },
+            ]}
+            rows={list.map(({ w, customer, plate, carrier }): DocSheetRow => ({
+              id: w.id,
+              href: `/waybills/${w.id}`,
+              editable: canUpdate && EDITABLE.includes(w.status),
+              cells: {
+                number: w.number,
+                date: w.waybillDate,
+                customer,
+                route: routeLabel.get(String(w.routeId)) ?? "—",
+                executor: plate ?? (carrier ? `${carrier} (ناقل)` : "—"),
+                shipper: w.shipper,
+                consignee: w.consignee,
+                amount: showPrices ? w.amount : null,
+                commission: w.driverCommission,
+                carrierCost: w.execution === "carrier" ? w.carrierCost : null,
+                weight: w.weightTons,
+                container: w.containerNumber,
+                deliveryNote: w.deliveryNoteNumber,
+                notes: w.notes,
+              },
+              badges: { status: { label: WAYBILL_STATUS[w.status].label, tone: SHEET_TONE[w.status] } },
+            }))}
+          />
+        </>
+      ) : (
       <WaybillTable
         rows={list.map(({ w, customer, plate, carrier, driver }) => ({
           id: w.id,
@@ -134,6 +204,9 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
         canOverride={hasSpecial(user.perms, "override_controls")}
         action={bulkWaybills}
       />
+      )}
+        </>
+      )}
     </>
   );
 }
