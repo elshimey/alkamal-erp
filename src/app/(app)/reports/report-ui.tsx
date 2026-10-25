@@ -4,6 +4,7 @@ import { presetRanges } from "@/lib/reports";
 import { getBrand } from "@/lib/brand";
 import { ExportButton } from "@/components/export-button";
 import { PrintButton } from "@/components/print-button";
+import { DateInput } from "@/components/date-input";
 
 // عناصر مشتركة لصفحات التقارير: الترويسة وأزرار التصدير والطباعة ومرشح الفترة والجدول
 
@@ -64,12 +65,12 @@ export function PeriodFilter({ from, to, today, asOf = false, children }: { from
       {!asOf && (
         <label className="flex flex-col gap-1 text-sm">
           <span className="font-medium text-gray-700">من</span>
-          <input type="date" name="from" defaultValue={from} className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+          <DateInput name="from" defaultValue={from} className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
         </label>
       )}
       <label className="flex flex-col gap-1 text-sm">
         <span className="font-medium text-gray-700">{asOf ? "في تاريخ" : "إلى"}</span>
-        <input type="date" name="to" defaultValue={to} className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+        <DateInput name="to" defaultValue={to} className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
       </label>
       {children}
       <button className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-brand-900 hover:bg-brand-500">عرض</button>

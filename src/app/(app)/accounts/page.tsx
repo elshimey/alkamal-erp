@@ -7,6 +7,7 @@ import { can } from "@/lib/permissions";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Badge, Card, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { createAccount } from "./actions";
+import { AddModeBar, ListActions } from "@/components/list-actions";
 
 const TYPE_LABEL: Record<string, string> = {
   asset: "أصول",
@@ -17,19 +18,22 @@ const TYPE_LABEL: Record<string, string> = {
   expense: "مصروفات",
 };
 
-export default async function AccountsPage() {
+export default async function AccountsPage({ searchParams }: { searchParams: Promise<{ add?: string }> }) {
   const user = await requirePermission("accounts", "view");
   const rows = await db.select().from(s.accounts).orderBy(asc(s.accounts.code));
   const canCreate = can(user.perms, "accounts", "create");
 
+  const adding = (await searchParams).add === "1" && !!(canCreate);
   return (
     <>
       <PageHeader
         title="شجرة الحسابات"
-        description="معيارية وفق IFRS. الترحيل على الحسابات النهائية فقط، والمركبة مركز تكلفة على سطر القيد وليست حساباً."
-      />
-      {canCreate && (
-        <Card title="إضافة حساب فرعي" className="mb-6">
+        description="معيارية وفق IFRS. الترحيل على الحسابات النهائية فقط، والمركبة مركز تكلفة على سطر القيد وليست حساباً.">
+        {!adding && <ListActions newHref={(canCreate) && "/accounts?add=1"} newLabel="إضافة حساب فرعي" />}
+      </PageHeader>
+      {adding && <AddModeBar backHref="/accounts" backLabel="شجرة الحسابات" title="إضافة حساب فرعي" />}
+      {adding && (
+        <Card className="mb-6">
           <ActionForm action={createAccount} className="grid gap-4 sm:grid-cols-[2fr_2fr_1fr_auto] sm:items-end">
             <Field label="تحت الحساب">
               <Select name="parentId" required defaultValue="">
@@ -59,7 +63,8 @@ export default async function AccountsPage() {
           </ActionForm>
         </Card>
       )}
-      <Table head={["الرمز", "الحساب", "النوع", "الطبيعة", "الترحيل", "ملاحظة"]}>
+      {!adding && (
+        <>      <Table head={["الرمز", "الحساب", "النوع", "الطبيعة", "الترحيل", "ملاحظة"]}>
         {rows.map((a) => (
           <tr key={a.id} className={a.level <= 2 ? "bg-gray-50/70 font-semibold" : ""}>
             <Td className="ltr-nums text-gray-500">{a.code}</Td>
@@ -86,6 +91,8 @@ export default async function AccountsPage() {
           </tr>
         ))}
       </Table>
+        </>
+      )}
     </>
   );
 }

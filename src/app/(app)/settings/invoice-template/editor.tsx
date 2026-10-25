@@ -142,7 +142,7 @@ export function TemplateEditor({
 
           <Section title="الشروط والتذييل">
             <div className="flex flex-col gap-3">
-              <Field label="الشروط والأحكام" hint="تظهر أسفل الفاتورة، اتركها فارغة لإخفائها">
+              <Field label="الشروط والأحكام" hint="تظهر أسفل الفاتورة، اتركها فارغة لإخفائها. عدد الأيام يُستبدل تلقائياً بمدة سداد العميل">
                 <textarea
                   value={t.terms}
                   onChange={(e) => set("terms", e.target.value)}

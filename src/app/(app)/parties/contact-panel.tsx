@@ -10,6 +10,7 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Badge, Input } from "@/components/ui";
 import { PrintButton } from "@/components/print-button";
 import { addPersonAction, removePersonAction, updatePersonAction } from "./actions";
+import { DateInput } from "@/components/date-input";
 
 const TABS = { summary: "الملخص", details: "تفاصيل جهة الاتصال", people: "الأشخاص", statement: "كشف الحساب" } as const;
 type Tab = keyof typeof TABS;
@@ -237,11 +238,11 @@ async function Statement({ p, from, to }: { p: typeof s.parties.$inferSelect; fr
         <input type="hidden" name="ptab" value="statement" />
         <label className="flex flex-col gap-1 text-xs text-gray-500">
           من
-          <input type="date" name="from" defaultValue={from} className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm" />
+          <DateInput name="from" defaultValue={from} className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm" />
         </label>
         <label className="flex flex-col gap-1 text-xs text-gray-500">
           إلى
-          <input type="date" name="to" defaultValue={to} className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm" />
+          <DateInput name="to" defaultValue={to} className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm" />
         </label>
         <button className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 hover:bg-gray-50">عرض</button>
         <div className="ms-auto">

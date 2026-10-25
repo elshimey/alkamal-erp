@@ -9,10 +9,11 @@ import { PasswordInput } from "@/components/password-input";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Badge, Card, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { createUser, linkDriverAccount, setUserActive, setUserTrial } from "./actions";
+import { AddModeBar, ListActions } from "@/components/list-actions";
 
 const daysLeft = (d: Date) => Math.ceil((d.getTime() - Date.now()) / 86_400_000);
 
-export default async function UsersPage() {
+export default async function UsersPage({ searchParams }: { searchParams: Promise<{ add?: string }> }) {
   const me = await requirePermission("users", "view");
   const [users, roles, links, drivers] = await Promise.all([
     db.select().from(s.users).orderBy(asc(s.users.name)),
@@ -33,11 +34,15 @@ export default async function UsersPage() {
   const unlinked = users.filter((u) => links.some((l) => l.userId === u.id && l.key === "driver") && !driverOf(u.id));
   const canUpdate = can(me.perms, "users", "update");
 
+  const adding = (await searchParams).add === "1" && !!(can(me.perms, "users", "create"));
   return (
     <>
-      <PageHeader title="المستخدمون" description="حتى 50 مستخدماً من الموظفين والسائقين. لكل مستخدم دور أو أكثر." />
-      {can(me.perms, "users", "create") && (
-        <Card title="مستخدم جديد" className="mb-6">
+      <PageHeader title="المستخدمون" description="حتى 50 مستخدماً من الموظفين والسائقين. لكل مستخدم دور أو أكثر.">
+        {!adding && <ListActions newHref={(can(me.perms, "users", "create")) && "/users?add=1"} newLabel="مستخدم جديد" />}
+      </PageHeader>
+      {adding && <AddModeBar backHref="/users" backLabel="المستخدمون" title="مستخدم جديد" />}
+      {adding && (
+        <Card className="mb-6">
           <ActionForm action={createUser} className="grid gap-4 sm:grid-cols-3">
             <Field label="الاسم">
               <Input name="name" required />
@@ -83,7 +88,8 @@ export default async function UsersPage() {
           </ActionForm>
         </Card>
       )}
-      {canUpdate && unlinked.length > 0 && (
+      {!adding && (
+        <>      {canUpdate && unlinked.length > 0 && (
         <Card title="حسابات سائقين غير مربوطة بسائق" className="mb-6 border-amber-300">
           <p className="mb-4 text-sm text-amber-800">
             هذه الحسابات بدور «سائق» لكنها غير مربوطة بأي سائق، فيظهر لصاحبها في التطبيق أن حسابه غير مربوط. اربط كل حساب بسائقه:
@@ -179,6 +185,8 @@ export default async function UsersPage() {
           </tr>
         ))}
       </Table>
+        </>
+      )}
     </>
   );
 }

@@ -11,6 +11,7 @@ import type { Entity } from "@/lib/permissions";
 import { WAYBILL_STATUS, type WaybillStatus } from "@/data/waybills";
 import { CountUp } from "@/components/count-up";
 import { Icon, Truck, type IconName } from "@/components/icons";
+import { DateInput } from "@/components/date-input";
 
 const money = (v: number) => Math.round(v).toLocaleString("en");
 const pct = (part: number, whole: number) => (whole ? Math.round((part / whole) * 100) : 0);
@@ -849,11 +850,11 @@ function PeriodPicker({ period, tab }: { period: Period; tab: Tab }) {
           {tab !== "overview" && <input type="hidden" name="tab" value={tab} />}
           <label className="flex flex-col gap-1">
             <span className="text-xs text-gray-500">من تاريخ</span>
-            <input type="date" name="from" required defaultValue={period.from} className="rounded-lg border border-gray-200 px-3 py-2 focus:border-brand-500 focus:outline-none" />
+            <DateInput name="from" required defaultValue={period.from} className="rounded-lg border border-gray-200 px-3 py-2 focus:border-brand-500 focus:outline-none" />
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-xs text-gray-500">إلى تاريخ</span>
-            <input type="date" name="to" required defaultValue={period.to} className="rounded-lg border border-gray-200 px-3 py-2 focus:border-brand-500 focus:outline-none" />
+            <DateInput name="to" required defaultValue={period.to} className="rounded-lg border border-gray-200 px-3 py-2 focus:border-brand-500 focus:outline-none" />
           </label>
           <button className="rounded-lg bg-asphalt-900 py-2 font-semibold text-brand-500 transition hover:bg-asphalt-800">عرض الفترة</button>
         </form>

@@ -7,8 +7,9 @@ import { todayRiyadh } from "@/lib/dates";
 import { SheetEditor } from "@/components/sheet-editor";
 import { Card, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
 import { saveRates } from "./actions";
+import { AddModeBar, ListActions } from "@/components/list-actions";
 
-export default async function ExchangeRatesPage() {
+export default async function ExchangeRatesPage({ searchParams }: { searchParams: Promise<{ add?: string }> }) {
   const user = await requirePermission("accounts", "view");
   const [currencies, rates] = await Promise.all([
     db.select().from(s.currencies).where(ne(s.currencies.code, "SAR")),
@@ -16,11 +17,15 @@ export default async function ExchangeRatesPage() {
   ]);
   const today = todayRiyadh();
 
+  const adding = (await searchParams).add === "1" && !!(can(user.perms, "accounts", "update"));
   return (
     <>
-      <PageHeader title="أسعار الصرف" description="قيمة وحدة واحدة من العملة بالريال. كل حركة تأخذ آخر سعر مسجّل في تاريخها أو قبله." />
-      {can(user.perms, "accounts", "update") && (
-        <Card title="إدخال أسعار" className="mb-6">
+      <PageHeader title="أسعار الصرف" description="قيمة وحدة واحدة من العملة بالريال. كل حركة تأخذ آخر سعر مسجّل في تاريخها أو قبله.">
+        {!adding && <ListActions newHref={(can(user.perms, "accounts", "update")) && "/exchange-rates?add=1"} newLabel="إدخال أسعار" />}
+      </PageHeader>
+      {adding && <AddModeBar backHref="/exchange-rates" backLabel="أسعار الصرف" title="إدخال أسعار" />}
+      {adding && (
+        <Card className="mb-6">
           <SheetEditor
             templateName="أسعار الصرف"
             action={saveRates}
@@ -33,7 +38,8 @@ export default async function ExchangeRatesPage() {
           />
         </Card>
       )}
-      <Table head={["التاريخ", "العملة", "السعر بالريال"]}>
+      {!adding && (
+        <>      <Table head={["التاريخ", "العملة", "السعر بالريال"]}>
         {rates.length === 0 && <EmptyRow cols={3}>لا توجد أسعار مسجلة</EmptyRow>}
         {rates.map((r) => (
           <tr key={r.id}>
@@ -43,6 +49,8 @@ export default async function ExchangeRatesPage() {
           </tr>
         ))}
       </Table>
+        </>
+      )}
     </>
   );
 }

@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type Key
 import { parseDelimited } from "@/lib/sheet";
 import type { QuickKind } from "@/lib/quick-add-types";
 import { ComboBox, useCreatedOptions } from "./combo-box";
+import { isoToDmy } from "@/components/date-input";
 
 export interface GridColumn {
   key: string;
@@ -287,10 +288,11 @@ export function DataGrid({
                     ) : (
                       <input
                         {...common}
-                        type={col.type === "date" ? "date" : "text"}
+                        type="text"
                         inputMode={col.type === "number" ? "decimal" : undefined}
-                        dir={col.ltr || col.type === "number" ? "ltr" : undefined}
-                        placeholder={r === 0 ? col.placeholder : undefined}
+                        dir={col.ltr || col.type === "number" || col.type === "date" ? "ltr" : undefined}
+                        // التاريخ يُكتب يوم/شهر/سنة (أو يُلصق من Excel) مهما كانت لغة المتصفح
+                        placeholder={col.type === "date" ? (r === 0 && col.placeholder ? isoToDmy(col.placeholder) : "dd/mm/yyyy") : r === 0 ? col.placeholder : undefined}
                         onChange={(e) => setCell(r, col.key, e.target.value)}
                       />
                     )}

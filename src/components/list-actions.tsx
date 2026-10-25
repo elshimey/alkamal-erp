@@ -28,7 +28,12 @@ export function ListActions({
           تعديل جماعي
         </Link>
       )}
-      {items.length > 0 && (
+      {items.length === 1 && (
+        <Link href={items[0].href} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-brand-900 shadow-sm hover:bg-brand-500">
+          + {items[0].label}
+        </Link>
+      )}
+      {items.length > 1 && (
         <details className="relative">
           <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-brand-900 shadow-sm hover:bg-brand-500">
             إضافة <span className="text-xs">▾</span>

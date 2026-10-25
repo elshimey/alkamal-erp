@@ -103,7 +103,44 @@ export function WaybillTable({
           ))}
         </ul>
       )}
-      <div className="overflow-x-auto rounded-2xl border border-black/[0.06] bg-white shadow-[0_4px_16px_-8px_rgba(27,33,38,0.08)]">
+      {/* على الجوال: بطاقة لكل شحنة، والضغط على البطاقة يحددها للتسليم أو الاعتماد الجماعي */}
+      <ul className="flex flex-col gap-2 md:hidden">
+        {rows.length === 0 && <li className="rounded-2xl bg-white px-4 py-10 text-center text-sm text-gray-400 shadow-sm">لا توجد شحنات في هذا التصنيف</li>}
+        {rows.map((r) => {
+          const canPick = selectable.includes(r);
+          const on = selected.has(r.id);
+          return (
+            <li
+              key={r.id}
+              onClick={canPick ? () => toggle(r.id) : undefined}
+              className={`rounded-2xl border bg-white p-3.5 shadow-sm transition ${on ? "border-brand-500 bg-brand-50" : "border-black/[0.06]"} ${canPick ? "cursor-pointer" : ""}`}
+            >
+              <div className="flex items-center gap-2">
+                {canPick && <input type="checkbox" aria-label={`تحديد ${r.number}`} checked={on} onChange={() => toggle(r.id)} onClick={(e) => e.stopPropagation()} className="size-4 accent-brand-600" />}
+                <Link href={`/waybills/${r.id}`} onClick={(e) => e.stopPropagation()} className="ltr-nums font-semibold text-brand-700">
+                  {r.number}
+                </Link>
+                <span className="ms-auto" title={r.rejectionReason ?? undefined}>
+                  <Badge tone={WAYBILL_STATUS[r.status].tone}>{WAYBILL_STATUS[r.status].label}</Badge>
+                </span>
+              </div>
+              <div className="mt-2 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate font-medium text-gray-800">{r.customer}</div>
+                  <div className="truncate text-xs text-gray-500">{r.route}</div>
+                </div>
+                {showPrices && r.amount != null && <span className="ltr-nums shrink-0 font-semibold text-brand-900">{r.amount.toLocaleString("en", { minimumFractionDigits: 2 })}</span>}
+              </div>
+              <div className="mt-1.5 flex flex-wrap gap-x-3 text-xs text-gray-500">
+                <span className="ltr-nums">{r.date}</span>
+                <span>{r.executor}</span>
+                <span>{r.driver}</span>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      <div className="hidden overflow-x-auto md:block rounded-2xl border border-black/[0.06] bg-white shadow-[0_4px_16px_-8px_rgba(27,33,38,0.08)]">
         <table className="w-full text-sm">
           <thead className="bg-asphalt-900 text-white/85">
             <tr>
