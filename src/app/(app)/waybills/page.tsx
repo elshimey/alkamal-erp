@@ -94,7 +94,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
                 action={saveWaybills}
                 initialRows={4}
                 columns={[
-                  { key: "date", label: "التاريخ", type: "date", required: true, placeholder: todayRiyadh() },
+                  { key: "date", label: "التاريخ", type: "date", placeholder: todayRiyadh() },
                   { key: "customerId", label: "العميل", type: "select", required: true, options: customers, width: "11rem", create: "customer" },
                   { key: "routeId", label: "المسار", type: "select", required: true, options: routes, width: "13rem", create: "route" },
                   { key: "vehicleId", label: "المركبة", type: "select", options: vehicles, width: "8rem", create: "vehicle" },

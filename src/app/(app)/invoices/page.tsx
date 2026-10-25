@@ -19,7 +19,7 @@ import { Icon } from "@/components/icons";
 import { RowCheck, SelectAll, SelectionTotal } from "@/components/row-selection";
 import { TaxInvoiceDocument } from "@/components/tax-invoice";
 import { Badge, EmptyRow, LimitRow, Input, PageHeader, Table, Td } from "@/components/ui";
-import { ImportLink } from "@/components/import-link";
+import { ListActions } from "@/components/list-actions";
 import { invoiceAll, invoiceCustomer, issue, issueMany, saveInvoiceSheet, sendToZatca } from "./actions";
 import { fmt } from "@/lib/format";
 
@@ -60,7 +60,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
   return (
     <>
       <PageHeader title="فواتير المبيعات" description="فاتورة تجميعية لعدة شحنات معتمدة، سطر لكل شحنة بمركز تكلفة مركبتها. الإيراد والضريبة يُقيدان عند الإصدار.">
-        {canCreate && <ImportLink entity="sales-invoices" />}
+        <ListActions bulkHref={can(user.perms, "sales_invoices", "update") && "/invoices?view=sheet&status=draft"} importHref={canCreate && "/import/sales-invoices"} />
       </PageHeader>
 
       {canCreate && queue.length > 0 && (

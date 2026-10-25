@@ -13,15 +13,17 @@ import { listAttachments } from "@/lib/attachments";
 import { EXPENSE_PAYERS, EXPENSE_STATUS } from "@/data/purchases";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { SheetEditor } from "@/components/sheet-editor";
+import { AddModeBar, ListActions } from "@/components/list-actions";
 import { Badge, Card, EmptyRow, Input, PageHeader, Table, Td } from "@/components/ui";
 import { approve, approveMany, reject, remove, revert, saveExpenses } from "./actions";
 import { fmt } from "@/lib/format";
 
 type Status = keyof typeof EXPENSE_STATUS;
 
-export default async function ExpensesPage({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
+export default async function ExpensesPage({ searchParams }: { searchParams: Promise<{ status?: string; add?: string }> }) {
   const user = await requirePermission("expenses", "view");
-  const { status: raw } = await searchParams;
+  const { status: raw, add } = await searchParams;
+  const adding = add === "1" && can(user.perms, "expenses", "create");
   const status: Status | undefined = raw && raw in EXPENSE_STATUS ? (raw as Status) : undefined;
   const today = todayRiyadh();
   const since = new Date(Date.parse(today) - 60 * 86_400_000).toISOString().slice(0, 10);
@@ -60,16 +62,19 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
 
   return (
     <>
-      <PageHeader title="المصروفات" description="مصروفات الطريق والمكتب المدفوعة من عهدة السائق أو من الصندوق والبنك. تُقيد على المركبة عند الاعتماد." />
+      <PageHeader title="المصروفات" description="مصروفات الطريق والمكتب المدفوعة من عهدة السائق أو من الصندوق والبنك. تُقيد على المركبة عند الاعتماد.">
+        {!adding && <ListActions addHref={can(user.perms, "expenses", "create") && "/expenses?add=1"} addLabel="إدخال مصروفات" />}
+      </PageHeader>
+      {adding && <AddModeBar backHref="/expenses" backLabel="المصروفات" title="إدخال مصروفات" />}
       <div className="mb-6 grid gap-6 xl:grid-cols-3">
-        {can(user.perms, "expenses", "create") && (
-          <Card title="إدخال مصروفات" className="xl:col-span-2">
+        {adding && (
+          <Card className="xl:col-span-3">
             <SheetEditor
               templateName="المصروفات"
               action={saveExpenses}
               initialRows={4}
               columns={[
-                { key: "date", label: "التاريخ", type: "date", required: true, placeholder: today },
+                { key: "date", label: "التاريخ", type: "date", placeholder: today },
                 { key: "payer", label: "الدافع", type: "select", required: true, options: Object.entries(EXPENSE_PAYERS).map(([value, label]) => ({ value, label })), width: "8rem" },
                 { key: "driverId", label: "السائق", type: "select", options: drivers, width: "9rem", create: "driver" },
                 { key: "cashAccountId", label: "أو الصندوق", type: "select", options: cashes.map((a) => ({ value: String(a.id), label: a.nameAr })), width: "9rem" },
@@ -88,11 +93,11 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
             </p>
           </Card>
         )}
-        {custody.length > 0 && (
-          <Card title="أرصدة عهد السائقين">
-            <ul className="divide-y divide-gray-100 text-sm">
+        {!adding && custody.length > 0 && (
+          <Card title="أرصدة عهد السائقين" className="xl:col-span-3">
+            <ul className="grid gap-x-8 text-sm sm:grid-cols-2 xl:grid-cols-4">
               {custody.map((c) => (
-                <li key={c.id} className="flex items-center justify-between py-2">
+                <li key={c.id} className="flex items-center justify-between border-b border-gray-100 py-2">
                   <span>{c.name}</span>
                   <span className={`ltr-nums font-semibold ${c.balance < 0 ? "text-red-600" : "text-emerald-700"}`}>{fmt(c.balance)}</span>
                 </li>
@@ -109,6 +114,8 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
         )}
       </div>
 
+      {!adding && (
+        <>
       <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
         {[{ key: undefined, label: "الكل" }, ...(Object.keys(EXPENSE_STATUS) as Status[]).map((k) => ({ key: k, label: EXPENSE_STATUS[k].label }))].map((t) => (
           <Link
@@ -181,6 +188,8 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
           </tr>
         ))}
       </Table>
+        </>
+      )}
     </>
   );
 }

@@ -74,7 +74,7 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
                   action={savePurchases}
                   initialRows={4}
                   columns={[
-                    { key: "date", label: "التاريخ", type: "date", required: true, placeholder: today },
+                    { key: "date", label: "التاريخ", type: "date", placeholder: today },
                     { key: "supplierId", label: "المورد", type: "select", required: true, options: suppliers, width: "11rem", create: "supplier" },
                     { key: "supplierInvoiceNo", label: "رقم فاتورته", required: true, ltr: true, width: "7rem" },
                     { key: "productId", label: "الصنف", type: "select", options: products, width: "11rem", create: "product" },

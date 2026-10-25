@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState, useTransition, type ReactNode } from "rea
 import type { ReceiptKind } from "@/lib/receipts";
 import { PAYMENT_METHODS } from "@/data/sales";
 import { Icon, Truck } from "@/components/icons";
+import { ComboBox } from "@/components/combo-box";
 import { customerOpenItems, saveReceipt } from "../actions";
 import { fmt } from "@/lib/format";
 
@@ -180,14 +181,7 @@ export function ReceiptForm({
         </div>
         <div className="flex max-w-2xl flex-col gap-3.5 p-5">
           <Row label="العميل" required>
-            <select value={customerId} onChange={(e) => setCustomerId(e.target.value)} className={inputCls}>
-              <option value="">اختر العميل</option>
-              {customers.map((c) => (
-                <option key={c.value} value={c.value}>
-                  {c.label}
-                </option>
-              ))}
-            </select>
+            <ComboBox value={customerId} options={customers} onChange={(v) => setCustomerId(v)} create="customer" placeholder="ابحث عن العميل…" className={inputCls} />
           </Row>
           <Row label={kind === "refund" ? "تم الصرف من خلال" : "تم الدفع من خلال"} required hint="الصندوق أو البنك">
             <select value={cashId} onChange={(e) => setCashId(e.target.value)} className={inputCls}>

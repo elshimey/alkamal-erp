@@ -13,12 +13,15 @@ import { PAYMENT_KINDS } from "@/data/purchases";
 import { PAYMENT_METHODS, RECEIPT_STATUS } from "@/data/sales";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { SheetEditor } from "@/components/sheet-editor";
+import { AddModeBar, ListActions } from "@/components/list-actions";
 import { Badge, Card, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
 import { post, remove, revert, savePayments } from "./actions";
 import { fmt } from "@/lib/format";
 
-export default async function PaymentsPage() {
+export default async function PaymentsPage({ searchParams }: { searchParams: Promise<{ add?: string }> }) {
   const user = await requirePermission("payments", "view");
+  const canCreate = can(user.perms, "payments", "create");
+  const adding = (await searchParams).add === "1" && canCreate;
   const cash = alias(s.accounts, "cash");
   const [suppliers, drivers, cashes, openInvoices, balances, list] = await Promise.all([
     supplierOptions(db),
@@ -52,10 +55,13 @@ export default async function PaymentsPage() {
 
   return (
     <>
-      <PageHeader title="سندات الصرف" description="سداد الموردين والورش والناقلين والمحطات، وصرف العهد للسائقين، من الصندوق أو البنك." />
+      <PageHeader title="سندات الصرف" description="سداد الموردين والورش والناقلين والمحطات، وصرف العهد للسائقين، من الصندوق أو البنك.">
+        {!adding && <ListActions addHref={canCreate && "/payments?add=1"} addLabel="إدخال سندات صرف" />}
+      </PageHeader>
+      {adding && <AddModeBar backHref="/payments" backLabel="سندات الصرف" title="إدخال سندات صرف" />}
       <div className="mb-6 grid gap-6 xl:grid-cols-3">
-        {can(user.perms, "payments", "create") && (
-          <Card title="إدخال سندات صرف" className="xl:col-span-2">
+        {adding && (
+          <Card className="xl:col-span-3">
             {cashes.length === 0 ? (
               <p className="text-sm text-gray-500">أضف حساب صندوق أو بنك تفصيلياً تحت 1101 أو 1102 أولاً.</p>
             ) : (
@@ -65,8 +71,8 @@ export default async function PaymentsPage() {
                   action={savePayments}
                   initialRows={3}
                   columns={[
-                    { key: "date", label: "التاريخ", type: "date", required: true, placeholder: todayRiyadh() },
-                    { key: "partyId", label: "المورد / الناقل", type: "select", options: suppliers, width: "11rem" },
+                    { key: "date", label: "التاريخ", type: "date", placeholder: todayRiyadh() },
+                    { key: "partyId", label: "المورد / الناقل", type: "select", options: suppliers, width: "11rem", create: "supplier" },
                     { key: "driverId", label: "أو عهدة سائق", type: "select", options: drivers, width: "9rem" },
                     { key: "amount", label: "المبلغ", type: "number", required: true, width: "7rem" },
                     { key: "currency", label: "العملة", type: "select", options: [{ value: "SAR", label: "SAR" }, { value: "KWD", label: "KWD" }], width: "5rem", placeholder: "SAR" },
@@ -85,13 +91,14 @@ export default async function PaymentsPage() {
             )}
           </Card>
         )}
-        <Card title="المستحق للجهات الدائنة">
+        {!adding && (
+        <Card title="المستحق للجهات الدائنة" className="xl:col-span-3">
           {balances.length === 0 ? (
             <p className="text-sm text-gray-500">لا أرصدة مستحقة.</p>
           ) : (
-            <ul className="divide-y divide-gray-100 text-sm">
+            <ul className="grid gap-x-8 text-sm sm:grid-cols-2 xl:grid-cols-4">
               {balances.map((b) => (
-                <li key={b.id} className="flex items-center justify-between py-2">
+                <li key={b.id} className="flex items-center justify-between border-b border-gray-100 py-2">
                   <span>{b.name}</span>
                   <span className={`ltr-nums font-semibold ${b.balance < 0 ? "text-emerald-700" : "text-brand-900"}`}>{fmt(b.balance)}</span>
                 </li>
@@ -100,8 +107,10 @@ export default async function PaymentsPage() {
           )}
           <p className="mt-2 text-xs text-gray-500">من القيود المرحّلة: فواتير الموردين، وتكاليف الناقلين والديزل الآجل من الشحنات، ومخصوماً منها السداد. السالب دفعة مقدمة.</p>
         </Card>
+        )}
       </div>
 
+      {!adding && (
       <Table head={["الرقم", "التاريخ", "النوع", "إلى", "المبلغ", "الطريقة", "من", "المخصص على", "الحالة", ""]}>
         {list.length === 0 && <EmptyRow cols={10}>لا توجد سندات صرف بعد</EmptyRow>}
         {list.map(({ p, party, driver, cash: box, entry, invoices }) => (
@@ -152,6 +161,7 @@ export default async function PaymentsPage() {
           </tr>
         ))}
       </Table>
+      )}
     </>
   );
 }

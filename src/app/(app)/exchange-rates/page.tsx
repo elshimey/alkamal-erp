@@ -27,7 +27,7 @@ export default async function ExchangeRatesPage() {
             initialRows={3}
             columns={[
               { key: "currency", label: "العملة", type: "select", required: true, options: currencies.map((c) => ({ value: c.code, label: `${c.code} ${c.nameAr}` })), width: "10rem" },
-              { key: "date", label: "التاريخ", type: "date", required: true, placeholder: today },
+              { key: "date", label: "التاريخ", type: "date", placeholder: today },
               { key: "rate", label: "السعر بالريال", type: "number", required: true, width: "8rem", placeholder: "12.25" },
             ]}
           />
