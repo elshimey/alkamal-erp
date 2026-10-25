@@ -59,7 +59,7 @@ export const NOTE_STATUS = {
 } as const;
 
 export const NOTE_SIDES = {
-  sales: { title: "إشعارات العملاء", party: "العميل", entity: "sales_invoices", invoices: "/invoices", kinds: ["sales_credit", "sales_debit"] },
+  sales: { title: "الإشعارات الدائنة والمدينة", party: "العميل", entity: "sales_invoices", invoices: "/invoices", kinds: ["sales_credit", "sales_debit"] },
   purchase: { title: "إشعارات الموردين", party: "المورد", entity: "purchase_invoices", invoices: "/purchases", kinds: ["purchase_debit", "purchase_credit"] },
 } as const;
 export type NoteSide = keyof typeof NOTE_SIDES;

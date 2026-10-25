@@ -40,6 +40,8 @@ export interface RecordDef {
   heading: (row: Row) => string | Promise<string>;
   /** قيم إضافية للنموذج (الأدوار مثلاً) */
   load?: (id: number) => Promise<Row>;
+  /** مثل load لكل السجلات دفعة واحدة (للتعديل الجماعي) */
+  loadAll?: () => Promise<Map<number, Row>>;
   /** تحقق وتعديلات بعد الحفظ في المعاملة نفسها */
   after?: (tx: Tx, id: number, values: Row, before: Row) => Promise<void>;
   /** حذف السجل وتوابعه؛ الافتراضي حذف الصف فقط */
@@ -153,6 +155,15 @@ export const RECORDS: Record<string, RecordDef> = {
       { key: "isActive", label: "نشط", ...yesNo },
     ],
     load: async (id) => ({ roles: (await db.select({ role: s.partyRoles.role }).from(s.partyRoles).where(eq(s.partyRoles.partyId, id))).map((r) => r.role) }),
+    loadAll: async () => {
+      const m = new Map<number, Row>();
+      for (const r of await db.select({ id: s.partyRoles.partyId, role: s.partyRoles.role }).from(s.partyRoles)) {
+        const row = m.get(r.id) ?? { roles: [] as string[] };
+        (row.roles as string[]).push(r.role);
+        m.set(r.id, row);
+      }
+      return m;
+    },
     after: async (tx, id, v) => {
       const roles = (v.roles as string[]).filter((r) => r in PARTY_ROLES) as (typeof s.partyRoleType.enumValues)[number][];
       if (!roles.length) throw new Error("اختر دوراً واحداً على الأقل");
