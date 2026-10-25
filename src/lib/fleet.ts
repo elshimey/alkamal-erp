@@ -1,5 +1,6 @@
 import { and, desc, eq, gte, isNull, lte, or, sql } from "drizzle-orm";
 import type { Db, Tx } from "@/db";
+import { blockingDocumentIssues } from "@/lib/documents";
 import * as s from "@/db/schema";
 import { addSubAccountTx } from "@/lib/accounts";
 import { findPgError } from "@/lib/errors";
@@ -209,12 +210,22 @@ export async function deleteDriver(db: Db, id: number) {
 export async function assignVehicle(
   db: Db,
   input: { vehicleId: number; driverId: number; fromDate: string; odometerStart?: number | null; notes?: string | null; userId?: number },
+  opts: { canOverride?: boolean; overrideReason?: string | null } = {},
 ) {
   return db.transaction(async (tx) => {
     const [vehicle] = await tx.select().from(s.vehicles).where(eq(s.vehicles.id, input.vehicleId)).for("update");
     if (!vehicle) throw new Error("المركبة غير موجودة");
+    if (vehicle.assetKind === "trailer") throw new Error(`${vehicle.plate} مقطورة؛ تُسند الرؤوس للسائقين، والمقطورة تُختار في الشحنة`);
     const [driver] = await tx.select().from(s.drivers).where(eq(s.drivers.id, input.driverId));
     if (!driver || driver.status !== "active") throw new Error("السائق غير نشط");
+    // الوثائق المانعة المنتهية للرأس أو السائق تمنع الإسناد، إلا بتجاوز مسبَّب ممن يملك الصلاحية
+    const docs = await blockingDocumentIssues(tx, [{ kind: "vehicle", id: vehicle.id, label: vehicle.plate }, { kind: "driver", id: driver.id }], input.fromDate, false);
+    const reason = opts.overrideReason?.trim() || null;
+    if (docs.length && !(opts.canOverride && reason)) {
+      const hint = opts.canOverride ? "؛ اكتب سبب التجاوز للإسناد" : "؛ جدّد الوثيقة أو اطلب الإسناد من مستخدم بصلاحية تجاوز الضوابط";
+      throw new Error(docs.map((d) => d.message).join("، ") + hint);
+    }
+    if (docs.length) input = { ...input, notes: [input.notes, `تجاوز الوثائق: ${reason}`].filter(Boolean).join(" · ") };
     const open = await tx
       .select({ vehicleId: s.vehicleAssignments.vehicleId, driverId: s.vehicleAssignments.driverId })
       .from(s.vehicleAssignments)

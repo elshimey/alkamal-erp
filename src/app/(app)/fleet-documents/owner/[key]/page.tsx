@@ -4,7 +4,7 @@ import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { todayRiyadh } from "@/lib/dates";
-import { alertWindow, BLOCKING, OWNER_KINDS, ownerDocuments, ownerKey, ownerLabel, parseOwnerKey, STATE_LABEL, type DocState } from "@/lib/documents";
+import { BLOCKING, OWNER_KINDS, ownerDocuments, ownerKey, ownerLabel, parseOwnerKey, STATE_LABEL, type DocState } from "@/lib/documents";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { DocumentFileInput } from "@/components/document-file-input";
 import { EditLink } from "@/components/edit-link";
@@ -71,7 +71,7 @@ export default async function OwnerDocumentsPage({ params, searchParams }: { par
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-semibold text-brand-900">{type.nameAr}</span>
                   {current ? (
-                    <ExpiryBadge expiryDate={current.doc.expiryDate} today={today} window={alertWindow(type.alertDays)} />
+                    <ExpiryBadge expiryDate={current.doc.expiryDate} today={today} alertDays={type.alertDays} />
                   ) : (
                     <Badge tone={TONE[state]}>{STATE_LABEL[state]}</Badge>
                   )}

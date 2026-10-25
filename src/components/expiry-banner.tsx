@@ -5,8 +5,8 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
 /** تنبيه الوثائق المنتهية والقريبة من الانتهاء أعلى الشاشة؛ يُخفى لبقية اليوم عند إغلاقه. على الجوال يظهر في لوحة القيادة فقط. */
-export function ExpiryBanner({ expired, soon, today }: { expired: number; soon: number; today: string }) {
-  const key = `expiry-banner-${today}-${expired}-${soon}`;
+export function ExpiryBanner({ expired, soon, critical = [], today }: { expired: number; soon: number; critical?: { name: string; expiryDate: string }[]; today: string }) {
+  const key = `expiry-banner-${today}-${expired}-${soon}-${critical.length}`;
   const [hidden, setHidden] = useState(true);
   const home = usePathname() === "/";
   useEffect(() => {
@@ -17,6 +17,19 @@ export function ExpiryBanner({ expired, soon, today }: { expired: number; soon: 
     // eslint-disable-next-line react-hooks/set-state-in-effect -- يُقرأ التخزين المحلي بعد التحميل فقط
     setHidden(dismissed);
   }, [key]);
+  if (critical.length) {
+    // السجل التجاري أو ترخيص هيئة النقل: لا يُخفى ويظهر في كل الصفحات
+    return (
+      <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-b border-red-300 bg-red-600 px-4 py-2 text-center text-xs font-medium text-white print:hidden">
+        <span>
+          {critical.map((c) => `${c.name} ${c.expiryDate < today ? "منتهٍ" : "ينتهي"} ${c.expiryDate}`).join("، ")}: جدّده فوراً.
+        </span>
+        <Link href="/fleet-documents/owner/company-0" className="font-semibold underline underline-offset-2">
+          وثائق المنشأة
+        </Link>
+      </div>
+    );
+  }
   if (hidden || (!expired && !soon)) return null;
   return (
     <div className={`${home ? "flex" : "hidden md:flex"} flex-wrap items-center justify-center gap-x-3 gap-y-1 border-b px-4 py-2 text-center text-xs print:hidden ${expired ? "border-red-200 bg-red-50 text-red-800" : "border-amber-200 bg-amber-50 text-amber-900"}`}>

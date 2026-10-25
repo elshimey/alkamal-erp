@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray, like, lte, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { Db, Tx } from "@/db";
+import { blockingDocumentIssues } from "@/lib/documents";
 import * as s from "@/db/schema";
 import { createJournalEntryTx, deleteEntryTx, nextDocumentNumber } from "@/lib/ledger";
 import { activeContract, contractRatesFor } from "@/lib/operations";
@@ -341,7 +342,7 @@ export async function recordStage(
 // ───────────── الاعتماد والرفض والإرجاع ─────────────
 
 export interface ControlIssue {
-  code: "no_contract" | "zero_amount" | "credit_limit";
+  code: "no_contract" | "zero_amount" | "credit_limit" | "documents";
   message: string;
 }
 
@@ -369,6 +370,19 @@ export async function approvalIssues(db: Db | Tx, w: typeof s.waybills.$inferSel
       issues.push({ code: "credit_limit", message: `تتجاوز الحد الائتماني للعميل: ${exposure.toLocaleString("en")} من ${limit.toLocaleString("en")}` });
     }
   }
+  // الوثائق المانعة المنتهية في تاريخ الرحلة: الرأس والمقطورة والسائق، والعميل
+  const docs = await blockingDocumentIssues(
+    db,
+    [
+      { kind: "vehicle", id: w.vehicleId },
+      { kind: "trailer", id: w.trailerId },
+      { kind: "driver", id: w.driverId },
+      { kind: "customer", id: w.customerId },
+    ],
+    w.waybillDate,
+    w.isInternational,
+  );
+  issues.push(...docs.map((d) => ({ code: "documents" as const, message: d.message })));
   return issues;
 }
 

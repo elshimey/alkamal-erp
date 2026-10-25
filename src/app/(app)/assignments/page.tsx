@@ -2,7 +2,7 @@ import { and, asc, desc, eq, isNotNull, isNull, notInArray } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
-import { can } from "@/lib/permissions";
+import { can, hasSpecial } from "@/lib/permissions";
 import { todayRiyadh } from "@/lib/dates";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
@@ -33,7 +33,7 @@ export default async function AssignmentsPage({ searchParams }: { searchParams: 
     db
       .select({ id: s.vehicles.id, plate: s.vehicles.plate, odometer: s.vehicles.odometer })
       .from(s.vehicles)
-      .where(and(eq(s.vehicles.status, "active"), busyVehicles.length ? notInArray(s.vehicles.id, busyVehicles) : undefined))
+      .where(and(eq(s.vehicles.status, "active"), eq(s.vehicles.assetKind, "head"), busyVehicles.length ? notInArray(s.vehicles.id, busyVehicles) : undefined))
       .orderBy(asc(s.vehicles.plate)),
     db
       .select({ id: s.drivers.id, name: s.employees.nameAr })
@@ -83,6 +83,11 @@ export default async function AssignmentsPage({ searchParams }: { searchParams: 
             <Field label="قراءة العداد" hint="فارغ = آخر قراءة مسجلة">
               <Input name="odometerStart" type="number" min={0} dir="ltr" />
             </Field>
+            {hasSpecial(user.perms, "override_controls") && (
+              <Field label="سبب التجاوز" hint="فقط إن كانت وثيقة مانعة منتهية">
+                <Input name="overrideReason" />
+              </Field>
+            )}
             <SubmitButton>تسجيل الاستلام</SubmitButton>
             <div className="col-span-full">
               <Field label="ملاحظات الحالة">

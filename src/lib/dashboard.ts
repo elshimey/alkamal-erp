@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { PLAN_ALERT_DAYS } from "@/data/maintenance";
-import { expiryCounts } from "@/lib/documents";
+import { expiryCounts, type OwnerKind } from "@/lib/documents";
 
 // مؤشرات اللوحة الرئيسية. الأرقام المالية من القيود المرحّلة فقط (بالريال)،
 // وأرقام التشغيل من الشحنات نفسها.
@@ -381,8 +381,8 @@ export async function topCustomers(db: Db, from: string, to: string) {
 }
 
 /** ما يحتاج تدخلاً الآن، مرتباً بالأهمية. */
-export async function alertCounts(db: Db, today: string) {
-  const docs = await expiryCounts(db, today);
+export async function alertCounts(db: Db, today: string, docKinds?: OwnerKind[]) {
+  const docs = docKinds?.length ? await expiryCounts(db, today, docKinds) : { expired: 0, soon: 0, critical: [] };
   const [r] = await rows<Record<string, string>>(
     db,
     sql`select
@@ -424,6 +424,7 @@ export async function alertCounts(db: Db, today: string) {
     draftReceipts: n(r.draft_receipts),
     docsExpired: docs.expired,
     docsExpiring: docs.soon,
+    docsCritical: docs.critical,
     kwdRateDate: (r.kwd_rate_date as string | null) ?? null,
     unassigned: n(r.unassigned),
     pendingExpenses: n(r.pending_expenses),

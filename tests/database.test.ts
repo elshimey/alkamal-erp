@@ -19,7 +19,7 @@ import { verifyPassword } from "@/lib/password";
 import { createJournalEntry } from "@/lib/ledger";
 import { getCompany, getInvoiceTemplate, invoiceReadiness, saveCompany, saveInvoiceTemplate } from "@/lib/company";
 import { assignVehicle, createDriver, deleteDriver, updateDriver, createVehicle, driverOnDate, releaseAssignment } from "@/lib/fleet";
-import { addDocument, documentRegister, expiringDocuments, ownerDocuments } from "@/lib/documents";
+import { addDocument, blockingDocumentIssues, documentRegister, expiringDocuments, ownerDocuments } from "@/lib/documents";
 import { addSubAccount } from "@/lib/accounts";
 import { activeContract, createContract, createLocation, createParty, createRoute, priceTrip, setContractStatus } from "@/lib/operations";
 import { createInvoice, createReceipt, invoicingQueue, issueInvoice, listSalesInvoices, revertInvoice, revertReceipt, updateDraftInvoice } from "@/lib/invoices";
@@ -55,7 +55,7 @@ import { IMPORT_SPECS } from "@/data/import-specs";
 import * as hr from "@/lib/hr";
 import * as platform from "@/lib/platform";
 import { runInTenant, tenantClient } from "@/db/tenant";
-import { addExpense, addFuel, approveWaybill, createWaybill, deleteWaybill, recordStage, rejectWaybill, revertWaybill, updateWaybill } from "@/lib/waybills";
+import { addExpense, addFuel, approvalIssues, approveWaybill, createWaybill, deleteWaybill, recordStage, rejectWaybill, revertWaybill, updateWaybill } from "@/lib/waybills";
 
 const url = process.env.TEST_DATABASE_URL;
 const YEAR = 2026;
@@ -475,6 +475,24 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       const [row] = await db.select().from(s.waybills).where(eq(s.waybills.id, w.id));
       expect(row.status).toBe("approved");
       expect(row.overrideReason).toBe("موافقة المدير العام");
+    });
+
+    it("الوثيقة المانعة المنتهية تمنع الاعتماد والإسناد، والدولية في الرحلات الدولية فقط", async () => {
+      const types = await db.select().from(s.documentTypes);
+      const code = (c: string) => types.find((t) => t.code === c)!.id;
+      const reg = await addDocument(db, { documentTypeId: code("v_registration"), owner: { kind: "vehicle", id: vehicle.id }, expiryDate: "2020-01-01" });
+      const gcc = await addDocument(db, { documentTypeId: code("v_gcc_insurance"), owner: { kind: "vehicle", id: vehicle.id }, expiryDate: "2020-01-01" });
+      const w = await createWaybill(db, { waybillDate: D, customerId, routeId, shipper: "أ", consignee: "ب", vehicleId: vehicle.id });
+      const docs = (await approvalIssues(db, w)).filter((i) => i.code === "documents");
+      expect(docs.map((d) => d.message)).toEqual([expect.stringContaining("رخصة السير")]);
+      expect(await blockingDocumentIssues(db, [{ kind: "vehicle", id: vehicle.id }], D, true)).toHaveLength(2);
+      await expect(assignVehicle(db, { vehicleId: vehicle.id, driverId: driver.id, fromDate: D })).rejects.toThrow("رخصة السير");
+      // التجديد يرفع المنع
+      await addDocument(db, { documentTypeId: code("v_registration"), owner: { kind: "vehicle", id: vehicle.id }, expiryDate: `${YEAR + 2}-01-01` });
+      expect((await approvalIssues(db, w)).some((i) => i.code === "documents")).toBe(false);
+      await deleteWaybill(db, w.id, { reason: "اختبار" });
+      expect([reg.row.vehicleId, gcc.row.vehicleId]).toEqual([vehicle.id, vehicle.id]);
+      await db.delete(s.fleetDocuments).where(eq(s.fleetDocuments.vehicleId, vehicle.id));
     });
 
     it("الإرجاع لمسودة يلغي القيد", async () => {
