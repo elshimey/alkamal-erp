@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { DataGrid, GRID_HINT, useGridHistory, type GridColumn, type GridRow } from "./data-grid";
 import { Icon, Truck } from "./icons";
+import { confirmDiscard, useUnsavedGuard } from "./unsaved-guard";
 
 export interface BulkRow {
   id: number;
@@ -68,6 +69,7 @@ export function BulkEditor({
     });
 
   const pending = dirtyIdx.length + deleted.size;
+  useUnsavedGuard(pending > 0);
 
   const save = () => {
     const changes = dirtyIdx
@@ -92,6 +94,7 @@ export function BulkEditor({
   };
 
   const cancel = () => {
+    if (!confirmDiscard(true, "تجاهل كل التعديلات غير المحفوظة والعودة للبيانات كما كانت؟")) return;
     history.reset(original.map((r) => ({ ...r })));
     setDeleted(new Set());
     setErrors({});
@@ -111,9 +114,12 @@ export function BulkEditor({
           <span className="font-semibold text-gray-800">{title}</span>
         </nav>
         <span className={`ms-2 text-xs ${pending ? "font-semibold text-amber-800" : "text-gray-500"}`}>
-          {pending ? `${dirtyIdx.length ? `${dirtyIdx.length} صف معدّل` : ""}${dirtyIdx.length && deleted.size ? " · " : ""}${deleted.size ? `${deleted.size} للحذف` : ""}` : "لا توجد تغييرات بعد"}
+          {pending ? `${dirtyIdx.length ? `${dirtyIdx.length} صف معدّل لم يُحفظ` : ""}${dirtyIdx.length && deleted.size ? " · " : ""}${deleted.size ? `${deleted.size} للحذف` : ""}` : message.ok ? <span className="font-semibold text-green-700">✓ {message.ok}</span> : "لا توجد تغييرات بعد"}
         </span>
         <div className="ms-auto flex flex-wrap items-center gap-2">
+          <Link href={backHref} className={`${btn} flex items-center gap-1`}>
+            → العودة للجدول
+          </Link>
           <button type="button" onClick={history.undo} disabled={!history.canUndo} className={btn}>
             ↶ تراجع
           </button>
@@ -130,7 +136,7 @@ export function BulkEditor({
                 جارٍ الحفظ…
               </span>
             ) : (
-              "حفظ التغييرات"
+              `حفظ التغييرات${pending ? ` (${pending})` : ""}`
             )}
           </button>
         </div>
@@ -209,7 +215,7 @@ export function BulkEditor({
         </ul>
       )}
       {message.error && Object.keys(errors).length === 0 && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{message.error}</p>}
-      {message.ok && <p className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-800">{message.ok}</p>}
+      {message.ok && <p className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-800">✓ {message.ok}</p>}
     </div>
   );
 }

@@ -16,6 +16,7 @@ import {
 } from "@/app/(app)/quick-add/actions";
 import type { QuickForm, QuickKind, QuickOption } from "@/lib/quick-add-types";
 import { ComboBox } from "./combo-box";
+import { PANEL_MESSAGE, type PanelMessage } from "./record-panel";
 import { Truck } from "./icons";
 
 /** رسالة قصيرة أسفل الشاشة تختفي وحدها. */
@@ -32,17 +33,43 @@ function toast(message: string) {
 const input =
   "w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20";
 
-export function QuickAddDialog({
-  kind,
-  initial,
-  onClose,
-  onDone,
-}: {
+type DialogProps = {
   kind: QuickKind;
   initial?: string;
   onClose: () => void;
   onDone: (o: QuickOption) => void;
-}) {
+};
+
+// المركبة والسائق يُضافان من المستند بنافذتهما الكاملة نفسها (البيانات والوثائق والمرفقات)
+const FULL_PANEL: Partial<Record<QuickKind, string>> = { vehicle: "/vehicles", driver: "/drivers" };
+
+export function QuickAddDialog(props: DialogProps) {
+  return FULL_PANEL[props.kind] ? <PanelFrame {...props} base={FULL_PANEL[props.kind]!} /> : <QuickAddForm {...props} />;
+}
+
+/** نافذة السجل الكاملة مضمّنة فوق المستند؛ تُبلغ بالسجل المحفوظ فيُختار في الخانة. */
+function PanelFrame({ base, initial, onClose, onDone }: DialogProps & { base: string }) {
+  useEffect(() => {
+    const listen = (e: MessageEvent<PanelMessage>) => {
+      if (e.origin !== window.location.origin || e.data?.source !== PANEL_MESSAGE) return;
+      if (e.data.type === "saved") {
+        onDone({ value: String(e.data.id), label: e.data.label });
+        toast(`أُضيف «${e.data.label}» واختير`);
+      }
+      onClose();
+    };
+    window.addEventListener("message", listen);
+    return () => window.removeEventListener("message", listen);
+  }, [onClose, onDone]);
+  return createPortal(
+    <div className="fixed inset-0 z-[80] bg-asphalt-900/40" onKeyDown={(e) => e.stopPropagation()} onPaste={(e) => e.stopPropagation()}>
+      <iframe title="إضافة" src={`${base}?new=1&embed=1${initial ? `&q=${encodeURIComponent(initial)}` : ""}`} className="size-full border-0 bg-[#f7f6f3]" />
+    </div>,
+    document.body,
+  );
+}
+
+function QuickAddForm({ kind, initial, onClose, onDone }: DialogProps) {
   const [form, setForm] = useState<QuickForm | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [error, setError] = useState<string>();

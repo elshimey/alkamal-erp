@@ -263,7 +263,7 @@ export async function setDriverLanguage(db: Db, driverId: number, lang: DriverLa
 }
 
 /** ينشئ حساب دخول بدور «السائق» ويربطه بالسائق. */
-export async function createDriverLogin(db: Db, input: { driverId: number; login: string; password: string }) {
+export async function createDriverLogin(db: Db | Tx, input: { driverId: number; login: string; password: string }) {
   const login = input.login.trim();
   if (login.length < 3) throw new Error("اسم الدخول إلزامي (الجوال مثلاً)");
   if (input.password.length < MIN_PASSWORD_LENGTH) throw new Error(`كلمة المرور ${MIN_PASSWORD_LENGTH} أحرف على الأقل`);

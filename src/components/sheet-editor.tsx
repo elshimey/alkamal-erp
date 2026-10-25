@@ -7,6 +7,7 @@ import { useRef, useState, useTransition } from "react";
 import { Truck } from "./icons";
 import { DataGrid, emptyGridRow, GRID_HINT, isEmptyGridRow, normalizeCell, useGridHistory, type GridColumn } from "./data-grid";
 import { parseDelimited, toCsv, type SheetResult } from "@/lib/sheet";
+import { useUnsavedGuard } from "./unsaved-guard";
 
 export type SheetColumn = GridColumn;
 
@@ -34,6 +35,8 @@ export function SheetEditor({
   const [message, setMessage] = useState<{ ok?: string; error?: string }>({});
   const [pending, startTransition] = useTransition();
   const fileRef = useRef<HTMLInputElement>(null);
+  // صفوف مكتوبة لم تُحفظ: سؤال قبل مغادرة الصفحة
+  useUnsavedGuard(rows.some((r) => !isEmpty(r)));
 
   const downloadTemplate = () => {
     const blob = new Blob(["﻿" + toCsv([columns.map((c) => c.label)])], { type: "text/csv;charset=utf-8" });

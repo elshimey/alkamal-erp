@@ -1,6 +1,7 @@
 import Link from "next/link";
+import { AddMenu } from "./add-menu";
 
-// أزرار رأس القوائم على طريقة وافق: «تعديل جماعي» و«إضافة ▾» (إضافة جماعية في شيت، أو استيراد من Excel).
+// أزرار رأس القوائم على طريقة وافق: «تعديل جماعي»، و«+ إضافة» لسجل واحد مع سهم منفصل للإضافة الجماعية والاستيراد.
 
 const btn = "rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50 print:hidden";
 
@@ -20,7 +21,8 @@ export function ListActions({
   newLabel?: string;
   addLabel?: string;
 }) {
-  const items = [newHref && { href: newHref, label: newLabel }, addHref && { href: addHref, label: addLabel }, importHref && { href: importHref, label: "الاستيراد من Excel" }].filter(Boolean) as { href: string; label: string }[];
+  const more = [addHref && { href: addHref, label: addLabel }, importHref && { href: importHref, label: "الاستيراد من Excel" }].filter(Boolean) as { href: string; label: string }[];
+  const main = newHref ? { href: newHref, label: newLabel } : undefined;
   return (
     <div className="flex flex-wrap items-center gap-2 print:hidden">
       {bulkHref && (
@@ -28,25 +30,7 @@ export function ListActions({
           تعديل جماعي
         </Link>
       )}
-      {items.length === 1 && (
-        <Link href={items[0].href} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-brand-900 shadow-sm hover:bg-brand-500">
-          + {items[0].label}
-        </Link>
-      )}
-      {items.length > 1 && (
-        <details className="relative">
-          <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-brand-900 shadow-sm hover:bg-brand-500">
-            إضافة <span className="text-xs">▾</span>
-          </summary>
-          <div className="absolute end-0 z-30 mt-1 w-48 overflow-hidden rounded-xl border border-gray-200 bg-white py-1 text-sm shadow-lg">
-            {items.map((i) => (
-              <Link key={i.href} href={i.href} className="block px-4 py-2 hover:bg-gray-50">
-                {i.label}
-              </Link>
-            ))}
-          </div>
-        </details>
-      )}
+      {main || more.length > 1 ? <AddMenu main={main} more={more} /> : more.length === 1 && <AddMenu main={more[0]} more={[]} />}
     </div>
   );
 }

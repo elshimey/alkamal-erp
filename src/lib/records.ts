@@ -637,7 +637,8 @@ export function parseForm(def: RecordDef, data: FormData): Row {
 /** الأعمدة الرقمية العشرية تُخزن نصاً في drizzle */
 const MONEY_KEYS = new Set(["basicSalary", "housingAllowance", "allowances", "driverCommission", "cost", "creditLimit", "purchasePrice", "salePrice", "reorderLevel", "custodyLimit"]);
 
-export async function saveRecord(kind: RecordKind, id: number, values: Row) {
+/** extra: خطوة إضافية في المعاملة نفسها (حفظ الوثائق من نافذة السجل مثلاً). */
+export async function saveRecord(kind: RecordKind, id: number, values: Row, extra?: (tx: Tx) => Promise<void>) {
   const def = RECORDS[kind];
   if (def.save) return def.save(id, values);
   const t = def.table as unknown as typeof s.vehicles;
@@ -653,6 +654,7 @@ export async function saveRecord(kind: RecordKind, id: number, values: Row) {
     if ("updatedAt" in before) set.updatedAt = new Date();
     if (Object.keys(set).length) await tx.update(t).set(set as never).where(eq(t.id, id));
     if (def.after) await def.after(tx, id, values, before);
+    if (extra) await extra(tx);
   });
 }
 

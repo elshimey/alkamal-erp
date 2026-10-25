@@ -619,3 +619,80 @@ export function summaryText(sum: Awaited<ReturnType<typeof dailySummary>>, compa
     ...(sum.pending ? [`طلبات تجديد من السائقين بانتظار الاعتماد: ${sum.pending}`] : []),
   ].join("\n");
 }
+
+// ───────────── وثائق الصاحب من نافذة إضافته أو تعديله ─────────────
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * يحفظ خانات الوثائق (doc.<النوع>.number|issue|expiry|file|current) من نافذة المركبة أو السائق.
+ * بلا وثيقة حالية: تُنشأ إن كُتب فيها شيء. مع وثيقة حالية: تاريخ انتهاء جديد = تجديد (وثيقة جديدة)،
+ * وتغيير الرقم أو الإصدار وحده = تصحيح للحالية. المرفق يُضاف للوثيقة الناتجة.
+ * يعيد رقم كل وثيقة كُتب رقمها (لمزامنة رقم الإقامة والرخصة في بيانات السائق).
+ */
+export async function saveOwnerDocumentFields(tx: Tx, owner: { kind: OwnerKind; id: number }, data: FormData, userId?: number) {
+  const ids = new Set<number>();
+  for (const key of data.keys()) {
+    const m = key.match(/^doc\.(\d+)\./);
+    if (m) ids.add(Number(m[1]));
+  }
+  const numbers = new Map<string, string>();
+  if (!ids.size) return numbers;
+  const types = await tx.select().from(s.documentTypes);
+  const cols = ownerColumns(owner.kind, owner.id);
+  for (const typeId of ids) {
+    const type = types.find((t) => t.id === typeId);
+    if (!type) continue;
+    const get = (f: string) => String(data.get(`doc.${typeId}.${f}`) ?? "").trim();
+    const number = get("number");
+    const issue = get("issue");
+    const expiry = get("expiry");
+    const file = get("file");
+    const currentId = Number(get("current")) || null;
+    try {
+      if ((issue && !ISO_DATE.test(issue)) || (expiry && !ISO_DATE.test(expiry))) throw new Error("تاريخ غير صحيح؛ اكتبه يوم/شهر/سنة");
+      if (issue && expiry && issue > expiry) throw new Error("تاريخ الإصدار بعد تاريخ الانتهاء");
+      let target: number | null = null;
+      if (currentId) {
+        const [cur] = await tx.select().from(s.fleetDocuments).where(eq(s.fleetDocuments.id, currentId));
+        const mine = cur && cur.documentTypeId === typeId && cur.vehicleId === cols.vehicleId && cur.driverId === cols.driverId && cur.employeeId === cols.employeeId && cur.partyId === cols.partyId;
+        if (!mine) throw new Error("الوثيقة الحالية غير موجودة؛ أعد فتح النافذة");
+        if (expiry && expiry !== cur.expiryDate) {
+          // تاريخ انتهاء جديد: تجديد، وتبقى السابقة في التاريخ
+          const { row } = await addDocument(tx, { documentTypeId: typeId, owner, number: number || cur.number, issueDate: issue || null, expiryDate: expiry, userId });
+          target = row.id;
+        } else {
+          const patch: Partial<typeof s.fleetDocuments.$inferInsert> = {};
+          if ((number || null) !== cur.number) patch.number = number || null;
+          if ((issue || null) !== cur.issueDate) patch.issueDate = issue || null;
+          if (!expiry && cur.expiryDate) patch.expiryDate = null;
+          if (Object.keys(patch).length) await tx.update(s.fleetDocuments).set(patch).where(eq(s.fleetDocuments.id, cur.id));
+          target = cur.id;
+        }
+      } else {
+        if (!number && !issue && !expiry && !file) continue;
+        const { row } = await addDocument(tx, { documentTypeId: typeId, owner, number, issueDate: issue || null, expiryDate: expiry || null, userId });
+        target = row.id;
+      }
+      if (file) await saveDataUrl(tx, { entity: "fleet_documents", entityId: target, kind: "document", dataUrl: file, userId });
+      if (number) numbers.set(type.code, number);
+    } catch (err) {
+      throw new Error(`${type.nameAr}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  return numbers;
+}
+
+/** خانات الوثائق لنافذة الصاحب: الوثيقة الحالية وحالتها لكل نوع (أو الأنواع فقط لصاحب جديد). */
+export async function ownerDocumentFields(db: Db | Tx, kind: OwnerKind, id: number | null, today: string) {
+  const rows = id ? await ownerDocuments(db, kind, id, today) : (await listDocumentTypes(db, { activeOnly: true, kind })).map((type) => ({ type, current: null, state: (type.required ? "missing" : "none") as DocState }));
+  return rows.map(({ type, current, state }) => ({
+    id: type.id,
+    code: type.code,
+    nameAr: type.nameAr,
+    required: type.required,
+    state: id ? state : ("none" as DocState),
+    stateLabel: id ? STATE_LABEL[state] : type.required ? "إلزامية" : "اختيارية",
+    current: current ? { id: current.doc.id, number: current.doc.number, issueDate: current.doc.issueDate, expiryDate: current.doc.expiryDate, attachmentId: current.attachmentId ?? null } : undefined,
+  }));
+}

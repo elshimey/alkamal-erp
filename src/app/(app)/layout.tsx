@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { isDriverOnly } from "@/lib/driver-app";
 import { getTenant, requireUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
@@ -10,6 +11,8 @@ import { BrandMark, Logo } from "@/components/logo";
 import { getBrand } from "@/lib/brand";
 import { MobileNav, NavLinks, type NavGroup } from "@/components/nav-links";
 import { TourRunner } from "@/components/tour";
+import { Sidebar } from "@/components/sidebar";
+import { SIDEBAR_COOKIE } from "@/components/sidebar-cookie";
 import { ExpiryBanner } from "@/components/expiry-banner";
 import { alertKindsFor, expiryCounts } from "@/lib/documents";
 import { todayRiyadh } from "@/lib/dates";
@@ -55,15 +58,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="flex min-h-screen">
-      <aside className="sticky top-0 hidden print:hidden h-screen w-64 shrink-0 flex-col overflow-y-auto bg-asphalt-900 text-white md:flex">
-        <div className="road-line absolute inset-y-0 end-0 opacity-70" />
-        <div className="border-b border-white/5 px-5 py-5">
+      <Sidebar initialPinned={(await cookies()).get(SIDEBAR_COOKIE)?.value !== "collapsed"}>
+        <div className="border-b border-white/5 py-5 ps-5 pe-10">
           <Logo light name={brand.name} logo={brand.logo} />
         </div>
         <nav className="flex flex-1 flex-col p-3 pt-4">
           <NavLinks groups={groups} footer={FOOTER} />
         </nav>
-      </aside>
+      </Sidebar>
       <div className="flex min-w-0 flex-1 flex-col overflow-x-clip">
         <header className="sticky top-0 z-30 flex print:hidden items-center justify-between gap-3 border-b border-black/5 bg-white/85 px-3 py-2 backdrop-blur md:gap-4 md:px-6 md:py-3">
           <MobileNav groups={[...groups, ...FOOTER]} brand={{ name: brand.name, logo: brand.logo }} />

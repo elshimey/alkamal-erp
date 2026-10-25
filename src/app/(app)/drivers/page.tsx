@@ -11,6 +11,7 @@ import { Badge, Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } fr
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { MIN_PASSWORD_LENGTH } from "@/lib/password";
 import { createDriverLoginAction, saveDrivers } from "./actions";
+import { DriverPanel } from "./driver-panel";
 
 const LANG = { ar: "عربي", ur: "أوردو", hi: "هندي", en: "إنجليزي" } as const;
 const STATUS = {
@@ -19,11 +20,17 @@ const STATUS = {
   terminated: { label: "منتهية خدمته", tone: "red" },
 } as const;
 
-export default async function DriversPage({ searchParams }: { searchParams: Promise<{ deleted?: string; add?: string }> }) {
-  const { deleted, add } = await searchParams;
+export default async function DriversPage({ searchParams }: { searchParams: Promise<{ deleted?: string; add?: string; new?: string; edit?: string; embed?: string; q?: string }> }) {
+  const sp = await searchParams;
+  const { deleted, add } = sp;
   const user = await requirePermission("drivers", "view");
   const canCreate = can(user.perms, "drivers", "create");
+  const canEdit = can(user.perms, "drivers", "update");
   const adding = add === "1" && canCreate;
+  const editId = Number(sp.edit) || null;
+  const panel =
+    (sp.new === "1" && canCreate) || (editId && canEdit) ? <DriverPanel id={editId} embed={sp.embed === "1"} initial={sp.q} canLogin={can(user.perms, "users", "create")} /> : null;
+  if (panel && sp.embed === "1") return panel;
   const custody = alias(s.accounts, "custody");
   const rows = await db
     .select({
@@ -47,7 +54,7 @@ export default async function DriversPage({ searchParams }: { searchParams: Prom
         title="السائقون"
         description="كل سائق يُنشأ معه موظفه، وحساب عهدته تحت 1105، وحساب رواتبه المستحقة تحت 2107 تلقائياً."
       >
-        {!adding && <ListActions bulkHref={can(user.perms, "drivers", "update") && "/records/drivers/bulk"} addHref={canCreate && "/drivers?add=1"} />}
+        {!adding && <ListActions bulkHref={canEdit && "/records/drivers/bulk"} newHref={canCreate && "/drivers?new=1"} newLabel="إضافة سائق" addHref={canCreate && "/drivers?add=1"} />}
       </PageHeader>
       {adding && <AddModeBar backHref="/drivers" backLabel="السائقون" title="إضافة جماعية" />}
       {deleted && <p className="mb-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-800">حُذف السائق «{deleted}» نهائياً</p>}
@@ -106,13 +113,13 @@ export default async function DriversPage({ searchParams }: { searchParams: Prom
       )}
       {!adding && (
       <>
-      <p className="mb-2 text-sm text-gray-500">اضغط اسم السائق لتعديل بياناته أو حالته أو حساب دخوله أو حذفه.</p>
+      <p className="mb-2 text-sm text-gray-500">اضغط اسم السائق لتعديل بياناته ووثائقه.</p>
       <Table head={["الاسم", "الجوال", "الجنسية", "لغة التطبيق", "العمولة", "المركبة الحالية", "حساب العهدة", "دخول التطبيق", "الحالة"]}>
         {rows.length === 0 && <EmptyRow cols={9}>لا يوجد سائقون بعد</EmptyRow>}
         {rows.map(({ d, name, custodyCode, plate, login }) => (
           <tr key={d.id}>
             <Td className="font-medium">
-              <Link href={`/drivers/${d.id}`} className="text-brand-700 hover:underline">
+              <Link href={canEdit ? `/drivers?edit=${d.id}` : `/drivers/${d.id}`} scroll={false} prefetch={false} className="text-brand-700 hover:underline">
                 {name}
               </Link>
               <Link href={`/fleet-documents/owner/driver-${d.id}`} className="ms-2 text-xs font-normal text-gray-500 hover:text-brand-700 hover:underline">
@@ -134,6 +141,7 @@ export default async function DriversPage({ searchParams }: { searchParams: Prom
       </Table>
       </>
       )}
+      {panel}
     </>
   );
 }

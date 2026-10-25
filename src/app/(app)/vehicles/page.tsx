@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { EditLink } from "@/components/edit-link";
 import { and, asc, eq, like } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
@@ -10,6 +9,7 @@ import { SheetEditor } from "@/components/sheet-editor";
 import { Badge, Card, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
 import { AddModeBar, ListActions } from "@/components/list-actions";
 import { saveVehicles } from "./actions";
+import { VehiclePanel } from "./vehicle-panel";
 
 const STATUS = {
   active: { label: "تعمل", tone: "green" },
@@ -18,10 +18,16 @@ const STATUS = {
   sold: { label: "مباعة", tone: "red" },
 } as const;
 
-export default async function VehiclesPage({ searchParams }: { searchParams: Promise<{ add?: string }> }) {
+export default async function VehiclesPage({ searchParams }: { searchParams: Promise<{ add?: string; new?: string; edit?: string; embed?: string; q?: string }> }) {
   const user = await requirePermission("vehicles", "view");
+  const sp = await searchParams;
   const canCreate = can(user.perms, "vehicles", "create");
-  const adding = (await searchParams).add === "1" && canCreate;
+  const canEdit = can(user.perms, "vehicles", "update");
+  const adding = sp.add === "1" && canCreate;
+  const editId = Number(sp.edit) || null;
+  const panel = (sp.new === "1" && canCreate) || (editId && canEdit) ? <VehiclePanel id={editId} embed={sp.embed === "1"} initial={sp.q} /> : null;
+  // من داخل مستند: النافذة وحدها دون الجدول
+  if (panel && sp.embed === "1") return panel;
   const asset = alias(s.accounts, "asset");
   const [rows, types, assetAccounts] = await Promise.all([
     db
@@ -42,7 +48,15 @@ export default async function VehiclesPage({ searchParams }: { searchParams: Pro
   return (
     <>
       <PageHeader title="المركبات" description="الرؤوس والمقطورات (السطحات). كل مركبة تنشئ مركز تكلفتها تلقائياً، وتُربط بحساب أصلها في شجرة الحسابات.">
-        {!adding && <ListActions bulkHref={can(user.perms, "vehicles", "update") && "/records/vehicles/bulk"} addHref={canCreate && "/vehicles?add=1"} importHref={canCreate && "/import/vehicles"} />}
+        {!adding && (
+          <ListActions
+            bulkHref={canEdit && "/records/vehicles/bulk"}
+            newHref={canCreate && "/vehicles?new=1"}
+            newLabel="إضافة مركبة"
+            addHref={canCreate && "/vehicles?add=1"}
+            importHref={canCreate && "/import/vehicles"}
+          />
+        )}
       </PageHeader>
       {adding && <AddModeBar backHref="/vehicles" backLabel="المركبات" title="إضافة جماعية" />}
       {adding && (
@@ -72,14 +86,20 @@ export default async function VehiclesPage({ searchParams }: { searchParams: Pro
           />
         </Card>
       )}
+      {!adding && rows.length > 0 && canEdit && <p className="mb-2 text-sm text-gray-500">اضغط اللوحة لتعديل بيانات المركبة ووثائقها.</p>}
       {!adding && (
       <Table head={["اللوحة", "النوع", "الماركة والطراز", "السنة", "العداد", "الملكية", "الحالة", "حساب الأصل", "مركز التكلفة", ""]}>
         {rows.length === 0 && <EmptyRow cols={10}>لا توجد مركبات بعد</EmptyRow>}
         {rows.map(({ v, typeName, ccCode, accCode, accName }) => (
           <tr key={v.id}>
             <Td className="font-medium">
-              {v.plate}
-              <EditLink href={`/records/vehicles/${v.id}`} />
+              {canEdit ? (
+                <Link href={`/vehicles?edit=${v.id}`} scroll={false} prefetch={false} className="text-brand-700 hover:underline">
+                  {v.plate}
+                </Link>
+              ) : (
+                v.plate
+              )}
             </Td>
             <Td>
               {v.assetKind === "trailer" && <Badge tone="blue">مقطورة</Badge>} {typeName ?? (v.assetKind === "trailer" ? "" : "—")}
@@ -102,6 +122,7 @@ export default async function VehiclesPage({ searchParams }: { searchParams: Pro
         ))}
       </Table>
       )}
+      {panel}
     </>
   );
 }
