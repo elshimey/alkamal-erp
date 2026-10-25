@@ -133,6 +133,25 @@ const ar = {
   tooManyAttempts: "محاولات خاطئة كثيرة؛ أعد المحاولة بعد 15 دقيقة",
   forgot: "نسيت كلمة المرور؟ اطلب من المكتب تغييرها.",
   chooseLanguage: "اختر لغتك",
+  docs: {
+    title: "وثائقي",
+    card: "وثائقي ووثائق مركبتي",
+    mine: "وثائقي",
+    vehicle: "وثائق المركبة",
+    upload: "رفع وثيقة مجدَّدة",
+    uploadHint: "صوّر الوثيقة الجديدة بوضوح. يراجعها المكتب ويحدّث تاريخ الانتهاء.",
+    type: "الوثيقة",
+    number: "رقم الوثيقة",
+    expiry: "تاريخ الانتهاء الجديد",
+    photo: "صورة الوثيقة",
+    pending: "بانتظار المكتب",
+    rejected: "مرفوضة",
+    expires: "تنتهي",
+    noExpiry: "لا تنتهي",
+    states: { valid: "سارية", soon: "تنتهي قريباً", expired: "منتهية", missing: "غير مسجلة", none: "غير مسجلة" },
+    myUploads: "ما رفعته",
+    approved: "اعتُمدت",
+  },
 };
 
 export type DriverDict = typeof ar;
@@ -262,6 +281,25 @@ const ur: DriverDict = {
   tooManyAttempts: "بہت زیادہ غلط کوششیں؛ 15 منٹ بعد دوبارہ کوشش کریں",
   forgot: "پاس ورڈ بھول گئے؟ دفتر سے نیا لیں۔",
   chooseLanguage: "اپنی زبان منتخب کریں",
+  docs: {
+    title: "میرے کاغذات",
+    card: "میرے اور گاڑی کے کاغذات",
+    mine: "میرے کاغذات",
+    vehicle: "گاڑی کے کاغذات",
+    upload: "نئی تجدید شدہ دستاویز بھیجیں",
+    uploadHint: "نئی دستاویز کی صاف تصویر لیں۔ دفتر جانچ کر تاریخ اپ ڈیٹ کرے گا۔",
+    type: "دستاویز",
+    number: "دستاویز نمبر",
+    expiry: "نئی میعاد ختم ہونے کی تاریخ",
+    photo: "دستاویز کی تصویر",
+    pending: "دفتر کے انتظار میں",
+    rejected: "مسترد",
+    expires: "ختم",
+    noExpiry: "ختم نہیں ہوتی",
+    states: { valid: "درست", soon: "جلد ختم", expired: "ختم شدہ", missing: "درج نہیں", none: "درج نہیں" },
+    myUploads: "میری بھیجی گئی",
+    approved: "منظور",
+  },
 };
 
 const hi: DriverDict = {
@@ -389,6 +427,25 @@ const hi: DriverDict = {
   tooManyAttempts: "बहुत अधिक गलत प्रयास; 15 मिनट बाद फिर कोशिश करें",
   forgot: "पासवर्ड भूल गए? ऑफिस से नया लें।",
   chooseLanguage: "अपनी भाषा चुनें",
+  docs: {
+    title: "मेरे दस्तावेज़",
+    card: "मेरे और गाड़ी के दस्तावेज़",
+    mine: "मेरे दस्तावेज़",
+    vehicle: "गाड़ी के दस्तावेज़",
+    upload: "नवीनीकृत दस्तावेज़ भेजें",
+    uploadHint: "नए दस्तावेज़ की साफ़ फ़ोटो लें। ऑफ़िस जाँच कर तारीख़ अपडेट करेगा।",
+    type: "दस्तावेज़",
+    number: "दस्तावेज़ नंबर",
+    expiry: "नई समाप्ति तिथि",
+    photo: "दस्तावेज़ की फ़ोटो",
+    pending: "ऑफ़िस की प्रतीक्षा",
+    rejected: "अस्वीकृत",
+    expires: "समाप्ति",
+    noExpiry: "समाप्त नहीं होता",
+    states: { valid: "मान्य", soon: "जल्द समाप्त", expired: "समाप्त", missing: "दर्ज नहीं", none: "दर्ज नहीं" },
+    myUploads: "मेरे भेजे हुए",
+    approved: "स्वीकृत",
+  },
 };
 
 const en: DriverDict = {
@@ -516,6 +573,25 @@ const en: DriverDict = {
   tooManyAttempts: "Too many wrong attempts; try again in 15 minutes",
   forgot: "Forgot your password? Ask the office to reset it.",
   chooseLanguage: "Choose your language",
+  docs: {
+    title: "My documents",
+    card: "My & my vehicle's documents",
+    mine: "My documents",
+    vehicle: "Vehicle documents",
+    upload: "Send a renewed document",
+    uploadHint: "Take a clear photo of the new document. The office reviews it and updates the expiry date.",
+    type: "Document",
+    number: "Document number",
+    expiry: "New expiry date",
+    photo: "Document photo",
+    pending: "Waiting for office",
+    rejected: "Rejected",
+    expires: "Expires",
+    noExpiry: "Does not expire",
+    states: { valid: "Valid", soon: "Expiring soon", expired: "Expired", missing: "Not recorded", none: "Not recorded" },
+    myUploads: "My uploads",
+    approved: "Approved",
+  },
 };
 
 export const DRIVER_DICT: Record<DriverLang, DriverDict> = { ar, ur, hi, en };

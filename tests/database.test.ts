@@ -19,7 +19,7 @@ import { verifyPassword } from "@/lib/password";
 import { createJournalEntry } from "@/lib/ledger";
 import { getCompany, getInvoiceTemplate, invoiceReadiness, saveCompany, saveInvoiceTemplate } from "@/lib/company";
 import { assignVehicle, createDriver, deleteDriver, updateDriver, createVehicle, driverOnDate, releaseAssignment } from "@/lib/fleet";
-import { addDocument, blockingDocumentIssues, documentRegister, expiringDocuments, ownerDocuments } from "@/lib/documents";
+import { addDocument, approveSubmission, blockingDocumentIssues, dailySummary, documentRegister, expiringDocuments, listSubmissions, ownerDocuments, rejectSubmission, submitRenewal, summaryText } from "@/lib/documents";
 import { addSubAccount } from "@/lib/accounts";
 import { activeContract, createContract, createLocation, createParty, createRoute, priceTrip, setContractStatus } from "@/lib/operations";
 import { createInvoice, createReceipt, invoicingQueue, issueInvoice, listSalesInvoices, revertInvoice, revertReceipt, updateDraftInvoice } from "@/lib/invoices";
@@ -492,6 +492,40 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect((await approvalIssues(db, w)).some((i) => i.code === "documents")).toBe(false);
       await deleteWaybill(db, w.id, { reason: "اختبار" });
       expect([reg.row.vehicleId, gcc.row.vehicleId]).toEqual([vehicle.id, vehicle.id]);
+      await db.delete(s.fleetDocuments).where(eq(s.fleetDocuments.vehicleId, vehicle.id));
+    });
+
+    it("السائق يرفع الوثيقة المجددة، والمكتب يعتمدها فتصبح الحالية بصورتها، أو يرفضها بسبب", async () => {
+      const types = await db.select().from(s.documentTypes);
+      const code = (c: string) => types.find((t) => t.code === c)!.id;
+      const photo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+      const me = { id: driver.id, vehicle: { id: vehicle.id } };
+      await expect(submitRenewal(db, me, { documentTypeId: code("v_registration"), photo: null })).rejects.toThrow("صورة");
+      await expect(submitRenewal(db, me, { documentTypeId: code("c_cr"), photo })).rejects.toThrow();
+      await expect(submitRenewal(db, { ...me, vehicle: null }, { documentTypeId: code("v_registration"), photo })).rejects.toThrow();
+      const sub = await submitRenewal(db, me, { documentTypeId: code("v_registration"), number: "R-1", expiryDate: `${YEAR + 1}-06-30`, photo });
+      const [pending] = await listSubmissions(db, { status: "pending" });
+      expect(pending.sub.id).toBe(sub.id);
+      expect(pending.attachmentId).not.toBeNull();
+      expect((await dailySummary(db, D)).pending).toBe(1);
+
+      const doc = await approveSubmission(db, sub.id, { expiryDate: `${YEAR + 1}-07-01` });
+      expect(doc).toMatchObject({ vehicleId: vehicle.id, number: "R-1", expiryDate: `${YEAR + 1}-07-01` });
+      const reg = (await ownerDocuments(db, "vehicle", vehicle.id, D)).find((r) => r.type.code === "v_registration")!;
+      expect(reg.current?.doc.id).toBe(doc.id);
+      expect(reg.current?.attachmentId).toBe(pending.attachmentId);
+      await expect(approveSubmission(db, sub.id, {})).rejects.toThrow("مسبقاً");
+
+      const lic = await submitRenewal(db, me, { documentTypeId: code("d_license"), photo });
+      await expect(rejectSubmission(db, lic.id, " ")).rejects.toThrow("سبب");
+      await rejectSubmission(db, lic.id, "الصورة غير واضحة");
+      const [mine] = await listSubmissions(db, { driverId: driver.id });
+      expect(mine.sub).toMatchObject({ status: "rejected", reviewNote: "الصورة غير واضحة" });
+
+      const sum = await dailySummary(db, D);
+      expect(sum.pending).toBe(0);
+      expect(summaryText(sum, "الكمال")).toContain("ملخص الوثائق اليومي – الكمال");
+      await db.delete(s.documentSubmissions);
       await db.delete(s.fleetDocuments).where(eq(s.fleetDocuments.vehicleId, vehicle.id));
     });
 

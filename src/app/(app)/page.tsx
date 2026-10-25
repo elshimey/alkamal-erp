@@ -141,6 +141,13 @@ export default async function Dashboard({
       href: "/fleet-documents",
     },
     {
+      show: can(user.perms, "fleet_documents", "update") && alerts.pendingDocUploads > 0,
+      tone: "amber",
+      icon: "document",
+      text: `${alerts.pendingDocUploads} وثيقة مجددة رفعها السائقون بانتظار الاعتماد`,
+      href: "/fleet-documents/submissions",
+    },
+    {
       show: canSales && alerts.overdue > 0,
       tone: "red",
       icon: "invoice",

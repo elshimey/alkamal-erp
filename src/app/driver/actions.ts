@@ -7,6 +7,7 @@ import { requireDriver } from "@/lib/driver-auth";
 import { destroySession } from "@/lib/auth";
 import { createDriverExpense, ownTrip, recordDriverStage, reportBreakdown, setDriverLanguage, startTrip, type TripStage } from "@/lib/driver-app";
 import { requestCommissionAdvance } from "@/lib/hr";
+import { submitRenewal } from "@/lib/documents";
 import { addExpense, addFuel, deleteWaybillItem } from "@/lib/waybills";
 import { todayRiyadh } from "@/lib/dates";
 import { errorMessage } from "@/lib/errors";
@@ -169,6 +170,27 @@ export async function breakdownAction(_: FormState, data: FormData): Promise<For
     return { error: errorMessage(err) };
   }
   revalidatePath("/driver/breakdown");
+  return { ok: t.saved };
+}
+
+export async function documentAction(_: FormState, data: FormData): Promise<FormState> {
+  const { user, driver, t } = await requireDriver();
+  try {
+    const expiry = str(data, "expiryDate");
+    if (expiry && !/^\d{4}-\d{2}-\d{2}$/.test(expiry)) throw new Error("تاريخ غير صحيح");
+    await onceForOp(db, op(data), async () => {
+      await submitRenewal(db, driver, {
+        documentTypeId: Number(str(data, "documentTypeId")),
+        number: str(data, "number"),
+        expiryDate: expiry || null,
+        photo: photo(data),
+        userId: user.id,
+      });
+    });
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+  revalidatePath("/driver/documents");
   return { ok: t.saved };
 }
 

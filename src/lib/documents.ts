@@ -4,6 +4,7 @@ import * as s from "@/db/schema";
 import { daysBetween } from "@/lib/dates";
 import { getCompany } from "@/lib/company";
 import { can, type PermissionSet } from "@/lib/permissions";
+import { saveDataUrl } from "@/lib/attachments";
 
 // سجل الوثائق: لكل صاحب (رأس، مقطورة، سائق، موظف، الشركة، عميل) وثائقه حسب الأنواع المعرّفة في الإعدادات.
 // الوثيقة المجدَّدة سجل جديد؛ الأحدث انتهاءً هو المعتمد، والأقدم يبقى في التاريخ.
@@ -481,4 +482,140 @@ export function alertKindsFor(perms: PermissionSet): OwnerKind[] {
   if (can(perms, "fleet_documents", "view") && can(perms, "employees", "view")) kinds.push("employee");
   if (can(perms, "fleet_documents", "view") && (perms.isAdmin || can(perms, "settings", "update"))) kinds.push("company");
   return kinds;
+}
+
+// ───────────── تجديد الوثائق من تطبيق السائق ─────────────
+
+/** يرفع السائق صورة وثيقة مجدَّدة له أو لمركبته المسندة؛ تبقى بانتظار اعتماد المكتب. */
+export async function submitRenewal(
+  db: Db,
+  driver: { id: number; vehicle: { id: number } | null },
+  input: { documentTypeId: number; number?: string | null; expiryDate?: string | null; note?: string | null; photo: string | null; userId?: number },
+) {
+  return db.transaction(async (tx) => {
+    const [type] = await tx.select().from(s.documentTypes).where(eq(s.documentTypes.id, input.documentTypeId));
+    if (!type || (type.ownerKind !== "driver" && type.ownerKind !== "vehicle")) throw new Error("اختر الوثيقة");
+    if (type.ownerKind === "vehicle" && !driver.vehicle) throw new Error("لا توجد مركبة مسندة لك");
+    if (!input.photo) throw new Error("صورة الوثيقة إلزامية");
+    const [row] = await tx
+      .insert(s.documentSubmissions)
+      .values({
+        documentTypeId: type.id,
+        driverId: driver.id,
+        vehicleId: type.ownerKind === "vehicle" ? driver.vehicle!.id : null,
+        number: input.number || null,
+        expiryDate: input.expiryDate || null,
+        note: input.note || null,
+        submittedBy: input.userId ?? null,
+      })
+      .returning();
+    const saved = await saveDataUrl(tx, { entity: "document_submissions", entityId: row.id, kind: "document", dataUrl: input.photo, userId: input.userId });
+    if (!saved) throw new Error("صورة الوثيقة إلزامية");
+    return row;
+  });
+}
+
+/** طلبات التجديد المرفوعة من السائقين (الأحدث أولاً)، مع الصورة وصاحب الوثيقة. */
+export async function listSubmissions(db: Db | Tx, opts: { status?: (typeof s.documentSubmissionStatus.enumValues)[number]; driverId?: number; limit?: number } = {}) {
+  return db
+    .select({
+      sub: s.documentSubmissions,
+      type: s.documentTypes,
+      plate: s.vehicles.plate,
+      driverName: s.employees.nameAr,
+      attachmentId: sql<number | null>`(select a.id from attachments a where a.entity = 'document_submissions' and a.entity_id = ${s.documentSubmissions.id} order by a.id desc limit 1)`,
+    })
+    .from(s.documentSubmissions)
+    .innerJoin(s.documentTypes, eq(s.documentTypes.id, s.documentSubmissions.documentTypeId))
+    .innerJoin(s.drivers, eq(s.drivers.id, s.documentSubmissions.driverId))
+    .innerJoin(s.employees, eq(s.employees.id, s.drivers.employeeId))
+    .leftJoin(s.vehicles, eq(s.vehicles.id, s.documentSubmissions.vehicleId))
+    .where(
+      and(
+        opts.status ? eq(s.documentSubmissions.status, opts.status) : undefined,
+        opts.driverId ? eq(s.documentSubmissions.driverId, opts.driverId) : undefined,
+      ),
+    )
+    .orderBy(desc(s.documentSubmissions.createdAt))
+    .limit(opts.limit ?? 200);
+}
+
+/** اعتماد التجديد: تُسجَّل وثيقة جديدة بالتواريخ التي يؤكدها الموظف، وتنتقل الصورة إليها. */
+export async function approveSubmission(
+  db: Db,
+  id: number,
+  input: { number?: string | null; issueDate?: string | null; expiryDate?: string | null; cost?: number | null; userId?: number },
+) {
+  return db.transaction(async (tx) => {
+    const [sub] = await tx.select().from(s.documentSubmissions).where(eq(s.documentSubmissions.id, id)).for("update");
+    if (!sub) throw new Error("الطلب غير موجود");
+    if (sub.status !== "pending") throw new Error("الطلب رُوجع مسبقاً");
+    const owner = sub.vehicleId ? { kind: "vehicle" as const, id: sub.vehicleId } : { kind: "driver" as const, id: sub.driverId };
+    const { row } = await addDocument(tx, {
+      documentTypeId: sub.documentTypeId,
+      owner,
+      number: input.number ?? sub.number,
+      issueDate: input.issueDate,
+      expiryDate: input.expiryDate ?? sub.expiryDate,
+      cost: input.cost,
+      notes: sub.note ? `من تطبيق السائق: ${sub.note}` : "من تطبيق السائق",
+      userId: input.userId,
+    });
+    await tx
+      .update(s.attachments)
+      .set({ entity: "fleet_documents", entityId: row.id })
+      .where(and(eq(s.attachments.entity, "document_submissions"), eq(s.attachments.entityId, sub.id)));
+    await tx
+      .update(s.documentSubmissions)
+      .set({ status: "approved", documentId: row.id, reviewedBy: input.userId ?? null, reviewedAt: new Date() })
+      .where(eq(s.documentSubmissions.id, id));
+    return row;
+  });
+}
+
+export async function rejectSubmission(db: Db, id: number, reason: string, userId?: number) {
+  if (!reason.trim()) throw new Error("اكتب سبب الرفض ليصل للسائق");
+  const rows = await db
+    .update(s.documentSubmissions)
+    .set({ status: "rejected", reviewNote: reason.trim(), reviewedBy: userId ?? null, reviewedAt: new Date() })
+    .where(and(eq(s.documentSubmissions.id, id), eq(s.documentSubmissions.status, "pending")))
+    .returning({ id: s.documentSubmissions.id });
+  if (!rows.length) throw new Error("الطلب رُوجع مسبقاً");
+}
+
+// ───────────── الملخص اليومي ─────────────
+
+/** ملخص اليوم: المنتهية، وما ينتهي اليوم، وما دخل مرحلة تنبيه جديدة اليوم، وطلبات السائقين، والناقص. */
+export async function dailySummary(db: Db | Tx, today: string, kinds?: OwnerKind[]) {
+  const [rows, missing, pending] = await Promise.all([
+    expiringDocuments(db, today, kinds),
+    missingDocuments(db, kinds),
+    db.select({ n: sql<number>`count(*)::int` }).from(s.documentSubmissions).where(eq(s.documentSubmissions.status, "pending")),
+  ]);
+  const expired = rows.filter((r) => r.doc.expiryDate! < today);
+  const dueToday = rows.filter((r) => r.doc.expiryDate === today);
+  // دخلت اليوم مرحلة تنبيه: الباقي يساوي أحد أيام التنبيه بالضبط
+  const newStage = rows.filter((r) => {
+    const left = daysBetween(today, r.doc.expiryDate!);
+    return left > 0 && parseAlertDays(r.type.alertDays).includes(left);
+  });
+  const critical = rows.filter((r) => CRITICAL_COMPANY_DOCS.includes(r.type.code) && daysBetween(today, r.doc.expiryDate!) <= 7);
+  return { today, expired, dueToday, newStage, soon: rows.filter((r) => r.doc.expiryDate! > today), missing: missing.length, pending: pending[0]?.n ?? 0, critical };
+}
+
+/** نص الملخص لرسالة واتساب (مختصر: أهم 10 بنود من كل قسم). */
+export function summaryText(sum: Awaited<ReturnType<typeof dailySummary>>, company: string) {
+  const line = (r: (typeof sum.expired)[number]) => `• ${r.owner}: ${r.type.nameAr} (${r.doc.expiryDate})`;
+  const part = (title: string, list: typeof sum.expired) => (list.length ? [`*${title} (${list.length})*`, ...list.slice(0, 10).map(line), ...(list.length > 10 ? [`… و${list.length - 10} أخرى`] : []), ""] : []);
+  return [
+    `ملخص الوثائق اليومي – ${company}`,
+    sum.today,
+    "",
+    ...(sum.critical.length ? [`🔴 عاجل: ${sum.critical.map((r) => `${r.type.nameAr} ${r.doc.expiryDate}`).join("، ")}`, ""] : []),
+    ...part("منتهية لم تُجدَّد", sum.expired),
+    ...part("تنتهي اليوم", sum.dueToday),
+    ...part("دخلت مرحلة تنبيه اليوم", sum.newStage),
+    `وثائق إلزامية ناقصة: ${sum.missing}`,
+    ...(sum.pending ? [`طلبات تجديد من السائقين بانتظار الاعتماد: ${sum.pending}`] : []),
+  ].join("\n");
 }

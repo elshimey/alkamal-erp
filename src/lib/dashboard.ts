@@ -412,6 +412,7 @@ export async function alertCounts(db: Db, today: string, docKinds?: OwnerKind[])
           (select count(*) from payroll_runs where status = 'approved')::int as unpaid_payroll,
           (select count(*) from employee_advances where status = 'pending')::int as pending_advances,
           (select count(*) from traffic_violations where status = 'posted')::int as unpaid_violations,
+          (select count(*) from document_submissions where status = 'pending')::int as pending_doc_uploads,
           (select count(*) from payroll_runs where month = date_trunc('month', ${today}::date - interval '1 month')::date)::int as last_month_run`,
   );
   return {
@@ -425,6 +426,7 @@ export async function alertCounts(db: Db, today: string, docKinds?: OwnerKind[])
     docsExpired: docs.expired,
     docsExpiring: docs.soon,
     docsCritical: docs.critical,
+    pendingDocUploads: n(r.pending_doc_uploads),
     kwdRateDate: (r.kwd_rate_date as string | null) ?? null,
     unassigned: n(r.unassigned),
     pendingExpenses: n(r.pending_expenses),
