@@ -5,8 +5,10 @@ import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { errorMessage } from "@/lib/errors";
-import { createManualEntry, deleteManualEntry, postManualEntry, reclassCandidates, reclassify, revertManualEntry, updateManualEntry, type ManualLine } from "@/lib/journal";
+import { createManualEntry, deleteManualEntry, postManualEntry, reclassCandidates, reclassify, revertManualEntry, updateManualEntry, updateManualEntryHeader, type ManualLine } from "@/lib/journal";
 import type { FormState } from "@/components/action-form";
+import type { DocSheetResult, SheetChange } from "@/components/doc-sheet";
+import { cell } from "@/lib/sheet-server";
 
 const refresh = () => {
   revalidatePath("/journal");
@@ -92,4 +94,25 @@ export async function reclassifyAction(input: { lineIds: number[]; targetAccount
   } catch (err) {
     return { error: errorMessage(err) };
   }
+}
+
+export async function saveEntrySheet(payload: string): Promise<DocSheetResult> {
+  await requirePermission("journal_entries", "update");
+  const changes = JSON.parse(payload) as SheetChange[];
+  const errors: Record<number, string> = {};
+  let saved = 0;
+  for (const { id, values: v } of changes) {
+    try {
+      await updateManualEntryHeader(db, id, {
+        entryDate: v.date !== undefined ? (cell.date(v.date, "التاريخ") ?? undefined) : undefined,
+        description: v.description,
+        reference: v.reference,
+      });
+      saved++;
+    } catch (err) {
+      errors[id] = errorMessage(err);
+    }
+  }
+  refresh();
+  return { ok: saved ? `حُفظت تعديلات ${saved} قيد` : undefined, errors };
 }

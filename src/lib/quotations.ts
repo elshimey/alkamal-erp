@@ -86,6 +86,26 @@ export async function setQuotationStatus(db: Db, id: number, status: "draft" | "
   await db.update(s.quotations).set({ status, updatedAt: new Date() }).where(eq(s.quotations.id, id));
 }
 
+/** تعديل رأس عرض المسودة من الورقة: التاريخ والصلاحية والملاحظات والشروط. */
+export async function updateDraftQuotation(db: Db, id: number, patch: { date?: string; validUntil?: string; notes?: string; terms?: string }) {
+  const [q] = await db.select().from(s.quotations).where(eq(s.quotations.id, id));
+  if (!q) throw new Error("العرض غير موجود");
+  if (q.status !== "draft") throw new Error(`العرض ${q.number} ليس مسودة؛ لا يُعدّل`);
+  const date = patch.date ?? q.quoteDate;
+  const validUntil = patch.validUntil ?? q.validUntil;
+  if (validUntil < date) throw new Error("تاريخ الصلاحية قبل تاريخ العرض");
+  await db
+    .update(s.quotations)
+    .set({
+      quoteDate: date,
+      validUntil,
+      ...(patch.notes !== undefined ? { notes: patch.notes.trim() || null } : {}),
+      ...(patch.terms !== undefined ? { terms: patch.terms.trim() || null } : {}),
+      updatedAt: new Date(),
+    })
+    .where(eq(s.quotations.id, id));
+}
+
 export async function deleteQuotation(db: Db, id: number) {
   const [q] = await db.select().from(s.quotations).where(eq(s.quotations.id, id));
   if (!q) return;

@@ -14,7 +14,8 @@ import { Icon } from "@/components/icons";
 import { ImportLink } from "@/components/import-link";
 import { JournalVoucher } from "@/components/journal-voucher";
 import { Badge, EmptyRow, LimitRow, PageHeader, Table, Td } from "@/components/ui";
-import { post, remove, revert } from "./actions";
+import { DocSheet, type DocSheetRow } from "@/components/doc-sheet";
+import { post, remove, revert, saveEntrySheet } from "./actions";
 import { fmt } from "@/lib/format";
 
 const SORTS = { date_desc: "الأحدث أولاً", date_asc: "الأقدم أولاً", amount_desc: "الأعلى مبلغاً", amount_asc: "الأقل مبلغاً" } as const;
@@ -25,7 +26,8 @@ export default async function JournalPage({ searchParams }: { searchParams: Prom
   const user = await requirePermission("journal_entries", "view");
   const sp = await searchParams;
   const f = parseDocFilter(sp, Object.keys(ENTRY_KINDS), todayRiyadh());
-  const openId = Number(sp.open) || null;
+  const view = sp.view === "sheet" ? "sheet" : "table";
+  const openId = view === "table" ? Number(sp.open) || null : null;
   const [list, openDoc, company, template] = await Promise.all([
     listEntries(db, { q: f.q, from: f.from, to: f.to, kind: f.status as EntryFilter["kind"], sort: f.sort in SORTS ? (f.sort as keyof typeof SORTS) : undefined }),
     openId ? entryDoc(db, openId) : Promise.resolve(null),
@@ -41,6 +43,11 @@ export default async function JournalPage({ searchParams }: { searchParams: Prom
       <PageHeader title="القيود اليومية" description="كل قيود الدفاتر: اليدوية التي تنشئها هنا، والآلية من الفواتير والسندات والشحنات. اضغط القيد لمعاينته وطباعته.">
         {canCreate && (
           <div className="flex flex-wrap items-center gap-2">
+            {can(user.perms, "journal_entries", "update") && (
+              <Link href={listHref(BASE, sp, { view: "sheet", open: undefined })} className={btn}>
+                تعديل جماعي
+              </Link>
+            )}
             <Link href="/journal/reclassify" className={btn}>
               إعادة تصنيف جماعي
             </Link>
@@ -52,9 +59,42 @@ export default async function JournalPage({ searchParams }: { searchParams: Prom
         )}
       </PageHeader>
 
-      <DocToolbar base={BASE} params={sp} statuses={ENTRY_KINDS} allStatuses="كل القيود" pay={false} views={false} sorts={SORTS} noun="قيد" exportName="القيود-اليومية" count={list.length} placeholder="ابحث بالرقم أو الوصف أو الحساب" />
+      <DocToolbar base={BASE} params={sp} statuses={ENTRY_KINDS} allStatuses="كل القيود" pay={false} sorts={SORTS} noun="قيد" exportName="القيود-اليومية" count={list.length} placeholder="ابحث بالرقم أو الوصف أو الحساب" />
 
-      {openDoc ? (
+      {view === "sheet" ? (
+        <>
+          <p className="mb-2 text-xs text-gray-500">تُعدَّل هنا رؤوس القيود اليدوية غير المرحّلة فقط (التاريخ والوصف والمرجع)؛ السطور تُعدَّل من شاشة القيد، والقيود الآلية من مستندها.</p>
+          <DocSheet
+            action={saveEntrySheet}
+            emptyText="لا توجد قيود بهذه الشروط"
+            columns={[
+              { key: "status", label: "الحالة", type: "badge", width: "6rem" },
+              { key: "number", label: "الرقم", ltr: true, width: "8rem" },
+              { key: "date", label: "التاريخ", type: "date", editable: true, width: "8.5rem" },
+              { key: "description", label: "الوصف", editable: true, width: "22rem" },
+              { key: "source", label: "المصدر", width: "8rem" },
+              { key: "reference", label: "المرجع", ltr: true, editable: true, width: "9rem" },
+              { key: "lines", label: "السطور", width: "4rem" },
+              { key: "total", label: "المبلغ", type: "number", width: "8rem" },
+            ]}
+            rows={list.map(({ e, total, lines }): DocSheetRow => ({
+              id: e.id,
+              href: `/journal?open=${e.id}`,
+              editable: !e.sourceType && e.status !== "posted" && can(user.perms, "journal_entries", "update"),
+              cells: {
+                number: e.number,
+                date: e.entryDate,
+                description: e.description,
+                source: e.sourceType ? (ENTRY_SOURCES[e.sourceType]?.label ?? e.sourceType) : "يدوي",
+                reference: e.reference,
+                lines: String(lines),
+                total: String(total),
+              },
+              badges: { status: { label: ENTRY_STATUS[e.status].label, tone: ENTRY_STATUS[e.status].tone } },
+            }))}
+          />
+        </>
+      ) : openDoc ? (
         <div className="grid items-start gap-4 lg:grid-cols-[minmax(17rem,22rem)_1fr]">
           <ul className="hidden max-h-[calc(100vh-9rem)] lg:block divide-y divide-gray-100 overflow-y-auto rounded-2xl border border-black/[0.06] bg-white shadow-sm print:hidden lg:sticky lg:top-4">
             {list.map(({ e, total }) => (

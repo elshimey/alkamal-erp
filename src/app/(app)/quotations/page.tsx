@@ -12,7 +12,9 @@ import { todayRiyadh } from "@/lib/dates";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { LinesEditor } from "@/components/lines-editor";
 import { Badge, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
-import { saveQuotation } from "./actions";
+import { DocSheet, type DocSheetRow } from "@/components/doc-sheet";
+import { AddModeBar, ListActions, ViewToggle } from "@/components/list-actions";
+import { saveQuotation, saveQuotationSheet } from "./actions";
 import { fmt } from "@/lib/format";
 
 const plusDays = (d: string, n: number) => {
@@ -21,7 +23,7 @@ const plusDays = (d: string, n: number) => {
   return x.toISOString().slice(0, 10);
 };
 
-export default async function QuotationsPage({ searchParams }: { searchParams: Promise<{ new?: string }> }) {
+export default async function QuotationsPage({ searchParams }: { searchParams: Promise<{ new?: string; add?: string; view?: string }> }) {
   const user = await requirePermission("sales_invoices", "view");
   const [rows, customers, routes, currencies, template] = await Promise.all([
     listQuotations(db),
@@ -32,16 +34,21 @@ export default async function QuotationsPage({ searchParams }: { searchParams: P
   ]);
   const canCreate = can(user.perms, "sales_invoices", "create");
   const today = todayRiyadh();
-  const openForm = (await searchParams).new === "1" || rows.length === 0;
+  const sp = await searchParams;
+  const adding = canCreate && (sp.add === "1" || sp.new === "1" || rows.length === 0);
+  const view = sp.view === "sheet" ? "sheet" : "table";
+  const canUpdate = can(user.perms, "sales_invoices", "update");
 
   return (
     <>
-      <PageHeader title="عروض الأسعار" description="عرض سعر للعميل بالمسارات والأسعار، يُرسل بالواتساب أو البريد ويُطبع، وعند قبوله يتحول بضغطة إلى فاتورة مسودة." />
+      <PageHeader title="عروض الأسعار" description="عرض سعر للعميل بالمسارات والأسعار، يُرسل بالواتساب أو البريد ويُطبع، وعند قبوله يتحول بضغطة إلى فاتورة مسودة.">
+        {!adding && <ListActions bulkHref={canUpdate && "/quotations?view=sheet"} newHref={canCreate && "/quotations?add=1"} newLabel="عرض سعر جديد" />}
+      </PageHeader>
 
-      {canCreate && (
-        <details open={openForm} className="mb-6 rounded-2xl border border-black/[0.06] bg-white p-5 shadow-sm">
-          <summary className="cursor-pointer font-semibold text-brand-900">+ عرض سعر جديد</summary>
-          <ActionForm action={saveQuotation} className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {adding && rows.length > 0 && <AddModeBar backHref="/quotations" backLabel="عروض الأسعار" title="عرض سعر جديد" />}
+      {adding && (
+        <div className="mb-6 rounded-2xl border border-black/[0.06] bg-white p-5 shadow-sm">
+          <ActionForm action={saveQuotation} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Field label="العميل">
               <ComboField name="customerId" options={customers} create="customer" required placeholder="ابحث عن العميل…" />
             </Field>
@@ -82,9 +89,39 @@ export default async function QuotationsPage({ searchParams }: { searchParams: P
               <SubmitButton>حفظ العرض</SubmitButton>
             </div>
           </ActionForm>
-        </details>
+        </div>
       )}
 
+      {!adding && (
+        <div className="mb-3 flex justify-end">
+          <ViewToggle base="/quotations" params={{}} view={view} />
+        </div>
+      )}
+      {!adding && view === "sheet" && (
+        <DocSheet
+          action={saveQuotationSheet}
+          emptyText="لا توجد عروض أسعار"
+          columns={[
+            { key: "status", label: "الحالة", type: "badge", width: "6rem" },
+            { key: "number", label: "الرقم", ltr: true, width: "8rem" },
+            { key: "date", label: "التاريخ", type: "date", editable: true, width: "8.5rem" },
+            { key: "validUntil", label: "صالح حتى", type: "date", editable: true, width: "8.5rem" },
+            { key: "customer", label: "العميل", width: "12rem" },
+            { key: "currency", label: "العملة", width: "4rem" },
+            { key: "total", label: "الإجمالي", type: "number", width: "7rem" },
+            { key: "notes", label: "ملاحظات", editable: true, width: "14rem" },
+            { key: "terms", label: "الشروط", editable: true, width: "16rem" },
+          ]}
+          rows={rows.map(({ q, customer }): DocSheetRow => ({
+            id: q.id,
+            href: `/quotations/${q.id}`,
+            editable: canUpdate && q.status === "draft",
+            cells: { number: q.number, date: q.quoteDate, validUntil: q.validUntil, customer, currency: q.currencyCode, total: q.total, notes: q.notes, terms: q.terms },
+            badges: { status: { label: QUOTE_STATUS[q.status].label, tone: QUOTE_STATUS[q.status].tone } },
+          }))}
+        />
+      )}
+      {!adding && view === "table" && (
       <Table head={["الرقم", "التاريخ", "صالح حتى", "العميل", "الإجمالي", "الحالة", "الفاتورة"]}>
         {rows.length === 0 && <EmptyRow cols={7}>لا توجد عروض أسعار بعد</EmptyRow>}
         {rows.map(({ q, customer, invoice }) => {
@@ -118,6 +155,7 @@ export default async function QuotationsPage({ searchParams }: { searchParams: P
           );
         })}
       </Table>
+      )}
     </>
   );
 }

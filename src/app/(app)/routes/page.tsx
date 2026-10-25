@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { AddModeBar, ListActions } from "@/components/list-actions";
 import { EditLink } from "@/components/edit-link";
 import { db } from "@/db";
 import * as s from "@/db/schema";
@@ -9,9 +11,11 @@ import { SheetEditor } from "@/components/sheet-editor";
 import { Badge, Card, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
 import { saveLocations, saveRoutes } from "./actions";
 
-export default async function RoutesPage() {
+export default async function RoutesPage({ searchParams }: { searchParams: Promise<{ add?: string }> }) {
   const user = await requirePermission("routes", "view");
   const canCreate = can(user.perms, "routes", "create");
+  const canEdit = can(user.perms, "routes", "update");
+  const adding = (await searchParams).add === "1" && canCreate;
   const [countries, locations, allLocations, routes] = await Promise.all([countryOptions(), locationOptions(), locationOptions({ includeHidden: true }), db.select().from(s.routes)]);
   const label = new Map(allLocations.map((l) => [l.value, l.label]));
   const sorted = routes
@@ -20,8 +24,11 @@ export default async function RoutesPage() {
 
   return (
     <>
-      <PageHeader title="المواقع والمسارات" description="المسار يحدد المسافة والعمولة الافتراضية للسائق، ويصبح دولياً تلقائياً إذا اختلفت الدولتان." />
-      {canCreate && (
+      <PageHeader title="المواقع والمسارات" description="المسار يحدد المسافة والعمولة الافتراضية للسائق، ويصبح دولياً تلقائياً إذا اختلفت الدولتان.">
+        {!adding && <ListActions bulkHref={canEdit && "/records/routes/bulk"} addHref={canCreate && "/routes?add=1"} addLabel="إضافة مدن ومسارات" />}
+      </PageHeader>
+      {adding && <AddModeBar backHref="/routes" backLabel="المواقع والمسارات" title="إضافة مدن ومسارات" />}
+      {adding && (
         <div className="mb-6 grid gap-6 xl:grid-cols-[2fr_3fr]">
           <Card title="المدن والمواقع">
             <SheetEditor
@@ -52,6 +59,8 @@ export default async function RoutesPage() {
           </Card>
         </div>
       )}
+      {!adding && (
+      <>
       <Table head={["من", "إلى", "المسافة", "النوع", "عمولة السائق", "الديزل التقديري"]}>
         {sorted.length === 0 && <EmptyRow cols={6}>لا توجد مسارات بعد</EmptyRow>}
         {sorted.map((r) => (
@@ -77,6 +86,11 @@ export default async function RoutesPage() {
       </Table>
       {allLocations.length > 0 && (
         <Card title="المدن والمواقع المسجلة" className="mt-6">
+          {canEdit && (
+            <Link href="/records/locations/bulk" className="mb-3 inline-block text-xs text-brand-700 hover:underline">
+              تعديل جماعي للمدن والمواقع
+            </Link>
+          )}
           <div className="flex flex-wrap gap-2">
             {allLocations.map((l) => (
               <span key={l.value} className={`rounded-lg border border-gray-200 bg-white px-2 py-1 text-sm ${locations.some((x) => x.value === l.value) ? "" : "opacity-50"}`}>
@@ -86,6 +100,8 @@ export default async function RoutesPage() {
             ))}
           </div>
         </Card>
+      )}
+      </>
       )}
     </>
   );

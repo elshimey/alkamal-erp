@@ -5,8 +5,10 @@ import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
-import { createQuotation, deleteQuotation, quotationToInvoice, setQuotationStatus } from "@/lib/quotations";
+import { createQuotation, deleteQuotation, quotationToInvoice, setQuotationStatus, updateDraftQuotation } from "@/lib/quotations";
+import { cell } from "@/lib/sheet-server";
 import type { FormState } from "@/components/action-form";
+import type { DocSheetResult, SheetChange } from "@/components/doc-sheet";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 const num = (v: unknown) => Number(String(v ?? "").replace(/[,\s]/g, "")) || 0;
@@ -69,4 +71,26 @@ export async function removeQuotation(id: number, _: FormState): Promise<FormSta
   }
   revalidatePath("/quotations");
   redirect("/quotations");
+}
+
+export async function saveQuotationSheet(payload: string): Promise<DocSheetResult> {
+  await requirePermission("sales_invoices", "update");
+  const changes = JSON.parse(payload) as SheetChange[];
+  const errors: Record<number, string> = {};
+  let saved = 0;
+  for (const { id, values: v } of changes) {
+    try {
+      await updateDraftQuotation(db, id, {
+        date: v.date !== undefined ? (cell.date(v.date, "التاريخ") ?? undefined) : undefined,
+        validUntil: v.validUntil !== undefined ? (cell.date(v.validUntil, "صالح حتى") ?? undefined) : undefined,
+        notes: v.notes,
+        terms: v.terms,
+      });
+      saved++;
+    } catch (err) {
+      errors[id] = errorMessage(err);
+    }
+  }
+  revalidatePath("/quotations");
+  return { ok: saved ? `حُفظت تعديلات ${saved} عرض` : undefined, errors };
 }

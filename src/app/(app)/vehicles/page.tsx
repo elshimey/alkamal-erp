@@ -7,7 +7,7 @@ import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { SheetEditor } from "@/components/sheet-editor";
 import { Badge, Card, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
-import { ImportLink } from "@/components/import-link";
+import { AddModeBar, ListActions } from "@/components/list-actions";
 import { saveVehicles } from "./actions";
 
 const STATUS = {
@@ -17,8 +17,10 @@ const STATUS = {
   sold: { label: "مباعة", tone: "red" },
 } as const;
 
-export default async function VehiclesPage() {
+export default async function VehiclesPage({ searchParams }: { searchParams: Promise<{ add?: string }> }) {
   const user = await requirePermission("vehicles", "view");
+  const canCreate = can(user.perms, "vehicles", "create");
+  const adding = (await searchParams).add === "1" && canCreate;
   const asset = alias(s.accounts, "asset");
   const [rows, types, assetAccounts] = await Promise.all([
     db
@@ -39,9 +41,10 @@ export default async function VehiclesPage() {
   return (
     <>
       <PageHeader title="المركبات" description="كل مركبة تُضاف تنشئ مركز تكلفتها تلقائياً، وتُربط بحساب أصلها في شجرة الحسابات.">
-        {can(user.perms, "vehicles", "create") && <ImportLink entity="vehicles" />}
+        {!adding && <ListActions bulkHref={can(user.perms, "vehicles", "update") && "/records/vehicles/bulk"} addHref={canCreate && "/vehicles?add=1"} importHref={canCreate && "/import/vehicles"} />}
       </PageHeader>
-      {can(user.perms, "vehicles", "create") && (
+      {adding && <AddModeBar backHref="/vehicles" backLabel="المركبات" title="إضافة جماعية" />}
+      {adding && (
         <Card title="إدخال مركبات" className="mb-6">
           <SheetEditor
             templateName="المركبات"
@@ -67,6 +70,7 @@ export default async function VehiclesPage() {
           />
         </Card>
       )}
+      {!adding && (
       <Table head={["اللوحة", "النوع", "الماركة والطراز", "السنة", "العداد", "الملكية", "الحالة", "حساب الأصل", "مركز التكلفة"]}>
         {rows.length === 0 && <EmptyRow cols={9}>لا توجد مركبات بعد</EmptyRow>}
         {rows.map(({ v, typeName, ccCode, accCode, accName }) => (
@@ -88,6 +92,7 @@ export default async function VehiclesPage() {
           </tr>
         ))}
       </Table>
+      )}
     </>
   );
 }

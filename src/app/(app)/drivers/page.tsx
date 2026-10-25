@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AddModeBar, ListActions } from "@/components/list-actions";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
@@ -18,9 +19,11 @@ const STATUS = {
   terminated: { label: "منتهية خدمته", tone: "red" },
 } as const;
 
-export default async function DriversPage({ searchParams }: { searchParams: Promise<{ deleted?: string }> }) {
-  const { deleted } = await searchParams;
+export default async function DriversPage({ searchParams }: { searchParams: Promise<{ deleted?: string; add?: string }> }) {
+  const { deleted, add } = await searchParams;
   const user = await requirePermission("drivers", "view");
+  const canCreate = can(user.perms, "drivers", "create");
+  const adding = add === "1" && canCreate;
   const custody = alias(s.accounts, "custody");
   const rows = await db
     .select({
@@ -43,9 +46,12 @@ export default async function DriversPage({ searchParams }: { searchParams: Prom
       <PageHeader
         title="السائقون"
         description="كل سائق يُنشأ معه موظفه، وحساب عهدته تحت 1105، وحساب رواتبه المستحقة تحت 2107 تلقائياً."
-      />
+      >
+        {!adding && <ListActions bulkHref={can(user.perms, "drivers", "update") && "/records/drivers/bulk"} addHref={canCreate && "/drivers?add=1"} />}
+      </PageHeader>
+      {adding && <AddModeBar backHref="/drivers" backLabel="السائقون" title="إضافة جماعية" />}
       {deleted && <p className="mb-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-800">حُذف السائق «{deleted}» نهائياً</p>}
-      {can(user.perms, "drivers", "create") && (
+      {adding && (
         <Card title="إدخال سائقين" className="mb-6">
           <SheetEditor
             templateName="السائقون"
@@ -67,7 +73,7 @@ export default async function DriversPage({ searchParams }: { searchParams: Prom
           />
         </Card>
       )}
-      {can(user.perms, "users", "create") && rows.some((r) => !r.login) && (
+      {!adding && can(user.perms, "users", "create") && rows.some((r) => !r.login) && (
         <Card title="حساب دخول لتطبيق السائق" className="mb-6">
           <p className="mb-4 text-sm text-gray-500">
             يدخل السائق بهذا الحساب من جواله على الرابط <a href="/driver" dir="ltr" className="font-medium text-brand-700 hover:underline" style={{ unicodeBidi: "isolate" }}>/driver</a>، ويرى رحلاته ومصاريفه وعهدته بلغته فقط. رابط الإرسال ورمز التطبيق في <a href="/settings/driver-app" className="font-medium text-brand-700 hover:underline">الإعدادات ← تطبيق السائق</a>.
@@ -98,6 +104,8 @@ export default async function DriversPage({ searchParams }: { searchParams: Prom
           </ActionForm>
         </Card>
       )}
+      {!adding && (
+      <>
       <p className="mb-2 text-sm text-gray-500">اضغط اسم السائق لتعديل بياناته أو حالته أو حساب دخوله أو حذفه.</p>
       <Table head={["الاسم", "الجوال", "الجنسية", "لغة التطبيق", "العمولة", "المركبة الحالية", "حساب العهدة", "دخول التطبيق", "الحالة"]}>
         {rows.length === 0 && <EmptyRow cols={9}>لا يوجد سائقون بعد</EmptyRow>}
@@ -121,6 +129,8 @@ export default async function DriversPage({ searchParams }: { searchParams: Prom
           </tr>
         ))}
       </Table>
+      </>
+      )}
     </>
   );
 }
