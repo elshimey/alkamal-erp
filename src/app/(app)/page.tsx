@@ -5,6 +5,7 @@ import { requireUser } from "@/lib/auth";
 import { can, scopeFor } from "@/lib/permissions";
 import { daysBetween, todayRiyadh } from "@/lib/dates";
 import { setupSteps } from "@/lib/setup";
+import { alertKindsFor } from "@/lib/documents";
 import { PERIODS, alertCounts, cashFlow, balances, collected, financials, fleetStatus, monthlyTrend, operations, receivablesAging, resolvePeriod, topCustomers, unbilledTrips, vehicleProfit, type Period } from "@/lib/dashboard";
 import { incomeStatement } from "@/lib/reports";
 import type { Entity } from "@/lib/permissions";
@@ -75,7 +76,7 @@ export default async function Dashboard({
     canFinance && ov ? vehicleProfit(db, range.from, range.to) : null,
     canFleet && ov ? fleetStatus(db) : null,
     canSales && ov ? topCustomers(db, range.from, range.to) : null,
-    alertCounts(db, today),
+    alertCounts(db, today, alertKindsFor(user.perms)),
     canSales && ov ? unbilledTrips(db) : null,
     tab === "income"
       ? incomeStatement(db, {
@@ -125,6 +126,13 @@ export default async function Dashboard({
       text: `رصيد النقدية بالسالب (${money(bal?.cash ?? 0)} ر.س): سندات صرف أكثر من المقبوض`,
       href: "/payments",
     },
+    ...alerts.docsCritical.map((d) => ({
+      show: true,
+      tone: "red" as const,
+      icon: "shield" as const,
+      text: `${d.name} للمنشأة ${d.expiryDate < today ? `منتهٍ منذ ${d.expiryDate}` : `ينتهي في ${d.expiryDate}`}: جدّده فوراً`,
+      href: "/fleet-documents/owner/company-0",
+    })),
     {
       show: can(user.perms, "fleet_documents", "view") && alerts.docsExpired > 0,
       tone: "red",

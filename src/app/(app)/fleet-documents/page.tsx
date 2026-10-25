@@ -5,7 +5,7 @@ import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { todayRiyadh } from "@/lib/dates";
-import { alertWindow, documentRegister, listDocumentTypes, OWNER_KINDS, ownerKey, type OwnerKind } from "@/lib/documents";
+import { documentRegister, listDocumentTypes, OWNER_KINDS, ownerKey, type OwnerKind } from "@/lib/documents";
 import { ExpiryBadge } from "@/components/expiry-badge";
 import { EditLink } from "@/components/edit-link";
 import { Badge, Card, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
@@ -51,7 +51,12 @@ export default async function DocumentRegisterPage({ searchParams }: { searchPar
   return (
     <>
       <PageHeader title="سجل الوثائق" description="وثائق الرؤوس والمقطورات والسائقين والموظفين والشركة والعملاء، مع المرفقات. الناقص هو نوع إلزامي لم تُسجَّل له وثيقة بعد.">
-        <ListActions newHref={canCreate && "/fleet-documents?add=1"} newLabel="إضافة وثيقة" />
+        <div className="flex flex-wrap items-center gap-2">
+          <Link href="/fleet-documents/reports" className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50">
+            التقارير
+          </Link>
+          <ListActions newHref={canCreate && "/fleet-documents?add=1"} newLabel="إضافة وثيقة" />
+        </div>
       </PageHeader>
 
       <div className="mb-5 grid grid-cols-3 gap-3 sm:max-w-xl">
@@ -182,7 +187,7 @@ async function AllDocuments({ today }: { today: string }) {
             <Td>{doc.authority ?? "—"}</Td>
             <Td className="ltr-nums">{doc.expiryDate ?? "—"}</Td>
             <Td>
-              {renewed ? <Badge>جُدِّدت</Badge> : <ExpiryBadge expiryDate={doc.expiryDate} today={today} window={alertWindow(type.alertDays)} />}
+              {renewed ? <Badge>جُدِّدت</Badge> : <ExpiryBadge expiryDate={doc.expiryDate} today={today} alertDays={type.alertDays} />}
             </Td>
             <Td>
               {attachmentId ? (

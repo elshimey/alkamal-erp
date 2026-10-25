@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
 import { assignVehicle, releaseAssignment } from "@/lib/fleet";
 import { errorMessage } from "@/lib/errors";
+import { hasSpecial } from "@/lib/permissions";
 import type { FormState } from "@/components/action-form";
 
 const num = (v: FormDataEntryValue | null) => (v === null || v === "" ? null : Number(v));
@@ -23,7 +24,7 @@ export async function startAssignment(_: FormState, data: FormData): Promise<For
       odometerStart: num(data.get("odometerStart")),
       notes: String(data.get("notes") ?? "") || null,
       userId: user.id,
-    });
+    }, { canOverride: hasSpecial(user.perms, "override_controls"), overrideReason: String(data.get("overrideReason") ?? "") });
     revalidatePath("/assignments");
     return { ok: "سُجّل استلام السائق للمركبة" };
   } catch (err) {

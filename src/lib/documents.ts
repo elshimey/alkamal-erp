@@ -3,6 +3,7 @@ import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
 import { daysBetween } from "@/lib/dates";
 import { getCompany } from "@/lib/company";
+import { can, type PermissionSet } from "@/lib/permissions";
 
 // سجل الوثائق: لكل صاحب (رأس، مقطورة، سائق، موظف، الشركة، عميل) وثائقه حسب الأنواع المعرّفة في الإعدادات.
 // الوثيقة المجدَّدة سجل جديد؛ الأحدث انتهاءً هو المعتمد، والأقدم يبقى في التاريخ.
@@ -236,8 +237,8 @@ export async function documentRegister(db: Db | Tx, today: string): Promise<Regi
   });
 }
 
-/** الوثائق السارية الحالية (الأحدث لكل نوع وصاحب) المنتهية أو التي دخلت أول مرحلة تنبيه لنوعها، الأقرب أولاً. */
-export async function expiringDocuments(db: Db | Tx, today: string) {
+/** الوثيقة الحالية (الأحدث) لكل نوع وصاحب فاعل، اختيارياً حتى تاريخ انتهاء معيّن، الأقرب انتهاءً أولاً. */
+export async function currentDocuments(db: Db | Tx, opts: { expiringBy?: string; expiringFrom?: string } = {}) {
   const rows = await db
     .select({
       doc: s.fleetDocuments,
@@ -246,6 +247,7 @@ export async function expiringDocuments(db: Db | Tx, today: string) {
       driverName: s.employees.nameAr,
       employeeName: sql<string | null>`(select e.name_ar from employees e where e.id = ${s.fleetDocuments.employeeId})`,
       partyName: s.parties.nameAr,
+      attachmentId: docSelect.attachmentId,
     })
     .from(s.fleetDocuments)
     .innerJoin(s.documentTypes, eq(s.documentTypes.id, s.fleetDocuments.documentTypeId))
@@ -256,26 +258,127 @@ export async function expiringDocuments(db: Db | Tx, today: string) {
     .where(
       and(
         eq(s.documentTypes.isActive, true),
-        sql`${s.fleetDocuments.expiryDate} <= ${today}::date + 365`,
-        // الوثيقة المجدَّدة (أحدث منها لنفس الصاحب ونفس النوع) لا تُنبَّه
+        opts.expiringBy ? sql`${s.fleetDocuments.expiryDate} <= ${opts.expiringBy}::date` : undefined,
+        opts.expiringFrom ? sql`${s.fleetDocuments.expiryDate} >= ${opts.expiringFrom}::date` : undefined,
+        // الوثيقة المجدَّدة (أحدث منها لنفس الصاحب ونفس النوع) ليست الحالية
         sql`not exists (select 1 from fleet_documents f2 where f2.document_type_id = ${s.fleetDocuments.documentTypeId}
           and f2.vehicle_id is not distinct from ${s.fleetDocuments.vehicleId} and f2.driver_id is not distinct from ${s.fleetDocuments.driverId}
           and f2.employee_id is not distinct from ${s.fleetDocuments.employeeId} and f2.party_id is not distinct from ${s.fleetDocuments.partyId}
-          and (f2.expiry_date is null or f2.expiry_date > ${s.fleetDocuments.expiryDate}))`,
+          and f2.id <> ${s.fleetDocuments.id}
+          and (f2.expiry_date is null and ${s.fleetDocuments.expiryDate} is not null or f2.expiry_date > ${s.fleetDocuments.expiryDate}
+            or f2.expiry_date is not distinct from ${s.fleetDocuments.expiryDate} and f2.id > ${s.fleetDocuments.id}))`,
         sql`coalesce(${s.vehicles.status}::text, '') <> 'sold' and coalesce(${s.drivers.status}::text, '') <> 'terminated'`,
+        sql`not exists (select 1 from employees e where e.id = ${s.fleetDocuments.employeeId} and e.status = 'terminated')`,
+        sql`coalesce(${s.parties.isActive}, true)`,
       ),
     )
-    .orderBy(asc(s.fleetDocuments.expiryDate));
-  return rows
-    .filter((r) => stateOf(r.doc.expiryDate, today, alertWindow(r.type.alertDays)) !== "valid")
-    .map((r) => ({ ...r, owner: r.plate ?? r.driverName ?? r.employeeName ?? r.partyName ?? "الشركة" }));
+    .orderBy(sql`${s.fleetDocuments.expiryDate} asc nulls last`);
+  return rows.map((r) => {
+    const d = r.doc;
+    return {
+      ...r,
+      ownerKind: r.type.ownerKind,
+      ownerId: d.vehicleId ?? d.driverId ?? d.employeeId ?? d.partyId ?? 0,
+      owner: r.plate ?? r.driverName ?? r.employeeName ?? r.partyName ?? "الشركة",
+    };
+  });
 }
 
-/** عدد الوثائق المنتهية والقريبة من الانتهاء، لتنبيه أعلى الشاشة. */
-export async function expiryCounts(db: Db | Tx, today: string) {
-  const rows = await expiringDocuments(db, today);
+/**
+ * مرحلة التنبيه الحالية للوثيقة: قبل الانتهاء بأيام النوع (60 ثم 30 ثم 7 افتراضياً)، ثم يوم الانتهاء، ثم يومياً بعده.
+ * null = سارية لم تدخل أول مرحلة.
+ */
+export function alertStage(expiryDate: string | null, today: string, alertDays: string | null | undefined): { stage: number | "today" | "overdue"; label: string; left: number } | null {
+  if (!expiryDate) return null;
+  const left = daysBetween(today, expiryDate);
+  if (left < 0) return { stage: "overdue", label: `منتهية منذ ${-left} يوم`, left };
+  if (left === 0) return { stage: "today", label: "تنتهي اليوم", left };
+  const stages = parseAlertDays(alertDays);
+  const hit = [...stages].reverse().find((d) => left <= d);
+  return hit ? { stage: hit, label: `خلال ${hit} يوماً (باقٍ ${left})`, left } : null;
+}
+
+/** الوثائق الحالية المنتهية أو التي دخلت أول مرحلة تنبيه لنوعها، الأقرب أولاً. */
+export async function expiringDocuments(db: Db | Tx, today: string, kinds?: OwnerKind[]) {
+  const rows = await currentDocuments(db, { expiringBy: addDaysIso(today, 365) });
+  return rows.filter((r) => (!kinds || kinds.includes(r.ownerKind)) && alertStage(r.doc.expiryDate, today, r.type.alertDays));
+}
+
+// السجل التجاري وترخيص هيئة النقل: انتهاؤهما يوقف الشركة كلها، فيُنبَّه المدير بالأحمر
+export const CRITICAL_COMPANY_DOCS = ["c_cr", "c_transport_license"];
+
+/** عدد الوثائق المنتهية والقريبة من الانتهاء، ووثائق الشركة الحرجة، لتنبيه أعلى الشاشة ولوحة القيادة. */
+export async function expiryCounts(db: Db | Tx, today: string, kinds?: OwnerKind[]) {
+  const rows = await expiringDocuments(db, today, kinds);
   const expired = rows.filter((r) => r.doc.expiryDate! < today).length;
-  return { expired, soon: rows.length - expired };
+  const critical = rows.filter((r) => CRITICAL_COMPANY_DOCS.includes(r.type.code) && daysBetween(today, r.doc.expiryDate!) <= 7).map((r) => ({ name: r.type.nameAr, expiryDate: r.doc.expiryDate! }));
+  return { expired, soon: rows.length - expired, critical };
+}
+
+function addDaysIso(date: string, days: number) {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/** أنواع الوثائق الإلزامية التي لم تُسجَّل لكل صاحب فاعل. */
+export async function missingDocuments(db: Db | Tx, kinds?: OwnerKind[]) {
+  const [types, owners, docs] = await Promise.all([
+    listDocumentTypes(db, { activeOnly: true }),
+    listOwners(db, kinds),
+    db
+      .selectDistinct({
+        typeId: s.fleetDocuments.documentTypeId,
+        vehicleId: s.fleetDocuments.vehicleId,
+        driverId: s.fleetDocuments.driverId,
+        employeeId: s.fleetDocuments.employeeId,
+        partyId: s.fleetDocuments.partyId,
+      })
+      .from(s.fleetDocuments),
+  ]);
+  const typeById = new Map(types.map((t) => [t.id, t]));
+  const have = new Set(
+    docs.flatMap((d) => {
+      const t = typeById.get(d.typeId);
+      return t ? [`${ownerKey(t.ownerKind, ownerIdOf(t.ownerKind, d) ?? -1)}|${t.id}`] : [];
+    }),
+  );
+  return owners.flatMap((o) => types.filter((t) => t.required && t.ownerKind === o.kind && !have.has(`${ownerKey(o.kind, o.id)}|${t.id}`)).map((t) => ({ owner: o, type: t })));
+}
+
+/** رسوم إصدار الوثائق وتجديدها في فترة (بتاريخ الإصدار، أو تاريخ الإدخال إن لم يُسجَّل) لكل صاحب. */
+export async function renewalCosts(db: Db | Tx, from: string, to: string) {
+  const rows = await db
+    .select({
+      kind: s.documentTypes.ownerKind,
+      vehicleId: s.fleetDocuments.vehicleId,
+      driverId: s.fleetDocuments.driverId,
+      employeeId: s.fleetDocuments.employeeId,
+      partyId: s.fleetDocuments.partyId,
+      type: s.documentTypes.nameAr,
+      cost: s.fleetDocuments.cost,
+    })
+    .from(s.fleetDocuments)
+    .innerJoin(s.documentTypes, eq(s.documentTypes.id, s.fleetDocuments.documentTypeId))
+    .where(
+      and(
+        sql`${s.fleetDocuments.cost} > 0`,
+        sql`coalesce(${s.fleetDocuments.issueDate}, (${s.fleetDocuments.createdAt} at time zone 'Asia/Riyadh')::date) between ${from}::date and ${to}::date`,
+      ),
+    );
+  const owners = new Map((await listOwners(db)).map((o) => [ownerKey(o.kind, o.id), o]));
+  const out = new Map<string, { kind: OwnerKind; id: number; label: string; total: number; count: number; types: Map<string, number> }>();
+  for (const r of rows) {
+    const id = ownerIdOf(r.kind, r) ?? 0;
+    const key = ownerKey(r.kind, id);
+    const row = out.get(key) ?? { kind: r.kind, id, label: owners.get(key)?.label ?? OWNER_KINDS[r.kind].label, total: 0, count: 0, types: new Map() };
+    const c = Number(r.cost);
+    row.total += c;
+    row.count++;
+    row.types.set(r.type, (row.types.get(r.type) ?? 0) + c);
+    out.set(key, row);
+  }
+  return [...out.values()].sort((a, b) => b.total - a.total);
 }
 
 export interface DocumentInput {
@@ -317,4 +420,65 @@ export async function addDocument(db: Db | Tx, input: DocumentInput) {
     })
     .returning();
   return { row, type };
+}
+
+export interface DocumentIssue {
+  owner: string;
+  type: string;
+  expiryDate: string;
+  message: string;
+}
+
+/**
+ * الوثائق المانعة المنتهية في تاريخ التشغيل لعدة أصحاب (الرأس والمقطورة والسائق والعميل).
+ * «تمنع الدولي فقط» تُفحص في الرحلات الدولية. الناقصة لا تمنع، وتظهر في سجل الوثائق وتقاريره.
+ */
+export async function blockingDocumentIssues(
+  db: Db | Tx,
+  owners: { kind: OwnerKind; id: number | null | undefined; label?: string }[],
+  onDate: string,
+  international: boolean,
+): Promise<DocumentIssue[]> {
+  const issues: DocumentIssue[] = [];
+  for (const o of owners) {
+    if (o.id == null) continue;
+    const cols = ownerColumns(o.kind, o.id);
+    const rows = await db
+      .selectDistinctOn([s.fleetDocuments.documentTypeId], { type: s.documentTypes, expiryDate: s.fleetDocuments.expiryDate })
+      .from(s.fleetDocuments)
+      .innerJoin(s.documentTypes, eq(s.documentTypes.id, s.fleetDocuments.documentTypeId))
+      .where(
+        and(
+          eq(s.documentTypes.ownerKind, o.kind),
+          eq(s.documentTypes.isActive, true),
+          international ? ne(s.documentTypes.blocking, "alert") : eq(s.documentTypes.blocking, "block"),
+          cols.vehicleId != null ? eq(s.fleetDocuments.vehicleId, cols.vehicleId) : undefined,
+          cols.driverId != null ? eq(s.fleetDocuments.driverId, cols.driverId) : undefined,
+          cols.partyId != null ? eq(s.fleetDocuments.partyId, cols.partyId) : undefined,
+          cols.employeeId != null ? eq(s.fleetDocuments.employeeId, cols.employeeId) : undefined,
+        ),
+      )
+      .orderBy(s.fleetDocuments.documentTypeId, sql`${s.fleetDocuments.expiryDate} desc nulls first`);
+    const expired = rows.filter((r) => r.expiryDate && r.expiryDate < onDate);
+    if (!expired.length) continue;
+    const label = o.label ?? (await ownerLabel(db, o.kind, o.id))?.label ?? OWNER_KINDS[o.kind].label;
+    for (const r of expired) {
+      issues.push({
+        owner: label,
+        type: r.type.nameAr,
+        expiryDate: r.expiryDate!,
+        message: `${r.type.nameAr} لـ${OWNER_KINDS[o.kind].label} ${label} منتهية منذ ${r.expiryDate}`,
+      });
+    }
+  }
+  return issues;
+}
+
+/** أصحاب الوثائق الذين ينبَّه المستخدم بوثائقهم: الأسطول والعملاء للتشغيل، والموظفون للموارد البشرية، والشركة للإدارة. */
+export function alertKindsFor(perms: PermissionSet): OwnerKind[] {
+  const kinds: OwnerKind[] = [];
+  if (can(perms, "fleet_documents", "view")) kinds.push("vehicle", "trailer", "driver", "customer");
+  if (can(perms, "fleet_documents", "view") && can(perms, "employees", "view")) kinds.push("employee");
+  if (can(perms, "fleet_documents", "view") && (perms.isAdmin || can(perms, "settings", "update"))) kinds.push("company");
+  return kinds;
 }
