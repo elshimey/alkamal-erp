@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { can, hasSpecial, scopeFor } from "@/lib/permissions";
-import { chargeTypeOptions, partyOptions, routeOptions } from "@/lib/lookups";
+import { chargeTypeOptions, partyOptions, routeOptions, vehicleOptions } from "@/lib/lookups";
 import { approvalIssues } from "@/lib/waybills";
 import { EXPENSE_BILL_TO, EXPENSE_PAYERS, FUEL_SOURCES, TRIP_STAGES, WAYBILL_STATUS } from "@/data/waybills";
 import { ActionForm, SubmitButton } from "@/components/action-form";
@@ -37,6 +37,7 @@ export default async function WaybillPage({ params }: { params: Promise<{ id: st
       customerEmail: s.parties.email,
       contract: s.contracts.number,
       plate: s.vehicles.plate,
+      trailerPlate: sql<string | null>`(select t.plate from vehicles t where t.id = ${s.waybills.trailerId})`,
       driver: s.employees.nameAr,
       driverUserId: s.drivers.userId,
       carrier: carrier.nameAr,
@@ -60,7 +61,7 @@ export default async function WaybillPage({ params }: { params: Promise<{ id: st
 
   const station = alias(s.parties, "station");
   const broker = alias(s.parties, "broker");
-  const [routes, fuel, expenses, stages, lines, chargeTypes, stations, brokers, issues, photos] = await Promise.all([
+  const [routes, fuel, expenses, stages, lines, chargeTypes, stations, brokers, issues, photos, trailers] = await Promise.all([
     routeOptions(),
     db.select({ f: s.waybillFuel, party: station.nameAr }).from(s.waybillFuel).leftJoin(station, eq(station.id, s.waybillFuel.partyId)).where(eq(s.waybillFuel.waybillId, id)).orderBy(asc(s.waybillFuel.id)),
     db
@@ -85,6 +86,7 @@ export default async function WaybillPage({ params }: { params: Promise<{ id: st
     partyOptions("customs_broker"),
     ["draft", "in_transit", "delivered"].includes(w.status) ? approvalIssues(db, w) : Promise.resolve([]),
     listAttachments(db, "waybills", [id]),
+    vehicleOptions("trailer"),
   ]);
 
   const showPrices = hasSpecial(user.perms, "view_prices");
@@ -102,7 +104,7 @@ export default async function WaybillPage({ params }: { params: Promise<{ id: st
     ["العميل", row.customer],
     ["العقد", row.contract ?? "—"],
     ["المسار", `${route}${w.isInternational ? " · دولي" : ""}`],
-    ["التنفيذ", fleet ? `${row.plate} · ${row.driver}` : `${row.carrier} (ناقل خارجي)${w.carrierPlate ? ` · ${w.carrierPlate}` : ""}`],
+    ["التنفيذ", fleet ? `${row.plate}${row.trailerPlate ? ` + مقطورة ${row.trailerPlate}` : ""} · ${row.driver}` : `${row.carrier} (ناقل خارجي)${w.carrierPlate ? ` · ${w.carrierPlate}` : ""}`],
     ["المرسل ← المستلم", `${w.shipper} ← ${w.consignee}`],
     ["المسافة", w.distanceKm != null ? `${w.distanceKm} كم` : "—"],
     ["العداد", km != null ? `${w.odometerStart} ← ${w.odometerEnd} (${km} كم)` : (w.odometerStart ?? "—")],
@@ -206,6 +208,18 @@ export default async function WaybillPage({ params }: { params: Promise<{ id: st
             ) : (
               <Field label="تكلفة الناقل">
                 <Input name="carrierCost" defaultValue={w.carrierCost ?? ""} dir="ltr" inputMode="decimal" />
+              </Field>
+            )}
+            {fleet && (trailers.length > 0 || w.trailerId) && (
+              <Field label="المقطورة (السطحة)">
+                <Select name="trailerId" defaultValue={w.trailerId ? String(w.trailerId) : ""}>
+                  <option value="">بلا مقطورة</option>
+                  {trailers.map((t) => (
+                    <option key={t.value} value={t.value}>
+                      {t.label}
+                    </option>
+                  ))}
+                </Select>
               </Field>
             )}
             <Field label="العداد عند البداية">

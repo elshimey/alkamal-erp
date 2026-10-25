@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { PLAN_ALERT_DAYS } from "@/data/maintenance";
+import { expiryCounts } from "@/lib/documents";
 
 // مؤشرات اللوحة الرئيسية. الأرقام المالية من القيود المرحّلة فقط (بالريال)،
 // وأرقام التشغيل من الشحنات نفسها.
@@ -381,6 +382,7 @@ export async function topCustomers(db: Db, from: string, to: string) {
 
 /** ما يحتاج تدخلاً الآن، مرتباً بالأهمية. */
 export async function alertCounts(db: Db, today: string) {
+  const docs = await expiryCounts(db, today);
   const [r] = await rows<Record<string, string>>(
     db,
     sql`select
@@ -391,8 +393,6 @@ export async function alertCounts(db: Db, today: string) {
           (select count(*) from sales_invoices where status = 'draft')::int as draft_invoices,
           (select count(*) from sales_invoices where status = 'issued' and paid_amount < total and due_date < ${today})::int as overdue,
           (select count(*) from receipts where status = 'draft')::int as draft_receipts,
-          (select count(*) from fleet_documents where expiry_date < ${today})::int as docs_expired,
-          (select count(*) from fleet_documents where expiry_date between ${today} and ${today}::date + 30)::int as docs_expiring,
           (select max(rate_date) from exchange_rates where currency_code = 'KWD') as kwd_rate_date,
           (select count(*) from vehicles where status = 'active' and not exists (select 1 from vehicle_assignments va where va.vehicle_id = vehicles.id and va.to_date is null))::int as unassigned,
           (select count(*) from expenses where status = 'pending')::int as pending_expenses,
@@ -422,8 +422,8 @@ export async function alertCounts(db: Db, today: string) {
     draftInvoices: n(r.draft_invoices),
     overdue: n(r.overdue),
     draftReceipts: n(r.draft_receipts),
-    docsExpired: n(r.docs_expired),
-    docsExpiring: n(r.docs_expiring),
+    docsExpired: docs.expired,
+    docsExpiring: docs.soon,
     kwdRateDate: (r.kwd_rate_date as string | null) ?? null,
     unassigned: n(r.unassigned),
     pendingExpenses: n(r.pending_expenses),

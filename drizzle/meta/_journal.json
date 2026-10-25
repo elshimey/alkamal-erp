@@ -176,6 +176,20 @@
       "when": 1792912089722,
       "tag": "0024_location_active",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1792953706538,
+      "tag": "0025_document_register",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1792953746240,
+      "tag": "0026_document_type_column",
+      "breakpoints": true
     }
   ]
 }

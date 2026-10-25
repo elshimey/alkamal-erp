@@ -4,21 +4,28 @@ import * as s from "@/db/schema";
 
 // صور مضغوطة في المتصفح قبل الرفع (أقصى بُعد 1280 بكسل)، فلا تتجاوز عادة 200 كيلوبايت
 export const MAX_ATTACHMENT_BYTES = 1_500_000;
+// صورة الوثيقة أو ملف PDF ممسوح
+export const MAX_DOCUMENT_BYTES = 5_000_000;
 export const ATTACHMENT_KINDS = {
   pod: "إثبات التسليم",
   odometer: "صورة العداد",
   fuel_receipt: "فاتورة الوقود",
   expense_receipt: "إيصال المصروف",
+  document: "صورة الوثيقة",
   other: "صورة",
 } as const;
 export type AttachmentKind = keyof typeof ATTACHMENT_KINDS;
 
-/** يحفظ صورة مرسلة كـ data URL. القيمة الفارغة لا تفعل شيئاً. */
+/** يحفظ صورة (أو PDF للوثائق) مرسلة كـ data URL. القيمة الفارغة لا تفعل شيئاً. */
 export async function saveDataUrl(db: Db | Tx, input: { entity: string; entityId: number; kind: AttachmentKind; dataUrl: string | null | undefined; userId?: number }) {
-  const m = input.dataUrl?.match(/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/);
-  if (!m) return null;
+  const isDoc = input.kind === "document";
+  const m = input.dataUrl?.match(isDoc ? /^data:(image\/(?:jpeg|png|webp)|application\/pdf);base64,([A-Za-z0-9+/=]+)$/ : /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/);
+  if (!m) {
+    if (input.dataUrl && isDoc) throw new Error("المرفق يجب أن يكون صورة أو PDF");
+    return null;
+  }
   const data = Buffer.from(m[2], "base64");
-  if (data.length > MAX_ATTACHMENT_BYTES) throw new Error("الصورة كبيرة جداً");
+  if (data.length > (isDoc ? MAX_DOCUMENT_BYTES : MAX_ATTACHMENT_BYTES)) throw new Error(isDoc ? "الملف أكبر من 5 ميجابايت" : "الصورة كبيرة جداً");
   const [row] = await db
     .insert(s.attachments)
     .values({ entity: input.entity, entityId: input.entityId, kind: input.kind, mime: m[1], size: data.length, data, createdBy: input.userId ?? null })

@@ -52,10 +52,11 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
     .groupBy(s.waybills.status);
   if (status) where.push(eq(s.waybills.status, status));
 
-  const [routes, customers, vehicles, drivers, carriers, shippers, list] = await Promise.all([
+  const [routes, customers, vehicles, trailers, drivers, carriers, shippers, list] = await Promise.all([
     routeOptions(),
     customerOptions(),
-    vehicleOptions(),
+    vehicleOptions("head"),
+    vehicleOptions("trailer"),
     driverOptions(),
     partyOptions("carrier"),
     adding ? shipperSuggestions() : Promise.resolve([]),
@@ -98,6 +99,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
                   { key: "customerId", label: "العميل", type: "select", required: true, options: customers, width: "11rem", create: "customer" },
                   { key: "routeId", label: "المسار", type: "select", required: true, options: routes, width: "13rem", create: "route" },
                   { key: "vehicleId", label: "المركبة", type: "select", options: vehicles, width: "8rem", create: "vehicle" },
+                  ...(trailers.length ? [{ key: "trailerId", label: "المقطورة", type: "select" as const, options: trailers, width: "8rem" }] : []),
                   { key: "driverId", label: "السائق", type: "select", options: drivers, width: "9rem", create: "driver" },
                   { key: "carrierId", label: "أو ناقل خارجي", type: "select", options: carriers, width: "9rem", create: "carrier" },
                   { key: "carrierCost", label: "تكلفة الناقل", type: "number", width: "6rem" },

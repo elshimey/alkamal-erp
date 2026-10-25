@@ -12,7 +12,7 @@ export const NAV: { title: string; icon: IconName; items: { href: string; label:
       { href: "/vehicles", label: "المركبات", icon: "truck", entity: "vehicles" },
       { href: "/drivers", label: "السائقون", icon: "driver", entity: "drivers" },
       { href: "/assignments", label: "الإسناد والتسليم", icon: "handover", entity: "vehicles" },
-      { href: "/fleet-documents", label: "وثائق الأسطول", icon: "document", entity: "fleet_documents" },
+      { href: "/fleet-documents", label: "سجل الوثائق", icon: "document", entity: "fleet_documents" },
       { href: "/violations", label: "المخالفات المرورية", icon: "ticket", entity: "violations" },
       { href: "/maintenance", label: "أوامر الصيانة", icon: "wrench", entity: "maintenance" },
       { href: "/maintenance/requests", label: "طلبات العطل", icon: "alert", entity: "maintenance" },
@@ -161,7 +161,7 @@ export const NAV_KEYWORDS: Record<string, string> = {
   "/reports/ledger": "كشف حساب",
   "/expenses": "مصروف",
   "/violations": "مخالفة ساهر",
-  "/fleet-documents": "وثيقة استمارة رخصة تأمين إقامة",
+  "/fleet-documents": "وثائق وثيقة استمارة رخصة تأمين إقامة سجل تجاري مقطورة سطحة ناقصة منتهية",
   "/accounts": "دليل الحسابات شجرة",
   "/maintenance": "صيانة ورشة",
 };

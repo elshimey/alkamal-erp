@@ -1,5 +1,5 @@
 import "server-only";
-import { asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
 
@@ -44,8 +44,13 @@ export async function vehicleTypeOptions() {
   return rows.map((r) => ({ value: String(r.id), label: r.nameAr }));
 }
 
-export async function vehicleOptions() {
-  const rows = await db.select({ id: s.vehicles.id, plate: s.vehicles.plate }).from(s.vehicles).orderBy(asc(s.vehicles.plate));
+/** المركبات: الكل (للمصروفات والصيانة)، أو الرؤوس فقط، أو المقطورات فقط (للشحنة). */
+export async function vehicleOptions(kind?: "head" | "trailer") {
+  const rows = await db
+    .select({ id: s.vehicles.id, plate: s.vehicles.plate })
+    .from(s.vehicles)
+    .where(kind ? and(eq(s.vehicles.assetKind, kind), ne(s.vehicles.status, "sold")) : undefined)
+    .orderBy(asc(s.vehicles.plate));
   return rows.map((r) => ({ value: String(r.id), label: r.plate }));
 }
 

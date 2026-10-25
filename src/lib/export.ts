@@ -20,7 +20,7 @@ const TABLES: [string, string][] = [
   ["vehicle_types", "أنواع المركبات"],
   ["vehicles", "المركبات"],
   ["vehicle_assignments", "إسناد المركبات"],
-  ["fleet_documents", "وثائق الأسطول"],
+  ["fleet_documents", "سجل الوثائق"],
   ["employees", "الموظفون"],
   ["drivers", "السائقون"],
   ["locations", "المواقع"],

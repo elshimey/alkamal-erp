@@ -47,6 +47,7 @@ const SECTIONS: { title: string; items: Item[] }[] = [
       { href: "/contracts", title: "العقود والأسعار", description: "أسعار كل عميل وحدّه الائتماني.", icon: "contract", entity: "contracts" },
       { href: "/settings/hr", title: "الموارد البشرية", description: "نقاط الإنذار والترقية، ومقدم العمولة، ومعايير التقييم وأنواع الإجازات.", icon: "people", entity: "settings" },
       { href: "/vehicles", title: "المركبات", description: "إضافة مركبات الأسطول وبياناتها.", icon: "truck", entity: "vehicles" },
+      { href: "/settings/document-types", title: "أنواع الوثائق", description: "وثائق الرؤوس والمقطورات والسائقين والموظفين والشركة والعملاء، وأيام التنبيه وأيها إلزامي.", icon: "document", entity: "settings" },
       { href: "/settings/driver-app", title: "تطبيق السائق", description: "رابط التطبيق ورمزه لإرساله للسائقين، وطريقة تثبيته على الجوال.", icon: "driver", entity: "drivers" },
     ],
   },

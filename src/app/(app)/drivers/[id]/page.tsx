@@ -44,6 +44,9 @@ export default async function DriverPage({ params }: { params: Promise<{ id: str
       <PageHeader title={e.nameAr} description={`حساب العهدة ${custodyCode} · ${plate ? `المركبة الحالية ${plate}` : "بلا مركبة"}`}>
         <div className="flex items-center gap-3">
           <Badge tone={STATUS[d.status].tone}>{STATUS[d.status].label}</Badge>
+          <Link href={`/fleet-documents/owner/driver-${d.id}`} className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-brand-700 hover:bg-brand-50">
+            الوثائق
+          </Link>
           <Link href="/drivers" className="text-sm font-medium text-brand-700 hover:underline">
             ← كل السائقين
           </Link>

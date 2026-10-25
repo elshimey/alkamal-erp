@@ -115,6 +115,9 @@ export default async function DriversPage({ searchParams }: { searchParams: Prom
               <Link href={`/drivers/${d.id}`} className="text-brand-700 hover:underline">
                 {name}
               </Link>
+              <Link href={`/fleet-documents/owner/driver-${d.id}`} className="ms-2 text-xs font-normal text-gray-500 hover:text-brand-700 hover:underline">
+                الوثائق
+              </Link>
             </Td>
             <Td className="ltr-nums">{d.mobile ?? "—"}</Td>
             <Td>{d.nationality ?? "—"}</Td>

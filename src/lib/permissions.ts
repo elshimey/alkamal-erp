@@ -35,7 +35,7 @@ export const ENTITIES = {
   parties: { label: "جهات الاتصال", module: "sales" },
   vehicles: { label: "المركبات", module: "fleet" },
   drivers: { label: "السائقون", module: "fleet" },
-  fleet_documents: { label: "وثائق الأسطول", module: "fleet" },
+  fleet_documents: { label: "سجل الوثائق", module: "fleet" },
   violations: { label: "المخالفات", module: "fleet" },
   routes: { label: "المواقع والمسارات", module: "operations" },
   contracts: { label: "العقود والأسعار", module: "operations" },
