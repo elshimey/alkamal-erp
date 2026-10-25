@@ -28,7 +28,7 @@ export const NAV: { title: string; icon: IconName; items: { href: string; label:
       { href: "/invoices", label: "الفواتير", icon: "invoice", entity: "sales_invoices" },
       { href: "/customers", label: "العملاء", icon: "people", entity: "parties" },
       { href: "/receipts", label: "سندات العملاء", icon: "cash", entity: "receipts" },
-      { href: "/notes/sales", label: "إشعارات العملاء", icon: "document", entity: "sales_invoices" },
+      { href: "/notes/sales", label: "الإشعارات الدائنة والمدينة", icon: "document", entity: "sales_invoices" },
       { href: "/parties", label: "جهات الاتصال", icon: "people", entity: "parties" },
       { href: "/routes", label: "المواقع والمسارات", icon: "route", entity: "routes" },
       { href: "/contracts", label: "العقود والأسعار", icon: "contract", entity: "contracts" },

@@ -165,6 +165,22 @@ export const partyRoles = pgTable(
   (t) => [primaryKey({ columns: [t.partyId, t.role] })],
 );
 
+// الأشخاص المرتبطون بجهة الاتصال (المسؤول المالي، مدير المشتريات…)
+export const partyContacts = pgTable(
+  "party_contacts",
+  {
+    id: id(),
+    partyId: ref("party_id").notNull().references(() => parties.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    position: text("position"),
+    mobile: varchar("mobile", { length: 20 }),
+    email: varchar("email", { length: 120 }),
+    notes: text("notes"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("party_contacts_party_idx").on(t.partyId)],
+);
+
 export const numberSequences = pgTable(
   "number_sequences",
   {

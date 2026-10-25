@@ -6,6 +6,9 @@ import { requirePermission } from "@/lib/auth";
 import { createParty, type PartyRole } from "@/lib/operations";
 import { cell, saveSheetRows, type SheetRow } from "@/lib/sheet-server";
 import { PARTY_ROLES } from "@/data/operations";
+import { addPerson, removePerson, updatePerson, type PersonInput } from "@/lib/contacts";
+import { errorMessage } from "@/lib/errors";
+import type { FormState } from "@/components/action-form";
 
 export async function saveParties(rows: SheetRow[]) {
   await requirePermission("parties", "create");
@@ -29,3 +32,26 @@ export async function saveParties(rows: SheetRow[]) {
   revalidatePath("/parties");
   return result;
 }
+
+const person = (data: FormData): PersonInput => ({
+  name: String(data.get("name") ?? ""),
+  position: String(data.get("position") ?? ""),
+  mobile: String(data.get("mobile") ?? ""),
+  email: String(data.get("email") ?? ""),
+  notes: String(data.get("notes") ?? ""),
+});
+
+async function personAction(fn: () => Promise<unknown>, ok: string): Promise<FormState> {
+  await requirePermission("parties", "update");
+  try {
+    await fn();
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+  revalidatePath("/parties");
+  return { ok };
+}
+
+export const addPersonAction = async (partyId: number, _: FormState, data: FormData) => personAction(() => addPerson(db, partyId, person(data)), "أُضيف الشخص");
+export const updatePersonAction = async (partyId: number, id: number, _: FormState, data: FormData) => personAction(() => updatePerson(db, id, person(data)), "حُفظ");
+export const removePersonAction = async (partyId: number, id: number, _: FormState) => personAction(() => removePerson(db, id), "حُذف");

@@ -162,6 +162,13 @@
       "when": 1792697125139,
       "tag": "0022_zatca_phase2",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1792910153889,
+      "tag": "0023_party_contacts",
+      "breakpoints": true
     }
   ]
 }
