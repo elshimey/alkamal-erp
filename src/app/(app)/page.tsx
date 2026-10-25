@@ -14,6 +14,8 @@ import { Icon, Truck, type IconName } from "@/components/icons";
 
 const money = (v: number) => Math.round(v).toLocaleString("en");
 const pct = (part: number, whole: number) => (whole ? Math.round((part / whole) * 100) : 0);
+// الهامش بلا معنى إن كان الإيراد صفراً أو سالباً (إشعارات دائنة تفوق الفواتير)
+const marginNote = (part: number, revenue: number) => (revenue > 0 ? `هامش ${pct(part, revenue)}%` : "هامش —");
 const MONTHS = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
 const delay = (i: number) => ({ "--i": i }) as CSSProperties;
 
@@ -309,7 +311,6 @@ export default async function Dashboard({
 
   const cur = fin?.current;
   const prev = fin?.previous;
-  const margin = cur ? pct(cur.gross, cur.revenue) : 0;
 
   return (
     <>
@@ -324,7 +325,7 @@ export default async function Dashboard({
             <h1 className="mt-2 text-2xl font-semibold sm:text-3xl">أهلاً، {user.name}</h1>
             <p className="mt-2 max-w-xl text-sm leading-relaxed text-white/60">
               {ops ? `${ops.trips} رحلة · ${period.label}` : "لوحة البداية"}
-              {cur ? ` · إيراد ${money(cur.revenue)} ر.س · مجمل ربح ${margin}%` : ""}
+              {cur ? ` · إيراد ${money(cur.revenue)} ر.س${cur.revenue > 0 ? ` · مجمل ربح ${pct(cur.gross, cur.revenue)}%` : ""}` : ""}
               {activeAlerts.length ? ` · ${activeAlerts.length} تنبيه يحتاج متابعة` : ""}
             </p>
           </div>
@@ -388,7 +389,7 @@ export default async function Dashboard({
             <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
               <Kpi i={0} label="الإيرادات المفوترة" value={cur.revenue} prev={prev.revenue} icon="chart" href="/invoices" unit="ر.س" note={ops ? `قيمة رحلات الفترة ${money(ops.value)}` : undefined} />
               <Kpi i={1} label="تكاليف التشغيل" value={cur.directCost} prev={prev.directCost} icon="truck" href="/waybills?status=approved" unit="ر.س" invert />
-              <Kpi i={2} label="مجمل الربح" value={cur.gross} prev={prev.gross} icon="target" href={canReports ? "/reports/income" : undefined} unit="ر.س" note={`هامش ${margin}%`} />
+              <Kpi i={2} label="مجمل الربح" value={cur.gross} prev={prev.gross} icon="target" href={canReports ? "/reports/income" : undefined} unit="ر.س" note={marginNote(cur?.gross ?? 0, cur?.revenue ?? 0)} />
               <Kpi i={3} label="صافي الربح" value={cur.net} prev={prev.net} icon="ledger" href={canReports ? "/reports/income" : "/accounts"} unit="ر.س" note={`بعد مصروفات إدارية ${money(cur.admin)}`} />
             </div>
           )}
@@ -500,7 +501,7 @@ export default async function Dashboard({
                               <td className="ltr-nums px-2 py-2">{money(v.cost)}</td>
                               <td className="ltr-nums px-2 py-2 text-gray-500">{money(v.fuel)}</td>
                               <td className={`ltr-nums px-2 py-2 font-semibold ${v.profit < 0 ? "text-red-600" : "text-emerald-700"}`}>{money(v.profit)}</td>
-                              <td className="ltr-nums px-2 py-2 text-gray-500">{v.revenue ? `${pct(v.profit, v.revenue)}%` : "—"}</td>
+                              <td className="ltr-nums px-2 py-2 text-gray-500">{v.revenue > 0 ? `${pct(v.profit, v.revenue)}%` : "—"}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -911,9 +912,9 @@ function IncomeTab({ r, period, costs, canReports, settings }: { r: Income; peri
     <>
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Kpi i={0} label="الإيرادات" value={revenue} prev={prevRevenue} icon="chart" href="/invoices" unit="ر.س" />
-        <Kpi i={1} label="مجمل الربح" value={r.current.gross} prev={p?.gross ?? 0} icon="target" unit="ر.س" note={`هامش ${pct(r.current.gross, revenue)}%`} />
-        <Kpi i={2} label="الربح التشغيلي" value={r.current.operating} prev={p?.operating ?? 0} icon="truck" unit="ر.س" note={`هامش ${pct(r.current.operating, revenue)}%`} />
-        <Kpi i={3} label="صافي الربح" value={r.current.net} prev={p?.net ?? 0} icon="ledger" unit="ر.س" note={`هامش ${pct(r.current.net, revenue)}%`} />
+        <Kpi i={1} label="مجمل الربح" value={r.current.gross} prev={p?.gross ?? 0} icon="target" unit="ر.س" note={marginNote(r.current.gross, revenue)} />
+        <Kpi i={2} label="الربح التشغيلي" value={r.current.operating} prev={p?.operating ?? 0} icon="truck" unit="ر.س" note={marginNote(r.current.operating, revenue)} />
+        <Kpi i={3} label="صافي الربح" value={r.current.net} prev={p?.net ?? 0} icon="ledger" unit="ر.س" note={marginNote(r.current.net, revenue)} />
       </div>
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
         <div className="min-w-0 xl:col-span-2">

@@ -6,6 +6,7 @@ import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { errorMessage } from "@/lib/errors";
+import { todayRiyadh } from "@/lib/dates";
 import { cell, type SheetRow } from "@/lib/sheet-server";
 import type { SheetResult } from "@/lib/sheet";
 import { createPurchaseInvoice, deletePurchaseInvoice, postPurchaseInvoice, revertPurchaseInvoice, updateDraftPurchase, type DraftPurchasePatch, type PurchaseLineInput } from "@/lib/purchases";
@@ -53,7 +54,7 @@ export async function savePurchases(rows: SheetRow[]): Promise<SheetResult> {
       await createPurchaseInvoice(db, {
         supplierId: Number(cell.required(first.supplierId, "المورد")),
         supplierInvoiceNo: cell.required(first.supplierInvoiceNo, "رقم فاتورة المورد"),
-        invoiceDate: cell.date(first.date, "التاريخ") ?? cell.required("", "التاريخ"),
+        invoiceDate: cell.date(first.date, "التاريخ") ?? todayRiyadh(),
         dueDate: cell.date(first.dueDate, "الاستحقاق"),
         currencyCode: first.currency === "KWD" ? "KWD" : "SAR",
         exchangeRate: cell.number(first.rate, "سعر الصرف"),

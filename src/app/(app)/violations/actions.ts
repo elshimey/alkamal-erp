@@ -23,7 +23,7 @@ export async function saveViolations(rows: SheetRow[]) {
     const chargeTo = cell.required(r.chargeTo, "على من");
     if (chargeTo !== "driver" && chargeTo !== "company") throw new Error("على من: السائق أو الشركة");
     await createViolation(db, {
-      violationDate: cell.date(r.date, "التاريخ") ?? cell.required("", "التاريخ"),
+      violationDate: cell.date(r.date, "التاريخ") ?? todayRiyadh(),
       vehicleId: Number(cell.required(r.vehicleId, "المركبة")),
       driverId: r.driverId ? Number(r.driverId) : null,
       reference: cell.text(r.reference),

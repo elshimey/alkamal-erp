@@ -8,6 +8,7 @@ import * as s from "@/db/schema";
 import { requirePermission, type CurrentUser } from "@/lib/auth";
 import { hasSpecial, scopeFor, type Action } from "@/lib/permissions";
 import { errorMessage } from "@/lib/errors";
+import { todayRiyadh } from "@/lib/dates";
 import { cell, saveSheetRows, type SheetRow } from "@/lib/sheet-server";
 import {
   addExpense,
@@ -51,7 +52,8 @@ export async function saveWaybills(rows: SheetRow[]) {
   const prices = hasSpecial(user.perms, "view_prices");
   const result = await saveSheetRows(rows, async (r) => {
     await createWaybill(db, {
-      waybillDate: cell.date(r.date, "التاريخ") ?? cell.required("", "التاريخ"),
+      // التاريخ الفارغ = اليوم، كما يظهر في الخلية
+      waybillDate: cell.date(r.date, "التاريخ") ?? todayRiyadh(),
       customerId: Number(cell.required(r.customerId, "العميل")),
       routeId: Number(cell.required(r.routeId, "المسار")),
       shipper: cell.required(r.shipper, "المرسل"),

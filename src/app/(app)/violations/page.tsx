@@ -17,7 +17,7 @@ import { listHref, parseDocFilter, type DocListParams } from "@/lib/doc-filters"
 import { BulkPdfButton } from "@/components/bulk-pdf";
 import { DocToolbar } from "@/components/doc-toolbar";
 import { Icon } from "@/components/icons";
-import { ImportLink } from "@/components/import-link";
+import { AddModeBar, ListActions } from "@/components/list-actions";
 import { ViolationDocument } from "@/components/violation-document";
 import { fmt } from "@/lib/format";
 
@@ -25,9 +25,11 @@ const PAY_FORM = "pay-violations";
 const STATUSES = { posted: "غير مسددة للمرور", paid: "مسددة" };
 const BASE = "/violations";
 
-export default async function ViolationsPage({ searchParams }: { searchParams: Promise<DocListParams & { charge?: string; vehicle?: string; driver?: string }> }) {
+export default async function ViolationsPage({ searchParams }: { searchParams: Promise<DocListParams & { charge?: string; vehicle?: string; driver?: string; add?: string }> }) {
   const user = await requirePermission("violations", "view");
   const sp = await searchParams;
+  const canCreate = can(user.perms, "violations", "create");
+  const adding = sp.add === "1" && canCreate;
   const df = parseDocFilter(sp, Object.keys(STATUSES), todayRiyadh());
   const filter: ViolationFilter = {
     q: df.q,
@@ -59,9 +61,11 @@ export default async function ViolationsPage({ searchParams }: { searchParams: P
         title="المخالفات المرورية"
         description="تُسجل المخالفة على المركبة ويُعرف السائق من سجل الإسناد في تاريخها. على السائق تُخصم من راتبه في المسير، وعلى الشركة تُقيد مصروفاً على المركبة. القيد يُنشأ فور الحفظ."
       >
-        {can(user.perms, "violations", "create") && <ImportLink entity="violations" />}
+        {!adding && <ListActions addHref={canCreate && "/violations?add=1"} addLabel="تسجيل مخالفات" importHref={canCreate && "/import/violations"} />}
       </PageHeader>
+      {adding && <AddModeBar backHref="/violations" backLabel="المخالفات المرورية" title="تسجيل مخالفات" />}
 
+      {!adding && (
       <div className="mb-6 grid gap-4 sm:grid-cols-3">
         {[
           { label: "غير مسدد للمرور", value: sum.unpaid, hint: `${sum.unpaidCount} مخالفة`, strong: true },
@@ -77,16 +81,17 @@ export default async function ViolationsPage({ searchParams }: { searchParams: P
           </div>
         ))}
       </div>
+      )}
 
-      {can(user.perms, "violations", "create") && (
-        <Card title="تسجيل مخالفات" className="mb-6">
+      {adding && (
+        <Card className="mb-6">
           <SheetEditor
             templateName="المخالفات"
             action={saveViolations}
             initialRows={4}
             columns={[
-              { key: "date", label: "تاريخ المخالفة", type: "date", required: true, placeholder: today },
-              { key: "vehicleId", label: "المركبة", type: "select", required: true, options: vehicles, width: "8rem" },
+              { key: "date", label: "تاريخ المخالفة", type: "date", placeholder: today },
+              { key: "vehicleId", label: "المركبة", type: "select", required: true, options: vehicles, width: "8rem", create: "vehicle" },
               { key: "reference", label: "رقم المخالفة", ltr: true, width: "8rem" },
               { key: "type", label: "نوع المخالفة", required: true, width: "11rem", placeholder: "سرعة، وقوف، حمولة…" },
               { key: "location", label: "الموقع", width: "9rem" },
@@ -116,6 +121,8 @@ export default async function ViolationsPage({ searchParams }: { searchParams: P
         </Card>
       )}
 
+      {!adding && (
+        <>
       <DocToolbar base={BASE} params={sp} statuses={STATUSES} allStatuses="كل الحالات" pay={false} views={false} sorts={{}} noun="مخالفة" exportName="المخالفات" count={list.length} placeholder="ابحث بالرقم أو اللوحة أو السائق أو النوع" />
       <form className="mb-4 flex flex-wrap items-center gap-2 text-sm print:hidden">
         {(["q", "period", "status"] as const).map((k) => sp[k] && <input key={k} type="hidden" name={k} value={sp[k]} />)}
@@ -252,6 +259,8 @@ export default async function ViolationsPage({ searchParams }: { searchParams: P
           </tr>
         ))}
       </Table>
+        </>
+      )}
     </>
   );
 }

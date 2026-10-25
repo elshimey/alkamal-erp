@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { errorMessage } from "@/lib/errors";
+import { todayRiyadh } from "@/lib/dates";
 import { cell, saveSheetRows, type SheetRow } from "@/lib/sheet-server";
 import { createPayment, deletePayment, postPayment, revertPayment } from "@/lib/purchases";
 import { PAYMENT_METHODS } from "@/data/sales";
@@ -29,7 +30,8 @@ export async function savePayments(rows: SheetRow[]) {
     const kind = r.driverId && !r.partyId ? "custody" : "supplier";
     if (r.driverId && r.partyId) throw new Error("اختر المورد أو السائق، لا الاثنين");
     await createPayment(db, {
-      paymentDate: cell.date(r.date, "التاريخ") ?? cell.required("", "التاريخ"),
+      // التاريخ الفارغ = اليوم، كما يظهر في الخلية
+      paymentDate: cell.date(r.date, "التاريخ") ?? todayRiyadh(),
       kind,
       partyId: r.partyId ? Number(r.partyId) : null,
       driverId: r.driverId ? Number(r.driverId) : null,

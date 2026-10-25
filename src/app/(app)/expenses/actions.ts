@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { errorMessage } from "@/lib/errors";
+import { todayRiyadh } from "@/lib/dates";
 import { cell, saveSheetRows, type SheetRow } from "@/lib/sheet-server";
 import { approveExpense, createExpense, deleteExpense, rejectExpense, revertExpense } from "@/lib/purchases";
 import type { FormState } from "@/components/action-form";
@@ -23,7 +24,7 @@ export async function saveExpenses(rows: SheetRow[]) {
     const payer = cell.required(r.payer, "الدافع");
     if (payer !== "driver_custody" && payer !== "cash") throw new Error("الدافع: عهدة السائق أو صندوق / بنك");
     await createExpense(db, {
-      expenseDate: cell.date(r.date, "التاريخ") ?? cell.required("", "التاريخ"),
+      expenseDate: cell.date(r.date, "التاريخ") ?? todayRiyadh(),
       payer,
       driverId: r.driverId ? Number(r.driverId) : null,
       cashAccountId: r.cashAccountId ? Number(r.cashAccountId) : null,
