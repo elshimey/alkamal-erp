@@ -7,6 +7,7 @@ import { todayRiyadh } from "@/lib/dates";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { endAssignment, startAssignment } from "./actions";
+import { AddModeBar, ListActions } from "@/components/list-actions";
 
 const baseQuery = () =>
   db
@@ -16,7 +17,7 @@ const baseQuery = () =>
     .innerJoin(s.drivers, eq(s.drivers.id, s.vehicleAssignments.driverId))
     .innerJoin(s.employees, eq(s.employees.id, s.drivers.employeeId));
 
-export default async function AssignmentsPage() {
+export default async function AssignmentsPage({ searchParams }: { searchParams: Promise<{ add?: string }> }) {
   const user = await requirePermission("vehicles", "view");
   const canEdit = can(user.perms, "vehicles", "update");
   const today = todayRiyadh();
@@ -42,11 +43,15 @@ export default async function AssignmentsPage() {
       .orderBy(asc(s.employees.nameAr)),
   ]);
 
+  const adding = (await searchParams).add === "1" && !!(canEdit);
   return (
     <>
-      <PageHeader title="الإسناد والتسليم" description="من يقود كل مركبة ومتى. منه يُعرف السائق وقت المخالفة، ويُحدَّث عداد المركبة." />
-      {canEdit && (
-        <Card title="استلام مركبة" className="mb-6">
+      <PageHeader title="الإسناد والتسليم" description="من يقود كل مركبة ومتى. منه يُعرف السائق وقت المخالفة، ويُحدَّث عداد المركبة.">
+        {!adding && <ListActions newHref={(canEdit) && "/assignments?add=1"} newLabel="استلام مركبة" />}
+      </PageHeader>
+      {adding && <AddModeBar backHref="/assignments" backLabel="الإسناد والتسليم" title="استلام مركبة" />}
+      {adding && (
+        <Card className="mb-6">
           <ActionForm action={startAssignment} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5 lg:items-end">
             <Field label="المركبة">
               <Select name="vehicleId" required defaultValue="">
@@ -87,7 +92,8 @@ export default async function AssignmentsPage() {
           </ActionForm>
         </Card>
       )}
-      <h2 className="mb-3 font-semibold text-gray-800">المسندة حالياً</h2>
+      {!adding && (
+        <>      <h2 className="mb-3 font-semibold text-gray-800">المسندة حالياً</h2>
       <Table head={["المركبة", "السائق", "منذ", "عداد الاستلام", canEdit ? "تسجيل التسليم" : ""]}>
         {open.length === 0 && <EmptyRow cols={5}>لا توجد مركبات مسندة</EmptyRow>}
         {open.map(({ a, plate, driver }) => (
@@ -123,6 +129,8 @@ export default async function AssignmentsPage() {
           </tr>
         ))}
       </Table>
+        </>
+      )}
     </>
   );
 }

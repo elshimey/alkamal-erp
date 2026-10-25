@@ -6,6 +6,7 @@ import { NOTE_KINDS, NOTE_SIDES, type NoteKind, type NoteSide } from "@/data/sal
 import { Icon, Truck } from "@/components/icons";
 import { invoiceLines, partyInvoices, saveNote } from "../actions";
 import { fmt } from "@/lib/format";
+import { DateInput } from "@/components/date-input";
 
 type Option = { value: string; label: string };
 type Inv = Awaited<ReturnType<typeof partyInvoices>>[number];
@@ -183,7 +184,7 @@ export function NoteForm({
             </Row>
           )}
           <Row label="التاريخ" required>
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={`${inputCls} ltr-nums`} />
+            <DateInput value={date} onChange={(e) => setDate(e.target.value)} className={`${inputCls} ltr-nums`} />
           </Row>
           <Row label="سبب الإشعار" required>
             <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder={reduces ? "مرتجع، خصم لاحق، تصحيح سعر…" : "فرق سعر، رسوم إضافية…"} className={inputCls} />

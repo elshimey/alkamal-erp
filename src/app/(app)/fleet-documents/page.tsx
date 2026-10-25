@@ -11,8 +11,9 @@ import { DOCUMENT_TYPES } from "@/data/fleet";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { addDocument } from "./actions";
+import { AddModeBar, ListActions } from "@/components/list-actions";
 
-export default async function FleetDocumentsPage() {
+export default async function FleetDocumentsPage({ searchParams }: { searchParams: Promise<{ add?: string }> }) {
   const user = await requirePermission("fleet_documents", "view");
   const today = todayRiyadh();
   const [docs, vehicles, drivers] = await Promise.all([
@@ -31,11 +32,15 @@ export default async function FleetDocumentsPage() {
       .orderBy(asc(s.employees.nameAr)),
   ]);
 
+  const adding = (await searchParams).add === "1" && !!(can(user.perms, "fleet_documents", "create"));
   return (
     <>
-      <PageHeader title="وثائق الأسطول" description={`استمارات وتأمين وفحص ورخص وإقامات. يظهر التنبيه قبل ${EXPIRY_ALERT_DAYS} يوماً من الانتهاء.`} />
-      {can(user.perms, "fleet_documents", "create") && (
-        <Card title="إضافة وثيقة" className="mb-6">
+      <PageHeader title="وثائق الأسطول" description={`استمارات وتأمين وفحص ورخص وإقامات. يظهر التنبيه قبل ${EXPIRY_ALERT_DAYS} يوماً من الانتهاء.`}>
+        {!adding && <ListActions newHref={(can(user.perms, "fleet_documents", "create")) && "/fleet-documents?add=1"} newLabel="إضافة وثيقة" />}
+      </PageHeader>
+      {adding && <AddModeBar backHref="/fleet-documents" backLabel="وثائق الأسطول" title="إضافة وثيقة" />}
+      {adding && (
+        <Card className="mb-6">
           <ActionForm action={addDocument} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Field label="صاحب الوثيقة *">
               <Select name="owner" required defaultValue="">
@@ -91,7 +96,8 @@ export default async function FleetDocumentsPage() {
           </ActionForm>
         </Card>
       )}
-      <Table head={["صاحب الوثيقة", "النوع", "الرقم", "الجهة", "الانتهاء", "الحالة"]}>
+      {!adding && (
+        <>      <Table head={["صاحب الوثيقة", "النوع", "الرقم", "الجهة", "الانتهاء", "الحالة"]}>
         {docs.length === 0 && <EmptyRow cols={6}>لا توجد وثائق بعد</EmptyRow>}
         {docs.map(({ doc, plate, driverName }) => (
           <tr key={doc.id}>
@@ -109,6 +115,8 @@ export default async function FleetDocumentsPage() {
           </tr>
         ))}
       </Table>
+        </>
+      )}
     </>
   );
 }

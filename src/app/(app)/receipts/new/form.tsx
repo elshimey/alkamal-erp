@@ -8,6 +8,7 @@ import { Icon, Truck } from "@/components/icons";
 import { ComboBox } from "@/components/combo-box";
 import { customerOpenItems, saveReceipt } from "../actions";
 import { fmt } from "@/lib/format";
+import { DateInput } from "@/components/date-input";
 
 type Option = { value: string; label: string };
 type OpenInvoice = Awaited<ReturnType<typeof customerOpenItems>>["invoices"][number];
@@ -211,7 +212,7 @@ export function ReceiptForm({
             )}
           </Row>
           <Row label="التاريخ" required>
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={`${inputCls} ltr-nums`} />
+            <DateInput value={date} onChange={(e) => setDate(e.target.value)} className={`${inputCls} ltr-nums`} />
           </Row>
           <Row label="الوصف">
             <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="غير محدد" className={`${inputCls} h-auto py-2`} />

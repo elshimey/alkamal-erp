@@ -8,25 +8,31 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Badge, Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { createReconciliationAction } from "./actions";
 import { fmt } from "@/lib/format";
+import { AddModeBar, ListActions } from "@/components/list-actions";
 
-export default async function ReconciliationsPage() {
+export default async function ReconciliationsPage({ searchParams }: { searchParams: Promise<{ add?: string }> }) {
   const user = await requirePermission("accounts", "view");
   const [rows, accounts] = await Promise.all([listReconciliations(db), reconcilableAccounts(db)]);
   const canCreate = can(user.perms, "accounts", "update");
 
+  const adding = (await searchParams).add === "1" && !!(canCreate);
   return (
     <>
       <PageHeader
         title="التسوية البنكية"
         description="أدخل رصيد كشف البنك في تاريخه، ثم أشّر على الحركات التي ظهرت في الكشف. حين يصبح الفرق صفراً تكتمل التسوية، وما لم يظهر يبقى معلقاً للشهر التالي."
       >
+        <div className="flex flex-wrap items-center gap-3">
         <Link href="/bank-accounts" className="text-sm text-brand-700 hover:underline">
           الحسابات البنكية
         </Link>
+          {!adding && <ListActions newHref={(canCreate) && "/bank-accounts/reconcile?add=1"} newLabel="تسوية جديدة" />}
+        </div>
       </PageHeader>
 
-      {canCreate && (
-        <Card title="تسوية جديدة" className="mb-6">
+      {adding && <AddModeBar backHref="/bank-accounts/reconcile" backLabel="التسوية البنكية" title="تسوية جديدة" />}
+      {adding && (
+        <Card className="mb-6">
           <ActionForm action={createReconciliationAction} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Field label="الحساب">
               <Select name="accountId" required defaultValue="">
@@ -55,7 +61,8 @@ export default async function ReconciliationsPage() {
           </ActionForm>
         </Card>
       )}
-
+      {!adding && (
+        <>
       <Table head={["الرقم", "الحساب", "تاريخ الكشف", "رصيد الكشف", "الحالة"]}>
         {rows.length === 0 && <EmptyRow cols={5}>لا توجد تسويات بعد</EmptyRow>}
         {rows.map(({ r, account, code, currency }) => (
@@ -76,6 +83,8 @@ export default async function ReconciliationsPage() {
           </tr>
         ))}
       </Table>
+        </>
+      )}
     </>
   );
 }

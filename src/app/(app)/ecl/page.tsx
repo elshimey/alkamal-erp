@@ -8,6 +8,7 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Card, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
 import { postProvision, removeProvision } from "./actions";
 import { fmt } from "@/lib/format";
+import { DateInput } from "@/components/date-input";
 
 export default async function EclPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const user = await requirePermission("journal_entries", "view");
@@ -31,7 +32,7 @@ export default async function EclPage({ searchParams }: { searchParams: Promise<
         <form className="grid items-end gap-3 sm:grid-cols-4 lg:grid-cols-8">
           <label className="text-sm sm:col-span-2">
             <span className="mb-1 block text-gray-600">في تاريخ</span>
-            <input type="date" name="asOf" defaultValue={asOf} className="h-9 w-full rounded-lg border border-gray-300 px-3 text-sm" />
+            <DateInput name="asOf" defaultValue={asOf} className="h-9 w-full rounded-lg border border-gray-300 px-3 text-sm" />
           </label>
           {ECL_BUCKETS.map((b) => (
             <label key={b.key} className="text-sm">

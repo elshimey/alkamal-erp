@@ -1,4 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
+import { DateInput } from "@/components/date-input";
 
 export function PageHeader({ title, description, children }: { title: string; description?: string; children?: ReactNode }) {
   return (
@@ -40,6 +41,19 @@ const inputClass =
 export function Input(props: ComponentProps<"input">) {
   // الحقول اللاتينية (أسماء الدخول وكلمات المرور والرموز): لا تكبير تلقائي للحرف الأول ولا تصحيح على الجوال
   const latin = props.dir === "ltr" ? { autoCapitalize: "none", autoCorrect: "off", spellCheck: false } : {};
+  if (props.type === "date") {
+    const { value, defaultValue, onChange, ...rest } = props;
+    delete rest.type;
+    return (
+      <DateInput
+        {...rest}
+        value={value as string | undefined}
+        defaultValue={defaultValue as string | undefined}
+        onChange={onChange ? (e) => onChange({ target: { value: e.target.value } } as never) : undefined}
+        className={`${inputClass} ${props.className ?? ""}`}
+      />
+    );
+  }
   return <input {...latin} {...props} className={`${inputClass} ${props.className ?? ""}`} />;
 }
 

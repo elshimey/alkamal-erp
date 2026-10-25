@@ -5,6 +5,7 @@ import { useState, useTransition, type ClipboardEvent } from "react";
 import { Icon, Truck } from "@/components/icons";
 import { saveEntry } from "./actions";
 import { fmt } from "@/lib/format";
+import { DateInput } from "@/components/date-input";
 
 type Option = { value: string; label: string; code?: string; cc?: boolean };
 export type EntryLine = { accountId: string; description: string; costCenterId: string; partyId: string; debit: string; credit: string };
@@ -116,7 +117,7 @@ export function EntryForm({ accounts, centers, parties, initial, entryId, canPos
           <span className="mb-1 block text-gray-600">
             التاريخ<span className="text-red-500">*</span>
           </span>
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={`${inputCls} ltr-nums`} />
+          <DateInput value={date} onChange={(e) => setDate(e.target.value)} className={`${inputCls} ltr-nums`} />
         </label>
         <label className="text-sm">
           <span className="mb-1 block text-gray-600">المرجع</span>

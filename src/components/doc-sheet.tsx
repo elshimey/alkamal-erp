@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition, type KeyboardEvent } from "react";
 import { Icon } from "@/components/icons";
+import { isoToDmy } from "@/components/date-input";
 
 export interface DocSheetColumn {
   key: string;
@@ -244,8 +245,8 @@ export function DocSheet({ columns, rows, action, emptyText }: { columns: DocShe
                       {active && editable ? (
                         <input
                           ref={input}
-                          value={editing ? editing.value : v}
-                          placeholder={col.type === "date" ? "YYYY-MM-DD" : undefined}
+                          value={editing ? editing.value : col.type === "date" ? isoToDmy(v) : v}
+                          placeholder={col.type === "date" ? "dd/mm/yyyy" : undefined}
                           onChange={(e) => setEditing({ value: e.target.value, caret: editing?.caret ?? false })}
                           onFocus={(e) => !editing && e.currentTarget.select()}
                           onBlur={commit}
@@ -265,6 +266,8 @@ export function DocSheet({ columns, rows, action, emptyText }: { columns: DocShe
                         <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${TONES[badge.tone]}`}>{badge.label}</span>
                       ) : col.type === "number" ? (
                         fmtNum(v)
+                      ) : col.type === "date" && v ? (
+                        isoToDmy(v)
                       ) : (
                         v || <span className="text-gray-300">—</span>
                       )}

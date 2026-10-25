@@ -8,24 +8,30 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { removeTransfer, saveTransfer } from "./actions";
 import { fmt } from "@/lib/format";
+import { AddModeBar, ListActions } from "@/components/list-actions";
 
-export default async function TransfersPage() {
+export default async function TransfersPage({ searchParams }: { searchParams: Promise<{ add?: string }> }) {
   const user = await requirePermission("payments", "view");
   const [accounts, rows] = await Promise.all([transferAccounts(db), listTransfers(db)]);
   const canCreate = can(user.perms, "payments", "create");
   const canDelete = can(user.perms, "payments", "delete");
   const label = (a: (typeof accounts)[number]) => `${a.code} ${a.nameAr}${a.currencyCode && a.currencyCode !== "SAR" ? ` (${a.currencyCode})` : ""}`;
 
+  const adding = (await searchParams).add === "1" && !!(canCreate);
   return (
     <>
       <PageHeader title="التحويل بين الحسابات" description="نقل مبلغ بين بنك وصندوق، أو بين بنكين، أو شحن رصيد بطاقات الوقود. يُقيد فوراً، والرسوم على الرسوم البنكية، وفرق العملة على فروق العملة.">
+        <div className="flex flex-wrap items-center gap-3">
         <Link href="/bank-accounts" className="text-sm font-medium text-brand-700 hover:underline">
           ← البنوك والصناديق
         </Link>
+          {!adding && <ListActions newHref={(canCreate) && "/transfers?add=1"} newLabel="تحويل جديد" />}
+        </div>
       </PageHeader>
 
-      {canCreate && (
-        <Card title="تحويل جديد" className="mb-6">
+      {adding && <AddModeBar backHref="/transfers" backLabel="التحويل بين الحسابات" title="تحويل جديد" />}
+      {adding && (
+        <Card className="mb-6">
           <ActionForm action={saveTransfer} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Field label="التاريخ">
               <Input name="date" type="date" required defaultValue={todayRiyadh()} />
@@ -75,7 +81,8 @@ export default async function TransfersPage() {
           </ActionForm>
         </Card>
       )}
-
+      {!adding && (
+        <>
       <Table head={["الرقم", "التاريخ", "من", "إلى", "المبلغ", "المستلم", "الرسوم", "المرجع", "القيد", ""]}>
         {rows.length === 0 && <EmptyRow cols={10}>لا توجد تحويلات بعد</EmptyRow>}
         {rows.map(({ t, from, fromCode, fromCur, to, toCode, toCur, entry }) => (
@@ -120,6 +127,8 @@ export default async function TransfersPage() {
           </tr>
         ))}
       </Table>
+        </>
+      )}
     </>
   );
 }

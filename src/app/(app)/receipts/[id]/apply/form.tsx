@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { applyAdvanceAction } from "../../actions";
 import { fmt } from "@/lib/format";
+import { DateInput } from "@/components/date-input";
 
 type Inv = { id: number; number: string; invoiceDate: string; dueDate: string; total: string; paid: string };
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -45,7 +46,7 @@ export function ApplyForm({ receiptId, remaining, invoices, today, minDate, post
       <div className="mb-3 flex flex-wrap items-center gap-3 text-sm">
         <label className="flex items-center gap-2">
           تاريخ التطبيق
-          <input type="date" value={date} min={minDate} onChange={(e) => setDate(e.target.value)} className="ltr-nums h-9 rounded-lg border border-gray-300 px-2" />
+          <DateInput value={date} min={minDate} onChange={(e) => setDate(e.target.value)} className="ltr-nums h-9 rounded-lg border border-gray-300 px-2" />
         </label>
         <button type="button" onClick={auto} disabled={!invoices.length} className="ms-auto text-xs text-brand-700 hover:underline disabled:text-gray-300">
           توزيع تلقائي
