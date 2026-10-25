@@ -5,7 +5,7 @@ import { db } from "@/db";
 import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { can, hasSpecial, scopeFor } from "@/lib/permissions";
-import { customerOptions, driverOptions, partyOptions, routeOptions, vehicleOptions } from "@/lib/lookups";
+import { customerOptions, driverOptions, partyOptions, routeOptions, shipperSuggestions, vehicleOptions } from "@/lib/lookups";
 import { todayRiyadh } from "@/lib/dates";
 import { WAYBILL_STATUS, type WaybillStatus } from "@/data/waybills";
 import { SheetEditor } from "@/components/sheet-editor";
@@ -37,12 +37,13 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
     .groupBy(s.waybills.status);
   if (status) where.push(eq(s.waybills.status, status));
 
-  const [routes, customers, vehicles, drivers, carriers, list] = await Promise.all([
+  const [routes, customers, vehicles, drivers, carriers, shippers, list] = await Promise.all([
     routeOptions(),
     customerOptions(),
     vehicleOptions(),
     driverOptions(),
     partyOptions("carrier"),
+    canCreate ? shipperSuggestions() : Promise.resolve([]),
     db
       .select({
         w: s.waybills,
@@ -69,34 +70,21 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
       <PageHeader title="الشحنات" description="كل شحنة رحلة واحدة. السعر من العقد الساري والعمولة من المسار تلقائياً، والقيد يُرحّل عند الاعتماد." />
       {canCreate && (
         <Card title="إدخال شحنات" className="mb-6">
-          {customers.length === 0 || routes.length === 0 ? (
-            <p className="text-sm text-gray-500">
-              أضف العملاء من{" "}
-              <Link href="/parties" className="text-brand-700 underline">
-                جهات الاتصال
-              </Link>{" "}
-              والمسارات من{" "}
-              <Link href="/routes" className="text-brand-700 underline">
-                المواقع والمسارات
-              </Link>{" "}
-              أولاً.
-            </p>
-          ) : (
-            <>
-              <SheetEditor
+          <>
+            <SheetEditor
                 templateName="الشحنات"
                 action={saveWaybills}
                 initialRows={4}
                 columns={[
                   { key: "date", label: "التاريخ", type: "date", required: true, placeholder: todayRiyadh() },
-                  { key: "customerId", label: "العميل", type: "select", required: true, options: customers, width: "11rem" },
-                  { key: "routeId", label: "المسار", type: "select", required: true, options: routes, width: "13rem" },
-                  { key: "vehicleId", label: "المركبة", type: "select", options: vehicles, width: "8rem" },
-                  { key: "driverId", label: "السائق", type: "select", options: drivers, width: "9rem" },
-                  { key: "carrierId", label: "أو ناقل خارجي", type: "select", options: carriers, width: "9rem" },
+                  { key: "customerId", label: "العميل", type: "select", required: true, options: customers, width: "11rem", create: "customer" },
+                  { key: "routeId", label: "المسار", type: "select", required: true, options: routes, width: "13rem", create: "route" },
+                  { key: "vehicleId", label: "المركبة", type: "select", options: vehicles, width: "8rem", create: "vehicle" },
+                  { key: "driverId", label: "السائق", type: "select", options: drivers, width: "9rem", create: "driver" },
+                  { key: "carrierId", label: "أو ناقل خارجي", type: "select", options: carriers, width: "9rem", create: "carrier" },
                   { key: "carrierCost", label: "تكلفة الناقل", type: "number", width: "6rem" },
-                  { key: "shipper", label: "المرسل", required: true, width: "9rem" },
-                  { key: "consignee", label: "المستلم", required: true, width: "9rem" },
+                  { key: "shipper", label: "المرسل", required: true, width: "10rem", suggest: shippers },
+                  { key: "consignee", label: "المستلم", required: true, width: "10rem", suggest: shippers },
                   ...(showPrices ? [{ key: "amount", label: "المبلغ", type: "number" as const, width: "6rem", placeholder: "من العقد" }] : []),
                   { key: "commission", label: "عمولة السائق", type: "number", width: "6rem", placeholder: "من المسار" },
                   { key: "weight", label: "الوزن (طن)", type: "number", width: "5rem" },
@@ -105,10 +93,9 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
                 ]}
               />
               <p className="mt-2 text-xs text-gray-500">
-                اترك السائق فارغاً ليؤخذ السائق المسند للمركبة في تاريخ الرحلة. اختر مركبة من الأسطول أو ناقلاً خارجياً بتكلفته.
+                اكتب أول حروف العميل أو المسار أو المركبة لتظهر النتائج، أو اختر «+ إضافة» لإضافة جديد دون مغادرة الصفحة. اترك السائق فارغاً ليؤخذ السائق المسند للمركبة في تاريخ الرحلة.
               </p>
-            </>
-          )}
+          </>
         </Card>
       )}
       <nav className="mb-4 flex flex-wrap gap-2 text-sm">

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ComboField } from "@/components/combo-box";
 import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
@@ -38,14 +39,7 @@ export default async function PurchaseRequestsPage() {
               <Input name="neededBy" type="date" />
             </Field>
             <Field label="للمركبة" hint="اختياري؛ تُحمّل عليها التكلفة">
-              <Select name="vehicleId" defaultValue="">
-                <option value="">—</option>
-                {vehicles.map((v) => (
-                  <option key={v.value} value={v.value}>
-                    {v.label}
-                  </option>
-                ))}
-              </Select>
+              <ComboField name="vehicleId" options={vehicles} create="vehicle" />
             </Field>
             <Field label="ملاحظات">
               <Input name="notes" />
@@ -54,7 +48,7 @@ export default async function PurchaseRequestsPage() {
               <LinesEditor
                 totals={{ qty: "quantity", price: "price" }}
                 columns={[
-                  { key: "productId", label: "الصنف", type: "select", width: "16rem", options: products, placeholder: "صنف من المخزون أو اكتب الوصف" },
+                  { key: "productId", label: "الصنف", type: "select", width: "16rem", options: products, placeholder: "صنف من المخزون أو اكتب الوصف", create: "product" },
                   { key: "description", label: "الوصف" },
                   { key: "quantity", label: "الكمية", type: "number", width: "6rem" },
                   { key: "price", label: "السعر التقديري", type: "number", width: "8rem" },

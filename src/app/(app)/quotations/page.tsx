@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ComboField } from "@/components/combo-box";
 import { asc } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
@@ -42,16 +43,7 @@ export default async function QuotationsPage({ searchParams }: { searchParams: P
           <summary className="cursor-pointer font-semibold text-brand-900">+ عرض سعر جديد</summary>
           <ActionForm action={saveQuotation} className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Field label="العميل">
-              <Select name="customerId" required defaultValue="">
-                <option value="" disabled>
-                  اختر العميل
-                </option>
-                {customers.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </Select>
+              <ComboField name="customerId" options={customers} create="customer" required placeholder="ابحث عن العميل…" />
             </Field>
             <Field label="التاريخ">
               <Input name="date" type="date" required defaultValue={today} />
@@ -70,7 +62,7 @@ export default async function QuotationsPage({ searchParams }: { searchParams: P
               <LinesEditor
                 totals={{ qty: "quantity", price: "price", vat: "vatRate" }}
                 columns={[
-                  { key: "routeId", label: "المسار", type: "select", width: "14rem", options: routes.map((r) => ({ ...r, fill: { description: `نقل ${r.label}` } })) },
+                  { key: "routeId", label: "المسار", type: "select", width: "14rem", create: "route", options: routes.map((r) => ({ ...r, fill: { description: `نقل ${r.label}` } })) },
                   { key: "description", label: "البيان", placeholder: "نقل حاوية 40 قدم…" },
                   { key: "quantity", label: "الكمية", type: "number", width: "6rem", defaultValue: "1" },
                   { key: "price", label: "السعر", type: "number", width: "8rem" },

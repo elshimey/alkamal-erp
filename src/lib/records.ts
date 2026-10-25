@@ -183,8 +183,9 @@ export const RECORDS: Record<string, RecordDef> = {
     fields: [
       { key: "nameAr", label: "الاسم", required: true },
       { key: "isBorderCrossing", label: "منفذ حدودي", ...yesNo },
+      { key: "isActive", label: "يظهر في القوائم", ...yesNo },
     ],
-    instead: "اتركه كما هو؛ لا يظهر إلا إن اخترته",
+    instead: "ألغِ علامة «يظهر في القوائم»",
   },
 
   routes: {
