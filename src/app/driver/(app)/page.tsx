@@ -2,6 +2,8 @@ import Link from "next/link";
 import { db } from "@/db";
 import { getDriverContext } from "@/lib/driver-auth";
 import { driverTrips, type TripStage } from "@/lib/driver-app";
+import { ownerDocuments } from "@/lib/documents";
+import { todayRiyadh } from "@/lib/dates";
 import { Icon, Truck } from "@/components/icons";
 import { isRtl } from "@/data/driver-i18n";
 import { Pill, Section, STATUS_TONE } from "../driver-ui";
@@ -12,7 +14,14 @@ export default async function DriverHome() {
   const { driver, t, lang } = await getDriverContext();
   const arrow = isRtl(lang) ? "←" : "→";
   if (!driver) return null;
-  const [open, past] = await Promise.all([driverTrips(db, driver.id, { open: true }), driverTrips(db, driver.id, { open: false, limit: 10 })]);
+  const today = todayRiyadh();
+  const [open, past, docs] = await Promise.all([
+    driverTrips(db, driver.id, { open: true }),
+    driverTrips(db, driver.id, { open: false, limit: 10 }),
+    Promise.all([ownerDocuments(db, "driver", driver.id, today), driver.vehicle ? ownerDocuments(db, "vehicle", driver.vehicle.id, today) : []]).then(([a, b]) => [...a, ...b]),
+  ]);
+  const expired = docs.filter((d) => d.state === "expired").length;
+  const soon = docs.filter((d) => d.state === "soon").length;
 
   return (
     <>
@@ -33,6 +42,21 @@ export default async function DriverHome() {
       ) : (
         <p className="mb-4 rounded-2xl bg-amber-50 p-4 text-sm text-amber-900">{t.noVehicle}</p>
       )}
+
+      <Link
+        href="/driver/documents"
+        className={`mb-4 flex items-center justify-between gap-3 rounded-2xl border p-3.5 text-sm shadow-sm transition active:scale-[0.99] ${expired ? "border-red-200 bg-red-50 text-red-900" : soon ? "border-amber-200 bg-amber-50 text-amber-900" : "border-gray-200 bg-white text-gray-700"}`}
+      >
+        <span className="flex items-center gap-2 font-medium">
+          <Icon name="document" className="size-5" />
+          {t.docs.card}
+        </span>
+        <span className="flex items-center gap-1.5">
+          {expired > 0 && <Pill tone="red">{`${expired} ${t.docs.states.expired}`}</Pill>}
+          {soon > 0 && <Pill tone="amber">{`${soon} ${t.docs.states.soon}`}</Pill>}
+          <span>{arrow}</span>
+        </span>
+      </Link>
 
       <Section title={t.activeTrips}>
         {open.length === 0 && <p className="py-3 text-center text-sm text-gray-500">{t.noTrips}</p>}

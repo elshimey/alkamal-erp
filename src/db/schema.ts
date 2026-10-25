@@ -552,6 +552,30 @@ export const fleetDocuments = pgTable(
   ],
 );
 
+export const documentSubmissionStatus = pgEnum("document_submission_status", ["pending", "approved", "rejected"]);
+
+// صورة وثيقة مجدَّدة يرفعها السائق من التطبيق، ويعتمدها المكتب فتُسجَّل وثيقة جديدة
+export const documentSubmissions = pgTable(
+  "document_submissions",
+  {
+    id: id(),
+    documentTypeId: ref("document_type_id").notNull().references(() => documentTypes.id),
+    vehicleId: ref("vehicle_id").references(() => vehicles.id, { onDelete: "cascade" }),
+    driverId: ref("driver_id").notNull().references(() => drivers.id, { onDelete: "cascade" }),
+    number: varchar("number", { length: 40 }),
+    expiryDate: date("expiry_date"),
+    note: text("note"),
+    status: documentSubmissionStatus("status").notNull().default("pending"),
+    reviewNote: text("review_note"),
+    documentId: ref("document_id").references(() => fleetDocuments.id, { onDelete: "set null" }),
+    submittedBy: ref("submitted_by").references(() => users.id, { onDelete: "set null" }),
+    reviewedBy: ref("reviewed_by").references(() => users.id, { onDelete: "set null" }),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("document_submissions_status_idx").on(t.status, t.createdAt)],
+);
+
 // ───────────────────────── التشغيل: المواقع والمسارات والعقود ─────────────────────────
 
 export const locationLevel = pgEnum("location_level", ["country", "city", "site"]);

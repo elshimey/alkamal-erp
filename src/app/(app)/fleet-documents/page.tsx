@@ -22,7 +22,11 @@ export default async function DocumentRegisterPage({ searchParams }: { searchPar
   const canCreate = can(user.perms, "fleet_documents", "create");
   const adding = sp.add === "1" && canCreate;
   const view = sp.kind === "all" ? "all" : KINDS.includes(sp.kind as OwnerKind) ? (sp.kind as OwnerKind) : "vehicle";
-  const [register, types] = await Promise.all([documentRegister(db, today), listDocumentTypes(db, { activeOnly: true })]);
+  const [register, types, [{ pending }]] = await Promise.all([
+    documentRegister(db, today),
+    listDocumentTypes(db, { activeOnly: true }),
+    db.select({ pending: sql<number>`count(*)::int` }).from(s.documentSubmissions).where(eq(s.documentSubmissions.status, "pending")),
+  ]);
 
   if (adding) {
     return (
@@ -52,6 +56,15 @@ export default async function DocumentRegisterPage({ searchParams }: { searchPar
     <>
       <PageHeader title="سجل الوثائق" description="وثائق الرؤوس والمقطورات والسائقين والموظفين والشركة والعملاء، مع المرفقات. الناقص هو نوع إلزامي لم تُسجَّل له وثيقة بعد.">
         <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href="/fleet-documents/submissions"
+            className={`rounded-lg border px-4 py-2 text-sm font-medium shadow-sm ${pending ? "border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100" : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"}`}
+          >
+            رفعها السائقون{pending ? ` (${pending})` : ""}
+          </Link>
+          <Link href="/fleet-documents/summary" className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50">
+            الملخص اليومي
+          </Link>
           <Link href="/fleet-documents/reports" className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50">
             التقارير
           </Link>

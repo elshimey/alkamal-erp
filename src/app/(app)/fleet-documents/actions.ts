@@ -8,7 +8,7 @@ import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
 import { saveDataUrl } from "@/lib/attachments";
-import { addDocument, OWNER_KINDS, parseAlertDays, parseOwnerKey, type Blocking, type OwnerKind } from "@/lib/documents";
+import { addDocument, approveSubmission, rejectSubmission, OWNER_KINDS, parseAlertDays, parseOwnerKey, type Blocking, type OwnerKind } from "@/lib/documents";
 import type { FormState } from "@/components/action-form";
 
 const str = (d: FormData, k: string) => String(d.get(k) ?? "").trim();
@@ -96,4 +96,34 @@ export async function saveDocumentTypeAction(_: FormState, data: FormData): Prom
   revalidatePath("/settings/document-types");
   revalidatePath("/fleet-documents", "layout");
   return { ok: id ? "حُفظ النوع" : `أُضيف «${nameAr}»` };
+}
+
+/** اعتماد وثيقة مجددة رفعها السائق: تُسجَّل وثيقة جديدة بتاريخ الانتهاء الجديد وتنتقل الصورة إليها. */
+export async function approveSubmissionAction(_: FormState, data: FormData): Promise<FormState> {
+  const user = await requirePermission("fleet_documents", "update");
+  const cost = str(data, "cost");
+  try {
+    await approveSubmission(db, Number(str(data, "id")), {
+      number: str(data, "number"),
+      issueDate: str(data, "issueDate") || null,
+      expiryDate: str(data, "expiryDate") || null,
+      cost: cost === "" ? null : Number(cost),
+      userId: user.id,
+    });
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+  revalidatePath("/fleet-documents", "layout");
+  return { ok: "اعتُمدت وسُجلت الوثيقة الجديدة" };
+}
+
+export async function rejectSubmissionAction(_: FormState, data: FormData): Promise<FormState> {
+  const user = await requirePermission("fleet_documents", "update");
+  try {
+    await rejectSubmission(db, Number(str(data, "id")), str(data, "reason"), user.id);
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+  revalidatePath("/fleet-documents", "layout");
+  return { ok: "رُفض الطلب وسيرى السائق السبب" };
 }

@@ -46,7 +46,7 @@ export function DateInput({ value, defaultValue, onChange, name, required, min, 
   };
 
   return (
-    <span className={`relative inline-flex items-center ${className?.includes("w-") ? "" : "w-full"}`}>
+    <span className={`relative inline-flex items-center ${className?.includes("w-") && !className.includes("w-full") ? "" : "w-full"}`}>
       <input
         {...rest}
         id={id}
