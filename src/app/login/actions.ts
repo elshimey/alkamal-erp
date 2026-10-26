@@ -13,10 +13,11 @@ import { completePasswordReset, requestPasswordReset } from "@/lib/password-rese
 
 /** يتحقق من الدخول وينشئ الجلسة في شركة المستخدم؛ يُرجع رسالة الخطأ أو أدواره. */
 export async function login(_: FormState, data: FormData): Promise<FormState> {
+  const company = String(data.get("company") ?? "").trim();
   const loginName = String(data.get("login") ?? "").trim();
   const password = String(data.get("password") ?? "");
-  if (!loginName || !password) return { error: "أدخل اسم الدخول وكلمة المرور" };
-  const result = await signIn(loginName, password);
+  if (!company || !loginName || !password) return { error: "أدخل رمز الشركة واسم الدخول وكلمة المرور" };
+  const result = await signIn(company, loginName, password);
   if ("error" in result) return { error: result.error };
   redirect(isDriverOnly(result.roles) ? "/driver" : "/");
 }
@@ -30,7 +31,7 @@ export async function logout() {
 export async function requestAccess(_: FormState, data: FormData): Promise<FormState> {
   const get = (k: string) => String(data.get(k) ?? "").trim();
   try {
-    await createAccessRequest(baseSql, { login: get("login"), name: get("name"), contact: get("contact") });
+    await createAccessRequest(baseSql, { company: get("company"), login: get("login"), name: get("name"), contact: get("contact") });
   } catch (err) {
     return { error: errorMessage(err) };
   }
@@ -39,14 +40,15 @@ export async function requestAccess(_: FormState, data: FormData): Promise<FormS
 
 /** رابط الاسترجاع على البريد. الرد واحد سواء وُجد الحساب أم لا، فلا يُعرف منه من له حساب. */
 export async function requestResetLink(_: FormState, data: FormData): Promise<FormState> {
+  const company = String(data.get("company") ?? "").trim();
   const identifier = String(data.get("identifier") ?? "").trim();
-  if (!identifier) return { error: "اكتب اسم الدخول أو البريد" };
+  if (!company || !identifier) return { error: "اكتب رمز الشركة واسم الدخول أو البريد" };
   // عنوان الموقع من الإعداد لا من رأس الطلب، فلا يُصنع رابط يشير لموقع آخر
   const fixed = process.env.APP_URL ?? (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : null);
   const h = await headers();
   const origin = (fixed ?? `http://${h.get("host")}`).replace(/\/$/, "");
   try {
-    await requestPasswordReset(baseSql, identifier, origin);
+    await requestPasswordReset(baseSql, company, identifier, origin);
   } catch (err) {
     console.error("password reset request failed", err);
   }

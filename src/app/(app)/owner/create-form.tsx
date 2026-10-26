@@ -49,8 +49,8 @@ export function CreateTenantForm() {
         <Field label="اسم الشركة">
           <Input name="name" required placeholder="مؤسسة النقل السريع" />
         </Field>
-        <Field label="رمز الشركة" hint="حروف إنجليزية صغيرة وأرقام، لا يتغير">
-          <Input name="slug" required pattern="[a-z][a-z0-9]{1,29}" dir="ltr" placeholder="fasttrans" />
+        <Field label="رمز الشركة" hint="يكتبه موظفوها عند الدخول: حروف إنجليزية صغيرة أو أرقام">
+          <Input name="slug" required pattern="[a-z0-9]{2,30}" dir="ltr" placeholder="1001" />
         </Field>
         <Field label="نوع الاشتراك">
           <Select name="trialDays" defaultValue="15">
@@ -65,7 +65,7 @@ export function CreateTenantForm() {
         <Field label="اسم مدير الشركة">
           <Input name="adminName" required />
         </Field>
-        <Field label="اسم دخول المدير" hint="بالإنجليزي، فريد على مستوى كل الشركات">
+        <Field label="اسم دخول المدير" hint="بالإنجليزي، يكفي أن يكون فريداً داخل الشركة">
           <Input name="adminLogin" required dir="ltr" autoComplete="off" />
         </Field>
         <Field label="كلمة مرور المدير" hint="8 أحرف على الأقل؛ اضغط العين للتأكد منها">

@@ -3,22 +3,23 @@
 // شريط الانتقال بين الأقسام: طريق في أعلى الشاشة تسير عليه شاحنة حتى تفتح الصفحة الجديدة.
 
 import { useEffect, useRef, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { Truck } from "./icons";
 
 export function RouteProgress() {
-  const path = usePathname();
+  // الصفحة ونافذتها المفتوحة (?new=1 مثلاً): فتح نموذج إضافة أو تعديل ينتظر الخادم أيضاً
+  const path = `${usePathname()}?${useSearchParams()}`;
   const [progress, setProgress] = useState<number | null>(null);
   const timer = useRef<ReturnType<typeof setInterval>>(undefined);
 
   // يبدأ عند الضغط على رابط داخلي لصفحة أخرى
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
-      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
       const a = (e.target as Element | null)?.closest?.("a");
       if (!a || a.target === "_blank" || a.hasAttribute("download")) return;
       const url = new URL(a.href, location.href);
-      if (url.origin !== location.origin || url.pathname === location.pathname) return;
+      if (url.origin !== location.origin || (url.pathname === location.pathname && url.search === location.search)) return;
       clearInterval(timer.current);
       setProgress(8);
       // يقترب من النهاية ببطء ولا يصلها إلا عند فتح الصفحة

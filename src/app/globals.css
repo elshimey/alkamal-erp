@@ -136,6 +136,49 @@ aside:hover > .road-line {
   animation: wheel 0.8s linear infinite;
   transform-origin: center;
 }
+/* هيكل الصفحة أثناء التحميل: لمعة تمر كضوء على الإسفلت */
+.skeleton {
+  background: linear-gradient(90deg, #e7e9eb 0%, #f4f5f6 40%, #e7e9eb 80%) 0 0 / 300% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+@keyframes shimmer {
+  to {
+    background-position: -150% 0;
+  }
+}
+/* التحميل السريع لا يُظهر الهيكل أصلاً (يظهر بعد لحظة فقط إن تأخرت الصفحة) */
+.loading-delay {
+  animation: fade-in 0.25s ease-out 0.15s both;
+}
+/* رسالة «تم الحفظ» تدخل بنبضة خفيفة */
+@keyframes saved-pop {
+  0% {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.01);
+  }
+  100% {
+    transform: none;
+  }
+}
+.saved-pop {
+  animation: saved-pop 0.35s ease-out both;
+}
+@keyframes shake {
+  25% {
+    transform: translateX(-3px);
+  }
+  75% {
+    transform: translateX(3px);
+  }
+}
+.shake {
+  animation: shake 0.25s ease-in-out 2;
+}
+
 /* تتابع ظهور البطاقات: كل عنصر يتأخر قليلاً عن سابقه */
 .stagger {
   animation-delay: calc(var(--i, 0) * 70ms);

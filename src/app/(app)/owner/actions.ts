@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import { baseSql, db } from "@/db";
 import { getTenant, isPlatformOwner, requireAdmin } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
-import { activateTenant, createTenant, deleteTenant, extendTrial, resetTenantAdminPassword, setSuspended } from "@/lib/platform";
+import { activateTenant, createTenant, deleteTenant, extendTrial, resetTenantAdminPassword, setCompanyCode, setSuspended } from "@/lib/platform";
 import type { FormState } from "@/components/action-form";
 
 // لوحة المالك لمديري نظام شركة البداية فقط
@@ -30,7 +30,7 @@ const run = async (fn: () => Promise<unknown>, ok: string): Promise<FormState> =
 export type CreateState = { error?: string; ok?: string; welcome?: string; phone?: string } | undefined;
 
 /** رسالة الترحيب ببيانات الدخول لإرسالها لمدير الشركة. */
-async function welcomeText(company: string, admin: string, login: string, password?: string) {
+async function welcomeText(company: string, code: string, admin: string, login: string, password?: string) {
   const h = await headers();
   const origin = `${h.get("x-forwarded-proto") ?? "https"}://${h.get("x-forwarded-host") ?? h.get("host")}`;
   return [
@@ -38,10 +38,11 @@ async function welcomeText(company: string, admin: string, login: string, passwo
     `تم تجهيز حساب «${company}» في نظام إدارة النقل والحسابات.`,
     "",
     `رابط الدخول: ${origin}/login`,
+    `رمز الشركة: ${code}`,
     `اسم الدخول: ${login}`,
     password ? `كلمة المرور: ${password}` : "كلمة المرور: التي أُرسلت لك سابقاً",
     "",
-    "يُرجى تغيير كلمة المرور بعد أول دخول من «حسابي».",
+    "يُرجى تغيير كلمة المرور بعد أول دخول من «حسابي». وكل موظف تضيفه يدخل بنفس رمز الشركة مع اسمه وكلمة مروره.",
   ].join("\n");
 }
 
@@ -57,7 +58,7 @@ export async function createTenantAction(_: CreateState, data: FormData): Promis
   revalidatePath("/owner");
   return {
     ok: `أُنشئت الشركة «${input.name}». أرسل لمديرها الرسالة التالية:`,
-    welcome: await welcomeText(input.name, input.adminName, input.adminLogin, input.adminPassword),
+    welcome: await welcomeText(input.name, input.slug.toLowerCase(), input.adminName, input.adminLogin, input.adminPassword),
     phone: input.contact,
   };
 }
@@ -68,17 +69,21 @@ export async function resetAdminAction(id: number, contact: string | null, _: Cr
   const password = String(data.get("password") ?? "");
   try {
     const r = await resetTenantAdminPassword(baseSql, db, id, password);
-    return { ok: "تغيّرت كلمة المرور. أرسل الرسالة:", welcome: await welcomeText(r.company, r.name, r.login, password), phone: contact ?? undefined };
+    return { ok: "تغيّرت كلمة المرور. أرسل الرسالة:", welcome: await welcomeText(r.company, r.code, r.name, r.login, password), phone: contact ?? undefined };
   } catch (err) {
     return { error: errorMessage(err) };
   }
 }
 
 /** رسالة الدخول لشركة قائمة (دون كلمة المرور، فهي لا تُحفظ إلا مشفرة). */
-export async function tenantWelcome(company: string, admin: string, login: string) {
+export async function tenantWelcome(company: string, code: string, admin: string, login: string) {
   await requireOwner();
-  return welcomeText(company, admin, login);
+  return welcomeText(company, code, admin, login);
 }
+
+/** يغيّر رمز الدخول لشركة؛ بعدها يدخل موظفوها بالرمز الجديد. */
+export const codeAction = async (id: number, _: FormState, data: FormData) =>
+  run(() => setCompanyCode(baseSql, id, String(data.get("code") ?? "")), "تغيّر رمز الشركة؛ أبلغ موظفيها بالرمز الجديد");
 
 export const activateAction = async (id: number, _: FormState) => run(() => activateTenant(baseSql, id), "تحوّلت إلى اشتراك فعلي وبقيت كل بياناتها");
 export const extendAction = async (id: number, _: FormState) => run(() => extendTrial(baseSql, id, 15), "مُدّدت التجربة 15 يوماً");

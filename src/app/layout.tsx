@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Sans_Arabic, Readex_Pro } from "next/font/google";
 import { RouteProgress } from "@/components/route-progress";
@@ -23,7 +24,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="ar" dir="rtl" className={`${body.variable} ${display.variable}`}>
       <body className="min-h-screen font-sans antialiased">
-        <RouteProgress />
+        <Suspense>
+          <RouteProgress />
+        </Suspense>
         {children}
       </body>
     </html>

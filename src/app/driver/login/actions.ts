@@ -12,10 +12,11 @@ import type { FormState } from "@/components/action-form";
 
 export async function driverLogin(lang: DriverLang, _: FormState, data: FormData): Promise<FormState> {
   const t = DRIVER_DICT[DRIVER_LANGS.includes(lang) ? lang : "ar"];
+  const company = String(data.get("company") ?? "").trim();
   const loginName = String(data.get("login") ?? "").trim();
   const password = String(data.get("password") ?? "");
-  if (!loginName || !password) return { error: t.wrongLogin };
-  const result = await signIn(loginName, password);
+  if (!company || !loginName || !password) return { error: t.wrongLogin };
+  const result = await signIn(company, loginName, password);
   if ("error" in result) return { error: result.throttled ? t.tooManyAttempts : result.locked ? t.accountLocked : t.wrongLogin };
 
   // اللغة التي اختارها في صفحة الدخول تصبح لغة تطبيقه
