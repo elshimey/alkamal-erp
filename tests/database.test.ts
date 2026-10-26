@@ -56,7 +56,8 @@ import { IMPORT_SPECS } from "@/data/import-specs";
 import * as hr from "@/lib/hr";
 import * as platform from "@/lib/platform";
 import { runInTenant, tenantClient } from "@/db/tenant";
-import { addExpense, addFuel, approvalIssues, approveWaybill, createWaybill, deleteWaybill, invoiceSelectedWaybills, listWaybills, parseWaybillFilter, patchWaybill, recordStage, rejectWaybill, revertWaybill, setWaybillStatus, updateWaybill } from "@/lib/waybills";
+import { addExpense, addFuel, approvalIssues, approveWaybill, createWaybill, deleteWaybill, invoiceSelectedWaybills, listWaybills, parseWaybillFilter, patchWaybill, recordStage, rejectWaybill, revertWaybill, saveTransportDoc, sendTransportDocToDriver, setWaybillStatus, updateWaybill, waybillDoc } from "@/lib/waybills";
+import { parseTransport } from "@/lib/transport-draft";
 
 const url = process.env.TEST_DATABASE_URL;
 const YEAR = 2026;
@@ -1070,6 +1071,72 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(report.issues[0].message).toContain("لا يوجد مسار");
       const [imp] = await db.select().from(s.waybills).where(eq(s.waybills.shipper, "مصنع الاستيراد"));
       expect([imp.status, Number(imp.amount), imp.driverId]).toEqual(["draft", 3000, driver.id]);
+    });
+
+    it("وثيقة النقل: بيانات الأطراف والبضاعة وأجور النقل، والإرسال للسائق، والمدن المسجلة مسبقاً", async () => {
+      // المدن السعودية والخليجية مسجلة، ولكل دولة خارجية مدينة باسمها
+      const cities = await db.select().from(s.locations).where(eq(s.locations.level, "city"));
+      expect(cities.length).toBeGreaterThan(200);
+      const kuwait = cities.find((c) => c.countryCode === "KW" && c.nameAr === "الكويت");
+      expect(kuwait).toBeDefined();
+      expect(cities.find((c) => c.nameAr === "البطحاء")?.isBorderCrossing).toBe(true);
+      const [sa] = await db.select().from(s.locations).where(and(eq(s.locations.level, "country"), eq(s.locations.countryCode, "SA")));
+      const riyadh = cities.find((c) => c.nameAr === "الرياض" && c.countryCode === "SA")!;
+      expect((await createLocation(db, { parentId: sa.id, nameAr: "الرياض" })).id).toBe(riyadh.id);
+
+      const w = await createWaybill(db, { waybillDate: `${YEAR}-12-11`, customerId, routeId, shipper: "مصنع الوثيقة", consignee: "مستودع الكويت", vehicleId: vehicle.id, amount: 500 });
+      const input = parseTransport(
+        JSON.stringify({
+          shipperPhone: "0551112222",
+          shipperCity: "جدة",
+          consigneeCity: "الكويت",
+          deliveryAddress: "الشويخ الصناعية",
+          pickupDate: `${YEAR}-12-11`,
+          expectedDeliveryDate: `${YEAR}-12-13`,
+          freightPayer: "consignee",
+          paymentMethod: "cash",
+          negotiable: true,
+          logistiNumber: "LG-778899",
+          logistiStatus: "issued",
+          goods: [
+            { description: "حديد تسليح", quantity: "٢٠", packageUnit: "bulk", weight: "18", weightUnit: "ton", condition: "good" },
+            { description: "كراتين", quantity: "40", packageUnit: "carton", weight: "1,500", weightUnit: "kg", condition: "partial" },
+            { description: "", quantity: "", weight: "" },
+          ],
+        }),
+      )!;
+      await saveTransportDoc(db, w.id, input);
+      const doc = (await waybillDoc(db, w.id))!;
+      expect(doc.goods.map((g) => [g.lineNo, g.description, Number(g.quantity)])).toEqual([
+        [1, "حديد تسليح", 20],
+        [2, "كراتين", 40],
+      ]);
+      expect(doc.w).toMatchObject({ shipperPhone: "0551112222", consigneeCity: "الكويت", deliveryAddress: "الشويخ الصناعية", freightPayer: "consignee", paymentMethod: "cash", negotiable: true, logistiNumber: "LG-778899", logistiStatus: "issued" });
+      // أوزان البضاعة تصبح وزن الشحنة بالطن
+      expect(Number(doc.w.weightTons)).toBe(19.5);
+      expect(doc.trailerPlate === null || typeof doc.trailerPlate === "string").toBe(true);
+
+      // تعديل الشحنة من الجدول لا يمس بيانات الوثيقة
+      await patchWaybill(db, w.id, { consignee: "مستودع الكويت الجديد" });
+      expect((await waybillDoc(db, w.id))!.w).toMatchObject({ logistiNumber: "LG-778899", consigneeCity: "الكويت" });
+
+      await expect(saveTransportDoc(db, w.id, { pickupDate: `${YEAR}-12-11`, expectedDeliveryDate: `${YEAR}-12-01` })).rejects.toThrow("قبل تاريخ الاستلام");
+      await expect(saveTransportDoc(db, w.id, { logistiNumber: "", logistiStatus: "issued" })).rejects.toThrow("رقم وثيقة لوجستي");
+      await expect(saveTransportDoc(db, w.id, { goods: [{ description: "", weight: 5 }] })).rejects.toThrow("الوصف مطلوب");
+      expect(() => parseTransport(JSON.stringify({ goods: [{ description: "x", weight: "-3" }] }))).toThrow("الوزن غير صالح");
+      await expect(saveTransportDoc(db, w.id, { paymentMethod: "bitcoin" })).rejects.toThrow("طريقة الدفع");
+
+      // الإرسال للسائق: يظهر في رحلته، والناقل الخارجي لا سائق له في التطبيق
+      const sent = await sendTransportDocToDriver(db, w.id);
+      expect(sent.number).toBe(w.number);
+      expect((await waybillDoc(db, w.id))!.w.sentToDriverAt).not.toBeNull();
+      const ext = await createWaybill(db, { waybillDate: `${YEAR}-12-11`, customerId, routeId, shipper: "أ", consignee: "ب", carrierId, carrierCost: 300 });
+      await expect(sendTransportDocToDriver(db, ext.id)).rejects.toThrow("ناقل خارجي");
+
+      // الوثيقة تبقى قابلة للتعديل بعد الاعتماد (لا تمس القيد)
+      await setWaybillStatus(db, w.id, "approved", { canOverride: true, overrideReason: "اختبار" });
+      await saveTransportDoc(db, w.id, { logistiStatus: "closed", logistiNumber: "LG-778899" });
+      expect((await waybillDoc(db, w.id))!.w.logistiStatus).toBe("closed");
     });
   });
   describe("تطبيق السائق", () => {

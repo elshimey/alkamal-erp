@@ -97,7 +97,7 @@ export async function tripDetail(db: Db | Tx, driverId: number, waybillId: numbe
       .orderBy(s.waybillExpenses.id),
   ]);
   return {
-    trip: { ...trip, shipper: w.shipper, consignee: w.consignee, containerNumber: w.containerNumber, weightTons: w.weightTons, rejectionReason: w.rejectionReason },
+    trip: { ...trip, shipper: w.shipper, consignee: w.consignee, containerNumber: w.containerNumber, weightTons: w.weightTons, rejectionReason: w.rejectionReason, sentToDriverAt: w.sentToDriverAt, logistiNumber: w.logistiNumber },
     stages,
     fuel,
     expenses,

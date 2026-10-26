@@ -112,3 +112,38 @@ export async function shipperSuggestions() {
   ]);
   return [...new Set([...parties.map((p) => p.n), ...used.map((u) => u.n)])].sort((a, b) => a.localeCompare(b, "ar"));
 }
+
+/** بطاقات المرسلين والمستلمين: جوال ومدينة وعنوان من جهات الاتصال، ثم من آخر شحنة سُجّلوا فيها. */
+export async function contactCards() {
+  const [parties, used] = await Promise.all([
+    db.select({ n: s.parties.nameAr, phone: s.parties.mobile, city: s.parties.city, address: s.parties.nationalAddress, street: s.parties.street, district: s.parties.district }).from(s.parties),
+    db.execute(sql`
+      select distinct on (n) n, phone, city, address from (
+        select shipper as n, shipper_phone as phone, shipper_city as city, shipper_address as address, id from waybills
+        union all
+        select consignee, consignee_phone, consignee_city, delivery_address, id from waybills
+      ) t
+      where n <> '' and coalesce(phone, city, address) is not null
+      order by n, id desc
+      limit 1000`) as unknown as Promise<{ n: string; phone: string | null; city: string | null; address: string | null }[]>,
+  ]);
+  const cards: Record<string, { phone?: string | null; city?: string | null; address?: string | null }> = {};
+  for (const u of used) cards[u.n] = { phone: u.phone, city: u.city, address: u.address };
+  for (const p of parties) {
+    const c = (cards[p.n] ??= {});
+    c.phone ||= p.phone;
+    c.city ||= p.city;
+    c.address ||= p.address || [p.district, p.street].filter(Boolean).join("، ") || null;
+  }
+  return cards;
+}
+
+/** أسماء المدن المحفوظة لاقتراحها في مدينة المرسل والمستلم. */
+export async function cityNames() {
+  const rows = await db
+    .select({ n: s.locations.nameAr })
+    .from(s.locations)
+    .where(and(eq(s.locations.level, "city"), eq(s.locations.isActive, true)))
+    .orderBy(asc(s.locations.nameAr));
+  return [...new Set(rows.map((r) => r.n))];
+}

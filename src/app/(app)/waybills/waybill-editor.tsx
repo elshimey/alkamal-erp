@@ -11,6 +11,8 @@ import type { CompanyProfile } from "@/lib/company";
 import type { InvoiceTemplate } from "@/lib/invoice-template";
 import type { QuickOption } from "@/lib/quick-add-types";
 import { fmt } from "@/lib/format";
+import { fillContact, type ContactCard, type TransportDraft } from "@/lib/transport-draft";
+import { TransportFields } from "./transport-fields";
 
 export interface WaybillDraft {
   number?: string;
@@ -27,7 +29,6 @@ export interface WaybillDraft {
   carrierDriverName: string;
   shipper: string;
   consignee: string;
-  deliveryAddress: string;
   amount: string;
   commission: string;
   weight: string;
@@ -36,6 +37,7 @@ export interface WaybillDraft {
   customs: string;
   notes: string;
   priceNote?: string | null;
+  transport: TransportDraft;
 }
 
 export type RouteOption = QuickOption & { international: boolean };
@@ -57,6 +59,8 @@ export function WaybillEditor({
   drivers,
   carriers,
   shippers,
+  contacts,
+  cities,
   showPrices,
   company,
   template,
@@ -73,6 +77,8 @@ export function WaybillEditor({
   drivers: QuickOption[];
   carriers: QuickOption[];
   shippers: string[];
+  contacts: Record<string, ContactCard>;
+  cities: string[];
   showPrices: boolean;
   company: CompanyProfile;
   template: InvoiceTemplate;
@@ -90,6 +96,11 @@ export function WaybillEditor({
   };
   const onField = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => set(e.target.name as keyof WaybillDraft, e.target.value);
   const suggestions = shippers.map((x) => ({ value: x, label: x }));
+  // اختيار مرسل أو مستلم محفوظ يملأ جواله ومدينته وعنوانه في وثيقة النقل
+  const pickParty = (side: "shipper" | "consignee", v: string, picked: boolean) => {
+    setD((x) => ({ ...x, [side]: v, transport: picked ? fillContact(x.transport, side, contacts[v]) : x.transport }));
+    touch();
+  };
 
   const route = routes.find((r) => r.value === d.routeId);
   const [from, to] = (route?.label ?? "— ← —").split(" ← ");
@@ -104,7 +115,14 @@ export function WaybillEditor({
       waybillDate: d.date,
       shipper: d.shipper || "—",
       consignee: d.consignee || "—",
-      deliveryAddress: d.deliveryAddress || null,
+      deliveryAddress: d.transport.deliveryAddress || null,
+      shipperPhone: d.transport.shipperPhone || null,
+      shipperCity: d.transport.shipperCity || null,
+      consigneePhone: d.transport.consigneePhone || null,
+      consigneeCity: d.transport.consigneeCity || null,
+      pickupDate: d.transport.pickupDate || null,
+      expectedDeliveryDate: d.transport.expectedDeliveryDate || null,
+      logistiNumber: d.transport.logistiNumber || null,
       isInternational: !!route?.international,
       execution: d.execution,
       carrierDriverName: d.carrierDriverName || null,
@@ -124,7 +142,9 @@ export function WaybillEditor({
     driver: label(drivers, d.driverId) ?? (fleet && d.vehicleId ? "السائق المسند للمركبة" : null),
     driverMobile: null,
     carrier: label(carriers, d.carrierId),
+    trailerPlate: label(trailers, d.trailerId),
     stages: [],
+    goods: d.transport.goods.filter((g) => g.description.trim()).map((g) => ({ ...g, quantity: g.quantity || null, weight: g.weight || null })),
   } as unknown as Parameters<typeof WaybillDocument>[0]["doc"];
 
   return (
@@ -162,11 +182,11 @@ export function WaybillEditor({
             </PanelField>
             <PanelField label="المرسل" required>
               <input type="hidden" name="shipper" value={d.shipper} />
-              <ComboBox value={d.shipper} options={suggestions} free placeholder="اسم الشاحن" onChange={(v) => set("shipper", v)} className={field} />
+              <ComboBox value={d.shipper} options={suggestions} free placeholder="اسم الشاحن" onChange={(v, o) => pickParty("shipper", v, !!o)} className={field} />
             </PanelField>
             <PanelField label="المستلم" required>
               <input type="hidden" name="consignee" value={d.consignee} />
-              <ComboBox value={d.consignee} options={suggestions} free placeholder="اسم المستلم" onChange={(v) => set("consignee", v)} className={field} />
+              <ComboBox value={d.consignee} options={suggestions} free placeholder="اسم المستلم" onChange={(v, o) => pickParty("consignee", v, !!o)} className={field} />
             </PanelField>
           </PanelSection>
 
@@ -244,15 +264,14 @@ export function WaybillEditor({
             </PanelSection>
           )}
 
-          <PanelSection title="الحمولة والمستندات" optional open={!!(d.weight || d.container || d.deliveryNote || d.customs || d.notes || d.deliveryAddress)}>
+          <TransportFields value={d.transport} onChange={(t) => set("transport", t)} cities={cities} />
+
+          <PanelSection title="الحمولة والمستندات" optional open={!!(d.weight || d.container || d.deliveryNote || d.customs || d.notes)}>
             <PanelField label="الوزن (طن)">
               <input name="weight" value={d.weight} onChange={onField} inputMode="decimal" className={`${field} ltr-nums`} />
             </PanelField>
             <PanelField label="رقم الحاوية">
               <input name="container" value={d.container} onChange={onField} className={`${field} ltr-nums`} />
-            </PanelField>
-            <PanelField label="عنوان التسليم">
-              <input name="deliveryAddress" value={d.deliveryAddress} onChange={onField} className={field} />
             </PanelField>
             <PanelField label="رقم سند التسليم">
               <input name="deliveryNote" value={d.deliveryNote} onChange={onField} className={`${field} ltr-nums`} />

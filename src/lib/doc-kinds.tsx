@@ -40,6 +40,14 @@ export const DOC_KINDS: Record<string, DocKind> = {
       return d && { name: d.w.number, node: <WaybillDocument company={c} doc={d} template={t} /> };
     },
   },
+  transport: {
+    title: "وثائق النقل",
+    entity: "waybills",
+    render: async (id, c, t) => {
+      const d = await waybillDoc(db, id);
+      return d && { name: `وثيقة-نقل-${d.w.number}`, node: <WaybillDocument company={c} doc={d} template={t} variant="transport" /> };
+    },
+  },
   invoices: {
     title: "فواتير المبيعات",
     entity: "sales_invoices",

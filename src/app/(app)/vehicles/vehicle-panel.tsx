@@ -10,7 +10,7 @@ import { PanelLink, RecordPanel } from "@/components/record-panel";
 import { saveVehicleAction } from "./actions";
 
 const BASIC = ["plate", "assetKind", "chassis", "assetAccountId"];
-const DETAILS = ["vehicleTypeId", "make", "model", "year", "color", "ownership", "ownershipDate", "odometer", "serialNumber", "registrationType", "customsDocument"];
+const DETAILS = ["plateType", "vehicleTypeId", "make", "model", "year", "color", "ownership", "ownershipDate", "odometer", "serialNumber", "registrationType", "customsDocument"];
 const DEFAULTS: Record<string, unknown> = { assetKind: "head", ownership: "owned" };
 
 /** نافذة إضافة مركبة أو تعديلها: بياناتها ثم وثائقها (الرأس أو المقطورة حسب نوع الأصل). */

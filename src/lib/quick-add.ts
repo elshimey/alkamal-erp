@@ -93,7 +93,11 @@ export async function quickForm(
           options: countries,
           default: sa,
         },
-        { key: "nameAr", label: "اسم المدينة", required: true },
+        {
+          key: "nameAr",
+          label: "اسم المدينة",
+          hint: "لدولة خارجية: اتركه فارغاً فتُسجَّل الوجهة باسم الدولة",
+        },
         {
           key: "site",
           label: "موقع داخلها (اختياري)",
@@ -386,7 +390,15 @@ export async function quickCreate(
 ): Promise<{ option: QuickOption; message?: string }> {
   if (kind === "city") {
     const countryId = Number(req(v.countryId, "الدولة"));
-    const name = req(v.nameAr, "اسم المدينة");
+    const [country] = await db
+      .select()
+      .from(s.locations)
+      .where(and(eq(s.locations.id, countryId), eq(s.locations.level, "country")));
+    if (!country) throw new Error("الدولة غير موجودة");
+    // الوجهة الدولية بلا مدينة محددة تُسجَّل باسم الدولة نفسها (الكويت مثلاً)
+    const name =
+      txt(v.nameAr) ??
+      (country.countryCode !== "SA" ? country.nameAr : req(v.nameAr, "اسم المدينة"));
     const keep = yes(v.keep);
     const [existing] = await db
       .select()

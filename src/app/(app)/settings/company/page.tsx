@@ -70,6 +70,12 @@ export default async function CompanyPage() {
                 <Field label="السجل التجاري" hint="10 أرقام">
                   <Input name="crNumber" defaultValue={v(c.crNumber)} dir="ltr" inputMode="numeric" maxLength={10} />
                 </Field>
+                <Field label="رقم ترخيص النقل" hint="يظهر في وثيقة النقل">
+                  <Input name="transportLicenseNo" defaultValue={v(c.transportLicenseNo)} dir="ltr" />
+                </Field>
+                <Field label="الرقم الموحد للمنشأة" hint="10 أرقام يبدأ بـ 7">
+                  <Input name="establishmentNo" defaultValue={v(c.establishmentNo)} dir="ltr" inputMode="numeric" maxLength={10} placeholder="7XXXXXXXXX" />
+                </Field>
               </div>
             </div>
           </Card>

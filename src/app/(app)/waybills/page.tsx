@@ -1,10 +1,12 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { can, hasSpecial, scopeFor } from "@/lib/permissions";
-import { customerOptions, driverOptions, locationOptions, partyOptions, shipperSuggestions, vehicleOptions } from "@/lib/lookups";
+import { cityNames, contactCards, customerOptions, driverOptions, locationOptions, partyOptions, shipperSuggestions, vehicleOptions } from "@/lib/lookups";
+import { emptyTransport, toTransportDraft } from "@/lib/transport-draft";
 import { getCompany, getInvoiceTemplate } from "@/lib/company";
 import { todayRiyadh } from "@/lib/dates";
 import { listHref, type DocListParams } from "@/lib/doc-filters";
@@ -25,7 +27,8 @@ import { SheetEditor } from "@/components/sheet-editor";
 import { AddModeBar } from "@/components/list-actions";
 import { Badge, Card, EmptyRow, LimitRow, PageHeader, Table, Td } from "@/components/ui";
 import { WaybillDocument } from "@/components/waybill-document";
-import { bulkWaybillOps, copyWaybill, invoiceOne, rejectWaybillAction, removeWaybillAction, saveWaybillPanel, saveWaybills, saveWaybillSheet, waybillToStatus } from "./actions";
+import { bulkWaybillOps, copyWaybill, invoiceOne, rejectWaybillAction, removeWaybillAction, saveTransportPanel, saveWaybillPanel, saveWaybills, saveWaybillSheet, sendToDriverAction, waybillToStatus } from "./actions";
+import { TransportPanel } from "./transport-panel";
 import { WaybillEditor, type RouteOption, type WaybillDraft } from "./waybill-editor";
 
 const BASE = "/waybills";
@@ -54,8 +57,13 @@ const SHEET_TONE: Record<WaybillStatus, "gray" | "green" | "blue" | "amber" | "r
 
 const withParam = (url: string, key: string, value: string) => `${url}${url.includes("?") ? "&" : "?"}${key}=${value}`;
 const inputCls = "w-full rounded-lg border border-gray-300 px-3 py-2 text-sm";
+// جوال سعودي محلي (05…) يصبح دولياً لرابط واتساب
+const whatsappLink = (mobile: string, text: string) => {
+  const digits = mobile.replace(/\D/g, "");
+  return `https://wa.me/${digits.startsWith("05") ? `966${digits.slice(1)}` : digits}?text=${encodeURIComponent(text)}`;
+};
 
-type Params = DocListParams & { new?: string; add?: string; edit?: string };
+type Params = DocListParams & { new?: string; add?: string; edit?: string; transport?: string; doc?: string };
 
 export default async function WaybillsPage({ searchParams }: { searchParams: Promise<Params> }) {
   const user = await requirePermission("waybills", "view");
@@ -75,17 +83,29 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
   const creating = sp.new === "1" && canCreate;
   const openId = view === "table" ? Number(sp.open) || null : null;
   const editId = canUpdate ? Number(sp.edit) || null : null;
+  const transportId = canUpdate ? Number(sp.transport) || null : null;
+  const docVariant = sp.doc === "transport" ? "transport" : "waybill";
+  const h = await headers();
+  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "alkamal-erp.vercel.app";
+  const appUrl = `${h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https")}://${host}`;
   const filter = { ...parseWaybillFilter(sp, today), driverUserId: scopeFor(user.perms, "waybills", "view") === "own" ? user.id : undefined };
 
-  const [{ rows, counts }, openDoc, editRow, company, template] = await Promise.all([
+  const [{ rows, counts }, openDoc, editRow, editGoods, transportDoc, company, template] = await Promise.all([
     listWaybills(db, filter, LIMIT),
     openId ? waybillDoc(db, openId) : Promise.resolve(null),
     editId ? db.select().from(s.waybills).where(eq(s.waybills.id, editId)).then((r) => r[0] ?? null) : Promise.resolve(null),
+    editId ? db.select().from(s.waybillGoods).where(eq(s.waybillGoods.waybillId, editId)).orderBy(s.waybillGoods.lineNo) : Promise.resolve([]),
+    transportId ? waybillDoc(db, transportId) : Promise.resolve(null),
     getCompany(db),
     getInvoiceTemplate(db),
   ]);
+  const transportOpen = !!transportDoc && transportDoc.w.status !== "rejected";
   const editing = !!editRow && EDITABLE.includes(editRow.status);
   const needOptions = view === "sheet" || creating || editing || bulkAdding;
+  const [contacts, cities] = await Promise.all([
+    creating || editing ? contactCards() : Promise.resolve({}),
+    creating || editing || transportOpen ? cityNames() : Promise.resolve([] as string[]),
+  ]);
   const [customers, routeRows, locs, vehicles, trailers, drivers, carriers, shippers] = needOptions
     ? await Promise.all([
         customerOptions(),
@@ -116,7 +136,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
   ) : undefined;
 
   /** عمليات الشحنة الواحدة في قائمة «العمليات». */
-  const menu = (w: Row["w"], invoiceId: number | null, invoice: string | null): MenuItem[] => {
+  const menu = (w: Row["w"], invoiceId: number | null, invoice: string | null, driverMobile?: string | null): MenuItem[] => {
     const items: MenuItem[] = [];
     const st = w.status;
     const to = (target: "draft" | "in_transit" | "delivered" | "approved") => waybillToStatus.bind(null, w.id, target);
@@ -181,9 +201,23 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
       items.push({ label: "إرجاع إلى مسودة", icon: "undo", action: to("draft"), confirm: st === "approved" ? { title: `إرجاع الشحنة ${w.number}`, text: "يُلغى قيد التكلفة المرحّل.", submit: "إرجاع" } : undefined });
     }
     if (canUpdate && st === "rejected") items.push({ label: "إعادة إلى مسودة للتصحيح", icon: "undo", action: to("draft") });
+    if (canUpdate && st !== "rejected") {
+      items.push({ label: "بيانات وثيقة النقل", icon: "pencil", hint: "المرسل والمستلم والبضاعة ورقم لوجستي", href: withParam(listUrl({ open: String(w.id) }), "transport", String(w.id)), divider: true });
+      if (w.execution === "fleet")
+        items.push({
+          label: w.sentToDriverAt ? "إعادة الإرسال للسائق" : "إرسال للسائق",
+          icon: "truck",
+          hint: "تظهر وثيقة النقل في رحلته بالتطبيق",
+          action: sendToDriverAction.bind(null, w.id),
+          confirm: w.sentToDriverAt ? { title: `إعادة إرسال وثيقة ${w.number}`, text: "أُرسلت من قبل؛ ستظهر للسائق بآخر بياناتها.", submit: "إرسال" } : undefined,
+        });
+      if (w.sentToDriverAt && driverMobile)
+        items.push({ label: "تنبيه السائق عبر واتساب", icon: "send", href: whatsappLink(driverMobile, `وثيقة النقل للشحنة ${w.number} جاهزة في تطبيق السائق: ${appUrl}/driver/trips/${w.id}`), newTab: true });
+    }
     items.push({ label: "التفاصيل الكاملة", icon: "document", hint: "المراحل والديزل والمصاريف", href: `/waybills/${w.id}`, divider: true });
     if (canCreate) items.push({ label: "نسخ الشحنة", icon: "copy", hint: "شحنة جديدة مسودة بتاريخ اليوم", action: copyWaybill.bind(null, w.id, listUrl()) });
     items.push({ label: "طباعة البوليصة", icon: "printer", href: `/print/waybills?ids=${w.id}&print=1`, newTab: true });
+    items.push({ label: "طباعة وثيقة النقل", icon: "printer", href: `/print/transport?ids=${w.id}&print=1`, newTab: true });
     items.push({ label: "تنزيل PDF", icon: "download", href: `/print/waybills?ids=${w.id}&pdf=1`, newTab: true });
     if (canDelete && (st === "draft" || st === "rejected"))
       items.push({
@@ -239,7 +273,6 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
         carrierDriverName: str(w.carrierDriverName),
         shipper: w.shipper,
         consignee: w.consignee,
-        deliveryAddress: str(w.deliveryAddress),
         amount: showPrices ? String(Number(w.amount)) : "",
         commission: String(Number(w.driverCommission)),
         weight: w.weightTons != null ? String(Number(w.weightTons)) : "",
@@ -248,10 +281,11 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
         customs: str(w.customsDeclaration),
         notes: str(w.notes),
         priceNote: w.priceNote,
+        transport: toTransportDraft(w, editGoods),
       };
     }
     if (creating)
-      return { date: today, customerId: "", routeId: "", execution: "fleet", vehicleId: "", trailerId: "", driverId: "", carrierId: "", carrierCost: "", carrierPlate: "", carrierDriverName: "", shipper: "", consignee: "", deliveryAddress: "", amount: "", commission: "", weight: "", container: "", deliveryNote: "", customs: "", notes: "" };
+      return { date: today, customerId: "", routeId: "", execution: "fleet", vehicleId: "", trailerId: "", driverId: "", carrierId: "", carrierCost: "", carrierPlate: "", carrierDriverName: "", shipper: "", consignee: "", amount: "", commission: "", weight: "", container: "", deliveryNote: "", customs: "", notes: "", transport: emptyTransport() };
     return null;
   };
   const initial = draft();
@@ -441,7 +475,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
                       </Link>
                     )}
                     <SendDocument kind="waybills" id={openDoc.w.id} label={`بوليصة شحن رقم ${openDoc.w.number}`} company={company.nameAr} phone={openDoc.customerMobile} email={openDoc.customerEmail} />
-                    <ActionsMenu items={menu(openDoc.w, openInvoiceId, openRow?.invoice ?? null)} label="العمليات" />
+                    <ActionsMenu items={menu(openDoc.w, openInvoiceId, openRow?.invoice ?? null, openDoc.driverMobile)} label="العمليات" />
                   </div>
                 </div>
                 {openDoc.w.status === "rejected" && openDoc.w.rejectionReason && <p className="border-b border-red-100 bg-red-50 px-5 py-2 text-sm text-red-800">سبب الرفض: {openDoc.w.rejectionReason}</p>}
@@ -473,7 +507,26 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
                 )}
                 <div className="p-4 sm:p-6">
                   <div className="mx-auto max-w-3xl">
-                    <WaybillDocument company={company} doc={openDoc} template={template} compact />
+                    <div className="mb-3 flex items-center gap-2">
+                      {(
+                        [
+                          ["waybill", "البوليصة"],
+                          ["transport", "وثيقة النقل"],
+                        ] as const
+                      ).map(([k, l]) => (
+                        <Link
+                          key={k}
+                          href={k === "transport" ? withParam(listUrl({ open: String(openDoc.w.id) }), "doc", "transport") : listUrl({ open: String(openDoc.w.id) })}
+                          scroll={false}
+                          className={`rounded-full px-3 py-1 text-sm ${docVariant === k ? "bg-asphalt-900 font-semibold text-brand-500" : "border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"}`}
+                        >
+                          {l}
+                        </Link>
+                      ))}
+                      {openDoc.w.sentToDriverAt && <Badge tone="blue">أُرسلت للسائق</Badge>}
+                      {openDoc.w.logistiNumber && <Badge tone="gray">لوجستي {openDoc.w.logistiNumber}</Badge>}
+                    </div>
+                    <WaybillDocument company={company} doc={openDoc} template={template} compact variant={docVariant} />
                   </div>
                 </div>
               </section>
@@ -580,12 +633,26 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
           drivers={drivers}
           carriers={carriers}
           shippers={shippers}
+          contacts={contacts}
+          cities={cities}
           showPrices={showPrices}
           company={company}
           template={template}
           action={saveWaybillPanel.bind(null, editing ? editId : null)}
           closeHref={back}
           savedHref={returnTo}
+        />
+      )}
+      {transportOpen && transportDoc && (
+        <TransportPanel
+          key={`transport-${transportDoc.w.id}`}
+          doc={transportDoc}
+          initial={toTransportDraft(transportDoc.w, transportDoc.goods)}
+          cities={cities}
+          company={company}
+          template={template}
+          action={saveTransportPanel.bind(null, transportDoc.w.id)}
+          closeHref={withParam(listUrl({ open: String(transportDoc.w.id) }), "doc", "transport")}
         />
       )}
     </>

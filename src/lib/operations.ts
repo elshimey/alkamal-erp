@@ -59,12 +59,23 @@ export async function createLocation(
   if (!input.parentId) {
     const code = (input.countryCode ?? "").toUpperCase();
     if (!/^[A-Z]{2}$/.test(code)) throw new Error("رمز الدولة حرفان إنجليزيان (مثل SA أو KW)");
+    const [existing] = await db
+      .select()
+      .from(s.locations)
+      .where(and(eq(s.locations.level, "country"), eq(s.locations.countryCode, code)));
+    if (existing) return existing;
     const [row] = await db.insert(s.locations).values({ level: "country", nameAr: input.nameAr.trim(), countryCode: code }).returning();
     return row;
   }
   const [parent] = await db.select().from(s.locations).where(eq(s.locations.id, input.parentId));
   if (!parent) throw new Error("الموقع الأب غير موجود");
   if (parent.level === "site") throw new Error("لا يمكن إضافة موقع تحت موقع؛ اختر دولة أو مدينة");
+  // المدن الشائعة مسجلة مسبقاً: إضافة الاسم نفسه تعيد المدينة الموجودة بدل خطأ التكرار
+  const [existing] = await db
+    .select()
+    .from(s.locations)
+    .where(and(eq(s.locations.parentId, parent.id), eq(s.locations.nameAr, input.nameAr.trim())));
+  if (existing) return existing;
   const [row] = await db
     .insert(s.locations)
     .values({
