@@ -53,6 +53,9 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
             <Field label="اسم الدخول (الجوال أو البريد)">
               <Input name="login" required dir="ltr" autoComplete="off" />
             </Field>
+            <Field label="البريد الإلكتروني" hint="اختياري؛ يصله رابط استرجاع كلمة المرور إن نسيها">
+              <Input name="email" type="email" dir="ltr" autoComplete="off" />
+            </Field>
             <Field label="كلمة المرور الأولى" hint={`${MIN_PASSWORD_LENGTH} أحرف على الأقل، ويغيّرها المستخدم من صفحة حسابه`}>
               <PasswordInput name="password" required minLength={MIN_PASSWORD_LENGTH} dir="ltr" autoComplete="new-password" />
             </Field>

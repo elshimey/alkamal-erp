@@ -197,6 +197,13 @@
       "when": 1792956373322,
       "tag": "0027_document_submissions",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1792956473322,
+      "tag": "0028_user_email",
+      "breakpoints": true
     }
   ]
 }

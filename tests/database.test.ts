@@ -1,6 +1,7 @@
 // اختبارات تكامل على قاعدة PostgreSQL حقيقية. تعمل فقط عند ضبط TEST_DATABASE_URL،
 // وتمسح تلك القاعدة بالكامل في البداية، فلا تشير بها إلى قاعدة التشغيل.
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+vi.mock("server-only", () => ({}));
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -1855,6 +1856,25 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     expect(orphan.map((r) => r.name)).toContain("نسي اسمه");
     for (const r of [...home, ...orphan]) await platform.resolveAccessRequest(client, r.id, r.schema_name);
     expect(await platform.openAccessRequests(client, "public")).toHaveLength(0);
+    // استرجاع بالبريد: الرابط يعيّن كلمة المرور مرة واحدة، والحساب بلا بريد لا يُرسل له شيء
+    const pr = await import("@/lib/password-reset");
+    process.env.MAIL_TRANSPORT = "log";
+    const logged: string[] = [];
+    const spy = vi.spyOn(console, "log").mockImplementation((m: string) => void logged.push(String(m)));
+    expect(await pr.requestPasswordReset(client, "admin", "https://x.test")).toBeNull();
+    await client`update public.users set email = 'boss@example.com' where login = 'admin'`;
+    expect(await pr.requestPasswordReset(client, "BOSS@example.com", "https://x.test")).toBe("bo•••@example.com");
+    spy.mockRestore();
+    delete process.env.MAIL_TRANSPORT;
+    const resetToken = logged.join("\n").match(/\/login\/reset\/(\S+)/)![1];
+    expect((await pr.resetTarget(client, resetToken))?.login).toBe("admin");
+    await expect(pr.completePasswordReset(client, resetToken, "short")).rejects.toThrow("أحرف");
+    const [before] = await client`select password_hash from public.users where login = 'admin'`;
+    await pr.completePasswordReset(client, resetToken, "brand-new-pass");
+    const [after] = await client`select password_hash from public.users where login = 'admin'`;
+    expect(await verifyPassword("brand-new-pass", after.password_hash)).toBe(true);
+    await expect(pr.completePasswordReset(client, resetToken, "another-pass")).rejects.toThrow("غير صالح");
+    await client`update public.users set password_hash = ${before.password_hash}, email = null where login = 'admin'`;
 
     const base = { name: "شركة التجربة", slug: "acme", trialDays: 15, adminName: "مدير أكمي", adminLogin: "acme_admin", adminPassword: "acme-pass-1" };
     await expect(platform.createTenant(client, tdb, { ...base, adminLogin: "admin" })).rejects.toThrow("مستخدم في شركة أخرى");

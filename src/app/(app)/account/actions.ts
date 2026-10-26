@@ -20,3 +20,12 @@ export async function changePassword(_: FormState, data: FormData): Promise<Form
   await db.delete(s.sessions).where(and(eq(s.sessions.userId, me.id), ne(s.sessions.id, (await currentSessionId()) ?? "")));
   return { ok: "تم تغيير كلمة المرور، وخرجت الأجهزة الأخرى" };
 }
+
+/** بريد الاسترجاع للمستخدم نفسه: يصله رابط تعيين كلمة مرور جديدة إن نسيها. */
+export async function setMyEmail(_: FormState, data: FormData): Promise<FormState> {
+  const me = await requireUser();
+  const email = String(data.get("email") ?? "").trim();
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: "البريد الإلكتروني غير صحيح" };
+  await db.update(s.users).set({ email: email || null, updatedAt: new Date() }).where(eq(s.users.id, me.id));
+  return { ok: email ? "حُفظ البريد؛ يصله رابط الاسترجاع إن نسيت كلمة المرور" : "أُزيل البريد" };
+}

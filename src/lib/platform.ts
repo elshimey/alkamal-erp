@@ -72,6 +72,15 @@ export async function ensurePlatform(sql: Sql, homeName = "الكمال للنق
       created_at timestamptz not null default now(),
       resolved_at timestamptz
     );
+    create table if not exists platform.password_resets (
+      token_hash varchar(64) primary key,
+      schema_name text not null,
+      user_id bigint not null,
+      created_at timestamptz not null default now(),
+      expires_at timestamptz not null,
+      used_at timestamptz
+    );
+    create index if not exists password_resets_user_idx on platform.password_resets (schema_name, user_id, created_at);
     create index if not exists access_requests_open_idx on platform.access_requests (schema_name) where resolved_at is null;
     create or replace function platform.sync_login() returns trigger language plpgsql as $$
     begin

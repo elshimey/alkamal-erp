@@ -569,6 +569,7 @@ export const RECORDS: Record<string, RecordDef> = {
     fields: [
       { key: "name", label: "الاسم", required: true },
       { key: "login", label: "اسم الدخول", required: true, ltr: true },
+      { key: "email", label: "البريد الإلكتروني", ltr: true, hint: "يصله رابط استرجاع كلمة المرور إن نسيها" },
       { key: "roles", label: "الأدوار", type: "multi", virtual: true, options: async () => (await db.select().from(s.roles).where(ne(s.roles.key, "driver")).orderBy(asc(s.roles.id))).map((r) => ({ value: String(r.id), label: r.nameAr })) },
       { key: "password", label: "كلمة مرور جديدة", type: "password", virtual: true, ltr: true, hint: `اتركها فارغة لتبقى كما هي، أو ${MIN_PASSWORD_LENGTH} أحرف على الأقل` },
       { key: "isActive", label: "نشط (يستطيع الدخول)", ...yesNo },
@@ -577,6 +578,7 @@ export const RECORDS: Record<string, RecordDef> = {
     after: async (tx, id, v) => {
       const roleIds = (v.roles as string[]).map(Number).filter(Boolean);
       if (!roleIds.length) throw new Error("اختر دوراً واحداً على الأقل");
+      if (v.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v.email))) throw new Error("البريد الإلكتروني غير صحيح");
       await tx.delete(s.userRoles).where(eq(s.userRoles.userId, id));
       await tx.insert(s.userRoles).values(roleIds.map((roleId) => ({ userId: id, roleId })));
       const pw = String(v.password ?? "");
