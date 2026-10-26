@@ -81,7 +81,7 @@ export async function ContactPanel({
             </Link>
           )}
           {create.length > 0 && (
-            <details className="relative">
+            <details data-dropdown className="relative">
               <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-brand-900 hover:bg-brand-500">
                 إنشاء <span className="text-xs">▾</span>
               </summary>

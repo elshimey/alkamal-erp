@@ -120,7 +120,7 @@ export function NavLinks({
           >
             <Icon name={g.icon} className="size-[18px]" />
           </span>
-          {first.label}
+          <span className="rail-hide whitespace-nowrap">{first.label}</span>
         </Link>
       );
     }
@@ -154,10 +154,10 @@ export function NavLinks({
         >
           <Icon name={g.icon} className="size-[18px]" />
         </span>
-        <span className="flex-1 text-start">{g.title}</span>
+        <span className="rail-hide flex-1 whitespace-nowrap text-start">{g.title}</span>
         <svg
           viewBox="0 0 24 24"
-          className={`size-4 text-white/35 transition-transform duration-200 rtl:rotate-180 ${isOpen ? "translate-x-[-2px] text-brand-500" : ""}`}
+          className={`rail-hide size-4 text-white/35 transition-transform duration-200 rtl:rotate-180 ${isOpen ? "translate-x-[-2px] text-brand-500" : ""}`}
           fill="none"
           stroke="currentColor"
           strokeWidth={2}

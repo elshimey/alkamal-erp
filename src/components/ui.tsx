@@ -18,7 +18,7 @@ export function PageHeader({ title, description, children }: { title: string; de
 
 export function Card({ title, children, className = "" }: { title?: string; children: ReactNode; className?: string }) {
   return (
-    <section className={`min-w-0 rounded-2xl border border-black/[0.06] bg-white p-5 shadow-[0_1px_2px_rgba(27,33,38,0.04),0_4px_16px_-8px_rgba(27,33,38,0.08)] ${className}`}>
+    <section className={`min-w-0 rounded-2xl border border-black/[0.06] bg-white p-5 shadow-[0_1px_2px_rgba(27,33,38,0.04),0_4px_16px_-8px_rgba(27,33,38,0.08)] transition-shadow duration-300 hover:shadow-[0_2px_4px_rgba(27,33,38,0.05),0_12px_28px_-12px_rgba(27,33,38,0.18)] ${className}`}>
       {title && <h2 className="mb-4 text-base font-semibold text-brand-900">{title}</h2>}
       {children}
     </section>

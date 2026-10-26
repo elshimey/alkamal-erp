@@ -11,6 +11,7 @@ import { BrandMark, Logo } from "@/components/logo";
 import { getBrand } from "@/lib/brand";
 import { MobileNav, NavLinks, type NavGroup } from "@/components/nav-links";
 import { TourRunner } from "@/components/tour";
+import { TruckRoad } from "@/components/truck-road";
 import { Sidebar } from "@/components/sidebar";
 import { SIDEBAR_COOKIE } from "@/components/sidebar-cookie";
 import { ExpiryBanner } from "@/components/expiry-banner";
@@ -103,6 +104,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         )}
         {expiry && <ExpiryBanner expired={expiry.expired} soon={expiry.soon} critical={expiry.critical} today={today} />}
         <main className="flex-1 p-4 pb-24 sm:p-6 md:pb-6 lg:p-8 print:p-0">{children}</main>
+        <TruckRoad />
         <TourRunner />
       </div>
     </div>

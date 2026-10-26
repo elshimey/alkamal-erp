@@ -855,7 +855,7 @@ function PeriodPicker({ period, tab }: { period: Period; tab: Tab }) {
         ))}
       </nav>
       {/* فترة مخصصة: من تاريخ إلى تاريخ */}
-      <details className="group relative">
+      <details data-dropdown className="group relative">
         <summary
           className={`flex cursor-pointer list-none items-center gap-1.5 rounded-full px-3.5 py-2 text-xs transition ${period.key === "custom" ? "bg-brand-500 font-semibold text-asphalt-900" : "bg-white/[0.06] text-white/70 hover:text-white"}`}
         >
