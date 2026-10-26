@@ -5,6 +5,7 @@ import { Logo } from "@/components/logo";
 import { getBrand } from "@/lib/brand";
 import { mailConfigured } from "@/lib/mailer";
 import { requestAccess, requestResetLink } from "../actions";
+import { lastCompanyCode } from "../company-code";
 
 const SUPPORT_PHONE = "966535443598";
 
@@ -12,6 +13,12 @@ const SUPPORT_PHONE = "966535443598";
 export default async function ForgotPage() {
   const brand = await getBrand(true);
   const email = mailConfigured();
+  const code = await lastCompanyCode();
+  const companyField = (
+    <Field label="رمز الشركة" hint="لا تعرفه؟ اسأل زميلك أو تواصل مع الدعم بالأسفل">
+      <Input name="company" required dir="ltr" defaultValue={code} className="py-2.5" />
+    </Field>
+  );
   const wa = `https://wa.me/${SUPPORT_PHONE}?text=${encodeURIComponent(`السلام عليكم، نسيت بيانات الدخول إلى ${brand.name}. اسمي: `)}`;
   return (
     <main className="flex min-h-screen items-center justify-center bg-concrete p-6">
@@ -25,7 +32,8 @@ export default async function ForgotPage() {
           {email && (
             <>
               <h2 className="mb-3 font-semibold text-gray-800">استرجاع عبر البريد</h2>
-              <ActionForm action={requestResetLink} className="flex flex-col gap-4">
+              <ActionForm action={requestResetLink} className="flex flex-col gap-4" resetOnSuccess={false}>
+                {companyField}
                 <Field label="اسم الدخول أو البريد الإلكتروني">
                   <Input name="identifier" required dir="ltr" autoComplete="username" className="py-2.5" />
                 </Field>
@@ -37,6 +45,7 @@ export default async function ForgotPage() {
           <h2 className="mb-1 font-semibold text-gray-800">{email ? "لا بريد مسجل لك؟ اطلب من مدير النظام" : "اطلب من مدير النظام"}</h2>
           <p className="mb-4 text-xs leading-relaxed text-gray-500">يصل طلبك لمدير النظام في شركتك، فيعيّن لك كلمة مرور جديدة ويتواصل معك.</p>
           <ActionForm action={requestAccess} className="flex flex-col gap-4">
+            {companyField}
             <Field label="اسم الدخول" hint="إن تذكرته؛ اتركه فارغاً إن نسيته">
               <Input name="login" dir="ltr" autoComplete="username" className="py-2.5" />
             </Field>

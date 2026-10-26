@@ -2,7 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { and, eq, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { db } from "@/db";
+import { baseSql, db } from "@/db";
+import { currentSchema } from "@/db/tenant";
+import { companyCode } from "@/lib/platform";
 import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
@@ -127,6 +129,8 @@ export default async function DriverPage({ params }: { params: Promise<{ id: str
           {login ? (
             <div className="space-y-5">
               <p className="text-sm text-gray-600">
+                رمز الشركة: <bdi className="ltr-nums font-semibold text-gray-900">{await companyCode(baseSql, await currentSchema())}</bdi>
+                <span className="mx-2 text-gray-300">|</span>
                 اسم الدخول: <bdi className="ltr-nums font-semibold text-gray-900">{login}</bdi>
                 {!loginActive && <Badge tone="red">موقوف</Badge>}
                 <span className="ms-2 text-gray-500">· يدخل من الرابط في الإعدادات ← تطبيق السائق</span>

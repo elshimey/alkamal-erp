@@ -21,11 +21,11 @@ interface Account {
   email: string;
 }
 
-/** الحسابات النشطة المطابقة لاسم الدخول أو البريد، في كل الشركات (البريد ليس في دليل الدخول). */
-async function findAccounts(sql: Sql, identifier: string): Promise<Account[]> {
+/** الحسابات النشطة المطابقة لاسم الدخول أو البريد داخل الشركة صاحبة الرمز. */
+async function findAccounts(sql: Sql, company: string, identifier: string): Promise<Account[]> {
   const key = identifier.trim().toLowerCase();
   if (!key) return [];
-  const schemas = (await sql<{ schema_name: string }[]>`select schema_name from platform.tenants`).map((r) => r.schema_name).filter(isSchemaName);
+  const schemas = (await sql<{ schema_name: string }[]>`select schema_name from platform.tenants where slug = ${company.trim().toLowerCase()}`).map((r) => r.schema_name).filter(isSchemaName);
   const found: Account[] = [];
   for (const schema of schemas) {
     const rows = await sql.unsafe<{ id: number; name: string; login: string; email: string | null }[]>(
@@ -43,9 +43,9 @@ async function findAccounts(sql: Sql, identifier: string): Promise<Account[]> {
 const mask = (email: string) => email.replace(/^(.{2}).*(@.*)$/, "$1•••$2");
 
 /** يرسل رابط الاسترجاع لكل حساب مطابق له بريد. يرد بالبريد المخفي جزئياً، أو null إن لم يوجد بريد (فيُعرض طلب المدير بدلاً منه). */
-export async function requestPasswordReset(sql: Sql, identifier: string, origin: string): Promise<string | null> {
+export async function requestPasswordReset(sql: Sql, company: string, identifier: string, origin: string): Promise<string | null> {
   if (!mailConfigured()) return null;
-  const accounts = await findAccounts(sql, identifier);
+  const accounts = await findAccounts(sql, company, identifier);
   if (!accounts.length) return null;
   const sentTo: string[] = [];
   for (const a of accounts) {

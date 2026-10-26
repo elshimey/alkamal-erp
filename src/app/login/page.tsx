@@ -8,10 +8,12 @@ import { BrandMark, Logo } from "@/components/logo";
 import { getBrand } from "@/lib/brand";
 import { Truck } from "@/components/icons";
 import { login } from "./actions";
+import { lastCompanyCode } from "./company-code";
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ reset?: string }> }) {
   if (await getCurrentUser()) redirect("/");
   const brand = await getBrand(true);
+  const code = await lastCompanyCode();
   return (
     <main className="flex min-h-screen bg-concrete">
       {/* لوحة الهوية: الطريق والشاحنة */}
@@ -49,13 +51,16 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
             <Logo name={brand.name} logo={brand.logo} />
           </div>
           <h2 className="text-2xl font-semibold text-brand-900">تسجيل الدخول</h2>
-          <p className="mt-1 mb-7 text-sm text-gray-500">أدخل اسم الدخول وكلمة المرور للمتابعة.</p>
+          <p className="mt-1 mb-7 text-sm text-gray-500">أدخل رمز شركتك واسم الدخول وكلمة المرور للمتابعة.</p>
           {(await searchParams).reset === "1" && (
             <p role="status" className="-mt-3 mb-5 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-800">
               عُيّنت كلمة المرور الجديدة؛ ادخل بها الآن.
             </p>
           )}
           <ActionForm action={login} className="flex flex-col gap-4" resetOnSuccess={false}>
+            <Field label="رمز الشركة" hint="يصلك من مدير النظام في شركتك، ويُحفظ على هذا الجهاز">
+              <Input name="company" autoComplete="organization" required dir="ltr" defaultValue={code} className="py-2.5" />
+            </Field>
             <Field label="اسم الدخول (الجوال أو البريد)">
               <Input name="login" autoComplete="username" required dir="ltr" className="py-2.5" />
             </Field>

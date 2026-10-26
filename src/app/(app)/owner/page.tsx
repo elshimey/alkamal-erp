@@ -4,7 +4,7 @@ import { getTenant, isPlatformOwner, requireAdmin } from "@/lib/auth";
 import { listTenants } from "@/lib/platform";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Badge, Card, Input, PageHeader, Table, Td } from "@/components/ui";
-import { activateAction, deleteAction, extendAction, resetAdminAction, suspendAction, tenantWelcome } from "./actions";
+import { activateAction, codeAction, deleteAction, extendAction, resetAdminAction, suspendAction, tenantWelcome } from "./actions";
 import { CreateTenantForm, ResetAdminForm, WelcomeMessage } from "./create-form";
 import { AccessRequests } from "../users/access-requests";
 
@@ -18,7 +18,7 @@ export default async function OwnerPage() {
   const canDelete = await isPlatformOwner(user);
   const tenants = await listTenants(baseSql);
   const others = tenants.filter((t) => t.schema_name !== "public");
-  const welcome = new Map(await Promise.all(others.filter((t) => t.admin_login).map(async (t) => [t.id, await tenantWelcome(t.name, t.admin_name ?? "", t.admin_login!)] as const)));
+  const welcome = new Map(await Promise.all(others.filter((t) => t.admin_login).map(async (t) => [t.id, await tenantWelcome(t.name, t.slug, t.admin_name ?? "", t.admin_login!)] as const)));
 
   return (
     <>
@@ -40,7 +40,8 @@ export default async function OwnerPage() {
               <Td>
                 <div className="font-semibold text-gray-800">{t.name}</div>
                 <div className="ltr-nums text-xs text-gray-500" dir="ltr">
-                  {home ? "شركة البداية" : t.slug}
+                  رمز الدخول: <b className="text-gray-800">{t.slug}</b>
+                  {home ? " · شركة البداية" : ""}
                   {t.contact ? ` · ${t.contact}` : ""}
                   {t.admin_login && !home ? ` · دخول المدير: ${t.admin_login}` : ""}
                 </div>
@@ -63,10 +64,19 @@ export default async function OwnerPage() {
               <Td className="ltr-nums">{t.entries}</Td>
               <Td className="ltr-nums">{date(t.last_login)}</Td>
               <Td>
-                {home ? (
-                  <span className="text-xs text-gray-400">—</span>
-                ) : (
-                  <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-2">
+                  <details className="relative">
+                    <summary className="cursor-pointer list-none rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50">تغيير الرمز</summary>
+                    <div className="absolute end-0 z-20 mt-2 w-64 rounded-xl border border-gray-200 bg-white p-3 shadow-lg">
+                      <p className="mb-2 text-xs leading-relaxed text-gray-600">يدخل موظفو الشركة بالرمز الجديد بدل القديم، وتبقى بياناتها كما هي.</p>
+                      <ActionForm action={codeAction.bind(null, t.id)} resetOnSuccess={false} className="flex flex-wrap gap-2">
+                        <Input name="code" required dir="ltr" defaultValue={t.slug} pattern="[a-z0-9]{2,30}" className="min-w-0 flex-1 !py-1.5 text-xs" />
+                        <SubmitButton className="!px-3 !py-1.5 text-xs">حفظ</SubmitButton>
+                      </ActionForm>
+                    </div>
+                  </details>
+                {!home && (
+                  <>
                     {welcome.has(t.id) && (
                       <details className="relative w-full sm:w-auto">
                         <summary className="w-fit cursor-pointer list-none rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50">رسالة الدخول</summary>
@@ -103,8 +113,9 @@ export default async function OwnerPage() {
                         </div>
                       </details>
                     )}
-                  </div>
+                  </>
                 )}
+                </div>
               </Td>
             </tr>
           );

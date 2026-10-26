@@ -8,6 +8,7 @@ import { PasswordInput } from "@/components/password-input";
 import { BrandMark } from "@/components/logo";
 import { Truck } from "@/components/icons";
 import { chooseLanguage, driverLogin } from "./actions";
+import { lastCompanyCode } from "../../login/company-code";
 
 export const viewport = { themeColor: "#1b2126" };
 
@@ -18,6 +19,7 @@ export default async function DriverLoginPage() {
   const lang: DriverLang = saved && DRIVER_LANGS.includes(saved) ? saved : "ar";
   const t = DRIVER_DICT[lang];
   const brand = await getBrand(true);
+  const code = await lastCompanyCode();
 
   return (
     <main dir={isRtl(lang) ? "rtl" : "ltr"} lang={lang} className="flex min-h-screen flex-col bg-concrete">
@@ -41,6 +43,18 @@ export default async function DriverLoginPage() {
           <h1 className="font-display text-2xl font-semibold text-asphalt-900">{t.loginTitle}</h1>
           <p className="mt-1 mb-5 text-sm text-gray-500">{t.loginHint}</p>
           <ActionForm action={driverLogin.bind(null, lang)} className="flex flex-col gap-4" resetOnSuccess={false}>
+            <label className="flex flex-col gap-1.5 text-sm font-medium text-gray-700">
+              {t.companyCode}
+              <input
+                name="company"
+                required
+                dir="ltr"
+                defaultValue={code}
+                autoComplete="organization"
+                autoCapitalize="none"
+                className="rounded-xl border border-gray-300 bg-white px-4 py-3.5 text-base shadow-sm outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-600/30"
+              />
+            </label>
             <label className="flex flex-col gap-1.5 text-sm font-medium text-gray-700">
               {t.username}
               <input

@@ -12,6 +12,8 @@ import { createUser, linkDriverAccount, setUserActive, setUserTrial } from "./ac
 import { AddModeBar, ListActions } from "@/components/list-actions";
 import { currentSchema } from "@/db/tenant";
 import { AccessRequests } from "./access-requests";
+import { baseSql } from "@/db";
+import { companyCode } from "@/lib/platform";
 
 const daysLeft = (d: Date) => Math.ceil((d.getTime() - Date.now()) / 86_400_000);
 
@@ -37,11 +39,18 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
   const canUpdate = can(me.perms, "users", "update");
 
   const adding = (await searchParams).add === "1" && !!(can(me.perms, "users", "create"));
+  const code = await companyCode(baseSql, await currentSchema());
   return (
     <>
       <PageHeader title="المستخدمون" description="حتى 50 مستخدماً من الموظفين والسائقين. لكل مستخدم دور أو أكثر.">
         {!adding && <ListActions newHref={(can(me.perms, "users", "create")) && "/users?add=1"} newLabel="مستخدم جديد" />}
       </PageHeader>
+      {code && (
+        <p className="mb-4 rounded-xl bg-brand-50 px-4 py-3 text-sm text-brand-900">
+          رمز شركتكم للدخول: <b dir="ltr" className="font-display text-base">{code}</b>
+          <span className="ms-2 text-brand-900/70">· يكتبه كل مستخدم مع اسم دخوله وكلمة مروره؛ أرسله مع بيانات الدخول لكل موظف جديد.</span>
+        </p>
+      )}
       {!adding && canUpdate && <AccessRequests schema={await currentSchema()} />}
       {adding && <AddModeBar backHref="/users" backLabel="المستخدمون" title="مستخدم جديد" />}
       {adding && (

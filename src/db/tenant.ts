@@ -45,10 +45,13 @@ const WRITE_RE = /^\s*(insert|update|delete)\b/i;
  * (تعمل مع مجمّع الاتصالات لأن الضبط محصور في المعاملة).
  */
 export function tenantClient(base: Sql, resolve: Resolver = currentSchema, resolveUser?: UserResolver): Sql {
-  const setPath = (tx: Sql, schema: string) => tx.unsafe(`set local search_path to "${schema}"`);
-  // المستخدم الحالي لسجل التعديلات (مشغل audit_row يقرأ app.user_id)؛ يُضبط داخل المعاملة فقط
-  const setUser = async (tx: Sql, userId: number | null) => {
-    if (userId) await tx.unsafe(`select set_config('app.user_id', $1, true)`, [String(userId)]);
+  // مخطط الشركة والمستخدم الحالي (لسجل التعديلات، يقرؤه مشغل audit_row) في أمر واحد محصور في المعاملة
+  const setup = (tx: Sql, schema: string, userId: number | null) => {
+    const parts: string[] = [];
+    const params: string[] = [];
+    if (schema !== HOME_SCHEMA) parts.push(`set_config('search_path', '"${schema}"', true)`);
+    if (userId) parts.push(`set_config('app.user_id', $${params.push(String(userId))}, true)`);
+    return parts.length ? tx.unsafe(`select ${parts.join(", ")}`, params) : null;
   };
   const wrapped = {
     options: base.options,
@@ -61,10 +64,12 @@ export function tenantClient(base: Sql, resolve: Resolver = currentSchema, resol
           return values ? q.values() : q;
         }
         return base.begin(async (tx) => {
-          if (schema !== HOME_SCHEMA) await setPath(tx as unknown as Sql, schema);
-          await setUser(tx as unknown as Sql, userId);
-          const q = (tx as unknown as Sql).unsafe(query, params as never[], opts);
-          return values ? q.values() : q;
+          // الضبط والاستعلام يُرسلان معاً (pipelining) فلا ينتظر أحدهما الآخر عبر الشبكة
+          const t = tx as unknown as Sql;
+          const prep = setup(t, schema, userId);
+          const q = t.unsafe(query, params as never[], opts);
+          const [, rows] = await Promise.all([prep, values ? q.values() : q]);
+          return rows;
         });
       };
       return {
@@ -77,8 +82,7 @@ export function tenantClient(base: Sql, resolve: Resolver = currentSchema, resol
       const schema = await resolve();
       const userId = resolveUser ? await resolveUser() : null;
       return base.begin(async (tx) => {
-        if (schema !== HOME_SCHEMA) await setPath(tx as unknown as Sql, schema);
-        await setUser(tx as unknown as Sql, userId);
+        await setup(tx as unknown as Sql, schema, userId);
         return fn(tx as unknown as Sql);
       });
     },

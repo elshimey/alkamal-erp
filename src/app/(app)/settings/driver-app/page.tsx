@@ -1,3 +1,6 @@
+import { baseSql } from "@/db";
+import { currentSchema } from "@/db/tenant";
+import { companyCode } from "@/lib/platform";
 import Link from "next/link";
 import { headers } from "next/headers";
 import QRCode from "qrcode";
@@ -14,7 +17,8 @@ export default async function DriverAppPage() {
   const proto = h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
   const url = `${proto}://${host}/driver`;
   const qr = await QRCode.toString(url, { type: "svg", margin: 1, color: { dark: "#1b2126", light: "#ffffff" } });
-  const message = `تطبيق السائق – ${(await getBrand()).name}\n${url}\nادخل باسم الدخول وكلمة المرور التي أرسلناها لك، ثم أضف التطبيق إلى الشاشة الرئيسية.`;
+  const code = await companyCode(baseSql, await currentSchema());
+  const message = `تطبيق السائق – ${(await getBrand()).name}\n${url}\nرمز الشركة: ${code ?? ""}\nادخل برمز الشركة واسم الدخول وكلمة المرور التي أرسلناها لك، ثم أضف التطبيق إلى الشاشة الرئيسية.`;
 
   return (
     <>

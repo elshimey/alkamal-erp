@@ -27,7 +27,8 @@ export interface Tenant {
 }
 
 const DAY = 24 * 60 * 60 * 1000;
-const SLUG_RE = /^[a-z][a-z0-9]{1,29}$/;
+// رمز الشركة: يكتبه كل موظف عند الدخول مع اسمه وكلمة مروره (حروف إنجليزية صغيرة أو أرقام)
+const SLUG_RE = /^[a-z0-9]{2,30}$/;
 
 /** ينشئ مخطط المنصة وجداولها ومشغّل دليل الدخول، ويسجل شركة البداية. آمن للتكرار. */
 export async function ensurePlatform(sql: Sql, homeName = "الكمال للنقليات") {
@@ -49,6 +50,14 @@ export async function ensurePlatform(sql: Sql, homeName = "الكمال للنق
       schema_name text not null
     );
     create index if not exists logins_schema_idx on platform.logins (schema_name);
+    -- كان اسم الدخول فريداً على مستوى المنصة؛ صار فريداً داخل كل شركة
+    do $$ begin
+      if exists (select 1 from pg_constraint c join pg_attribute a on a.attrelid = c.conrelid and a.attnum = any (c.conkey)
+                 where c.conname = 'logins_pkey' and c.conrelid = 'platform.logins'::regclass group by c.oid having count(*) = 1) then
+        alter table platform.logins drop constraint logins_pkey;
+        alter table platform.logins add primary key (schema_name, login);
+      end if;
+    end $$;
     create table if not exists platform.share_links (
       token varchar(40) primary key,
       schema_name text not null,
@@ -88,8 +97,9 @@ export async function ensurePlatform(sql: Sql, homeName = "الكمال للنق
         delete from platform.logins where login = old.login and schema_name = tg_table_schema;
       end if;
       if tg_op in ('INSERT', 'UPDATE') then
-        if exists (select 1 from platform.logins where lower(login) = lower(new.login)) then
-          raise exception 'اسم الدخول % مستخدم في شركة أخرى؛ اختر اسماً آخر', new.login using errcode = 'unique_violation';
+        -- أسماء الدخول فريدة داخل الشركة فقط؛ رمز الشركة يفرّق بين المتشابهين في شركات مختلفة
+        if exists (select 1 from platform.logins where lower(login) = lower(new.login) and schema_name = tg_table_schema) then
+          raise exception 'اسم الدخول % مستخدم؛ اختر اسماً آخر', new.login using errcode = 'unique_violation';
         end if;
         insert into platform.logins (login, schema_name) values (new.login, tg_table_schema);
       end if;
@@ -134,7 +144,7 @@ export interface AccessRequest {
 }
 
 /** يسجل الطلب ويرد دائماً بنفس النتيجة، فلا يُعرف منه هل اسم الدخول موجود. حد 3 طلبات في الساعة لنفس الاسم أو الجوال. */
-export async function createAccessRequest(sql: Sql, input: { login?: string; name: string; contact: string }) {
+export async function createAccessRequest(sql: Sql, input: { company?: string; login?: string; name: string; contact: string }) {
   const login = input.login?.trim().toLowerCase().slice(0, 120) || null;
   const name = input.name.trim().slice(0, 120);
   const contact = input.contact.trim().slice(0, 60);
@@ -142,9 +152,10 @@ export async function createAccessRequest(sql: Sql, input: { login?: string; nam
   const [recent] = await sql<{ n: number }[]>`select count(*)::int as n from platform.access_requests
     where created_at > now() - interval '1 hour' and (contact = ${contact} or (${login}::text is not null and login = ${login}))`;
   if (recent.n >= 3) return;
-  const [match] = login ? await sql<{ schema_name: string }[]>`select schema_name from platform.logins where lower(login) = ${login} limit 1` : [];
+  // رمز الشركة يحدد مديرها؛ رمز غير معروف يصل لمالك المنصة
+  const schema = input.company ? await schemaForCompany(sql, input.company) : null;
   await sql`delete from platform.access_requests where created_at < now() - interval '90 days'`;
-  await sql`insert into platform.access_requests (schema_name, login, name, contact) values (${match?.schema_name ?? null}, ${login}, ${name}, ${contact})`;
+  await sql`insert into platform.access_requests (schema_name, login, name, contact) values (${schema}, ${login}, ${name}, ${contact})`;
 }
 
 /** الطلبات المفتوحة لشركة، أو التي لم تُعرف شركتها (null) لمالك المنصة. */
@@ -232,14 +243,36 @@ export async function tenantState(sql: Sql, schema: string) {
   }
 }
 
-/** مخطط شركة صاحب اسم الدخول (شركة البداية إن لم يُعرف). */
-export async function schemaForLogin(sql: Sql, login: string) {
+/** مخطط الشركة من رمزها الذي يكتبه الموظف عند الدخول، أو null إن لم يوجد. */
+export async function schemaForCompany(sql: Sql, code: string) {
+  const key = code.trim().toLowerCase();
+  if (!key) return null;
   try {
-    const [r] = await sql<{ schema_name: string }[]>`select schema_name from platform.logins where lower(login) = lower(${login}) limit 1`;
-    return r?.schema_name ?? HOME_SCHEMA;
+    const [r] = await sql<{ schema_name: string }[]>`select schema_name from platform.tenants where slug = ${key} limit 1`;
+    return r?.schema_name ?? null;
   } catch {
-    return HOME_SCHEMA;
+    return null;
   }
+}
+
+/** رمز الشركة لمخططها (لعرضه للمدير، ولتعبئته تلقائياً في صفحة الدخول على نفس الجهاز). */
+export async function companyCode(sql: Sql, schema: string) {
+  try {
+    const [r] = await sql<{ slug: string }[]>`select slug from platform.tenants where schema_name = ${schema}`;
+    return r?.slug ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** يغيّر رمز الدخول لشركة (المخطط لا يتغير، فتبقى بياناتها كما هي). */
+export async function setCompanyCode(sql: Sql, id: number, code: string) {
+  const slug = code.trim().toLowerCase();
+  if (!SLUG_RE.test(slug)) throw new Error("رمز الشركة: حروف إنجليزية صغيرة أو أرقام، من 2 إلى 30");
+  const [taken] = await sql`select 1 from platform.tenants where slug = ${slug} and id <> ${id}`;
+  if (taken) throw new Error("رمز الشركة مستخدم لشركة أخرى؛ اختر رمزاً آخر");
+  const [t] = await sql`update platform.tenants set slug = ${slug} where id = ${id} returning id`;
+  if (!t) throw new Error("الشركة غير موجودة");
 }
 
 async function tenantById(sql: Sql, id: number) {
@@ -278,7 +311,7 @@ export interface NewTenant {
 /** ينشئ شركة جديدة: مخطط، ترحيل، بيانات أساسية، مدير نظام. */
 export async function createTenant(sql: Sql, db: Db, input: NewTenant) {
   const slug = input.slug.trim().toLowerCase();
-  if (!SLUG_RE.test(slug)) throw new Error("رمز الشركة: حروف إنجليزية صغيرة وأرقام، يبدأ بحرف، من 2 إلى 30");
+  if (!SLUG_RE.test(slug)) throw new Error("رمز الشركة: حروف إنجليزية صغيرة أو أرقام، من 2 إلى 30");
   if (input.name.trim().length < 2) throw new Error("اكتب اسم الشركة");
   if (input.adminLogin.trim().length < 3) throw new Error("اسم دخول مدير الشركة إلزامي");
   if (input.adminPassword.length < MIN_PASSWORD_LENGTH) throw new Error(`كلمة المرور ${MIN_PASSWORD_LENGTH} أحرف على الأقل`);
@@ -288,8 +321,6 @@ export async function createTenant(sql: Sql, db: Db, input: NewTenant) {
     await dropTenantSchema(sql, b.schema_name);
     await sql`delete from platform.tenants where id = ${b.id}`;
   }
-  const [taken] = await sql`select 1 from platform.logins where lower(login) = lower(${login})`;
-  if (taken) throw new Error(`اسم الدخول ${login} مستخدم في شركة أخرى`);
   const schema = schemaForSlug(slug);
   const [exists] = await sql`select 1 from platform.tenants where slug = ${slug} or schema_name = ${schema}`;
   if (exists) throw new Error("رمز الشركة مستخدم؛ اختر رمزاً آخر");
@@ -331,7 +362,7 @@ export async function resetTenantAdminPassword(sql: Sql, db: Db, id: number, pas
     // كلمة مرور جديدة تُخرج كل الأجهزة المسجّلة بالقديمة
     if (u) await db.delete(s.sessions).where(eq(s.sessions.userId, u.id));
   });
-  return { company: t.name, login: admin.admin_login, name: admin.admin_name ?? "" };
+  return { company: t.name, code: t.slug, login: admin.admin_login, name: admin.admin_name ?? "" };
 }
 
 /** تحويل التجربة إلى اشتراك فعلي: تبقى كل البيانات كما هي. */

@@ -1845,11 +1845,12 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     expect(await platform.loginThrottled(client, "someone_else")).toBe(false);
     await platform.clearLoginFailures(client, "guess_me");
     expect(await platform.loginThrottled(client, "guess_me")).toBe(false);
-    expect(await platform.schemaForLogin(client, "admin")).toBe("public");
-    // نسيت كلمة المرور: الطلب يصل لشركة صاحب الاسم، والاسم المجهول لمالك المنصة، و3 طلبات في الساعة كحد
-    await platform.createAccessRequest(client, { login: "ADMIN", name: "مدير", contact: "0511111111" });
-    await platform.createAccessRequest(client, { name: "نسي اسمه", contact: "0522222222" });
-    for (let i = 0; i < 4; i++) await platform.createAccessRequest(client, { login: "admin", name: "مكرر", contact: "0533333333" });
+    expect(await platform.schemaForCompany(client, "HOME")).toBe("public");
+    expect(await platform.schemaForCompany(client, "nope")).toBeNull();
+    // نسيت كلمة المرور: الطلب يصل لشركة الرمز، والرمز المجهول لمالك المنصة، و3 طلبات في الساعة كحد
+    await platform.createAccessRequest(client, { company: "home", login: "ADMIN", name: "مدير", contact: "0511111111" });
+    await platform.createAccessRequest(client, { company: "unknown", name: "نسي اسمه", contact: "0522222222" });
+    for (let i = 0; i < 4; i++) await platform.createAccessRequest(client, { company: "home", login: "admin", name: "مكرر", contact: "0533333333" });
     const home = await platform.openAccessRequests(client, "public");
     expect(home.filter((r) => r.login === "admin")).toHaveLength(3);
     const orphan = await platform.openAccessRequests(client, null);
@@ -1861,9 +1862,10 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     process.env.MAIL_TRANSPORT = "log";
     const logged: string[] = [];
     const spy = vi.spyOn(console, "log").mockImplementation((m: string) => void logged.push(String(m)));
-    expect(await pr.requestPasswordReset(client, "admin", "https://x.test")).toBeNull();
+    expect(await pr.requestPasswordReset(client, "home", "admin", "https://x.test")).toBeNull();
     await client`update public.users set email = 'boss@example.com' where login = 'admin'`;
-    expect(await pr.requestPasswordReset(client, "BOSS@example.com", "https://x.test")).toBe("bo•••@example.com");
+    expect(await pr.requestPasswordReset(client, "other", "BOSS@example.com", "https://x.test")).toBeNull();
+    expect(await pr.requestPasswordReset(client, "home", "BOSS@example.com", "https://x.test")).toBe("bo•••@example.com");
     spy.mockRestore();
     delete process.env.MAIL_TRANSPORT;
     const resetToken = logged.join("\n").match(/\/login\/reset\/(\S+)/)![1];
@@ -1877,15 +1879,17 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     await client`update public.users set password_hash = ${before.password_hash}, email = null where login = 'admin'`;
 
     const base = { name: "شركة التجربة", slug: "acme", trialDays: 15, adminName: "مدير أكمي", adminLogin: "acme_admin", adminPassword: "acme-pass-1" };
-    await expect(platform.createTenant(client, tdb, { ...base, adminLogin: "admin" })).rejects.toThrow("مستخدم في شركة أخرى");
     await expect(platform.createTenant(client, tdb, { ...base, slug: "Bad-Slug" })).rejects.toThrow("رمز الشركة");
     const t = await platform.createTenant(client, tdb, base);
     expect(t.schema_name).toBe("t_acme");
     await expect(platform.createTenant(client, tdb, { ...base, adminLogin: "other" })).rejects.toThrow("رمز الشركة مستخدم");
-    expect(await platform.schemaForLogin(client, "acme_admin")).toBe("t_acme");
-    // الجوال يكبّر الحرف الأول: اسم الدخول لا يفرّق بين الحالتين، ولا يُقبل اسم يختلف بالحالة فقط
-    expect(await platform.schemaForLogin(client, "Acme_Admin")).toBe("t_acme");
-    await expect(platform.createTenant(client, tdb, { ...base, slug: "acme2", adminLogin: "ACME_ADMIN" })).rejects.toThrow("مستخدم في شركة أخرى");
+    expect(await platform.schemaForCompany(client, "Acme")).toBe("t_acme");
+    // الرمز رقمي مسموح، ويمكن تغييره دون المساس بالبيانات
+    await expect(platform.setCompanyCode(client, t.id, "home")).rejects.toThrow("مستخدم");
+    await platform.setCompanyCode(client, t.id, "1001");
+    expect(await platform.schemaForCompany(client, "1001")).toBe("t_acme");
+    expect(await platform.schemaForCompany(client, "acme")).toBeNull();
+    await platform.setCompanyCode(client, t.id, "acme");
     expect((await platform.listTenants(client)).find((x) => x.slug === "acme")).toMatchObject({ admin_login: "acme_admin", admin_name: "مدير أكمي" });
     // إنشاء انقطع في منتصفه (مهلة الخادم): يظهر «لم يكتمل»، وإعادة الإنشاء بنفس الرمز تمسح بقاياه
     await client`insert into platform.tenants (slug, name, schema_name, status) values ('halfco', 'نصف', 't_halfco', 'active')`;
@@ -1911,8 +1915,10 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect((await getCompany(tdb))?.nameAr).toBe("شركة التجربة");
       await createVehicle(tdb, { plate: "ACME 1", chassis: "AC-1" });
       expect(await tdb.select().from(s.vehicles)).toHaveLength(1);
-      // اسم دخول مستخدم في شركة أخرى مرفوض
-      await expect(tdb.insert(s.users).values({ name: "x", login: "admin", passwordHash: "x" })).rejects.toThrow();
+      // نفس اسم الدخول مسموح في شركة أخرى، ومرفوض داخل نفس الشركة ولو اختلفت الحروف الكبيرة
+      await tdb.insert(s.users).values({ name: "x", login: "admin", passwordHash: "x" });
+      await expect(tdb.insert(s.users).values({ name: "y", login: "ACME_ADMIN", passwordHash: "x" })).rejects.toThrow();
+      await tdb.delete(s.users).where(eq(s.users.login, "admin"));
       // معاملة كاملة داخل الشركة
       await tdb.transaction(async (tx) => {
         await tx.update(s.users).set({ locale: "en" }).where(eq(s.users.login, "acme_admin"));
@@ -1947,14 +1953,15 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(users).toEqual([{ login: "acme_admin", key: "admin" }]);
       expect((await getCompany(tdb))?.nameAr).toBe("شركة التجربة");
     });
-    expect(await platform.schemaForLogin(client, "acme_admin")).toBe("t_acme");
+    expect(await platform.schemaForCompany(client, "acme")).toBe("t_acme");
     expect((await platform.listTenants(client)).map((x) => x.slug)).toEqual(["home", "acme"]);
 
     // الحذف النهائي
     await expect(platform.deleteTenant(client, t.id, "nope")).rejects.toThrow("للتأكيد");
     await platform.deleteTenant(client, t.id, "acme");
     expect(await client`select 1 from pg_namespace where nspname = 't_acme'`).toHaveLength(0);
-    expect(await platform.schemaForLogin(client, "acme_admin")).toBe("public");
+    expect(await platform.schemaForCompany(client, "acme")).toBeNull();
+    expect(await client`select 1 from platform.logins where schema_name = 't_acme'`).toHaveLength(0);
   }, 20_000);
 
   it("يعدّل السائق ويحذفه ويربط حسابه ويدير دخوله", async () => {
