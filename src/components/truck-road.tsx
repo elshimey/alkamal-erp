@@ -117,7 +117,7 @@ export function TruckRoad() {
       return;
     }
     e.preventDefault(); // لا تتحرك الصفحة بالأسهم أو المسافة أثناء القيادة
-    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    // لا نوقفها عند تفعيل «تقليل الحركة» في الجهاز: الحركة هنا بيد المستخدم نفسه
     run();
   };
 
@@ -154,7 +154,7 @@ export function TruckRoad() {
         onBlur={release}
         onKeyDown={(e) => setKey(e, true)}
         onKeyUp={(e) => setKey(e, false)}
-        className={`relative h-10 cursor-pointer overflow-hidden bg-asphalt-900 outline-none select-none transition-shadow ${driving ? "shadow-[inset_0_0_0_2px_var(--color-brand-600)]" : ""}`}
+        className={`truck-road relative h-10 cursor-pointer overflow-hidden bg-asphalt-900 outline-none select-none transition-shadow ${driving ? "shadow-[inset_0_0_0_2px_var(--color-brand-600)]" : ""}`}
       >
         <div className="road-line-h absolute inset-x-0 top-1/2 -translate-y-1/2 opacity-50" />
         <span
