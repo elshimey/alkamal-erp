@@ -4,10 +4,13 @@ import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { can, hasSpecial } from "@/lib/permissions";
 import { todayRiyadh } from "@/lib/dates";
-import { ActionForm, SubmitButton } from "@/components/action-form";
-import { Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
-import { endAssignment, startAssignment } from "./actions";
-import { AddModeBar, ListActions } from "@/components/list-actions";
+import Link from "next/link";
+import { EmptyRow, Input, PageHeader, Table, Td } from "@/components/ui";
+import { ListActions } from "@/components/list-actions";
+import { PanelField, PanelSection } from "@/components/panel-ui";
+import { RecordPanel } from "@/components/record-panel";
+import { AssignmentFields } from "./assignment-fields";
+import { endAssignmentAction, startAssignmentAction } from "./actions";
 
 const baseQuery = () =>
   db
@@ -17,7 +20,7 @@ const baseQuery = () =>
     .innerJoin(s.drivers, eq(s.drivers.id, s.vehicleAssignments.driverId))
     .innerJoin(s.employees, eq(s.employees.id, s.drivers.employeeId));
 
-export default async function AssignmentsPage({ searchParams }: { searchParams: Promise<{ add?: string }> }) {
+export default async function AssignmentsPage({ searchParams }: { searchParams: Promise<{ new?: string; release?: string }> }) {
   const user = await requirePermission("vehicles", "view");
   const canEdit = can(user.perms, "vehicles", "update");
   const today = todayRiyadh();
@@ -43,63 +46,24 @@ export default async function AssignmentsPage({ searchParams }: { searchParams: 
       .orderBy(asc(s.employees.nameAr)),
   ]);
 
-  const adding = (await searchParams).add === "1" && !!(canEdit);
+  const sp = await searchParams;
+  const creating = sp.new === "1" && canEdit;
+  const releasing = canEdit ? open.find((o) => o.a.id === Number(sp.release)) : undefined;
+  const notesField = (
+    <PanelSection title="ملاحظات الحالة" optional hint="حالة المركبة عند الاستلام أو التسليم">
+      <PanelField label="ملاحظات">
+        <textarea name="notes" rows={3} className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm" />
+      </PanelField>
+    </PanelSection>
+  );
+
   return (
     <>
       <PageHeader title="الإسناد والتسليم" description="من يقود كل مركبة ومتى. منه يُعرف السائق وقت المخالفة، ويُحدَّث عداد المركبة.">
-        {!adding && <ListActions newHref={(canEdit) && "/assignments?add=1"} newLabel="استلام مركبة" />}
+        <ListActions newHref={canEdit && "/assignments?new=1"} newLabel="استلام مركبة" />
       </PageHeader>
-      {adding && <AddModeBar backHref="/assignments" backLabel="الإسناد والتسليم" title="استلام مركبة" />}
-      {adding && (
-        <Card className="mb-6">
-          <ActionForm action={startAssignment} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5 lg:items-end">
-            <Field label="المركبة">
-              <Select name="vehicleId" required defaultValue="">
-                <option value="" disabled>
-                  اختر…
-                </option>
-                {freeVehicles.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.plate} (العداد {v.odometer.toLocaleString("en")})
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="السائق">
-              <Select name="driverId" required defaultValue="">
-                <option value="" disabled>
-                  اختر…
-                </option>
-                {freeDrivers.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="تاريخ الاستلام">
-              <Input name="fromDate" type="date" required defaultValue={today} />
-            </Field>
-            <Field label="قراءة العداد" hint="فارغ = آخر قراءة مسجلة">
-              <Input name="odometerStart" type="number" min={0} dir="ltr" />
-            </Field>
-            {hasSpecial(user.perms, "override_controls") && (
-              <Field label="سبب التجاوز" hint="فقط إن كانت وثيقة مانعة منتهية">
-                <Input name="overrideReason" />
-              </Field>
-            )}
-            <SubmitButton>تسجيل الاستلام</SubmitButton>
-            <div className="col-span-full">
-              <Field label="ملاحظات الحالة">
-                <Input name="notes" />
-              </Field>
-            </div>
-          </ActionForm>
-        </Card>
-      )}
-      {!adding && (
-        <>      <h2 className="mb-3 font-semibold text-gray-800">المسندة حالياً</h2>
-      <Table head={["المركبة", "السائق", "منذ", "عداد الاستلام", canEdit ? "تسجيل التسليم" : ""]}>
+      <h2 className="mb-3 font-semibold text-gray-800">المسندة حالياً</h2>
+      <Table head={["المركبة", "السائق", "منذ", "عداد الاستلام", ""]}>
         {open.length === 0 && <EmptyRow cols={5}>لا توجد مركبات مسندة</EmptyRow>}
         {open.map(({ a, plate, driver }) => (
           <tr key={a.id}>
@@ -109,19 +73,17 @@ export default async function AssignmentsPage({ searchParams }: { searchParams: 
             <Td className="ltr-nums">{a.odometerStart?.toLocaleString("en") ?? "—"}</Td>
             <Td>
               {canEdit && (
-                <ActionForm action={endAssignment.bind(null, a.id)} className="flex flex-wrap items-center gap-2">
-                  <Input name="toDate" type="date" required defaultValue={today} className="w-36" aria-label="تاريخ التسليم" />
-                  <Input name="odometerEnd" type="number" min={0} placeholder="العداد" dir="ltr" className="w-28" aria-label="عداد التسليم" />
-                  <SubmitButton variant="secondary">تسليم</SubmitButton>
-                </ActionForm>
+                <Link href={`/assignments?release=${a.id}`} scroll={false} prefetch={false} className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
+                  تسليم
+                </Link>
               )}
             </Td>
           </tr>
         ))}
       </Table>
       <h2 className="mt-8 mb-3 font-semibold text-gray-800">السجل</h2>
-      <Table head={["المركبة", "السائق", "من", "إلى", "الكيلومترات"]}>
-        {history.length === 0 && <EmptyRow cols={5}>لا يوجد سجل بعد</EmptyRow>}
+      <Table head={["المركبة", "السائق", "من", "إلى", "الكيلومترات", "ملاحظات"]}>
+        {history.length === 0 && <EmptyRow cols={6}>لا يوجد سجل بعد</EmptyRow>}
         {history.map(({ a, plate, driver }) => (
           <tr key={a.id}>
             <Td>{plate}</Td>
@@ -131,10 +93,37 @@ export default async function AssignmentsPage({ searchParams }: { searchParams: 
             <Td className="ltr-nums">
               {a.odometerEnd != null && a.odometerStart != null ? (a.odometerEnd - a.odometerStart).toLocaleString("en") : "—"}
             </Td>
+            <Td className="text-xs text-gray-500">{a.notes ?? ""}</Td>
           </tr>
         ))}
       </Table>
-        </>
+
+      {creating && (
+        <RecordPanel title="استلام مركبة" subtitle="يُسند الرأس للسائق من تاريخ الاستلام حتى تسجيل التسليم" closeHref="/assignments" action={startAssignmentAction} creating>
+          <PanelSection title="الاستلام">
+            <AssignmentFields
+              vehicles={freeVehicles.map((v) => ({ value: String(v.id), label: v.plate }))}
+              drivers={freeDrivers.map((d) => ({ value: String(d.id), label: d.name }))}
+              odometers={Object.fromEntries(freeVehicles.map((v) => [String(v.id), v.odometer]))}
+              today={today}
+              canOverride={hasSpecial(user.perms, "override_controls")}
+            />
+          </PanelSection>
+          {notesField}
+        </RecordPanel>
+      )}
+      {releasing && (
+        <RecordPanel title={`تسليم ${releasing.plate}`} subtitle={`${releasing.driver} · منذ ${releasing.a.fromDate}`} closeHref="/assignments" action={endAssignmentAction.bind(null, releasing.a.id)} creating={false}>
+          <PanelSection title="التسليم">
+            <PanelField label="تاريخ التسليم" required>
+              <Input type="date" name="toDate" defaultValue={today} min={releasing.a.fromDate} required className="w-full" />
+            </PanelField>
+            <PanelField label="قراءة العداد" hint={releasing.a.odometerStart != null ? `عداد الاستلام ${releasing.a.odometerStart.toLocaleString("en")}` : undefined}>
+              <Input name="odometerEnd" type="number" min={releasing.a.odometerStart ?? 0} dir="ltr" className="w-full" />
+            </PanelField>
+          </PanelSection>
+          {notesField}
+        </RecordPanel>
       )}
     </>
   );

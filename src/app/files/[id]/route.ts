@@ -6,7 +6,7 @@ import { getAttachment } from "@/lib/attachments";
 import { isDriverOnly } from "@/lib/driver-app";
 import { can, type Entity } from "@/lib/permissions";
 
-const ENTITY_PERM: Record<string, Entity> = { waybills: "waybills", expenses: "expenses", fleet_documents: "fleet_documents", document_submissions: "fleet_documents" };
+const ENTITY_PERM: Record<string, Entity> = { waybills: "waybills", expenses: "expenses", fleet_documents: "fleet_documents", document_submissions: "fleet_documents", traffic_violations: "violations" };
 
 /** عرض صورة مرفقة: للمكتب حسب الصلاحية، وللسائق صور رحلاته ومصروفاته فقط. */
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {

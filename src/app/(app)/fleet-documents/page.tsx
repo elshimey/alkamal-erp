@@ -7,20 +7,25 @@ import { can } from "@/lib/permissions";
 import { todayRiyadh } from "@/lib/dates";
 import { documentRegister, listDocumentTypes, OWNER_KINDS, ownerKey, type OwnerKind } from "@/lib/documents";
 import { ExpiryBadge } from "@/components/expiry-badge";
-import { EditLink } from "@/components/edit-link";
 import { Badge, Card, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
 import { AddModeBar, ListActions } from "@/components/list-actions";
-import { DocumentForm } from "./document-form";
-import { addDocumentAction } from "./actions";
+import { SheetEditor } from "@/components/sheet-editor";
+import { DocumentPanel } from "./document-panel";
+import { saveDocumentsSheet } from "./actions";
 
 const KINDS = Object.keys(OWNER_KINDS) as OwnerKind[];
 
-export default async function DocumentRegisterPage({ searchParams }: { searchParams: Promise<{ add?: string; kind?: string; owner?: string; type?: string; state?: string }> }) {
+export default async function DocumentRegisterPage({ searchParams }: { searchParams: Promise<{ add?: string; new?: string; edit?: string; kind?: string; owner?: string; type?: string; state?: string }> }) {
   const user = await requirePermission("fleet_documents", "view");
   const sp = await searchParams;
   const today = todayRiyadh();
   const canCreate = can(user.perms, "fleet_documents", "create");
+  const canEdit = can(user.perms, "fleet_documents", "update");
   const adding = sp.add === "1" && canCreate;
+  const editId = Number(sp.edit) || null;
+  const keep = new URLSearchParams(Object.entries({ kind: sp.kind, state: sp.state }).filter((e): e is [string, string] => !!e[1])).toString();
+  const closeHref = `/fleet-documents${keep ? `?${keep}` : ""}`;
+  const panel = (sp.new === "1" && canCreate) || (editId && canEdit) ? <DocumentPanel id={editId} closeHref={closeHref} owner={sp.owner} type={sp.type} /> : null;
   const view = sp.kind === "all" ? "all" : KINDS.includes(sp.kind as OwnerKind) ? (sp.kind as OwnerKind) : "vehicle";
   const [register, types, [{ pending }]] = await Promise.all([
     documentRegister(db, today),
@@ -32,15 +37,38 @@ export default async function DocumentRegisterPage({ searchParams }: { searchPar
     return (
       <>
         <PageHeader title="سجل الوثائق" />
-        <AddModeBar backHref="/fleet-documents" backLabel="سجل الوثائق" title="إضافة وثيقة" />
+        <AddModeBar backHref="/fleet-documents" backLabel="سجل الوثائق" title="إضافة وثائق جماعية" />
         <Card>
-          <DocumentForm
-            action={addDocumentAction}
-            owners={register.map((o) => ({ value: ownerKey(o.kind, o.id), label: `${o.label} · ${OWNER_KINDS[o.kind].label}` }))}
-            types={types.map((t) => ({ id: t.id, nameAr: t.nameAr, ownerKind: t.ownerKind, authority: t.authority }))}
-            defaultOwner={sp.owner ?? ""}
-            defaultType={sp.type ?? ""}
+          <SheetEditor
+            templateName="الوثائق"
+            action={saveDocumentsSheet}
+            initialRows={5}
+            columns={[
+              {
+                key: "owner",
+                label: "صاحب الوثيقة",
+                type: "select",
+                required: true,
+                width: "13rem",
+                options: register.map((o) => ({ value: ownerKey(o.kind, o.id), label: `${o.label} · ${OWNER_KINDS[o.kind].label}` })),
+              },
+              {
+                key: "documentTypeId",
+                label: "نوع الوثيقة",
+                type: "select",
+                required: true,
+                width: "14rem",
+                options: types.map((t) => ({ value: String(t.id), label: `${t.nameAr} (${OWNER_KINDS[t.ownerKind].label})` })),
+              },
+              { key: "number", label: "الرقم", ltr: true, width: "9rem" },
+              { key: "issueDate", label: "تاريخ الإصدار", type: "date" },
+              { key: "expiryDate", label: "تاريخ الانتهاء", type: "date" },
+              { key: "authority", label: "جهة الإصدار", width: "9rem" },
+              { key: "cost", label: "الرسوم", type: "number", width: "6rem" },
+              { key: "notes", label: "ملاحظات", width: "10rem" },
+            ]}
           />
+          <p className="mt-2 text-xs text-gray-500">نوع الوثيقة يجب أن يناسب صاحبها (وثيقة سائق لسائق، ووثيقة رأس لرأس). المرفقات تُضاف بعد الحفظ من نافذة الوثيقة.</p>
         </Card>
       </>
     );
@@ -68,7 +96,13 @@ export default async function DocumentRegisterPage({ searchParams }: { searchPar
           <Link href="/fleet-documents/reports" className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50">
             التقارير
           </Link>
-          <ListActions newHref={canCreate && "/fleet-documents?add=1"} newLabel="إضافة وثيقة" />
+          <ListActions
+            bulkHref={canEdit && "/records/fleet_documents/bulk"}
+            newHref={canCreate && `/fleet-documents?${keep ? `${keep}&` : ""}new=1`}
+            newLabel="إضافة وثيقة"
+            addHref={canCreate && "/fleet-documents?add=1"}
+            addLabel="إضافة وثائق جماعية"
+          />
         </div>
       </PageHeader>
 
@@ -94,7 +128,7 @@ export default async function DocumentRegisterPage({ searchParams }: { searchPar
       </div>
 
       {view === "all" ? (
-        <AllDocuments today={today} />
+        <AllDocuments today={today} canEdit={canEdit} />
       ) : (
         <Table head={[OWNER_KINDS[view].label, "سارية", "تقترب", "منتهية", "ناقصة", ""]}>
           {rows.length === 0 && (
@@ -130,6 +164,7 @@ export default async function DocumentRegisterPage({ searchParams }: { searchPar
           </Link>
         </p>
       )}
+      {panel}
     </>
   );
 }
@@ -156,7 +191,7 @@ function Tab({ href, active, label, count }: { href: string; active: boolean; la
   );
 }
 
-async function AllDocuments({ today }: { today: string }) {
+async function AllDocuments({ today, canEdit }: { today: string; canEdit: boolean }) {
   const docs = await db
     .select({
       doc: s.fleetDocuments,
@@ -193,8 +228,13 @@ async function AllDocuments({ today }: { today: string }) {
               </Link>
             </Td>
             <Td>
-              {type.nameAr}
-              <EditLink href={`/records/fleet_documents/${doc.id}`} />
+              {canEdit ? (
+                <Link href={`/fleet-documents?kind=all&edit=${doc.id}`} scroll={false} prefetch={false} className="text-brand-700 hover:underline">
+                  {type.nameAr}
+                </Link>
+              ) : (
+                type.nameAr
+              )}
             </Td>
             <Td className="ltr-nums">{doc.number ?? "—"}</Td>
             <Td>{doc.authority ?? "—"}</Td>

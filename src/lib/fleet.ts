@@ -268,7 +268,7 @@ export async function releaseAssignment(
     }
     await tx
       .update(s.vehicleAssignments)
-      .set({ toDate: input.toDate, odometerEnd: input.odometerEnd ?? null, notes: input.notes ?? a.notes })
+      .set({ toDate: input.toDate, odometerEnd: input.odometerEnd ?? null, notes: input.notes ? [a.notes, `التسليم: ${input.notes}`].filter(Boolean).join(" · ") : a.notes })
       .where(eq(s.vehicleAssignments.id, a.id));
     if (input.odometerEnd != null) {
       await tx

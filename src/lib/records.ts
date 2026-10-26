@@ -27,6 +27,8 @@ export interface FieldDef {
   hint?: string;
   /** حقل لا يُحفظ في الجدول مباشرة (يعالجه save) */
   virtual?: boolean;
+  /** للعرض فقط (صاحب الوثيقة مثلاً): لا يُعدَّل ولا يُحفظ، وقيمته من load/loadAll */
+  readOnly?: boolean;
 }
 
 type Row = Record<string, unknown>;
@@ -56,6 +58,23 @@ export interface RecordDef {
   /** حفظ وحذف بدالة الكيان نفسها بدل التعديل المباشر للجدول (السائق: موظفه وحساباته) */
   save?: (id: number, values: Row) => Promise<void>;
   del?: (id: number) => Promise<void>;
+}
+
+/** اسم صاحب كل وثيقة (اللوحة أو الاسم أو «الشركة») للعرض في التعديل الجماعي. */
+async function documentOwnerLabels(id?: number) {
+  const rows = await db
+    .select({
+      id: s.fleetDocuments.id,
+      label: sql<string>`coalesce(
+        (select v.plate from vehicles v where v.id = ${s.fleetDocuments.vehicleId}),
+        (select e.name_ar from drivers d join employees e on e.id = d.employee_id where d.id = ${s.fleetDocuments.driverId}),
+        (select e.name_ar from employees e where e.id = ${s.fleetDocuments.employeeId}),
+        (select p.name_ar from parties p where p.id = ${s.fleetDocuments.partyId}),
+        'الشركة')`,
+    })
+    .from(s.fleetDocuments)
+    .where(id ? eq(s.fleetDocuments.id, id) : undefined);
+  return new Map(rows.map((r) => [r.id, r.label]));
 }
 
 const yesNo = { type: "bool" as const };
@@ -262,7 +281,10 @@ export const RECORDS: Record<string, RecordDef> = {
       const [t] = await db.select({ nameAr: s.documentTypes.nameAr }).from(s.documentTypes).where(eq(s.documentTypes.id, r.documentTypeId as number));
       return `${t?.nameAr ?? "وثيقة"} ${r.number ?? ""}`;
     },
+    load: async (id) => ({ ownerLabel: (await documentOwnerLabels(id)).get(id) ?? "" }),
+    loadAll: async () => new Map([...(await documentOwnerLabels())].map(([id, ownerLabel]) => [id, { ownerLabel }])),
     fields: [
+      { key: "ownerLabel", label: "صاحب الوثيقة", readOnly: true },
       {
         key: "documentTypeId",
         label: "النوع",
@@ -607,6 +629,7 @@ export async function loadRecord(kind: RecordKind, id: number) {
 export function parseForm(def: RecordDef, data: FormData): Row {
   const out: Row = {};
   for (const f of def.fields) {
+    if (f.readOnly) continue;
     if (f.type === "multi") {
       out[f.key] = data.getAll(f.key).map(String);
       continue;
@@ -647,7 +670,7 @@ export async function saveRecord(kind: RecordKind, id: number, values: Row, extr
     if (!before) throw new Error(`${def.noun} غير موجود`);
     const set: Row = {};
     for (const f of def.fields) {
-      if (f.virtual) continue;
+      if (f.virtual || f.readOnly) continue;
       const v = values[f.key];
       set[f.key] = MONEY_KEYS.has(f.key) && v != null ? String(v) : v;
     }

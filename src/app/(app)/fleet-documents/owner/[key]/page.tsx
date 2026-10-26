@@ -7,15 +7,14 @@ import { todayRiyadh } from "@/lib/dates";
 import { BLOCKING, OWNER_KINDS, ownerDocuments, ownerKey, ownerLabel, parseOwnerKey, STATE_LABEL, type DocState } from "@/lib/documents";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { DocumentFileInput } from "@/components/document-file-input";
-import { EditLink } from "@/components/edit-link";
 import { ExpiryBadge } from "@/components/expiry-badge";
 import { Badge, Card, PageHeader } from "@/components/ui";
-import { DocumentForm } from "../../document-form";
-import { addDocumentAction, attachDocumentAction } from "../../actions";
+import { DocumentPanel } from "../../document-panel";
+import { attachDocumentAction } from "../../actions";
 
 const TONE: Record<DocState, "green" | "amber" | "red" | "gray" | "blue"> = { valid: "green", soon: "amber", expired: "red", missing: "red", none: "gray" };
 
-export default async function OwnerDocumentsPage({ params, searchParams }: { params: Promise<{ key: string }>; searchParams: Promise<{ add?: string; saved?: string }> }) {
+export default async function OwnerDocumentsPage({ params, searchParams }: { params: Promise<{ key: string }>; searchParams: Promise<{ new?: string; type?: string; edit?: string }> }) {
   const user = await requirePermission("fleet_documents", "view");
   const parsed = parseOwnerKey(decodeURIComponent((await params).key).replace("-", ":"));
   if (!parsed) notFound();
@@ -28,7 +27,14 @@ export default async function OwnerDocumentsPage({ params, searchParams }: { par
   const canUpdate = can(user.perms, "fleet_documents", "update");
   const key = ownerKey(parsed.kind, parsed.id);
   const self = `/fleet-documents/owner/${parsed.kind}-${parsed.id}`;
-  const addType = sp.add ?? "";
+  const editId = Number(sp.edit) || null;
+  const panel = (sp.new === "1" && canCreate) || (editId && canUpdate) ? <DocumentPanel id={editId} closeHref={self} owner={key} type={sp.type} /> : null;
+  const editLink = (id: number) =>
+    canUpdate && (
+      <Link href={`${self}?edit=${id}`} scroll={false} prefetch={false} className="text-xs text-brand-700 hover:underline">
+        تعديل
+      </Link>
+    );
   const issues = rows.filter((r) => r.state === "expired" || r.state === "missing").length;
 
   return (
@@ -45,22 +51,6 @@ export default async function OwnerDocumentsPage({ params, searchParams }: { par
           </Link>
         </div>
       </PageHeader>
-
-      {sp.saved && <p className="mb-4 rounded-lg bg-green-50 px-4 py-2 text-sm text-green-800">حُفظت الوثيقة.</p>}
-
-      {canCreate && addType !== "" && (
-        <Card title={rows.find((r) => String(r.type.id) === addType)?.current ? "تجديد الوثيقة" : "إضافة وثيقة"} className="mb-6">
-          <DocumentForm
-            action={addDocumentAction}
-            owners={[{ value: key, label: owner.label }]}
-            types={rows.filter((r) => r.type.isActive).map((r) => ({ id: r.type.id, nameAr: r.type.nameAr, ownerKind: r.type.ownerKind, authority: r.type.authority }))}
-            defaultOwner={key}
-            defaultType={addType === "new" ? "" : addType}
-            fixedOwner
-          />
-          <p className="mt-3 text-xs text-gray-500">التجديد يُسجَّل وثيقة جديدة، وتبقى السابقة في التاريخ أدناه.</p>
-        </Card>
-      )}
 
       <div className="grid gap-3">
         {rows.length === 0 && <Card>لا توجد أنواع وثائق لهذا الصاحب؛ أضفها من إعدادات أنواع الوثائق.</Card>}
@@ -94,10 +84,12 @@ export default async function OwnerDocumentsPage({ params, searchParams }: { par
                     📎 عرض المرفق
                   </a>
                 )}
-                {current && <EditLink href={`/records/fleet_documents/${current.doc.id}`} />}
+                {current && editLink(current.doc.id)}
                 {canCreate && type.isActive && (
                   <Link
-                    href={`${self}?add=${type.id}`}
+                    href={`${self}?new=1&type=${type.id}`}
+                    scroll={false}
+                    prefetch={false}
                     className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${current ? "border border-gray-300 bg-white text-gray-700 hover:bg-gray-50" : "bg-brand-600 text-brand-900 hover:bg-brand-500"}`}
                   >
                     {current ? "تجديد" : "+ إضافة"}
@@ -129,7 +121,7 @@ export default async function OwnerDocumentsPage({ params, searchParams }: { par
                           📎
                         </a>
                       )}
-                      <EditLink href={`/records/fleet_documents/${h.doc.id}`} />
+                      {editLink(h.doc.id)}
                     </li>
                   ))}
                 </ul>
@@ -138,6 +130,7 @@ export default async function OwnerDocumentsPage({ params, searchParams }: { par
           </section>
         ))}
       </div>
+      {panel}
     </>
   );
 }

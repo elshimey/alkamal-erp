@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
@@ -9,35 +8,74 @@ import { requirePermission } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
 import { saveDataUrl } from "@/lib/attachments";
 import { addDocument, approveSubmission, rejectSubmission, OWNER_KINDS, parseAlertDays, parseOwnerKey, type Blocking, type OwnerKind } from "@/lib/documents";
+import { loadRecord, parseForm, RECORDS, saveRecord } from "@/lib/records";
+import { cell, saveSheetRows, type SheetRow } from "@/lib/sheet-server";
 import type { FormState } from "@/components/action-form";
+import type { PanelResult } from "@/components/record-panel";
 
 const str = (d: FormData, k: string) => String(d.get(k) ?? "").trim();
 
-export async function addDocumentAction(_: FormState, data: FormData): Promise<FormState> {
-  const user = await requirePermission("fleet_documents", "create");
-  const owner = parseOwnerKey(str(data, "owner"));
-  if (!owner) return { error: "اختر صاحب الوثيقة" };
-  const cost = str(data, "cost");
+/** حفظ وثيقة واحدة من النافذة: إضافة (أو تجديد) أو تعديل، مع المرفق في المعاملة نفسها. */
+export async function saveDocumentAction(id: number | null, data: FormData): Promise<PanelResult> {
+  const user = await requirePermission("fleet_documents", id ? "update" : "create");
+  const file = str(data, "file");
   try {
-    await db.transaction(async (tx) => {
-      const { row } = await addDocument(tx, {
-        documentTypeId: Number(str(data, "documentTypeId")),
-        owner,
-        number: str(data, "number"),
-        issueDate: str(data, "issueDate") || null,
-        expiryDate: str(data, "expiryDate") || null,
-        authority: str(data, "authority"),
-        cost: cost === "" ? null : Number(cost),
-        notes: str(data, "notes"),
-        userId: user.id,
+    if (id) {
+      const docId = id;
+      const current = await loadRecord("fleet_documents", id);
+      if (!current) return { error: "الوثيقة غير موجودة" };
+      const values = { ...current, ...parseForm(RECORDS.fleet_documents, data) };
+      await saveRecord("fleet_documents", id, values, async (tx) => {
+        await saveDataUrl(tx, { entity: "fleet_documents", entityId: docId, kind: "document", dataUrl: file, userId: user.id });
       });
-      await saveDataUrl(tx, { entity: "fleet_documents", entityId: row.id, kind: "document", dataUrl: str(data, "file"), userId: user.id });
-    });
+    } else {
+      const owner = parseOwnerKey(str(data, "owner"));
+      if (!owner) return { error: "اختر صاحب الوثيقة" };
+      if (!Number(str(data, "documentTypeId"))) return { error: "اختر نوع الوثيقة" };
+      const cost = str(data, "cost");
+      id = await db.transaction(async (tx) => {
+        const { row } = await addDocument(tx, {
+          documentTypeId: Number(str(data, "documentTypeId")),
+          owner,
+          number: str(data, "number"),
+          issueDate: str(data, "issueDate") || null,
+          expiryDate: str(data, "expiryDate") || null,
+          authority: str(data, "authority"),
+          cost: cost === "" ? null : Number(cost),
+          notes: str(data, "notes"),
+          userId: user.id,
+        });
+        await saveDataUrl(tx, { entity: "fleet_documents", entityId: row.id, kind: "document", dataUrl: file, userId: user.id });
+        return row.id;
+      });
+    }
   } catch (err) {
     return { error: errorMessage(err) };
   }
-  revalidatePath("/fleet-documents");
-  redirect(`/fleet-documents/owner/${owner.kind}-${owner.id}?saved=1`);
+  revalidatePath("/fleet-documents", "layout");
+  return { ok: "حُفظت الوثيقة", id, label: "" };
+}
+
+/** إضافة جماعية من الشيت: صف لكل وثيقة (المرفقات تُضاف بعدها من نافذة الوثيقة). */
+export async function saveDocumentsSheet(rows: SheetRow[]) {
+  const user = await requirePermission("fleet_documents", "create");
+  const result = await saveSheetRows(rows, async (r) => {
+    const owner = parseOwnerKey(cell.required(r.owner, "صاحب الوثيقة"));
+    if (!owner) throw new Error("صاحب الوثيقة غير معروف");
+    await addDocument(db, {
+      documentTypeId: Number(cell.required(r.documentTypeId, "نوع الوثيقة")),
+      owner,
+      number: cell.text(r.number) ?? "",
+      issueDate: cell.date(r.issueDate, "تاريخ الإصدار"),
+      expiryDate: cell.date(r.expiryDate, "تاريخ الانتهاء"),
+      authority: cell.text(r.authority) ?? "",
+      cost: cell.number(r.cost, "الرسوم"),
+      notes: cell.text(r.notes) ?? "",
+      userId: user.id,
+    });
+  });
+  revalidatePath("/fleet-documents", "layout");
+  return result;
 }
 
 /** إرفاق صورة أو PDF بوثيقة محفوظة سابقاً. */
