@@ -38,6 +38,8 @@ export function Sidebar({ initialPinned, children }: { initialPinned: boolean; c
   return (
     <div className={`sticky top-0 z-40 hidden h-screen shrink-0 transition-[width] duration-200 md:block print:hidden ${pinned ? "w-64" : "w-16"}`}>
       <aside
+        // مطوي: أيقونات فقط بلا كتابة (تظهر الأسماء عند الفتح)
+        data-rail={!expanded}
         onMouseEnter={pinned ? undefined : enter}
         onMouseLeave={pinned ? undefined : leave}
         className={`absolute inset-y-0 start-0 z-40 overflow-hidden bg-asphalt-900 text-white transition-[width,box-shadow] duration-200 ease-out ${expanded ? "w-64" : "w-16"} ${expanded && !pinned ? "shadow-[0_0_40px_-6px_rgba(0,0,0,0.45)]" : ""}`}

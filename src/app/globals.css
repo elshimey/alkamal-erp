@@ -179,6 +179,54 @@ aside:hover > .road-line {
   animation: shake 0.25s ease-in-out 2;
 }
 
+/* الشريط الجانبي المطوي: أيقونات فقط، والأسماء تظهر بنعومة عند فتحه */
+.rail-hide {
+  transition: opacity 0.15s ease-out;
+}
+[data-rail="true"] .rail-hide {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* شاحنة الطريق السفلي: العجلات تدور أثناء السير فقط، وأضواء الفرامل وأثر الانزلاق عند الضغط */
+.truck-road-car .spin-wheel {
+  animation-play-state: paused;
+}
+.truck-road-car.truck-moving .spin-wheel {
+  animation-play-state: running;
+  animation-duration: 0.25s;
+}
+.truck-brake-light {
+  position: absolute;
+  right: 1px;
+  bottom: 9px;
+  width: 4px;
+  height: 5px;
+  border-radius: 2px;
+  background: #ff3b30;
+  box-shadow: 0 0 10px 3px rgba(255, 59, 48, 0.85);
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+.truck-braking .truck-brake-light {
+  opacity: 1;
+}
+.truck-skid-mark {
+  position: absolute;
+  bottom: -1px;
+  left: 100%;
+  width: 0;
+  height: 3px;
+  border-radius: 2px;
+  background: linear-gradient(to right, rgba(0, 0, 0, 0.55), transparent);
+  transition: width 0.15s ease-out, opacity 0.6s;
+  opacity: 0;
+}
+.truck-skid .truck-skid-mark {
+  width: 46px;
+  opacity: 1;
+}
+
 /* تتابع ظهور البطاقات: كل عنصر يتأخر قليلاً عن سابقه */
 .stagger {
   animation-delay: calc(var(--i, 0) * 70ms);

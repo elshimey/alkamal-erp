@@ -7,6 +7,7 @@ import { Badge, Card, Input, PageHeader, Table, Td } from "@/components/ui";
 import { activateAction, codeAction, deleteAction, extendAction, resetAdminAction, suspendAction, tenantWelcome } from "./actions";
 import { CreateTenantForm, ResetAdminForm, WelcomeMessage } from "./create-form";
 import { AccessRequests } from "../users/access-requests";
+import { DialogButton } from "@/components/dialog-button";
 
 export const maxDuration = 60; // إنشاء شركة يبني جداولها كاملة
 
@@ -65,56 +66,55 @@ export default async function OwnerPage() {
               <Td className="ltr-nums">{date(t.last_login)}</Td>
               <Td>
                 <div className="flex flex-wrap gap-2">
-                  <details className="relative">
-                    <summary className="cursor-pointer list-none rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50">تغيير الرمز</summary>
-                    <div className="absolute end-0 z-20 mt-2 w-64 rounded-xl border border-gray-200 bg-white p-3 shadow-lg">
-                      <p className="mb-2 text-xs leading-relaxed text-gray-600">يدخل موظفو الشركة بالرمز الجديد بدل القديم، وتبقى بياناتها كما هي.</p>
-                      <ActionForm action={codeAction.bind(null, t.id)} resetOnSuccess={false} className="flex flex-wrap gap-2">
-                        <Input name="code" required dir="ltr" defaultValue={t.slug} pattern="[a-z0-9]{2,30}" className="min-w-0 flex-1 !py-1.5 text-xs" />
-                        <SubmitButton className="!px-3 !py-1.5 text-xs">حفظ</SubmitButton>
-                      </ActionForm>
-                    </div>
-                  </details>
-                {!home && (
-                  <>
-                    {welcome.has(t.id) && (
-                      <details className="relative w-full sm:w-auto">
-                        <summary className="w-fit cursor-pointer list-none rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50">رسالة الدخول</summary>
-                        <div className="z-20 mt-2 w-full rounded-xl border border-gray-200 bg-white p-2 shadow-lg sm:absolute sm:end-0 sm:w-96">
+                  <DialogButton label="تغيير الرمز" title={`رمز دخول «${t.name}»`}>
+                    <p className="mb-3 text-sm leading-relaxed text-gray-600">يدخل موظفو الشركة بالرمز الجديد بدل القديم، وتبقى بياناتها كما هي. أبلغهم بالرمز الجديد بعد الحفظ.</p>
+                    <ActionForm action={codeAction.bind(null, t.id)} resetOnSuccess={false} className="flex flex-wrap gap-2">
+                      <Input name="code" required dir="ltr" defaultValue={t.slug} pattern="[a-z0-9]{2,30}" title="حروف إنجليزية صغيرة أو أرقام" className="min-w-0 flex-1" />
+                      <SubmitButton>حفظ الرمز</SubmitButton>
+                    </ActionForm>
+                  </DialogButton>
+                  {!home && (
+                    <>
+                      {welcome.has(t.id) && (
+                        <DialogButton label="رسالة الدخول" title={`رسالة الدخول لمدير «${t.name}»`}>
                           <WelcomeMessage text={welcome.get(t.id)!} phone={t.contact} />
                           <ResetAdminForm action={resetAdminAction.bind(null, t.id, t.contact)} />
-                        </div>
-                      </details>
-                    )}
-                    {t.status !== "active" && (
-                      <ActionForm action={activateAction.bind(null, t.id)} resetOnSuccess={false}>
-                        <SubmitButton className="!px-3 !py-1.5 text-xs">تحويل لاشتراك فعلي</SubmitButton>
-                      </ActionForm>
-                    )}
-                    {t.status !== "suspended" && t.status === "trial" && (
-                      <ActionForm action={extendAction.bind(null, t.id)} resetOnSuccess={false}>
-                        <SubmitButton variant="secondary" className="!px-3 !py-1.5 text-xs">تمديد 15 يوماً</SubmitButton>
-                      </ActionForm>
-                    )}
-                    <ActionForm action={suspendAction.bind(null, t.id, t.status !== "suspended")} resetOnSuccess={false}>
-                      <SubmitButton variant="secondary" className="!px-3 !py-1.5 text-xs">{t.status === "suspended" ? "إعادة التشغيل" : "إيقاف"}</SubmitButton>
-                    </ActionForm>
-                    {canDelete && (
-                      <details className="relative">
-                        <summary className="cursor-pointer list-none rounded-lg border border-red-200 px-3 py-1.5 text-xs text-red-700 hover:bg-red-50">حذف</summary>
-                        <div className="absolute end-0 z-20 mt-2 w-64 rounded-xl border border-red-200 bg-white p-3 shadow-lg">
-                          <p className="mb-2 text-xs leading-relaxed text-gray-600">
+                        </DialogButton>
+                      )}
+                      {t.status !== "active" && (
+                        <DialogButton label="تحويل لاشتراك فعلي" title="تحويل لاشتراك فعلي" className="!border-brand-600 !bg-brand-600 font-semibold !text-brand-900 hover:!bg-brand-500">
+                          <p className="mb-3 text-sm leading-relaxed text-gray-600">تصبح «{t.name}» مشتركة دون مدة تجربة، وتبقى كل بياناتها.</p>
+                          <ActionForm action={activateAction.bind(null, t.id)} resetOnSuccess={false}>
+                            <SubmitButton>تأكيد التحويل</SubmitButton>
+                          </ActionForm>
+                        </DialogButton>
+                      )}
+                      {t.status === "trial" && (
+                        <ActionForm action={extendAction.bind(null, t.id)} resetOnSuccess={false}>
+                          <SubmitButton variant="secondary" className="!px-3 !py-1.5 text-xs">تمديد 15 يوماً</SubmitButton>
+                        </ActionForm>
+                      )}
+                      <DialogButton label={t.status === "suspended" ? "إعادة التشغيل" : "إيقاف"} title={t.status === "suspended" ? "إعادة تشغيل الشركة" : "إيقاف الشركة"} danger={t.status !== "suspended"}>
+                        <p className="mb-3 text-sm leading-relaxed text-gray-600">
+                          {t.status === "suspended" ? `يعود موظفو «${t.name}» للدخول كالمعتاد.` : `يتوقف دخول كل موظفي «${t.name}» حتى تعيد تشغيلها، وتبقى بياناتها محفوظة.`}
+                        </p>
+                        <ActionForm action={suspendAction.bind(null, t.id, t.status !== "suspended")} resetOnSuccess={false}>
+                          <SubmitButton className={t.status === "suspended" ? "" : "!bg-red-600 !text-white hover:!bg-red-500"}>{t.status === "suspended" ? "تأكيد إعادة التشغيل" : "تأكيد الإيقاف"}</SubmitButton>
+                        </ActionForm>
+                      </DialogButton>
+                      {canDelete && (
+                        <DialogButton label="حذف" title={`حذف «${t.name}» نهائياً`} danger>
+                          <p className="mb-3 text-sm leading-relaxed text-gray-600">
                             تُحذف الشركة وكل بياناتها نهائياً ولا يمكن استرجاعها. اكتب <b dir="ltr">{t.slug}</b> للتأكيد.
                           </p>
-                          <ActionForm action={deleteAction.bind(null, t.id)} resetOnSuccess={false} className="flex gap-2">
-                            <Input name="confirm" required dir="ltr" className="!py-1.5 text-xs" />
-                            <SubmitButton className="!bg-red-600 !px-3 !py-1.5 text-xs !text-white">حذف</SubmitButton>
+                          <ActionForm action={deleteAction.bind(null, t.id)} resetOnSuccess={false} className="flex flex-wrap gap-2">
+                            <Input name="confirm" required dir="ltr" className="min-w-0 flex-1" />
+                            <SubmitButton className="!bg-red-600 !text-white hover:!bg-red-500">حذف نهائي</SubmitButton>
                           </ActionForm>
-                        </div>
-                      </details>
-                    )}
-                  </>
-                )}
+                        </DialogButton>
+                      )}
+                    </>
+                  )}
                 </div>
               </Td>
             </tr>

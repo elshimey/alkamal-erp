@@ -22,7 +22,7 @@ export function Logo({ light = false, name, logo }: { light?: boolean; name: str
   return (
     <div className="flex min-w-0 items-center gap-3">
       <BrandMark logo={logo} />
-      <div className="min-w-0 leading-tight">
+      <div className="rail-hide min-w-0 leading-tight">
         <div className={`line-clamp-2 font-display font-semibold ${name.length > 16 ? "text-base" : "text-lg"} ${light ? "text-white" : "text-brand-900"}`} title={name}>
           {name}
         </div>

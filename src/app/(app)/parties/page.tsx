@@ -44,7 +44,7 @@ export default async function PartiesPage({ searchParams }: { searchParams: Prom
             </Link>
           )}
           {canCreate && (
-            <details className="relative">
+            <details data-dropdown className="relative">
               <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-brand-900 shadow-sm hover:bg-brand-500">
                 إضافة <span className="text-xs">▾</span>
               </summary>

@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Sans_Arabic, Readex_Pro } from "next/font/google";
 import { RouteProgress } from "@/components/route-progress";
+import { DropdownDismiss } from "@/components/dropdown-dismiss";
 import { getBrand } from "@/lib/brand";
 import "./globals.css";
 
@@ -27,6 +28,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Suspense>
           <RouteProgress />
         </Suspense>
+        <DropdownDismiss />
         {children}
       </body>
     </html>
