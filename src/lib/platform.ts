@@ -63,6 +63,16 @@ export async function ensurePlatform(sql: Sql, homeName = "الكمال للنق
       at timestamptz not null default now()
     );
     create index if not exists login_failures_idx on platform.login_failures (login, at);
+    create table if not exists platform.access_requests (
+      id bigserial primary key,
+      schema_name text,
+      login varchar(120),
+      name text not null,
+      contact varchar(60) not null,
+      created_at timestamptz not null default now(),
+      resolved_at timestamptz
+    );
+    create index if not exists access_requests_open_idx on platform.access_requests (schema_name) where resolved_at is null;
     create or replace function platform.sync_login() returns trigger language plpgsql as $$
     begin
       if tg_op in ('UPDATE', 'DELETE') then
@@ -99,6 +109,44 @@ export async function recordLoginFailure(sql: Sql, login: string) {
 
 export async function clearLoginFailures(sql: Sql, login: string) {
   await sql`delete from platform.login_failures where login = lower(${login})`;
+}
+
+// ───────────── «نسيت كلمة المرور أو اسم الدخول» ─────────────
+// لا بريد مرسل في البرنامج بعد، فيصل الطلب لمدير النظام في شركة المستخدم (أو لمالك المنصة إن لم يُعرف اسم الدخول)،
+// ويعيّن له كلمة مرور جديدة من شاشة المستخدمين ويتواصل معه.
+
+export interface AccessRequest {
+  id: number;
+  schema_name: string | null;
+  login: string | null;
+  name: string;
+  contact: string;
+  created_at: Date;
+}
+
+/** يسجل الطلب ويرد دائماً بنفس النتيجة، فلا يُعرف منه هل اسم الدخول موجود. حد 3 طلبات في الساعة لنفس الاسم أو الجوال. */
+export async function createAccessRequest(sql: Sql, input: { login?: string; name: string; contact: string }) {
+  const login = input.login?.trim().toLowerCase().slice(0, 120) || null;
+  const name = input.name.trim().slice(0, 120);
+  const contact = input.contact.trim().slice(0, 60);
+  if (!name || !contact) throw new Error("اكتب اسمك ووسيلة التواصل معك");
+  const [recent] = await sql<{ n: number }[]>`select count(*)::int as n from platform.access_requests
+    where created_at > now() - interval '1 hour' and (contact = ${contact} or (${login}::text is not null and login = ${login}))`;
+  if (recent.n >= 3) return;
+  const [match] = login ? await sql<{ schema_name: string }[]>`select schema_name from platform.logins where lower(login) = ${login} limit 1` : [];
+  await sql`delete from platform.access_requests where created_at < now() - interval '90 days'`;
+  await sql`insert into platform.access_requests (schema_name, login, name, contact) values (${match?.schema_name ?? null}, ${login}, ${name}, ${contact})`;
+}
+
+/** الطلبات المفتوحة لشركة، أو التي لم تُعرف شركتها (null) لمالك المنصة. */
+export async function openAccessRequests(sql: Sql, schema: string | null) {
+  return schema
+    ? sql<AccessRequest[]>`select id, schema_name, login, name, contact, created_at from platform.access_requests where resolved_at is null and schema_name = ${schema} order by created_at desc limit 50`
+    : sql<AccessRequest[]>`select id, schema_name, login, name, contact, created_at from platform.access_requests where resolved_at is null and schema_name is null order by created_at desc limit 50`;
+}
+
+export async function resolveAccessRequest(sql: Sql, id: number, schema: string | null) {
+  await sql`update platform.access_requests set resolved_at = now() where id = ${id} and schema_name is not distinct from ${schema}`;
 }
 
 async function installLoginTrigger(sql: Sql, schema: string) {

@@ -6,6 +6,7 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Badge, Card, Input, PageHeader, Table, Td } from "@/components/ui";
 import { activateAction, deleteAction, extendAction, resetAdminAction, suspendAction, tenantWelcome } from "./actions";
 import { CreateTenantForm, ResetAdminForm, WelcomeMessage } from "./create-form";
+import { AccessRequests } from "../users/access-requests";
 
 export const maxDuration = 60; // إنشاء شركة يبني جداولها كاملة
 
@@ -22,6 +23,8 @@ export default async function OwnerPage() {
   return (
     <>
       <PageHeader title="الشركات المشتركة" description="كل شركة تدخل من نفس الرابط ببيانات منفصلة تماماً. التجربة تتوقف وحدها عند انتهاء مدتها، وتبقى بياناتها حتى تفعّلها أو تحذفها." />
+
+      <AccessRequests schema={null} />
 
       <Card title="إضافة شركة" className="mb-6">
         <CreateTenantForm />

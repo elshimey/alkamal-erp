@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
 import { PasswordInput } from "@/components/password-input";
@@ -56,6 +57,9 @@ export default async function LoginPage() {
             <Field label="كلمة المرور">
               <PasswordInput name="password" autoComplete="current-password" required dir="ltr" className="py-2.5" />
             </Field>
+            <Link href="/login/forgot" className="-mt-2 self-end text-xs text-brand-700 hover:underline">
+              نسيت كلمة المرور أو اسم الدخول؟
+            </Link>
             <SubmitButton>دخول</SubmitButton>
           </ActionForm>
           <div className="road-line-h mt-10 opacity-40" />
