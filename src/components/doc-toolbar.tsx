@@ -24,6 +24,8 @@ export function DocToolbar({
   views = true,
   period = true,
   placeholder = "ابحث بالرقم أو الاسم",
+  exportable = true,
+  extra,
 }: {
   base: string;
   params: DocListParams;
@@ -37,6 +39,10 @@ export function DocToolbar({
   views?: boolean;
   period?: boolean;
   placeholder?: string;
+  /** زر «تصدير» (CSV للجدول الظاهر)؛ يُخفى حين تملك الصفحة قائمة تصدير خاصة */
+  exportable?: boolean;
+  /** عناصر إضافية بجانب التبديل (قائمة ⋮ مثلاً) */
+  extra?: React.ReactNode;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -128,7 +134,8 @@ export function DocToolbar({
             </button>
           ))}
         </div>}
-        <ExportButton filename={exportName} label="تصدير" />
+        {exportable && <ExportButton filename={exportName} label="تصدير" />}
+        {extra}
       </div>
     </div>
   );

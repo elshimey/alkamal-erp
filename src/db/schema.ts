@@ -2099,7 +2099,7 @@ export const purchaseOrderLines = pgTable("purchase_order_lines", {
 
 // ───────────────────────── عروض الأسعار ─────────────────────────
 
-export const quotationStatus = pgEnum("quotation_status", ["draft", "sent", "accepted", "rejected"]);
+export const quotationStatus = pgEnum("quotation_status", ["draft", "sent", "accepted", "rejected", "cancelled"]);
 
 export const quotations = pgTable("quotations", {
   id: id(),
@@ -2109,6 +2109,9 @@ export const quotations = pgTable("quotations", {
   customerId: ref("customer_id").notNull().references(() => parties.id),
   currencyCode: varchar("currency_code", { length: 3 }).notNull().default("SAR").references(() => currencies.code),
   status: quotationStatus("status").notNull().default("draft"),
+  // دولي (خارج السعودية) = ضريبة صفرية، داخلي = 15%؛ يحدد ضريبة كل السطور
+  shippingType: varchar("shipping_type", { length: 15 }).$type<"international" | "domestic">().notNull().default("international"),
+  reference: text("reference"),
   subtotal: money("subtotal").notNull().default("0"),
   vatTotal: money("vat_total").notNull().default("0"),
   total: money("total").notNull().default("0"),

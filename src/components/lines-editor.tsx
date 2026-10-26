@@ -43,6 +43,8 @@ export function LinesEditor({
   name = "lines",
   totals,
   minRows = 3,
+  onChange,
+  totalsVat,
 }: {
   columns: LineColumn[];
   initial?: Row[];
@@ -50,6 +52,10 @@ export function LinesEditor({
   // مفاتيح الكمية والسعر ونسبة الضريبة لحساب الإجمالي
   totals?: { qty: string; price: string; vat?: string };
   minRows?: number;
+  /** يُبلَّغ بالسطور المستخدمة بعد كل تعديل (للمعاينة المباشرة) */
+  onChange?: (rows: Row[]) => void;
+  /** نسبة الضريبة حين تكون خانة الضريبة في السطر فارغة («حسب نوع الشحن») */
+  totalsVat?: number;
 }) {
   const withCreated = useCreatedOptions();
   const columns = baseColumns.map((c) => (c.create ? { ...c, options: withCreated(c.create, c.options) } : c));
@@ -83,9 +89,19 @@ export function LinesEditor({
   const blank = empty();
   const filled = rows.filter((r) => columns.some((c) => (r[c.key] ?? "").trim() && r[c.key] !== blank[c.key]));
 
+  const json = JSON.stringify(filled);
+  const report = useRef(onChange);
+  useEffect(() => {
+    report.current = onChange;
+  });
+  useEffect(() => {
+    report.current?.(JSON.parse(json));
+  }, [json]);
+
   const lineTotal = (r: Row) => (totals ? toNum(r[totals.qty]) * toNum(r[totals.price]) : 0);
   const sub = rows.reduce((t, r) => t + lineTotal(r), 0);
-  const vat = totals?.vat ? rows.reduce((t, r) => t + (lineTotal(r) * toNum(r[totals.vat!])) / 100, 0) : 0;
+  const rate = (r: Row) => ((r[totals!.vat!] ?? "") === "" && totalsVat !== undefined ? totalsVat : toNum(r[totals!.vat!]));
+  const vat = totals?.vat ? rows.reduce((t, r) => t + (lineTotal(r) * rate(r)) / 100, 0) : 0;
 
   const onPaste = (n: number, start: number) => (e: ClipboardEvent<HTMLElement>) => {
     if (!e.currentTarget.contains(e.target as Node)) return;
@@ -111,7 +127,7 @@ export function LinesEditor({
 
   return (
     <div>
-      <input ref={hidden} type="hidden" name={name} value={JSON.stringify(filled)} />
+      <input ref={hidden} type="hidden" name={name} value={json} />
       <div className="overflow-x-auto">
         <table className="w-full min-w-[44rem] text-sm">
           <thead className="border-b border-gray-200 text-xs text-gray-500">

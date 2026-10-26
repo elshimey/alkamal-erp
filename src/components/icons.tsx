@@ -86,6 +86,25 @@ const PATHS = {
   wrench: <path d="M14.5 6.5a4 4 0 0 0 5 5L12 19a2.1 2.1 0 0 1-3-3l7.5-7.5a4 4 0 0 1-2-2Z" />,
   upload: <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15" />,
   download: <path d="M12 4v12m0 0-4.5-4.5M12 16l4.5-4.5M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15" />,
+  dots: (
+    <>
+      <circle cx="12" cy="5" r="1.2" />
+      <circle cx="12" cy="12" r="1.2" />
+      <circle cx="12" cy="19" r="1.2" />
+    </>
+  ),
+  copy: <path d="M8 8h11v13H8Zm-3 8H4V3h11v1" />,
+  trash: <path d="M4 7h16M9 7V4h6v3m-8 0 1 14h8l1-14M10 11v6m4-6v6" />,
+  printer: <path d="M7 9V3h10v6M6 18H4v-7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v7h-2M7 14h10v7H7Z" />,
+  pencil: <path d="M4 20h4L19 9l-4-4L4 16Zm9-13 4 4" />,
+  undo: <path d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3" />,
+  ban: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="m5.6 5.6 12.8 12.8" />
+    </>
+  ),
+  send: <path d="m3 11 18-8-8 18-2-8Zm8 2 4-4" />,
   check: <path d="M5 12.5 10 17l9-10" />,
 } satisfies Record<string, ReactNode>;
 
