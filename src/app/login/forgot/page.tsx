@@ -43,7 +43,7 @@ export default async function ForgotPage() {
             <Field label="اسمك">
               <Input name="name" required autoComplete="name" className="py-2.5" />
             </Field>
-            <Field label="جوالك أو بريدك للتواصل">
+            <Field label="كيف يتواصل معك المدير؟" hint="رقم جوالك أو بريدك، ليبلغك بكلمة المرور الجديدة">
               <Input name="contact" required dir="ltr" autoComplete="tel" className="py-2.5" />
             </Field>
             <SubmitButton>إرسال الطلب لمدير النظام</SubmitButton>
