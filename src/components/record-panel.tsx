@@ -36,6 +36,8 @@ export function RecordPanel({
   embed,
   footer,
   savedHref,
+  wide = false,
+  toolbar,
   children,
 }: {
   title: string;
@@ -49,6 +51,10 @@ export function RecordPanel({
   footer?: ReactNode;
   /** وجهة ما بعد الحفظ بدل closeHref، و{id} يُستبدل برقم السجل المحفوظ (معاينة الأمر مثلاً) */
   savedHref?: string;
+  /** عرض كامل (نموذج بجانبه معاينة المستند) بدل العمود الواحد */
+  wide?: boolean;
+  /** أزرار إضافية في رأس النافذة بجانب «حفظ» (إخفاء المعاينة، طباعة…) */
+  toolbar?: ReactNode;
   children: ReactNode;
 }) {
   const router = useRouter();
@@ -135,6 +141,7 @@ export function RecordPanel({
         </div>
         <span className={`ms-2 hidden text-xs sm:inline ${dirty ? "font-semibold text-amber-700" : "text-gray-400"}`}>{dirty ? "تعديلات لم تُحفظ" : ""}</span>
         <div className="ms-auto flex items-center gap-2">
+          {toolbar}
           {creating && !embed && (
             <button type="button" disabled={saving} onClick={() => submit(true)} className="hidden rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-60 sm:block">
               حفظ وإضافة أخرى
@@ -162,7 +169,7 @@ export function RecordPanel({
           }}
           onInput={() => setDirty(true)}
           onChange={() => setDirty(true)}
-          className="mx-auto w-full max-w-4xl px-4 py-6 sm:px-6"
+          className={`mx-auto w-full px-4 py-6 sm:px-6 ${wide ? "max-w-[96rem]" : "max-w-4xl"}`}
         >
           {error && (
             <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm whitespace-pre-line text-red-800">

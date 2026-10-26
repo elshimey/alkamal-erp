@@ -7,7 +7,7 @@ import { DOC_KINDS } from "@/lib/doc-kinds";
 import { BULK_LIMIT } from "@/components/bulk-pdf";
 import { BatchExporter } from "./exporter";
 
-export default async function BatchPrintPage({ params, searchParams }: { params: Promise<{ kind: string }>; searchParams: Promise<{ ids?: string; zip?: string }> }) {
+export default async function BatchPrintPage({ params, searchParams }: { params: Promise<{ kind: string }>; searchParams: Promise<{ ids?: string; zip?: string; pdf?: string; print?: string }> }) {
   const kind = DOC_KINDS[(await params).kind];
   if (!kind) notFound();
   await requirePermission(kind.entity, "view");
@@ -22,7 +22,7 @@ export default async function BatchPrintPage({ params, searchParams }: { params:
   }
   return (
     <div className="mx-auto max-w-4xl">
-      <BatchExporter title={`${kind.title} (${docs.length})`} auto={sp.zip === "1"} />
+      <BatchExporter title={`${kind.title} (${docs.length})`} auto={sp.zip === "1" || sp.pdf === "1" || sp.print === "1"} mode={sp.pdf === "1" ? "pdf" : sp.print === "1" ? "print" : "zip"} />
       {docs.length === 0 && <p className="text-center text-sm text-gray-500">لا توجد مستندات</p>}
       <div className="space-y-8 print:space-y-0">
         {docs.map((d, i) => (

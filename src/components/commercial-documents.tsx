@@ -1,12 +1,17 @@
 import type { CompanyProfile } from "@/lib/company";
 import type { orderDoc } from "@/lib/purchasing";
-import type { quotationDoc } from "@/lib/quotations";
+import { SHIPPING_TYPES, type ShippingType } from "@/lib/quotations-data";
 import { DEFAULT_TEMPLATE, type InvoiceTemplate } from "@/lib/invoice-template";
 import { Facts, Frame } from "@/components/maintenance-document";
 import { fmt } from "@/lib/format";
 
 type Order = NonNullable<Awaited<ReturnType<typeof orderDoc>>>;
-type Quote = NonNullable<Awaited<ReturnType<typeof quotationDoc>>>;
+/** يكفي من العرض ما يُطبع، فتُبنى المعاينة المباشرة في نافذة التعديل من الحقول نفسها. */
+export interface QuoteView {
+  q: { number: string; quoteDate: string; validUntil: string; currencyCode: string; shippingType: ShippingType; reference: string | null; notes: string | null; terms: string | null; subtotal: string; vatTotal: string; total: string };
+  customer: { nameAr: string; vatNumber: string | null };
+  lines: { description: string; quantity: string; unitPrice: string; vatRate: string }[];
+}
 
 function Lines({ rows, currency, totals }: { rows: { description: string; quantity: string; unitPrice: string; vatRate: string }[]; currency: string; totals: { subtotal: number; vat: number; total: number } }) {
   return (
@@ -88,7 +93,7 @@ export function PurchaseOrderDocument({ company, doc, template = DEFAULT_TEMPLAT
 }
 
 /** عرض سعر للعميل بصلاحية محددة. */
-export function QuotationDocument({ company, doc, template = DEFAULT_TEMPLATE, compact = false }: { company: CompanyProfile; doc: Quote; template?: InvoiceTemplate; compact?: boolean }) {
+export function QuotationDocument({ company, doc, template = DEFAULT_TEMPLATE, compact = false }: { company: CompanyProfile; doc: QuoteView; template?: InvoiceTemplate; compact?: boolean }) {
   const { q } = doc;
   return (
     <Frame
@@ -104,13 +109,21 @@ export function QuotationDocument({ company, doc, template = DEFAULT_TEMPLATE, c
       ]}
       signatures={["المفوض بالتوقيع", "موافقة العميل"]}
     >
-      <Facts
-        rows={[
-          ["السادة", doc.customer.nameAr],
-          ["الرقم الضريبي", doc.customer.vatNumber],
-          ["ملاحظات", q.notes],
-        ]}
-      />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Facts
+          rows={[
+            ["السادة", doc.customer.nameAr],
+            ["الرقم الضريبي", doc.customer.vatNumber],
+            ["المرجع", q.reference],
+          ]}
+        />
+        <Facts
+          rows={[
+            ["نوع الشحن", `${SHIPPING_TYPES[q.shippingType].label} · ${SHIPPING_TYPES[q.shippingType].tax}`],
+            ["ملاحظات", q.notes],
+          ]}
+        />
+      </div>
       <Lines rows={doc.lines} currency={q.currencyCode} totals={{ subtotal: Number(q.subtotal), vat: Number(q.vatTotal), total: Number(q.total) }} />
       {(q.terms || template.terms) && (
         <div className="mt-6 rounded-lg bg-gray-50 px-4 py-3 text-xs whitespace-pre-line text-gray-600">

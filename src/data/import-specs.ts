@@ -63,6 +63,35 @@ export const IMPORT_SPECS: Record<string, ImportSpec> = {
     ],
   },
 
+  quotations: {
+    entity: "quotations",
+    title: "استيراد عروض الأسعار",
+    noun: "عرض",
+    permission: "sales_invoices",
+    backHref: "/quotations",
+    intro: "كل صف بند واحد. العرض ذو عدة بنود تُكرر صفوفه بنفس رقم العرض. نوع الشحن يحدد الضريبة: دولي صفري وداخلي 15%. تُستورد العروض مسودات.",
+    groupBy: "reference",
+    fields: [
+      { key: "customer", label: "اسم العميل", en: "Customer name", required: true, rule: MUST_MATCH, aliases: ["العميل", "customer"], width: 26 },
+      { key: "reference", label: "رقم العرض", en: "Quotation number", required: true, rule: "يجمع بنود العرض الواحد، ويُحفظ مرجعاً للعرض، ولا يُستورد الرقم مرتين", aliases: ["رقم المرجع", "المرجع", "quote no", "quotation no"], width: 16 },
+      { key: "date", label: "التاريخ", en: "Date", required: true, rule: "yyyy-mm-dd أو dd/mm/yyyy", aliases: ["تاريخ العرض", "quote date"], width: 13 },
+      { key: "validUntil", label: "صالح حتى", en: "Valid until", rule: "فارغ = بعد 15 يوماً من التاريخ", aliases: ["تاريخ الانتهاء", "expiry date", "تاريخ الإنتهاء"], width: 13 },
+      { key: "shippingType", label: "نوع الشحن", en: "Shipping type", rule: "دولي (ضريبة صفرية) أو داخلي (15%)، فارغ = دولي", aliases: ["النوع"], width: 12 },
+      { key: "currency", label: "العملة", en: "Currency", rule: "رمز العملة: SAR أو KWD أو USD، فارغ = SAR", width: 10 },
+      { key: "notes", label: "ملاحظات", en: "Notes", width: 24 },
+      { key: "terms", label: "الشروط", en: "Terms", width: 24 },
+      { key: "description", label: "وصف البند", en: "Item description", required: true, aliases: ["وصف المنتج", "الوصف", "البند"], width: 30 },
+      { key: "quantity", label: "الكمية", en: "Item qty", required: true, rule: "رقم أكبر من صفر", aliases: ["كمية المنتج"], width: 9 },
+      { key: "unitPrice", label: "السعر", en: "Item Price", required: true, rule: "سعر الوحدة قبل الضريبة", aliases: ["سعر المنتج"], width: 12 },
+      { key: "taxCode", label: "معدل الضريبة", en: "Item tax rate", rule: "15% أو صفر، فارغ = حسب نوع الشحن", aliases: ["الضريبة", "اسم معدل الضريبة للمنتج"], width: 14 },
+    ],
+    samples: [
+      { customer: "شركة مثال للتجارة", reference: "Q-001", date: "2026-10-01", validUntil: "2026-10-15", shippingType: "دولي", currency: "SAR", notes: "", terms: "", description: "نقل الدمام ← الكويت شاحنة سطحة", quantity: "2", unitPrice: "4500", taxCode: "" },
+      { customer: "شركة مثال للتجارة", reference: "Q-002", date: "2026-10-05", validUntil: "", shippingType: "داخلي", currency: "SAR", notes: "", terms: "", description: "نقل الرياض ← جدة", quantity: "1", unitPrice: "2200", taxCode: "" },
+      { customer: "شركة مثال للتجارة", reference: "Q-002", date: "2026-10-05", validUntil: "", shippingType: "داخلي", currency: "SAR", notes: "", terms: "", description: "تحميل وتنزيل", quantity: "1", unitPrice: "300", taxCode: "15%" },
+    ],
+  },
+
   vehicles: {
     entity: "vehicles",
     title: "استيراد المركبات",

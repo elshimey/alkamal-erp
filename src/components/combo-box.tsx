@@ -76,6 +76,7 @@ export function ComboBox({
   onCreated,
   disabled,
   allowEmpty = true,
+  autoOpen = false,
 }: {
   value: string;
   options: QuickOption[];
@@ -92,6 +93,8 @@ export function ComboBox({
   onCreated?: (option: QuickOption) => void;
   disabled?: boolean;
   allowEmpty?: boolean;
+  /** تفتح القائمة فور ظهور الخانة (خلية شيت نُقر عليها) */
+  autoOpen?: boolean;
 }) {
   const withCreated = useCreatedOptions();
   const all = withCreated(create, options);
@@ -99,7 +102,14 @@ export function ComboBox({
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const [query, setQuery] = useState<string | null>(null);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(autoOpen);
+  // فُتحت القائمة بنقرة الماوس التي أنشأت الحقل؛ تلك النقرة نفسها لا تغلقها
+  const skipClick = useRef(autoOpen);
+  useEffect(() => {
+    if (!skipClick.current) return;
+    const t = setTimeout(() => (skipClick.current = false), 400);
+    return () => clearTimeout(t);
+  }, []);
   const [active, setActive] = useState(0);
   const [dialog, setDialog] = useState<string | null>(null);
   const [pos, setPos] = useState<{
@@ -220,7 +230,10 @@ export function ComboBox({
           setOpen(true);
           setActive(0);
         }}
-        onClick={() => !disabled && setOpen((o) => !o)}
+        onClick={() => {
+          if (skipClick.current) return void (skipClick.current = false);
+          if (!disabled) setOpen((o) => !o);
+        }}
         onKeyDown={onKeyDown}
         onFocus={(e) => {
           inputProps?.onFocus?.(e);

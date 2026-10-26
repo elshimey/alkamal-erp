@@ -5,7 +5,7 @@ import { Icon } from "@/components/icons";
 import { downloadBlob, nodeToPdf, safeFileName } from "@/lib/pdf-client";
 
 /** يحوّل كل مستند في الصفحة إلى PDF مستقل ويجمعها في ملف مضغوط واحد للتنزيل. */
-export function BatchExporter({ title, auto }: { title: string; auto: boolean }) {
+export function BatchExporter({ title, auto, mode = "zip" }: { title: string; auto: boolean; mode?: "zip" | "pdf" | "print" }) {
   const [state, setState] = useState<{ done: number; total: number; busy: boolean; error?: string }>({ done: 0, total: 0, busy: false });
   const started = useRef(false);
 
@@ -14,6 +14,13 @@ export function BatchExporter({ title, auto }: { title: string; auto: boolean })
     if (!nodes.length) return;
     setState({ done: 0, total: nodes.length, busy: true });
     try {
+      // مستند واحد بصيغة PDF مباشرة دون ضغط
+      if (mode === "pdf" && nodes.length === 1) {
+        const pdf = await nodeToPdf(nodes[0]);
+        downloadBlob(new Blob([pdf], { type: "application/pdf" }), `${safeFileName(nodes[0].dataset.doc || title)}.pdf`);
+        setState({ done: 1, total: 1, busy: false });
+        return;
+      }
       const { default: JSZip } = await import("jszip");
       const zip = new JSZip();
       const used = new Map<string, number>();
@@ -37,7 +44,7 @@ export function BatchExporter({ title, auto }: { title: string; auto: boolean })
     if (!auto || started.current) return;
     started.current = true;
     // ننتظر تحميل الخطوط والصور قبل التحويل
-    const t = setTimeout(() => void document.fonts.ready.then(run), 600);
+    const t = setTimeout(() => void document.fonts.ready.then(mode === "print" ? () => window.print() : run), 600);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auto]);
@@ -71,7 +78,7 @@ export function BatchExporter({ title, auto }: { title: string; auto: boolean })
         </button>
         <button type="button" disabled={state.busy} onClick={run} className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-brand-900 shadow-sm hover:bg-brand-500 disabled:opacity-50">
           <Icon name="download" className="size-4" />
-          تنزيل ملف مضغوط
+          {mode === "pdf" && state.total <= 1 ? "تنزيل PDF" : "تنزيل ملف مضغوط"}
         </button>
       </div>
     </div>

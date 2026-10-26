@@ -44,7 +44,7 @@ import { createTransfer, deleteTransfer } from "@/lib/transfers";
 import { DEFAULT_ECL_RATES, deleteEcl, eclAging, eclCompute, postEcl, provisionBalance } from "@/lib/ecl";
 import { createStatement, postLineAsExpense, setStatementStatus, statementDetail } from "@/lib/fuel-cards";
 import { createPurchaseOrder, createPurchaseRequest, decideRequest, orderToInvoice, requestToOrderLines, setOrderStatus } from "@/lib/purchasing";
-import { createQuotation, quotationToInvoice } from "@/lib/quotations";
+import { createQuotation, deleteQuotation, duplicateQuotation, listQuotations, parseQuoteFilter, quotationLinesFor, quotationToInvoice, setQuotationStatus, updateQuotationFromSheet } from "@/lib/quotations";
 import { setupSteps } from "@/lib/setup";
 import ExcelJS from "exceljs";
 import { getAttachment, listAttachments, onceForOp, saveDataUrl } from "@/lib/attachments";
@@ -2131,6 +2131,63 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     expect(Number(si.total)).toBeCloseTo(Number(q.total));
     expect(si.status).toBe("draft");
     await expect(quotationToInvoice(db, q.id, { invoiceDate: `${YEAR + 1}-08-03` })).rejects.toThrow("مسبقاً");
+  });
+
+  it("عروض الأسعار: نوع الشحن يحدد الضريبة، والورقة تعدل البنود، والنسخ والإلغاء والبحث والاستيراد", async () => {
+    const [admin] = await db.select().from(s.users).limit(1);
+    const customer = await createParty(db, { nameAr: "عميل الشحن الدولي", roles: ["customer"] });
+    const d = `${YEAR + 1}-10-01`;
+    // دولي بلا ضريبة محددة = صفر، داخلي = 15%
+    const intl = await createQuotation(db, { date: d, validUntil: `${YEAR + 1}-10-11`, customerId: customer.id, shippingType: "international", reference: "PO-778", lines: [{ description: "نقل الدمام ← الكويت", quantity: 2, unitPrice: 4000, vatRate: null }], userId: admin.id });
+    expect([Number(intl.vatTotal), Number(intl.total)]).toEqual([0, 8000]);
+    const dom = await createQuotation(db, { date: d, validUntil: `${YEAR + 1}-10-11`, customerId: customer.id, shippingType: "domestic", lines: [{ description: "نقل الرياض ← جدة", quantity: 1, unitPrice: 1000, vatRate: null }], userId: admin.id });
+    expect(Number(dom.total)).toBeCloseTo(1150);
+
+    // الورقة: تغيير نوع الشحن ينقل البنود على الضريبة الافتراضية، وتعديل الكمية يعيد الحساب
+    const [l] = await quotationLinesFor(db, [intl.id]);
+    await updateQuotationFromSheet(db, intl.id, { header: { shippingType: "domestic" }, lines: { [l.id]: { quantity: 3 } } });
+    let [row] = await db.select().from(s.quotations).where(eq(s.quotations.id, intl.id));
+    expect([row.shippingType, Number(row.subtotal), Number(row.vatTotal)]).toEqual(["domestic", 12000, 1800]);
+    await updateQuotationFromSheet(db, intl.id, { header: { shippingType: "international" }, lines: {} });
+    [row] = await db.select().from(s.quotations).where(eq(s.quotations.id, intl.id));
+    expect(Number(row.vatTotal)).toBe(0);
+
+    // البحث في المرجع ووصف البند والمبلغ، والفلتر بالحالة
+    const f = (q: string, extra: Record<string, string> = {}) => listQuotations(db, parseQuoteFilter({ q, period: "all", ...extra }, d));
+    expect((await f("PO-778")).map((x) => x.q.id)).toEqual([intl.id]);
+    expect((await f("جدة")).map((x) => x.q.id)).toEqual([dom.id]);
+    expect((await f("1150")).map((x) => x.q.id)).toContain(dom.id);
+
+    // النسخ يحتفظ بمدة الصلاحية ويبدأ مسودة
+    const copy = await duplicateQuotation(db, intl.id, { date: `${YEAR + 1}-11-01`, userId: admin.id });
+    expect(copy).toMatchObject({ status: "draft", quoteDate: `${YEAR + 1}-11-01`, validUntil: `${YEAR + 1}-11-11`, shippingType: "international" });
+
+    // الملغى لا يُعدل ولا يُحول لفاتورة؛ الإعادة لمسودة تسمح بذلك
+    await setQuotationStatus(db, dom.id, "cancelled");
+    expect((await f("", { status: "cancelled" })).map((x) => x.q.id)).toEqual([dom.id]);
+    await expect(updateQuotationFromSheet(db, dom.id, { header: { notes: "x" }, lines: {} })).rejects.toThrow();
+    await expect(quotationToInvoice(db, dom.id, { invoiceDate: d })).rejects.toThrow();
+    await setQuotationStatus(db, dom.id, "draft");
+    const inv = await quotationToInvoice(db, dom.id, { invoiceDate: d, userId: admin.id });
+    await expect(deleteQuotation(db, dom.id)).rejects.toThrow();
+    await expect(setQuotationStatus(db, dom.id, "draft")).rejects.toThrow();
+    const [si] = await db.select().from(s.salesInvoices).where(eq(s.salesInvoices.id, inv.id));
+    expect(Number(si.vatTotal)).toBeCloseTo(150);
+    await deleteQuotation(db, copy.id);
+
+    // الاستيراد: بنود العرض الواحد تُجمع برقم العرض، ولا يُستورد الرقم مرتين
+    const rows = ([
+      { customer: "عميل الشحن الدولي", reference: "IMP-Q1", date: d, shippingType: "دولي", description: "نقل للكويت", quantity: "1", unitPrice: "5000" },
+      { customer: "عميل الشحن الدولي", reference: "IMP-Q2", date: d, shippingType: "داخلي", description: "نقل داخلي", quantity: "2", unitPrice: "500" },
+      { customer: "عميل الشحن الدولي", reference: "IMP-Q2", date: d, shippingType: "داخلي", description: "تحميل", quantity: "1", unitPrice: "100", taxCode: "صفر" },
+      { customer: "عميل غير موجود", reference: "IMP-Q3", date: d, description: "x", quantity: "1", unitPrice: "1" },
+    ] as Record<string, string>[]).map((values, i) => ({ row: i + 5, values }));
+    let report = await runImport(db, IMPORT_SPECS.quotations, rows, { dryRun: false, userId: admin.id });
+    expect(report).toMatchObject({ total: 3, ok: 2 });
+    const [q2] = await db.select().from(s.quotations).where(eq(s.quotations.reference, "IMP-Q2"));
+    expect([q2.shippingType, Number(q2.subtotal), Number(q2.vatTotal), q2.validUntil]).toEqual(["domestic", 1100, 150, `${YEAR + 1}-10-16`]);
+    report = await runImport(db, IMPORT_SPECS.quotations, rows.slice(0, 1), { dryRun: true });
+    expect(report.issues[0].message).toContain("مستورد مسبقاً");
   });
 
   it("الفوترة الإلكترونية: الاعتماد يسلسل العداد والبصمة، والرفض يتقدم بالسلسلة، وخطأ الخادم والانقطاع لا يغيّرانها", async () => {

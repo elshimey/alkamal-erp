@@ -3,6 +3,7 @@ import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
 import type { ImportSpec } from "@/data/import-specs";
 import { createManualInvoiceTx } from "@/lib/invoices";
+import { createQuotationTx } from "@/lib/quotations";
 import { createVehicle } from "@/lib/fleet";
 import { createParty } from "@/lib/operations";
 import { createReceipt } from "@/lib/receipts";
@@ -184,6 +185,42 @@ async function importInvoice(tx: Tx, rows: ImportRow[], ctx: Ctx, userId?: numbe
   if (!(lines.reduce((t, l) => t + l.amount + l.vatAmount, 0) > 0)) throw new Error(`إجمالي الفاتورة ${reference} صفر`);
   const inv = await createManualInvoiceTx(tx, { customerId, invoiceDate, dueDate, currencyCode, reference, notes: v(head, "notes") || null, userId, lines });
   return `${inv.number} ← ${reference}`;
+}
+
+// ───────────── عروض الأسعار ─────────────
+
+async function importQuotation(tx: Tx, rows: ImportRow[], ctx: Ctx, userId?: number) {
+  const head = rows[0];
+  const reference = required(head, "reference", "رقم العرض");
+  const customerName = required(head, "customer", "اسم العميل");
+  const customerId = resolve(ctx.idx.customers.find(customerName), customerName, "customer", "العميل");
+  const currencyRaw = v(head, "currency") || "SAR";
+  const currencyCode = resolve(ctx.idx.currencies.find(currencyRaw), currencyRaw, "currency", "العملة");
+  const date = toDate(required(head, "date", "التاريخ"), "التاريخ");
+  const validUntil = v(head, "validUntil") ? toDate(v(head, "validUntil"), "صالح حتى") : addDays(date, 15);
+  const shipRaw = normText(v(head, "shippingType"));
+  const shippingType = !shipRaw || /دولي|خارج|international|export/.test(shipRaw) ? "international" : /داخل|محلي|domestic|local/.test(shipRaw) ? "domestic" : null;
+  if (!shippingType) throw new Error(`نوع الشحن «${v(head, "shippingType")}» غير معروف؛ اكتب دولي أو داخلي`);
+  for (const r of rows.slice(1)) {
+    for (const [key, label] of [["customer", "اسم العميل"], ["date", "التاريخ"], ["shippingType", "نوع الشحن"]] as const) {
+      if (v(r, key) && normText(v(r, key)) !== normText(v(head, key))) throw new Error(`${label} يختلف بين بنود العرض ${reference} (الصف ${r.row})`);
+    }
+  }
+  const [dup] = await tx.select({ number: s.quotations.number }).from(s.quotations).where(eq(s.quotations.reference, reference)).limit(1);
+  if (dup) throw new Error(`العرض ${reference} مستورد مسبقاً برقم ${dup.number}`);
+  const lines = rows.map((r) => {
+    const at = rows.length > 1 ? ` (الصف ${r.row})` : "";
+    const taxRaw = v(r, "taxCode");
+    const tax = taxRaw ? resolve(ctx.idx.taxCodes.find(taxRaw), taxRaw, "taxCode", `معدل الضريبة${at}`) : null;
+    return {
+      description: required(r, "description", `وصف البند${at}`),
+      quantity: toNumber(required(r, "quantity", `الكمية${at}`), `الكمية${at}`, { positive: true }),
+      unitPrice: toNumber(required(r, "unitPrice", `السعر${at}`), `السعر${at}`, { positive: true }),
+      vatRate: tax ? Number(tax.rate) : null,
+    };
+  });
+  const q = await createQuotationTx(tx, { customerId, date, validUntil, currencyCode, shippingType, reference, notes: v(head, "notes"), terms: v(head, "terms"), lines, userId });
+  return `${q.number} ← ${reference}`;
 }
 
 // ───────────── المركبات ─────────────
@@ -459,6 +496,7 @@ async function importPlan(tx: Tx, [r]: ImportRow[], ctx: Ctx) {
 
 const IMPORTERS: Record<string, (tx: Tx, rows: ImportRow[], ctx: Ctx, userId?: number) => Promise<string>> = {
   "sales-invoices": importInvoice,
+  quotations: importQuotation,
   vehicles: importVehicle,
   customers: importCustomer,
   receipts: importReceipt,
@@ -529,6 +567,14 @@ export async function templateLists(db: Db, spec: ImportSpec): Promise<TemplateL
       { title: "المركبات (اللوحة)", values: ctx.vehicles.map((x) => x.plate).sort(), field: "costCenter" },
       { title: "مراكز التكلفة (الرمز)", values: ctx.costCenters.map((c) => c.code) },
       { title: "شامل/خالٍ من الضريبة", values: ["خالٍ من الضريبة", "شامل الضريبة"], field: "taxInclusive" },
+    ];
+  }
+  if (spec.entity === "quotations") {
+    return [
+      { title: "العملاء", values: ctx.customers.map((c) => c.nameAr).sort(), field: "customer" },
+      { title: "نوع الشحن", values: ["دولي", "داخلي"], field: "shippingType" },
+      { ...currencies, field: "currency" },
+      { title: "معدلات الضريبة", values: ["15%", "صفر"], field: "taxCode" },
     ];
   }
   if (spec.entity === "vehicles") {
