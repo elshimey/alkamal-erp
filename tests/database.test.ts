@@ -23,7 +23,7 @@ import { assignVehicle, createDriver, deleteDriver, updateDriver, createVehicle,
 import { addDocument, saveOwnerDocumentFields, approveSubmission, blockingDocumentIssues, dailySummary, documentRegister, expiringDocuments, listSubmissions, ownerDocuments, rejectSubmission, submitRenewal, summaryText } from "@/lib/documents";
 import { addSubAccount } from "@/lib/accounts";
 import { activeContract, createContract, createLocation, createParty, createRoute, priceTrip, setContractStatus } from "@/lib/operations";
-import { createInvoice, createReceipt, invoicingQueue, issueInvoice, listSalesInvoices, revertInvoice, revertReceipt, updateDraftInvoice } from "@/lib/invoices";
+import { createInvoice, createReceipt, invoicingQueue, issueInvoice, listSalesInvoices, revertInvoice, revertReceipt, unmergeInvoice, updateDraftInvoice } from "@/lib/invoices";
 import { parseDocFilter } from "@/lib/doc-filters";
 import { createExpense, approveExpense, createPayment, createPurchaseInvoice, custodyBalances, deletePurchaseInvoice, listPurchaseInvoices, postPurchaseInvoice, updateDraftPurchase, rejectExpense, revertExpense, revertPayment, revertPurchaseInvoice, supplierBalances } from "@/lib/purchases";
 import { addMaintenanceLines, approveBreakdownRequest, approveMaintenanceOrder, completeMaintenanceOrder, createBreakdownRequest, createMaintenanceOrder, deleteMaintenanceOrder, planSchedule, rejectBreakdownRequest, revertMaintenanceOrder, reviewBreakdownRequest, savePlan, listOrders, orderDoc, updateDraftOrder, createOrdersFrom, listRequests, requestDoc } from "@/lib/maintenance";
@@ -56,7 +56,7 @@ import { IMPORT_SPECS } from "@/data/import-specs";
 import * as hr from "@/lib/hr";
 import * as platform from "@/lib/platform";
 import { runInTenant, tenantClient } from "@/db/tenant";
-import { addExpense, addFuel, approvalIssues, approveWaybill, createWaybill, deleteWaybill, recordStage, rejectWaybill, revertWaybill, updateWaybill } from "@/lib/waybills";
+import { addExpense, addFuel, approvalIssues, approveWaybill, createWaybill, deleteWaybill, invoiceSelectedWaybills, listWaybills, parseWaybillFilter, patchWaybill, recordStage, rejectWaybill, revertWaybill, setWaybillStatus, updateWaybill } from "@/lib/waybills";
 
 const url = process.env.TEST_DATABASE_URL;
 const YEAR = 2026;
@@ -994,6 +994,82 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(c.eosbAccrual).toBe(2500);
       expect(computePayrollLine({ ...base, gosiSubject: false }).gosiEmployer).toBe(0);
       expect(computePayrollLine({ ...base, isSaudi: false }).gosiEmployee).toBe(0);
+    });
+
+    it("الشحنات من الجدول: الحالة للأمام والخلف، وفوترة المحدد لكل عميل، وفك الدمج، والبحث والتبويبات", async () => {
+      const D2 = `${YEAR}-12-10`;
+      const ov = { canOverride: true, overrideReason: "اختبار" };
+      const status = async (id: number) => (await db.select().from(s.waybills).where(eq(s.waybills.id, id)))[0];
+      const other = (await createParty(db, { nameAr: "مؤسسة الواحة", roles: ["customer"] })).id;
+      const mk = (cust: number, extra: Partial<Parameters<typeof createWaybill>[1]> = {}) => createWaybill(db, { waybillDate: D2, customerId: cust, routeId, shipper: "مصنع الجدول", consignee: "مستودع الواحة", vehicleId: vehicle.id, amount: 1000, ...extra });
+      const w1 = await mk(customerId, { containerNumber: "TBLU7654321" });
+      const w2 = await mk(customerId);
+      const w3 = await mk(other);
+      const w4 = await mk(other);
+
+      // للأمام خطوة خطوة حتى الاعتماد، ثم للخلف يلغي القيد
+      await setWaybillStatus(db, w1.id, "delivered");
+      expect((await status(w1.id)).status).toBe("delivered");
+      expect((await db.select().from(s.tripStages).where(eq(s.tripStages.waybillId, w1.id))).map((x) => x.stage)).toEqual(["in_transit", "delivery"]);
+      await setWaybillStatus(db, w1.id, "approved", ov);
+      const entryId = (await status(w1.id)).journalEntryId;
+      expect(entryId).not.toBeNull();
+      await setWaybillStatus(db, w1.id, "in_transit");
+      expect(await status(w1.id)).toMatchObject({ status: "in_transit", journalEntryId: null });
+      expect(await db.select().from(s.journalEntries).where(eq(s.journalEntries.id, entryId!))).toHaveLength(0);
+      await setWaybillStatus(db, w1.id, "draft");
+      expect((await status(w1.id)).status).toBe("draft");
+      for (const w of [w1, w2, w3]) await setWaybillStatus(db, w.id, "approved", ov);
+
+      // البحث والتبويبات
+      const today = `${YEAR}-12-28`;
+      const list = (sp: Record<string, string>) => listWaybills(db, parseWaybillFilter({ period: "all", ...sp }, today));
+      expect((await list({ q: "TBLU7654" })).rows.map((r) => r.w.id)).toEqual([w1.id]);
+      expect((await list({ q: "الواحة" })).rows.map((r) => r.w.id).sort()).toEqual([w1.id, w2.id, w3.id, w4.id].sort());
+      expect((await list({ q: "مكة" })).rows.length).toBeGreaterThanOrEqual(4);
+      let pending = await list({ status: "pending_invoice", q: "مصنع الجدول" });
+      expect(pending.rows.map((r) => r.w.id).sort()).toEqual([w1.id, w2.id, w3.id].sort());
+      expect(pending.counts).toMatchObject({ all: 4, draft: 1, approved: 3, pending_invoice: 3 });
+
+      // فوترة المحدد: فاتورة مسودة لكل عميل، والمسودة تُذكر برقمها
+      const res = await invoiceSelectedWaybills(db, [w1.id, w2.id, w3.id, w4.id], { invoiceDate: today });
+      expect(res.created.map((c) => c.count).sort()).toEqual([1, 2]);
+      expect(res.skipped).toEqual([expect.stringContaining(w4.number)]);
+      const invA = res.created.find((c) => c.count === 2)!;
+      const invB = res.created.find((c) => c.count === 1)!;
+      const [a] = await db.select().from(s.salesInvoices).where(eq(s.salesInvoices.id, invA.id));
+      expect([a.status, a.customerId, Number(a.subtotal), Number(a.vatTotal)]).toEqual(["draft", customerId, 2000, 300]);
+      await expect(setWaybillStatus(db, w1.id, "delivered")).rejects.toThrow("الفاتورة المسودة");
+      pending = await list({ status: "pending_invoice", q: "مصنع الجدول" });
+      expect(pending.rows).toHaveLength(0);
+      expect((await list({ q: "TBLU7654" })).rows[0].invoice).toBe(invA.number);
+
+      // فك الدمج يعيد الشحنات بانتظار الفوترة، والمصدرة لا تُفك ولا ترجع شحنتها
+      expect(await unmergeInvoice(db, invA.id)).toMatchObject({ waybills: 2 });
+      pending = await list({ status: "pending_invoice", q: "مصنع الجدول" });
+      expect(pending.rows.map((r) => r.w.id).sort()).toEqual([w1.id, w2.id].sort());
+      await issueInvoice(db, invB.id);
+      await expect(unmergeInvoice(db, invB.id)).rejects.toThrow("مُصدرة");
+      await expect(setWaybillStatus(db, w3.id, "draft")).rejects.toThrow("مفوترة");
+
+      // تعديل حقول من الورقة: تغيير التاريخ يعيد حساب السعر غير اليدوي، والمرسل يبقى
+      const w5 = await mk(customerId, { amount: null, waybillDate: `${YEAR}-08-20` });
+      expect(Number(w5.amount)).toBe(3000);
+      const p5 = await patchWaybill(db, w5.id, { waybillDate: `${YEAR + 1}-01-15` });
+      expect([Number(p5.amount), p5.priceNote, p5.shipper, p5.number]).toEqual([0, "لا يوجد عقد ساري", "مصنع الجدول", w5.number]);
+      const p1 = await patchWaybill(db, w4.id, { consignee: "مستلم جديد", customerId });
+      expect([p1.customerId, p1.consignee, Number(p1.amount)]).toEqual([customerId, "مستلم جديد", 1000]);
+
+      // الاستيراد: المسار بمدينتيه، والمركبة باللوحة، والسعر من العقد
+      const rows = [
+        { date: D2, customer: "شركة النخيل", from: "جدة", to: "مكة", vehicle: "ر س ت 999", shipper: "مصنع الاستيراد", consignee: "مستلم", weight: "20" },
+        { date: D2, customer: "شركة النخيل", from: "جدة", to: "الرياض", vehicle: "ر س ت 999", shipper: "أ", consignee: "ب" },
+      ].map((values, i) => ({ row: i + 5, values: values as Record<string, string> }));
+      const report = await runImport(db, IMPORT_SPECS.waybills, rows, { dryRun: false });
+      expect(report).toMatchObject({ total: 2, ok: 1 });
+      expect(report.issues[0].message).toContain("لا يوجد مسار");
+      const [imp] = await db.select().from(s.waybills).where(eq(s.waybills.shipper, "مصنع الاستيراد"));
+      expect([imp.status, Number(imp.amount), imp.driverId]).toEqual(["draft", 3000, driver.id]);
     });
   });
   describe("تطبيق السائق", () => {

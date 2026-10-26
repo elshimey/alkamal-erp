@@ -8,7 +8,7 @@ import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
 import { todayRiyadh } from "@/lib/dates";
-import { addWaybillsToInvoice, createAllInvoices, createInvoice, deleteInvoice, issueInvoice, removeInvoiceLine, revertInvoice, updateDraftInvoice, type DraftInvoicePatch } from "@/lib/invoices";
+import { addWaybillsToInvoice, createAllInvoices, createInvoice, deleteInvoice, issueInvoice, removeInvoiceLine, revertInvoice, unmergeInvoice, updateDraftInvoice, type DraftInvoicePatch } from "@/lib/invoices";
 import type { SheetChange, DocSheetResult } from "@/components/doc-sheet";
 import type { FormState } from "@/components/action-form";
 import { autoSubmit, submitDocument } from "@/lib/zatca/service";
@@ -157,4 +157,25 @@ export async function saveInvoiceSheet(payload: string): Promise<DocSheetResult>
   }
   refresh();
   return { ok: saved ? `حُفظت تعديلات ${saved} فاتورة` : undefined, errors };
+}
+
+/** فك الدمج من قائمة عمليات الفاتورة المسودة: تعود الشحنات بانتظار الفوترة. */
+export async function unmerge(id: number): Promise<FormState> {
+  const user = await requirePermission("sales_invoices", "delete");
+  let msg: string;
+  try {
+    const r = await unmergeInvoice(db, id, user.id);
+    msg = r.number;
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+  refresh();
+  revalidatePath("/waybills");
+  void msg;
+  redirect("/waybills?status=pending_invoice");
+}
+
+/** إرجاع فاتورة مصدرة لمسودة من قائمة العمليات (ممنوع إذا عليها قبض). */
+export async function revertFromMenu(id: number): Promise<FormState> {
+  return revert(id);
 }
