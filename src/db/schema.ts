@@ -37,6 +37,8 @@ export const users = pgTable("users", {
   name: text("name").notNull(),
   // الجوال أو البريد، وهو اسم الدخول
   login: varchar("login", { length: 120 }).notNull().unique(),
+  // بريد استرجاع كلمة المرور (إن لم يكن اسم الدخول نفسه بريداً)
+  email: varchar("email", { length: 120 }),
   passwordHash: text("password_hash").notNull(),
   locale: varchar("locale", { length: 5 }).notNull().default("ar"),
   isActive: boolean("is_active").notNull().default(true),

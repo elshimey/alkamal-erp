@@ -16,6 +16,7 @@ import type { FormState } from "@/components/action-form";
 const UserSchema = z.object({
   name: z.string().trim().min(2, "الاسم إلزامي"),
   login: z.string().trim().min(3, "اسم الدخول إلزامي (الجوال أو البريد)"),
+  email: z.union([z.literal(""), z.string().trim().email("البريد الإلكتروني غير صحيح")]),
   password: z.string().min(MIN_PASSWORD_LENGTH, `كلمة المرور ${MIN_PASSWORD_LENGTH} أحرف على الأقل`),
   roleIds: z.array(z.coerce.number().int().positive()).min(1, "اختر دوراً واحداً على الأقل"),
   trialDays: z.coerce.number().int().min(0).max(365),
@@ -29,19 +30,20 @@ export async function createUser(_: FormState, data: FormData): Promise<FormStat
   const parsed = UserSchema.safeParse({
     name: data.get("name"),
     login: data.get("login"),
+    email: String(data.get("email") ?? "").trim(),
     password: data.get("password"),
     roleIds: data.getAll("roleIds"),
     trialDays: data.get("trialDays") ?? 0,
     driverId: data.get("driverId") || 0,
   });
   if (!parsed.success) return { error: parsed.error.issues.map((i) => i.message).join("\n") };
-  const { name, login, password, roleIds, trialDays, driverId } = parsed.data;
+  const { name, login, email, password, roleIds, trialDays, driverId } = parsed.data;
   const expiresAt = trialDays ? new Date(Date.now() + trialDays * DAY) : null;
   try {
     await db.transaction(async (tx) => {
       const [user] = await tx
         .insert(s.users)
-        .values({ name, login, passwordHash: await hashPassword(password), expiresAt })
+        .values({ name, login, email: email || null, passwordHash: await hashPassword(password), expiresAt })
         .returning({ id: s.users.id });
       await tx.insert(s.userRoles).values(roleIds.map((roleId) => ({ userId: user.id, roleId })));
       // حساب بدور «سائق» لا يعمل في تطبيق السائق إلا مربوطاً بسائقه
