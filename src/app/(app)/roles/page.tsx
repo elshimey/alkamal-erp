@@ -21,9 +21,9 @@ export default async function RolesPage() {
 
   return (
     <>
-      <PageHeader title="الأدوار والصلاحيات" description="الأدوار الأساسية ثابتة. أنشئ أدواراً مخصصة (مثل موظف التشغيل أو مشرف الصيانة) واختر صلاحياتها من المصفوفة." />
+      <PageHeader title="الأدوار والصلاحيات" description="افتح أي دور لتعديل صلاحياته، أو أضف دوراً جديداً (مثل موظف التشغيل أو مشرف الصيانة) واختر صلاحياته من المصفوفة." />
       {can(me.perms, "roles", "create") && (
-        <Card title="دور مخصص جديد" className="mb-6">
+        <Card title="+ إضافة دور جديد" className="mb-6">
           <ActionForm action={createRole} className="grid gap-4 sm:grid-cols-[2fr_2fr_auto] sm:items-end">
             <Field label="اسم الدور">
               <Input name="nameAr" required placeholder="موظف التشغيل" />
@@ -40,11 +40,11 @@ export default async function RolesPage() {
                   ))}
               </Select>
             </Field>
-            <SubmitButton>إنشاء</SubmitButton>
+            <SubmitButton>إضافة الدور</SubmitButton>
           </ActionForm>
         </Card>
       )}
-      <Table head={["الدور", "النوع", "الوصف", "المستخدمون", "الصلاحيات"]}>
+      <Table head={["الدور", "النوع", "الوصف", "المستخدمون", "الصلاحيات", ""]}>
         {roles.map(({ role, users, perms }) => (
           <tr key={role.id}>
             <Td className="font-medium">
@@ -56,6 +56,11 @@ export default async function RolesPage() {
             <Td className="max-w-md text-xs text-gray-500">{role.description}</Td>
             <Td className="ltr-nums">{users}</Td>
             <Td className="ltr-nums">{role.key === "admin" ? "الكل" : perms}</Td>
+            <Td>
+              <Link href={`/roles/${role.id}`} className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50">
+                {role.key === "admin" ? "عرض" : can(me.perms, "roles", "update") ? "تعديل الصلاحيات" : "عرض"}
+              </Link>
+            </Td>
           </tr>
         ))}
       </Table>

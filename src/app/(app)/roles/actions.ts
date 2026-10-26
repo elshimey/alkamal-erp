@@ -2,12 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { eq } from "drizzle-orm";
+import { count, eq } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
-import { ALL_ACTIONS, ENTITIES, SPECIAL, SPECIAL_ENTITY, type Scope } from "@/lib/permissions";
+import { ALL_ACTIONS, CORE_ROLES, ENTITIES, SPECIAL, SPECIAL_ENTITY, type Scope } from "@/lib/permissions";
 import type { FormState } from "@/components/action-form";
 
 export async function createRole(_: FormState, data: FormData): Promise<FormState> {
@@ -35,7 +35,7 @@ export async function saveRolePermissions(roleId: number, _: FormState, data: Fo
   await requirePermission("roles", "update");
   const [role] = await db.select().from(s.roles).where(eq(s.roles.id, roleId));
   if (!role) return { error: "الدور غير موجود" };
-  if (role.isSystem) return { error: "الأدوار الأساسية ثابتة؛ انسخها إلى دور مخصص لتعديلها" };
+  if (role.key === "admin") return { error: "مدير النظام يملك كل الصلاحيات دائماً" };
 
   const selected = new Set(data.getAll("p").map(String));
   const rows: { roleId: number; entity: string; action: string; scope: Scope }[] = [];
@@ -55,4 +55,44 @@ export async function saveRolePermissions(roleId: number, _: FormState, data: Fo
   });
   revalidatePath(`/roles/${roleId}`);
   return { ok: `حُفظت صلاحيات «${role.nameAr}» (${rows.length} صلاحية)` };
+}
+
+/** يعيد صلاحيات دور أساسي (المدير، المحاسب، السائق) إلى ما جاء مع البرنامج. */
+export async function restoreRoleDefaults(roleId: number): Promise<FormState> {
+  await requirePermission("roles", "update");
+  const [role] = await db.select().from(s.roles).where(eq(s.roles.id, roleId));
+  const core = CORE_ROLES.find((r) => r.key === role?.key);
+  if (!role || !core || core.key === "admin") return { error: "الاستعادة للأدوار الأساسية فقط" };
+  await db.transaction(async (tx) => {
+    await tx.delete(s.rolePermissions).where(eq(s.rolePermissions.roleId, roleId));
+    if (core.permissions.length) await tx.insert(s.rolePermissions).values(core.permissions.map((p) => ({ ...p, roleId })));
+  });
+  revalidatePath(`/roles/${roleId}`);
+  return { ok: `عادت صلاحيات «${role.nameAr}» إلى الافتراضية` };
+}
+
+export async function renameRole(roleId: number, _: FormState, data: FormData): Promise<FormState> {
+  await requirePermission("roles", "update");
+  const nameAr = String(data.get("nameAr") ?? "").trim();
+  const description = String(data.get("description") ?? "").trim() || null;
+  if (nameAr.length < 2) return { error: "اكتب اسم الدور" };
+  const [role] = await db.select().from(s.roles).where(eq(s.roles.id, roleId));
+  if (!role) return { error: "الدور غير موجود" };
+  if (role.isSystem) return { error: "أسماء الأدوار الأساسية ثابتة" };
+  await db.update(s.roles).set({ nameAr, description }).where(eq(s.roles.id, roleId));
+  revalidatePath(`/roles/${roleId}`);
+  revalidatePath("/roles");
+  return { ok: "حُفظ اسم الدور" };
+}
+
+export async function deleteRole(roleId: number): Promise<FormState> {
+  await requirePermission("roles", "delete");
+  const [role] = await db.select().from(s.roles).where(eq(s.roles.id, roleId));
+  if (!role) return { error: "الدور غير موجود" };
+  if (role.isSystem) return { error: "لا يمكن حذف الأدوار الأساسية" };
+  const [{ n }] = await db.select({ n: count() }).from(s.userRoles).where(eq(s.userRoles.roleId, roleId));
+  if (n > 0) return { error: `الدور مسند إلى ${n} مستخدم؛ غيّر دورهم من صفحة المستخدمين أولاً` };
+  await db.delete(s.roles).where(eq(s.roles.id, roleId));
+  revalidatePath("/roles");
+  redirect("/roles");
 }

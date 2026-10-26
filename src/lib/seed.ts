@@ -117,8 +117,9 @@ export async function seedCoreRoles(db: Db) {
         set: { nameAr: role.nameAr, description: role.description, isSystem: true },
       })
       .returning({ id: s.roles.id });
-    await db.delete(s.rolePermissions).where(eq(s.rolePermissions.roleId, row.id));
-    if (role.permissions.length) {
+    // لا نمسح ما عدّله مدير الشركة: الافتراضية تُكتب فقط لدور بلا صلاحيات (شركة جديدة)
+    const existing = await db.select({ id: s.rolePermissions.roleId }).from(s.rolePermissions).where(eq(s.rolePermissions.roleId, row.id)).limit(1);
+    if (role.permissions.length && !existing.length) {
       await db.insert(s.rolePermissions).values(role.permissions.map((p) => ({ ...p, roleId: row.id })));
     }
   }

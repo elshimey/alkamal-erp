@@ -6,8 +6,9 @@ import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { ACTIONS, ALL_ACTIONS, ALL_ENTITIES, ENTITIES, MODULES, SPECIAL, SPECIAL_ENTITY, can, type Module } from "@/lib/permissions";
 import { ActionForm, SubmitButton } from "@/components/action-form";
-import { Badge, Card, PageHeader } from "@/components/ui";
-import { saveRolePermissions } from "../actions";
+import { Badge, Card, Field, Input, PageHeader } from "@/components/ui";
+import { DialogButton } from "@/components/dialog-button";
+import { deleteRole, renameRole, restoreRoleDefaults, saveRolePermissions } from "../actions";
 
 export default async function RolePage({ params }: { params: Promise<{ id: string }> }) {
   const me = await requirePermission("roles", "view");
@@ -16,22 +17,64 @@ export default async function RolePage({ params }: { params: Promise<{ id: strin
   const [role] = await db.select().from(s.roles).where(eq(s.roles.id, roleId));
   if (!role) notFound();
   const perms = await db.select().from(s.rolePermissions).where(eq(s.rolePermissions.roleId, roleId));
+  const users = await db.select({ id: s.userRoles.userId }).from(s.userRoles).where(eq(s.userRoles.roleId, roleId));
 
   const isAdmin = role.key === "admin";
-  const editable = !role.isSystem && can(me.perms, "roles", "update");
+  const editable = !isAdmin && can(me.perms, "roles", "update");
   const has = (entity: string, action: string) => isAdmin || perms.some((p) => p.entity === entity && p.action === action);
   const scopeOf = (entity: string) => (perms.some((p) => p.entity === entity && p.scope === "own") ? "own" : "all");
 
   return (
     <>
       <PageHeader title={role.nameAr} description={role.description ?? undefined}>
-        <Link href="/roles" className="text-sm text-brand-700 hover:underline">
-          ← كل الأدوار
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          {editable && role.isSystem && (
+            <DialogButton label="استعادة الصلاحيات الافتراضية" title={`استعادة صلاحيات «${role.nameAr}»`}>
+              <p className="mb-3 text-sm leading-relaxed text-gray-600">تعود صلاحيات هذا الدور كما جاءت مع البرنامج، وتُلغى تعديلاتك عليه.</p>
+              <ActionForm action={restoreRoleDefaults.bind(null, roleId)} resetOnSuccess={false}>
+                <SubmitButton>تأكيد الاستعادة</SubmitButton>
+              </ActionForm>
+            </DialogButton>
+          )}
+          {editable && !role.isSystem && (
+            <DialogButton label="تعديل الاسم" title="اسم الدور ووصفه">
+              <ActionForm action={renameRole.bind(null, roleId)} resetOnSuccess={false} className="flex flex-col gap-3">
+                <Field label="اسم الدور">
+                  <Input name="nameAr" required defaultValue={role.nameAr} />
+                </Field>
+                <Field label="الوصف">
+                  <Input name="description" defaultValue={role.description ?? ""} />
+                </Field>
+                <div>
+                  <SubmitButton>حفظ</SubmitButton>
+                </div>
+              </ActionForm>
+            </DialogButton>
+          )}
+          {!role.isSystem && can(me.perms, "roles", "delete") && (
+            <DialogButton label="حذف الدور" title={`حذف «${role.nameAr}»`} danger>
+              {users.length ? (
+                <p className="text-sm leading-relaxed text-gray-600">الدور مسند إلى {users.length} مستخدم. غيّر دورهم من صفحة المستخدمين أولاً ثم احذفه.</p>
+              ) : (
+                <>
+                  <p className="mb-3 text-sm leading-relaxed text-gray-600">يُحذف الدور وصلاحياته نهائياً.</p>
+                  <ActionForm action={deleteRole.bind(null, roleId)} resetOnSuccess={false}>
+                    <SubmitButton className="!bg-red-600 !text-white hover:!bg-red-500">تأكيد الحذف</SubmitButton>
+                  </ActionForm>
+                </>
+              )}
+            </DialogButton>
+          )}
+          <Link href="/roles" className="text-sm text-brand-700 hover:underline">
+            ← كل الأدوار
+          </Link>
+        </div>
       </PageHeader>
       {role.isSystem && (
         <p className="mb-4 rounded-lg bg-brand-50 px-4 py-3 text-sm text-brand-700">
-          {isAdmin ? "مدير النظام يملك كل الصلاحيات دائماً." : "دور أساسي ثابت. لتعديله أنشئ دوراً مخصصاً بنسخة منه."}
+          {isAdmin
+            ? "مدير النظام يملك كل الصلاحيات دائماً، ولا تحتاج مصفوفته إلى تعديل."
+            : "دور أساسي: عدّل صلاحياته كما تناسب شركتك ثم اضغط «حفظ الصلاحيات»، ويمكنك إرجاعها في أي وقت بزر «استعادة الصلاحيات الافتراضية»."}
         </p>
       )}
       <ActionForm action={saveRolePermissions.bind(null, roleId)} resetOnSuccess={false}>
@@ -88,7 +131,7 @@ export default async function RolePage({ params }: { params: Promise<{ id: strin
               <SubmitButton>حفظ الصلاحيات</SubmitButton>
             </div>
           ) : (
-            !role.isSystem && <Badge>للعرض فقط</Badge>
+            !isAdmin && <Badge>للعرض فقط</Badge>
           )}
         </fieldset>
       </ActionForm>
