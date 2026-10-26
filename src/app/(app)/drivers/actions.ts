@@ -9,6 +9,11 @@ import { cell, saveSheetRows, type SheetRow } from "@/lib/sheet-server";
 import { createDriverLogin, removeDriverLogin, resetDriverPassword } from "@/lib/driver-app";
 import { errorMessage } from "@/lib/errors";
 import type { FormState } from "@/components/action-form";
+import type { PanelResult } from "@/components/record-panel";
+import { eq } from "drizzle-orm";
+import * as s from "@/db/schema";
+import { saveOwnerDocumentFields } from "@/lib/documents";
+import { loadRecord, parseForm, RECORDS } from "@/lib/records";
 
 const LANGS = ["ar", "ur", "hi", "en"] as const;
 
@@ -120,4 +125,58 @@ export async function removeDriverLoginAction(id: number): Promise<FormState> {
   revalidatePath("/drivers");
   revalidatePath(`/drivers/${id}`);
   return { ok: "حُذف حساب الدخول؛ يمكنك إنشاء حساب جديد له" };
+}
+
+/** رقم الإقامة والرخصة وبطاقة النقل في بيانات السائق تؤخذ من وثائقه فلا تُكتب مرتين. */
+const DOC_NUMBER_FIELDS = { d_residency: "residencyNumber", d_license: "licenseNumber", d_professional_card: "transportCardNumber" } as const;
+
+/** حفظ سائق واحد من نافذة الإضافة أو التعديل: بياناته ووثائقه وحساب تطبيقه في معاملة واحدة. */
+export async function saveDriverAction(id: number | null, data: FormData): Promise<PanelResult> {
+  const user = await requirePermission("drivers", id ? "update" : "create");
+  try {
+    const v = parseForm(RECORDS.drivers, data);
+    const before = id ? await loadRecord("drivers", id) : null;
+    if (id && !before) throw new Error("السائق غير موجود");
+    const name = String(v.nameAr ?? "").trim();
+    const lang = (LANGS as readonly string[]).includes(String(v.appLanguage)) ? (v.appLanguage as (typeof LANGS)[number]) : "ar";
+    const login = str(data, "login");
+    const password = String(data.get("password") ?? "");
+    if (login || password) await requirePermission("users", "create");
+    const input = {
+      nameAr: name,
+      mobile: (v.mobile as string | null) ?? null,
+      nationality: (v.nationality as string | null) ?? null,
+      nationalId: (v.nationalId as string | null) ?? null,
+      residencyNumber: (before?.residencyNumber as string | null) ?? null,
+      licenseNumber: (before?.licenseNumber as string | null) ?? null,
+      transportCardNumber: (before?.transportCardNumber as string | null) ?? null,
+      appLanguage: lang,
+      commissionClass: v.commissionClass === "international" ? ("international" as const) : ("domestic" as const),
+      hireDate: (v.hireDate as string | null) ?? null,
+      basicSalary: (v.basicSalary as number | null) ?? 0,
+      custodyLimit: (v.custodyLimit as number | null) ?? null,
+    };
+    const savedId = await db.transaction(async (tx) => {
+      let driverId = id;
+      if (id) {
+        const status = STATUSES.includes(v.status as DriverStatus) ? (v.status as DriverStatus) : "active";
+        await updateDriver(tx, id, { ...input, birthDate: str(data, "birthDate") || null, status });
+      } else {
+        driverId = (await createDriver(tx, input)).id;
+        const birth = str(data, "birthDate");
+        if (birth) await tx.update(s.drivers).set({ birthDate: birth }).where(eq(s.drivers.id, driverId));
+      }
+      const numbers = await saveOwnerDocumentFields(tx, { kind: "driver", id: driverId! }, data, user.id);
+      const sync = Object.fromEntries(Object.entries(DOC_NUMBER_FIELDS).flatMap(([code, field]) => (numbers.has(code) ? [[field, numbers.get(code)]] : [])));
+      if (Object.keys(sync).length) await tx.update(s.drivers).set(sync).where(eq(s.drivers.id, driverId!));
+      if (login || password) await createDriverLogin(tx, { driverId: driverId!, login, password });
+      return driverId!;
+    });
+    revalidatePath("/drivers");
+    revalidatePath(`/drivers/${savedId}`);
+    revalidatePath("/fleet-documents", "layout");
+    return { ok: id ? `حُفظت بيانات ${name}` : `أُضيف السائق ${name}${login ? ` وحساب دخوله «${login}»` : ""}`, id: savedId, label: name };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
 }

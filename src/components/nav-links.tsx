@@ -6,6 +6,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { Icon, type IconName } from "./icons";
 import { Logo } from "./logo";
+import { useSidebarMenu } from "./sidebar";
 
 export interface NavGroup {
   title: string;
@@ -53,6 +54,8 @@ export function NavLinks({
   // تُغلق القائمة بالانتقال لصفحة أخرى
   const open = opened?.path === path ? opened : null;
   const panel = useRef<HTMLDivElement>(null);
+  const setMenuOpen = useSidebarMenu();
+  useEffect(() => setMenuOpen(!!open), [open, setMenuOpen]);
 
   // وبالضغط خارجها أو بزر Esc
   useEffect(() => {

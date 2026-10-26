@@ -229,6 +229,8 @@ export function ComboBox({
         onBlur={(e) => {
           inputProps?.onBlur?.(e);
           commit();
+          // الانتقال لخانة أخرى يغلق قائمة هذه الخانة دائماً، حتى لو لم يُكتب فيها شيء
+          setOpen(false);
         }}
       />
       {open &&

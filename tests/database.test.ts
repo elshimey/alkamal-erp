@@ -19,7 +19,7 @@ import { verifyPassword } from "@/lib/password";
 import { createJournalEntry } from "@/lib/ledger";
 import { getCompany, getInvoiceTemplate, invoiceReadiness, saveCompany, saveInvoiceTemplate } from "@/lib/company";
 import { assignVehicle, createDriver, deleteDriver, updateDriver, createVehicle, driverOnDate, releaseAssignment } from "@/lib/fleet";
-import { addDocument, approveSubmission, blockingDocumentIssues, dailySummary, documentRegister, expiringDocuments, listSubmissions, ownerDocuments, rejectSubmission, submitRenewal, summaryText } from "@/lib/documents";
+import { addDocument, saveOwnerDocumentFields, approveSubmission, blockingDocumentIssues, dailySummary, documentRegister, expiringDocuments, listSubmissions, ownerDocuments, rejectSubmission, submitRenewal, summaryText } from "@/lib/documents";
 import { addSubAccount } from "@/lib/accounts";
 import { activeContract, createContract, createLocation, createParty, createRoute, priceTrip, setContractStatus } from "@/lib/operations";
 import { createInvoice, createReceipt, invoicingQueue, issueInvoice, listSalesInvoices, revertInvoice, revertReceipt, updateDraftInvoice } from "@/lib/invoices";
@@ -332,6 +332,39 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect([row.vehicleId, row.driverId, row.employeeId, row.partyId]).toEqual([null, null, null, null]);
       expect((await expiringDocuments(db, `${YEAR}-07-01`)).map((d) => d.owner)).toEqual(["الشركة"]);
       await db.delete(s.fleetDocuments).where(eq(s.fleetDocuments.id, row.id));
+    });
+
+    it("خانات الوثائق في نافذة الصاحب: إضافة، تصحيح، تجديد", async () => {
+      const types = await db.select().from(s.documentTypes);
+      const fit = types.find((t) => t.code === "v_inspection")!.id;
+      const owner = { kind: "vehicle" as const, id: vehicleId };
+      const form = (f: Record<string, string>) => {
+        const d = new FormData();
+        for (const [k, v] of Object.entries(f)) d.set(`doc.${fit}.${k}`, v);
+        return d;
+      };
+      const mine = () => db.select().from(s.fleetDocuments).where(and(eq(s.fleetDocuments.vehicleId, vehicleId), eq(s.fleetDocuments.documentTypeId, fit)));
+      // خانات فارغة لا تُنشئ شيئاً
+      await db.transaction((tx) => saveOwnerDocumentFields(tx, owner, form({ number: "", issue: "", expiry: "" })));
+      expect(await mine()).toHaveLength(0);
+      const nums = await db.transaction((tx) => saveOwnerDocumentFields(tx, owner, form({ number: "F-1", issue: `${YEAR}-01-01`, expiry: `${YEAR}-12-31` })));
+      expect(nums.get("v_inspection")).toBe("F-1");
+      let docs = await mine();
+      expect(docs).toHaveLength(1);
+      const first = docs[0].id;
+      // نفس الانتهاء ورقم مختلف: تصحيح لنفس الوثيقة
+      await db.transaction((tx) => saveOwnerDocumentFields(tx, owner, form({ current: String(first), number: "F-1B", issue: `${YEAR}-01-01`, expiry: `${YEAR}-12-31` })));
+      docs = await mine();
+      expect(docs.map((d) => d.number)).toEqual(["F-1B"]);
+      // انتهاء جديد: تجديد بسجل جديد وتبقى السابقة
+      await db.transaction((tx) => saveOwnerDocumentFields(tx, owner, form({ current: String(first), number: "", issue: "", expiry: `${YEAR + 1}-12-31` })));
+      docs = await mine();
+      expect(docs).toHaveLength(2);
+      expect(docs.find((d) => d.id !== first)!.number).toBe("F-1B");
+      // أخطاء واضحة باسم الوثيقة
+      await expect(db.transaction((tx) => saveOwnerDocumentFields(tx, owner, form({ issue: `${YEAR}-05-01`, expiry: `${YEAR}-01-01` })))).rejects.toThrow("الإصدار بعد");
+      await expect(db.transaction((tx) => saveOwnerDocumentFields(tx, { kind: "driver", id: driverA }, form({ current: String(first), expiry: `${YEAR}-06-01` })))).rejects.toThrow();
+      await db.delete(s.fleetDocuments).where(and(eq(s.fleetDocuments.vehicleId, vehicleId), eq(s.fleetDocuments.documentTypeId, fit)));
     });
   });
 

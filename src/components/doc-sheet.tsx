@@ -1,5 +1,6 @@
 "use client";
 
+import { useUnsavedGuard } from "./unsaved-guard";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition, type KeyboardEvent } from "react";
@@ -62,6 +63,7 @@ export function DocSheet({ columns, rows, action, emptyText }: { columns: DocShe
   const value = (row: DocSheetRow, col: string) => edits[k(row.id, col)] ?? row.cells[col] ?? "";
   const canEdit = (r: number, c: number) => !!rows[r]?.editable && !!columns[c]?.editable;
   const dirty = Object.keys(edits).length;
+  useUnsavedGuard(dirty > 0);
 
   // الخلية النشطة القابلة للتعديل تحمل حقل إدخال مركّزاً دائماً، فلا يضيع أي حرف يُكتب
   useEffect(() => {

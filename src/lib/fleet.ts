@@ -23,9 +23,13 @@ export interface VehicleInput {
 export async function createVehicle(db: Db | Tx, input: VehicleInput) {
   const plate = input.plate.trim();
   return db.transaction(async (tx) => {
+    // رمز المركز من اللوحة؛ إن بقي رمز لمركبة سابقة (لوحة غُيّرت مثلاً) يُضاف رقم تمييز
+    const taken = new Set((await tx.select({ code: s.costCenters.code }).from(s.costCenters).where(sql`${s.costCenters.code} like ${`V-${plate}%`}`)).map((r) => r.code));
+    let code = `V-${plate}`;
+    for (let n = 2; taken.has(code); n++) code = `V-${plate}-${n}`;
     const [cc] = await tx
       .insert(s.costCenters)
-      .values({ code: `V-${plate}`, nameAr: `المركبة ${plate}`, type: "vehicle" })
+      .values({ code, nameAr: `المركبة ${plate}`, type: "vehicle" })
       .returning({ id: s.costCenters.id });
     const [vehicle] = await tx
       .insert(s.vehicles)
@@ -74,7 +78,7 @@ async function accountIdByCode(tx: Tx, code: string) {
  * ينشئ السائق مع موظفه (إلزامي)، وحساب رواتبه المستحقة تحت 2107،
  * وحساب عهدته تحت 1105، في معاملة واحدة.
  */
-export async function createDriver(db: Db, input: DriverInput) {
+export async function createDriver(db: Db | Tx, input: DriverInput) {
   const name = input.nameAr.trim();
   return db.transaction(async (tx) => {
     const payable = await addSubAccountTx(tx, await accountIdByCode(tx, "2107"), `رواتب مستحقة – ${name}`);
@@ -112,7 +116,7 @@ export async function createDriver(db: Db, input: DriverInput) {
 export type DriverStatus = (typeof s.employeeStatus.enumValues)[number];
 
 /** تعديل بيانات السائق وموظفه؛ تغيير الاسم يغيّر اسم حسابَي العهدة والرواتب واسم حساب دخوله. */
-export async function updateDriver(db: Db, id: number, input: DriverInput & { birthDate?: string | null; status: DriverStatus }) {
+export async function updateDriver(db: Db | Tx, id: number, input: DriverInput & { birthDate?: string | null; status: DriverStatus }) {
   const name = input.nameAr.trim();
   if (name.length < 2) throw new Error("الاسم إلزامي");
   return db.transaction(async (tx) => {
