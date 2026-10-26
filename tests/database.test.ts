@@ -122,6 +122,19 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     expect(cc.type).toBe("vehicle");
   });
 
+  it("إعادة الزرع لا تمسح صلاحيات دور أساسي عدّلها مدير الشركة", async () => {
+    const [acc] = await db.select().from(s.roles).where(eq(s.roles.key, "accountant"));
+    await db.delete(s.rolePermissions).where(eq(s.rolePermissions.roleId, acc.id));
+    await db.insert(s.rolePermissions).values({ roleId: acc.id, entity: "waybills", action: "view", scope: "all" });
+    await seedReferenceData(db, YEAR);
+    const after = await db.select().from(s.rolePermissions).where(eq(s.rolePermissions.roleId, acc.id));
+    expect(after.map((p) => `${p.entity}:${p.action}`)).toEqual(["waybills:view"]);
+    // دور بلا صلاحيات (شركة جديدة) يأخذ الافتراضية
+    await db.delete(s.rolePermissions).where(eq(s.rolePermissions.roleId, acc.id));
+    await seedReferenceData(db, YEAR);
+    expect((await db.select().from(s.rolePermissions).where(eq(s.rolePermissions.roleId, acc.id))).length).toBeGreaterThan(5);
+  });
+
   it("ينشئ مدير النظام مرة واحدة", async () => {
     const first = await ensureAdminUser(db, "admin", "secret-password");
     const second = await ensureAdminUser(db, "admin", "secret-password");
