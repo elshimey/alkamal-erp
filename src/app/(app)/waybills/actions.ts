@@ -15,6 +15,7 @@ import {
   addFuel,
   approveWaybill,
   createWaybill,
+  createWaybillTx,
   deleteWaybill,
   deleteWaybillItem,
   editWaybill,
@@ -25,9 +26,12 @@ import {
   type WaybillInput,
   rejectWaybill,
   revertWaybill,
+  saveTransportDoc,
+  sendTransportDocToDriver,
   updateWaybill,
 } from "@/lib/waybills";
 import { EXPENSE_BILL_TO, EXPENSE_PAYERS, FUEL_SOURCES, TRIP_STAGES, WAYBILL_FLOW, WAYBILL_STATUS, type WaybillFlowStatus } from "@/data/waybills";
+import { parseTransport } from "@/lib/transport-draft";
 import type { PanelResult } from "@/components/record-panel";
 import type { FormState } from "@/components/action-form";
 import type { DocSheetResult, SheetChange } from "@/components/doc-sheet";
@@ -293,7 +297,6 @@ function readWaybillForm(fd: FormData, prices: boolean) {
     routeId: Number(cell.required(str(fd, "routeId"), "المسار")),
     shipper: str(fd, "shipper"),
     consignee: str(fd, "consignee"),
-    deliveryAddress: str(fd, "deliveryAddress"),
     vehicleId: carrier ? null : optId(str(fd, "vehicleId")),
     trailerId: carrier ? null : optId(str(fd, "trailerId")),
     driverId: carrier ? null : optId(str(fd, "driverId")),
@@ -317,18 +320,51 @@ export async function saveWaybillPanel(id: number | null, fd: FormData): Promise
   const user = await guard(id ? "update" : "create", id ?? undefined);
   const prices = hasSpecial(user.perms, "view_prices");
   try {
-    const input = readWaybillForm(fd, prices);
+    const transport = parseTransport(str(fd, "transport"));
+    const input = { ...readWaybillForm(fd, prices), deliveryAddress: transport?.deliveryAddress ?? null };
     let row;
     if (id) {
       const [cur] = await db.select({ amount: s.waybills.amount }).from(s.waybills).where(eq(s.waybills.id, id));
       // من لا يرى الأسعار يبقى سعر الشحنة كما هو
       row = await editWaybill(db, id, { ...input, amount: prices ? input.amount : Number(cur?.amount ?? 0) });
+      if (transport) row = await saveTransportDoc(db, id, transport);
     } else {
-      row = await createWaybill(db, { ...input, amount: input.amount ?? null, userId: user.id });
-      if (input.deliveryNoteNumber || input.customsDeclaration) await updateWaybill(db, row.id, { deliveryNoteNumber: input.deliveryNoteNumber, customsDeclaration: input.customsDeclaration });
+      // الشحنة ووثيقة نقلها معاً: خطأ في البضاعة لا يترك شحنة ناقصة
+      row = await db.transaction(async (tx) => {
+        const created = await createWaybillTx(tx, { ...input, amount: input.amount ?? null, userId: user.id });
+        if (input.deliveryNoteNumber || input.customsDeclaration)
+          await tx.update(s.waybills).set({ deliveryNoteNumber: input.deliveryNoteNumber || null, customsDeclaration: input.customsDeclaration || null }).where(eq(s.waybills.id, created.id));
+        return transport ? saveTransportDoc(tx, created.id, transport) : created;
+      });
     }
     refresh(row.id);
     return { ok: id ? `حُفظت الشحنة ${row.number}` : `أُنشئت الشحنة ${row.number}`, id: row.id, label: row.number };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+}
+
+/** حفظ بيانات وثيقة النقل وحدها (لأي شحنة غير مرفوضة، حتى المعتمدة والمفوترة). */
+export async function saveTransportPanel(id: number, fd: FormData): Promise<PanelResult> {
+  await guard("update", id);
+  try {
+    const transport = parseTransport(str(fd, "transport"));
+    if (!transport) throw new Error("لا توجد بيانات للحفظ");
+    const row = await saveTransportDoc(db, id, transport);
+    refresh(id);
+    return { ok: `حُفظت وثيقة النقل للشحنة ${row.number}`, id: row.id, label: row.number };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+}
+
+/** إرسال وثيقة النقل لتطبيق السائق. */
+export async function sendToDriverAction(id: number): Promise<FormState> {
+  await guard("update", id);
+  try {
+    const r = await sendTransportDocToDriver(db, id);
+    refresh(id);
+    return { ok: `أُرسلت وثيقة النقل إلى ${r.driver ?? "السائق"}؛ تظهر الآن في رحلته بالتطبيق` };
   } catch (err) {
     return { error: errorMessage(err) };
   }

@@ -2,6 +2,7 @@ import "server-only";
 import { and, asc, eq, inArray, like, ne, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { PgTable } from "drizzle-orm/pg-core";
+import { PLATE_TYPES } from "@/data/waybills";
 import { db, type Tx } from "@/db";
 import * as s from "@/db/schema";
 import type { Entity } from "@/lib/permissions";
@@ -131,6 +132,7 @@ export const RECORDS: Record<string, RecordDef> = {
       { key: "model", label: "الطراز" },
       { key: "year", label: "سنة الصنع", type: "number" },
       { key: "color", label: "اللون" },
+      { key: "plateType", label: "نوع اللوحة", type: "select", options: Object.entries(PLATE_TYPES).map(([value, label]) => ({ value, label })), hint: "يظهر في وثيقة النقل" },
       { key: "registrationType", label: "نوع التسجيل" },
       { key: "ownership", label: "الملكية", type: "select", options: [{ value: "owned", label: "مملوكة" }, { value: "leased", label: "مستأجرة" }] },
       { key: "ownershipDate", label: "تاريخ التملك", type: "date" },

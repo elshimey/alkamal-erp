@@ -63,3 +63,43 @@ export const WAYBILL_SORTS = {
   party_asc: "حسب العميل",
 } as const;
 export type WaybillSort = keyof typeof WAYBILL_SORTS;
+
+// ───────────── وثيقة النقل (لوجستي) ─────────────
+
+export const PLATE_TYPES = {
+  public_transport: "نقل عام",
+  private_transport: "نقل خاص",
+  private: "خصوصي",
+  heavy_equipment: "معدات ثقيلة",
+  temporary: "مؤقتة",
+  export: "تصدير",
+  foreign: "أجنبية",
+} as const;
+export type PlateType = keyof typeof PLATE_TYPES;
+
+export const FREIGHT_PAYERS = { shipper: "المرسل", consignee: "المرسل إليه" } as const;
+export type FreightPayer = keyof typeof FREIGHT_PAYERS;
+
+export const PAYMENT_METHODS = { credit: "آجل", cash: "نقداً", transfer: "تحويل بنكي" } as const;
+export type PaymentMethod = keyof typeof PAYMENT_METHODS;
+
+export const LOGISTI_STATUSES = { none: "لم تصدر", issued: "صادرة", closed: "مغلقة", cancelled: "ملغاة" } as const;
+export type LogistiStatus = keyof typeof LOGISTI_STATUSES;
+
+export const PACKAGE_UNITS = {
+  piece: "قطعة",
+  package: "طرد",
+  carton: "كرتون",
+  pallet: "طبلية",
+  bag: "كيس",
+  container: "حاوية",
+  vehicle: "مركبة",
+  bulk: "سائب",
+} as const;
+export type PackageUnit = keyof typeof PACKAGE_UNITS;
+
+export const WEIGHT_UNITS = { kg: "كجم", ton: "طن" } as const;
+export type WeightUnit = keyof typeof WEIGHT_UNITS;
+
+export const GOODS_CONDITIONS = { good: "سليمة", partial: "تلف جزئي", damaged: "تالفة", unknown: "غير محددة" } as const;
+export type GoodsCondition = keyof typeof GOODS_CONDITIONS;

@@ -10,7 +10,7 @@ import { driverOnDate } from "@/lib/fleet";
 import { driverLeaveOn } from "@/lib/hr";
 import { waybillPostingLines } from "@/lib/waybill-posting";
 import { PERIODS, periodRange, type Period } from "@/lib/doc-filters";
-import { WAYBILL_ACCOUNTS, WAYBILL_FLOW, WAYBILL_SORTS, WAYBILL_STATUS, WAYBILL_TABS, type WaybillAccountKey, type WaybillFlowStatus, type WaybillSort, type WaybillStatus } from "@/data/waybills";
+import { FREIGHT_PAYERS, GOODS_CONDITIONS, LOGISTI_STATUSES, PACKAGE_UNITS, PAYMENT_METHODS, WEIGHT_UNITS, WAYBILL_ACCOUNTS, WAYBILL_FLOW, WAYBILL_SORTS, WAYBILL_STATUS, WAYBILL_TABS, type WaybillAccountKey, type WaybillFlowStatus, type WaybillSort, type WaybillStatus } from "@/data/waybills";
 
 // الشحنة = رحلة واحدة (القرار 2). لا قيد قبل الاعتماد (القرار 3).
 
@@ -597,9 +597,16 @@ export async function waybillDoc(db: Db | Tx, id: number) {
   const from = alias(s.locations, "from_loc");
   const to = alias(s.locations, "to_loc");
   const carrier = alias(s.parties, "carrier");
+  const trailer = alias(s.vehicles, "trailer");
   const [w] = await db
     .select({
       w: s.waybills,
+      fromCountry: sql<string | null>`(select c.name_ar from locations c where c.level = 'country' and c.country_code = ${from.countryCode} order by c.id limit 1)`,
+      toCountry: sql<string | null>`(select c.name_ar from locations c where c.level = 'country' and c.country_code = ${to.countryCode} order by c.id limit 1)`,
+      plateType: s.vehicles.plateType,
+      trailerPlate: trailer.plate,
+      driverIdNumber: sql<string | null>`coalesce(${s.drivers.residencyNumber}, ${s.employees.nationalId})`,
+      driverNationality: s.drivers.nationality,
       customer: s.parties.nameAr,
       customerMobile: s.parties.mobile,
       customerEmail: s.parties.email,
@@ -619,10 +626,125 @@ export async function waybillDoc(db: Db | Tx, id: number) {
     .leftJoin(s.drivers, eq(s.drivers.id, s.waybills.driverId))
     .leftJoin(s.employees, eq(s.employees.id, s.drivers.employeeId))
     .leftJoin(carrier, eq(carrier.id, s.waybills.carrierId))
+    .leftJoin(trailer, eq(trailer.id, s.waybills.trailerId))
     .where(eq(s.waybills.id, id));
   if (!w) return null;
-  const stages = await db.select().from(s.tripStages).where(eq(s.tripStages.waybillId, id)).orderBy(s.tripStages.at);
-  return { ...w, stages };
+  const [stages, goods] = await Promise.all([
+    db.select().from(s.tripStages).where(eq(s.tripStages.waybillId, id)).orderBy(s.tripStages.at),
+    db.select().from(s.waybillGoods).where(eq(s.waybillGoods.waybillId, id)).orderBy(s.waybillGoods.lineNo),
+  ]);
+  return { ...w, stages, goods };
+}
+
+// ───────────── وثيقة النقل (لوجستي) ─────────────
+
+export interface GoodsLine {
+  description: string;
+  quantity?: number | null;
+  packageUnit?: string | null;
+  weight?: number | null;
+  weightUnit?: string | null;
+  dimensions?: string | null;
+  condition?: string | null;
+}
+
+export interface TransportInput {
+  shipperPhone?: string | null;
+  shipperCity?: string | null;
+  shipperAddress?: string | null;
+  shipperNotes?: string | null;
+  consigneePhone?: string | null;
+  consigneeCity?: string | null;
+  deliveryAddress?: string | null;
+  consigneeNotes?: string | null;
+  pickupDate?: string | null;
+  expectedDeliveryDate?: string | null;
+  freightPayer?: string | null;
+  paymentMethod?: string | null;
+  freightInstructions?: string | null;
+  negotiable?: boolean;
+  logistiNumber?: string | null;
+  logistiStatus?: string | null;
+  goods?: GoodsLine[];
+}
+
+const oneOf = <T extends Record<string, string>>(map: T, v: string | null | undefined, fallback: keyof T, label: string): keyof T => {
+  if (!v) return fallback;
+  if (!(v in map)) throw new Error(`${label} غير صالح: ${v}`);
+  return v as keyof T;
+};
+const clean = (v: string | null | undefined) => (v ?? "").trim() || null;
+
+/**
+ * يحفظ بيانات وثيقة النقل وبضاعتها. لا تمس المحاسبة، فتُعدَّل في أي حالة ما عدا المرفوضة.
+ * أوزان البضاعة إن وُجدت تصبح وزن الشحنة (بالطن).
+ */
+export async function saveTransportDoc(db: Db | Tx, id: number, input: TransportInput) {
+  const run = async (tx: Tx) => {
+    const w = await lockWaybill(tx, id);
+    if (w.status === "rejected") throw new Error(`الشحنة ${w.number} مرفوضة؛ أعدها لمسودة أولاً`);
+    if (input.pickupDate && input.expectedDeliveryDate && input.expectedDeliveryDate < input.pickupDate)
+      throw new Error("تاريخ التسليم المتوقع قبل تاريخ الاستلام");
+    const status = oneOf(LOGISTI_STATUSES, input.logistiStatus, "none", "حالة وثيقة لوجستي");
+    const logistiNumber = clean(input.logistiNumber);
+    if (status !== "none" && !logistiNumber) throw new Error("أدخل رقم وثيقة لوجستي قبل تحديد حالتها");
+    const set: Partial<typeof s.waybills.$inferInsert> = { updatedAt: new Date() };
+    const text = ["shipperPhone", "shipperCity", "shipperAddress", "shipperNotes", "consigneePhone", "consigneeCity", "deliveryAddress", "consigneeNotes", "freightInstructions"] as const;
+    for (const k of text) if (input[k] !== undefined) set[k] = clean(input[k]);
+    if (input.pickupDate !== undefined) set.pickupDate = input.pickupDate || null;
+    if (input.expectedDeliveryDate !== undefined) set.expectedDeliveryDate = input.expectedDeliveryDate || null;
+    if (input.freightPayer !== undefined) set.freightPayer = oneOf(FREIGHT_PAYERS, input.freightPayer, "shipper", "دافع الأجرة") as string;
+    if (input.paymentMethod !== undefined) set.paymentMethod = oneOf(PAYMENT_METHODS, input.paymentMethod, "credit", "طريقة الدفع") as string;
+    if (input.negotiable !== undefined) set.negotiable = input.negotiable;
+    if (input.logistiNumber !== undefined || input.logistiStatus !== undefined) {
+      set.logistiNumber = logistiNumber;
+      set.logistiStatus = status as string;
+    }
+    if (input.goods) {
+      const lines = input.goods.filter((g) => g.description?.trim() || g.quantity || g.weight);
+      const rows = lines.map((g, i) => {
+        if (!g.description?.trim()) throw new Error(`سطر البضاعة ${i + 1}: الوصف مطلوب`);
+        for (const [v, label] of [
+          [g.quantity, "العدد"],
+          [g.weight, "الوزن"],
+        ] as const)
+          if (v != null && !(Number.isFinite(v) && v >= 0)) throw new Error(`سطر البضاعة ${i + 1}: ${label} غير صالح`);
+        return {
+          waybillId: id,
+          lineNo: i + 1,
+          description: g.description.trim(),
+          quantity: g.quantity != null ? String(g.quantity) : null,
+          packageUnit: g.packageUnit ? (oneOf(PACKAGE_UNITS, g.packageUnit, "piece", "الوحدة") as string) : null,
+          weight: g.weight != null ? String(g.weight) : null,
+          weightUnit: oneOf(WEIGHT_UNITS, g.weightUnit, "kg", "وحدة الوزن") as string,
+          dimensions: clean(g.dimensions),
+          condition: oneOf(GOODS_CONDITIONS, g.condition, "good", "حالة البضاعة") as string,
+        };
+      });
+      await tx.delete(s.waybillGoods).where(eq(s.waybillGoods.waybillId, id));
+      if (rows.length) await tx.insert(s.waybillGoods).values(rows);
+      const tons = rows.reduce((t, r) => t + (r.weight ? Number(r.weight) / (r.weightUnit === "ton" ? 1 : 1000) : 0), 0);
+      if (tons > 0) set.weightTons = String(Math.round(tons * 1000) / 1000);
+    }
+    const [row] = await tx.update(s.waybills).set(set).where(eq(s.waybills.id, id)).returning();
+    return row;
+  };
+  return db.transaction(run);
+}
+
+/** يرسل وثيقة النقل لتطبيق السائق: تظهر له في رحلته. يُعيد جواله لتنبيهه بواتساب. */
+export async function sendTransportDocToDriver(db: Db, id: number) {
+  const [w] = await db
+    .select({ number: s.waybills.number, status: s.waybills.status, execution: s.waybills.execution, driverId: s.waybills.driverId, mobile: s.drivers.mobile, driver: s.employees.nameAr })
+    .from(s.waybills)
+    .leftJoin(s.drivers, eq(s.drivers.id, s.waybills.driverId))
+    .leftJoin(s.employees, eq(s.employees.id, s.drivers.employeeId))
+    .where(eq(s.waybills.id, id));
+  if (!w) throw new Error("الشحنة غير موجودة");
+  if (w.execution !== "fleet" || !w.driverId) throw new Error("الشحنة منفذة بناقل خارجي؛ لا يوجد سائق في التطبيق");
+  if (w.status === "rejected") throw new Error(`الشحنة ${w.number} مرفوضة`);
+  await db.update(s.waybills).set({ sentToDriverAt: new Date() }).where(eq(s.waybills.id, id));
+  return { number: w.number, driver: w.driver, mobile: w.mobile };
 }
 
 // ───────────── تغيير الحالة من الجدول (للأمام والخلف) ─────────────

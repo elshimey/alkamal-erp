@@ -405,6 +405,8 @@ export const vehicles = pgTable("vehicles", {
   year: smallint("year"),
   color: text("color"),
   registrationType: text("registration_type"),
+  // نوع اللوحة كما في وثيقة النقل (نقل عام، نقل خاص…)
+  plateType: varchar("plate_type", { length: 20 }),
   ownership: vehicleOwnership("ownership").notNull().default("owned"),
   ownershipDate: date("ownership_date"),
   customsDocument: text("customs_document"),
@@ -743,6 +745,24 @@ export const waybills = pgTable(
     emptyReturn: boolean("empty_return").notNull().default(false),
     returnWaybillId: ref("return_waybill_id").references((): AnyPgColumn => waybills.id),
     notes: text("notes"),
+    // وثيقة النقل (لوجستي): بيانات المرسل والمستلم، والتواريخ، وأجور النقل
+    shipperPhone: varchar("shipper_phone", { length: 20 }),
+    shipperCity: text("shipper_city"),
+    shipperAddress: text("shipper_address"),
+    shipperNotes: text("shipper_notes"),
+    consigneePhone: varchar("consignee_phone", { length: 20 }),
+    consigneeCity: text("consignee_city"),
+    consigneeNotes: text("consignee_notes"),
+    pickupDate: date("pickup_date"),
+    expectedDeliveryDate: date("expected_delivery_date"),
+    freightPayer: varchar("freight_payer", { length: 12 }).notNull().default("shipper"),
+    paymentMethod: varchar("payment_method", { length: 12 }).notNull().default("credit"),
+    freightInstructions: text("freight_instructions"),
+    negotiable: boolean("negotiable").notNull().default(false),
+    // رقم الوثيقة الرسمية في منصة لوجستي (يُدخل يدوياً حتى يتوفر الربط)
+    logistiNumber: varchar("logisti_number", { length: 40 }),
+    logistiStatus: varchar("logisti_status", { length: 12 }).notNull().default("none"),
+    sentToDriverAt: timestamp("sent_to_driver_at", { withTimezone: true }),
     status: waybillStatus("status").notNull().default("draft"),
     rejectionReason: text("rejection_reason"),
     // سبب تجاوز الضوابط (بلا عقد ساري، الحد الائتماني) لمن يملك الصلاحية
@@ -769,6 +789,24 @@ export const waybills = pgTable(
     check("waybills_amounts", sql`${t.amount} >= 0 and ${t.driverCommission} >= 0 and ${t.salesRepCommission} >= 0 and coalesce(${t.carrierCost}, 0) >= 0`),
     check("waybills_odometer", sql`${t.odometerEnd} is null or ${t.odometerStart} is null or ${t.odometerEnd} >= ${t.odometerStart}`),
   ],
+);
+
+// بضاعة وثيقة النقل: سطر لكل صنف
+export const waybillGoods = pgTable(
+  "waybill_goods",
+  {
+    id: id(),
+    waybillId: ref("waybill_id").notNull().references(() => waybills.id, { onDelete: "cascade" }),
+    lineNo: smallint("line_no").notNull(),
+    description: text("description").notNull(),
+    quantity: numeric("quantity", { precision: 12, scale: 3 }),
+    packageUnit: varchar("package_unit", { length: 12 }),
+    weight: numeric("weight", { precision: 12, scale: 3 }),
+    weightUnit: varchar("weight_unit", { length: 4 }).notNull().default("kg"),
+    dimensions: text("dimensions"),
+    condition: varchar("condition", { length: 12 }).notNull().default("good"),
+  },
+  (t) => [index("waybill_goods_waybill_idx").on(t.waybillId, t.lineNo)],
 );
 
 export const tripStageType = pgEnum("trip_stage_type", ["loading", "in_transit", "border", "delivery"]);
@@ -1474,6 +1512,9 @@ export const companyProfile = pgTable(
     phone: varchar("phone", { length: 30 }),
     email: varchar("email", { length: 120 }),
     website: varchar("website", { length: 120 }),
+    // ترخيص النقل ورقم المنشأة (700) كما يظهران في وثيقة النقل
+    transportLicenseNo: varchar("transport_license_no", { length: 40 }),
+    establishmentNo: varchar("establishment_no", { length: 20 }),
     // الشعار مخزن كرابط بيانات (data:image/...) لأن الاستضافة بلا ملفات دائمة
     logo: text("logo"),
     updatedBy: ref("updated_by").references(() => users.id),

@@ -75,6 +75,7 @@ export async function saveVehicleAction(id: number | null, data: FormData): Prom
             color: v.color as string | null,
             serialNumber: v.serialNumber as string | null,
             registrationType: v.registrationType as string | null,
+            plateType: v.plateType as string | null,
             ownershipDate: v.ownershipDate as string | null,
             customsDocument: v.customsDocument as string | null,
           })

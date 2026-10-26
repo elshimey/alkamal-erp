@@ -31,6 +31,8 @@ export async function saveCompanyAction(_: FormState, d: FormData): Promise<Form
         email: str(d, "email"),
         website: str(d, "website"),
         logo: str(d, "logo"),
+        transportLicenseNo: str(d, "transportLicenseNo"),
+        establishmentNo: num(d, "establishmentNo"),
       },
       user.id,
     );

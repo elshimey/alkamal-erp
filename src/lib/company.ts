@@ -34,7 +34,8 @@ export async function getCompany(db: Db): Promise<CompanyProfile> {
   );
 }
 
-export type CompanyInput = Omit<CompanyProfile, "id" | "updatedBy" | "updatedAt" | "country">;
+export type CompanyInput = Omit<CompanyProfile, "id" | "updatedBy" | "updatedAt" | "country" | "transportLicenseNo" | "establishmentNo"> &
+  Partial<Pick<CompanyProfile, "transportLicenseNo" | "establishmentNo">>;
 
 const digits = (v: string | null, n: number, label: string) => {
   if (v && !new RegExp(`^\\d{${n}}$`).test(v)) throw new Error(`${label} يجب أن يكون ${n} أرقام`);
@@ -48,6 +49,7 @@ export function validateCompany(i: CompanyInput) {
   digits(i.buildingNo, 4, "رقم المبنى");
   digits(i.postalCode, 5, "الرمز البريدي");
   digits(i.additionalNo, 4, "الرقم الإضافي");
+  if (i.establishmentNo && !/^7\d{9}$/.test(i.establishmentNo)) throw new Error("الرقم الموحد للمنشأة 10 أرقام يبدأ بـ 7");
   if (i.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(i.email)) throw new Error("البريد الإلكتروني غير صحيح");
   if (i.logo) {
     const m = i.logo.match(/^data:image\/(png|jpeg|webp|svg\+xml);base64,([A-Za-z0-9+/=]+)$/);

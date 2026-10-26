@@ -67,6 +67,19 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
         {(trip.status === "approved" || trip.status === "invoiced") && <p className="mt-3 rounded-xl bg-green-50 p-3 text-sm text-green-800">{t.closed}</p>}
       </Section>
 
+      {trip.sentToDriverAt && (
+        <Link href={`/driver/trips/${trip.id}/document`} className="mb-3 flex items-center justify-between gap-3 rounded-2xl border-2 border-brand-500 bg-brand-50 p-4 shadow-sm">
+          <span>
+            <span className="block font-semibold text-asphalt-900">📄 {t.transportDoc}</span>
+            <span className="block text-xs text-gray-600">
+              {t.transportDocHint}
+              {trip.logistiNumber && <span className="ltr-nums"> · {trip.logistiNumber}</span>}
+            </span>
+          </span>
+          <span className="shrink-0 rounded-full bg-asphalt-900 px-3 py-1.5 text-sm font-semibold text-brand-500">{t.openDoc}</span>
+        </Link>
+      )}
+
       <Section title={t.timeline}>
         <ol className="relative ms-3 border-s-2 border-dashed border-brand-600/50">
           {stages.map((st) => (
