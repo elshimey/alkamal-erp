@@ -111,6 +111,8 @@ export function ComboBox({
     return () => clearTimeout(t);
   }, []);
   const [active, setActive] = useState(0);
+  // في الخانة الحرة لا يُختار اقتراح بـ Enter إلا إذا تنقّل المستخدم إليه بالأسهم
+  const [moved, setMoved] = useState(false);
   const [dialog, setDialog] = useState<string | null>(null);
   const [pos, setPos] = useState<{
     top: number;
@@ -183,6 +185,7 @@ export function ComboBox({
     if (open && total > 0) {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
+        setMoved(true);
         setActive(
           (a) => (a + (e.key === "ArrowDown" ? 1 : -1) + total) % total,
         );
@@ -190,7 +193,8 @@ export function ComboBox({
       }
       if (e.key === "Enter") {
         e.preventDefault();
-        if (active < shown.length) pick(shown[active]);
+        if (free && !moved) commit();
+        else if (active < shown.length) pick(shown[active]);
         else startCreate();
         return;
       }
@@ -198,7 +202,8 @@ export function ComboBox({
     if (e.key === "Escape" && open) {
       e.preventDefault();
       setOpen(false);
-      setQuery(null);
+      if (free) commit();
+      else setQuery(null);
       return;
     }
     if (e.altKey && e.key === "ArrowDown") {
@@ -229,6 +234,9 @@ export function ComboBox({
           setQuery(e.target.value);
           setOpen(true);
           setActive(0);
+          setMoved(false);
+          // الخانة الحرة تحفظ ما يُكتب أولاً بأول (والمعاينة تتحدث معه)
+          if (free) onChange(e.target.value);
         }}
         onClick={() => {
           if (skipClick.current) return void (skipClick.current = false);

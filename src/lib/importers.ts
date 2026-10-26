@@ -1,9 +1,10 @@
-import { and, eq, or } from "drizzle-orm";
+import { and, eq, or, sql } from "drizzle-orm";
 import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
 import type { ImportSpec } from "@/data/import-specs";
 import { createManualInvoiceTx } from "@/lib/invoices";
 import { createQuotationTx } from "@/lib/quotations";
+import { createWaybillTx } from "@/lib/waybills";
 import { createVehicle } from "@/lib/fleet";
 import { createParty } from "@/lib/operations";
 import { createReceipt } from "@/lib/receipts";
@@ -221,6 +222,68 @@ async function importQuotation(tx: Tx, rows: ImportRow[], ctx: Ctx, userId?: num
   });
   const q = await createQuotationTx(tx, { customerId, date, validUntil, currencyCode, shippingType, reference, notes: v(head, "notes"), terms: v(head, "terms"), lines, userId });
   return `${q.number} ← ${reference}`;
+}
+
+// ───────────── الشحنات ─────────────
+
+async function waybillLookups(tx: Tx) {
+  const [routes, drivers, carriers] = await Promise.all([
+    tx.execute(sql`select r.id, a.name_ar as "from", b.name_ar as "to", ca.name_ar as "fromCountry", cb.name_ar as "toCountry"
+      from routes r join locations a on a.id = r.from_location_id join locations b on b.id = r.to_location_id
+      left join locations ca on ca.id = a.parent_id left join locations cb on cb.id = b.parent_id where r.is_active`) as unknown as Promise<{ id: number; from: string; to: string; fromCountry: string | null; toCountry: string | null }[]>,
+    tx.select({ id: s.drivers.id, name: s.employees.nameAr }).from(s.drivers).innerJoin(s.employees, eq(s.employees.id, s.drivers.employeeId)),
+    tx.select({ id: s.parties.id, nameAr: s.parties.nameAr }).from(s.parties).innerJoin(s.partyRoles, and(eq(s.partyRoles.partyId, s.parties.id), eq(s.partyRoles.role, "carrier"))),
+  ]);
+  const route = new Index<number>();
+  for (const r of routes) {
+    for (const f of [r.from, r.fromCountry]) for (const t of [r.to, r.toCountry]) if (f && t) route.add([`${f}|${t}`], Number(r.id));
+  }
+  const driver = new Index<number>();
+  for (const d of drivers) driver.add([d.name], d.id);
+  const carrier = new Index<number>();
+  for (const c of carriers) carrier.add([c.nameAr], c.id);
+  return { route, driver, carrier };
+}
+
+const wbCache: WeakMap<Ctx, Awaited<ReturnType<typeof waybillLookups>>> = new WeakMap();
+
+async function importWaybill(tx: Tx, [r]: ImportRow[], ctx: Ctx, userId?: number) {
+  const look = wbCache.get(ctx) ?? (await waybillLookups(tx));
+  wbCache.set(ctx, look);
+  const customerName = required(r, "customer", "العميل");
+  const customerId = resolve(ctx.idx.customers.find(customerName), customerName, "customer", "العميل");
+  const from = required(r, "from", "من");
+  const to = required(r, "to", "إلى");
+  const routeId = look.route.find(`${from}|${to}`);
+  if (routeId === null) throw new Error(`أكثر من مسار من ${from} إلى ${to}؛ وحّد المسارات أولاً`);
+  if (routeId === undefined) throw new Error(`لا يوجد مسار من ${from} إلى ${to}؛ أضفه من المسارات أولاً`);
+  const plate = v(r, "vehicle");
+  const carrierName = v(r, "carrier");
+  if (plate && carrierName) throw new Error("اكتب المركبة أو الناقل الخارجي، لا الاثنين");
+  const vehicleId = plate ? ctx.idx.vehicles.find(plate) : null;
+  if (plate && vehicleId == null) throw new Error(`المركبة «${plate}» غير موجودة أو مكررة`);
+  const carrierId = carrierName ? look.carrier.find(carrierName) : null;
+  if (carrierName && carrierId == null) throw new Error(`الناقل «${carrierName}» غير موجود أو مكرر في جهات الاتصال`);
+  const driverName = v(r, "driver");
+  const driverId = driverName ? look.driver.find(driverName) : null;
+  if (driverName && driverId == null) throw new Error(`السائق «${driverName}» غير موجود أو مكرر`);
+  const w = await createWaybillTx(tx, {
+    waybillDate: toDate(required(r, "date", "التاريخ"), "التاريخ"),
+    customerId,
+    routeId,
+    shipper: required(r, "shipper", "المرسل"),
+    consignee: required(r, "consignee", "المستلم"),
+    vehicleId,
+    driverId: driverId ?? null,
+    carrierId: carrierId ?? null,
+    carrierCost: v(r, "carrierCost") ? toNumber(v(r, "carrierCost"), "تكلفة الناقل", { positive: true }) : null,
+    amount: v(r, "amount") ? toNumber(v(r, "amount"), "المبلغ", { min: 0 }) : null,
+    weightTons: v(r, "weight") ? toNumber(v(r, "weight"), "الوزن", { min: 0 }) : null,
+    containerNumber: v(r, "container") || null,
+    notes: v(r, "notes") || null,
+    userId,
+  });
+  return w.number;
 }
 
 // ───────────── المركبات ─────────────
@@ -497,6 +560,7 @@ async function importPlan(tx: Tx, [r]: ImportRow[], ctx: Ctx) {
 const IMPORTERS: Record<string, (tx: Tx, rows: ImportRow[], ctx: Ctx, userId?: number) => Promise<string>> = {
   "sales-invoices": importInvoice,
   quotations: importQuotation,
+  waybills: importWaybill,
   vehicles: importVehicle,
   customers: importCustomer,
   receipts: importReceipt,
@@ -575,6 +639,22 @@ export async function templateLists(db: Db, spec: ImportSpec): Promise<TemplateL
       { title: "نوع الشحن", values: ["دولي", "داخلي"], field: "shippingType" },
       { ...currencies, field: "currency" },
       { title: "معدلات الضريبة", values: ["15%", "صفر"], field: "taxCode" },
+    ];
+  }
+  if (spec.entity === "waybills") {
+    const [cities, drivers, carriers] = await Promise.all([
+      db.select({ n: s.locations.nameAr }).from(s.locations).where(eq(s.locations.isActive, true)),
+      db.select({ n: s.employees.nameAr }).from(s.drivers).innerJoin(s.employees, eq(s.employees.id, s.drivers.employeeId)).where(eq(s.drivers.status, "active")),
+      db.select({ n: s.parties.nameAr }).from(s.parties).innerJoin(s.partyRoles, and(eq(s.partyRoles.partyId, s.parties.id), eq(s.partyRoles.role, "carrier"))),
+    ]);
+    const sorted = (xs: { n: string }[]) => [...new Set(xs.map((x) => x.n))].sort((a, b) => a.localeCompare(b, "ar"));
+    return [
+      { title: "العملاء", values: ctx.customers.map((c) => c.nameAr).sort(), field: "customer" },
+      { title: "مدن التحميل", values: sorted(cities), field: "from" },
+      { title: "مدن التسليم", values: sorted(cities), field: "to" },
+      { title: "المركبات", values: ctx.vehicles.map((x) => x.plate).sort(), field: "vehicle" },
+      { title: "السائقون", values: sorted(drivers), field: "driver" },
+      { title: "الناقلون", values: sorted(carriers), field: "carrier" },
     ];
   }
   if (spec.entity === "vehicles") {

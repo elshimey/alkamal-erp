@@ -92,6 +92,34 @@ export const IMPORT_SPECS: Record<string, ImportSpec> = {
     ],
   },
 
+  waybills: {
+    entity: "waybills",
+    title: "استيراد الشحنات",
+    noun: "شحنة",
+    permission: "waybills",
+    backHref: "/waybills",
+    intro: "كل صف شحنة واحدة. المسار يُعرف بمدينة التحميل ومدينة التسليم، والسعر الفارغ يُحسب من عقد العميل الساري، والسائق الفارغ هو المسند للمركبة. تُستورد الشحنات مسودات.",
+    fields: [
+      { key: "date", label: "التاريخ", en: "Date", required: true, rule: "yyyy-mm-dd أو dd/mm/yyyy", aliases: ["تاريخ الشحنة", "تاريخ الرحلة"], width: 13 },
+      { key: "customer", label: "العميل", en: "Customer", required: true, rule: MUST_MATCH, aliases: ["اسم العميل"], width: 24 },
+      { key: "from", label: "من", en: "From", required: true, rule: "مدينة التحميل كما في المسارات", aliases: ["مدينة التحميل", "من مدينة"], width: 14 },
+      { key: "to", label: "إلى", en: "To", required: true, rule: "مدينة أو دولة التسليم كما في المسارات", aliases: ["مدينة التسليم", "إلى مدينة", "الوجهة"], width: 14 },
+      { key: "vehicle", label: "المركبة", en: "Plate", rule: "لوحة مركبة من الأسطول، أو اترك فارغاً واكتب الناقل", aliases: ["اللوحة", "رقم اللوحة"], width: 12 },
+      { key: "driver", label: "السائق", en: "Driver", rule: "فارغ = المسند للمركبة في التاريخ", width: 16 },
+      { key: "carrier", label: "الناقل الخارجي", en: "Carrier", rule: "بدل المركبة عند النقل بناقل خارجي", aliases: ["الناقل"], width: 18 },
+      { key: "carrierCost", label: "تكلفة الناقل", en: "Carrier cost", rule: "إلزامية مع الناقل الخارجي", width: 12 },
+      { key: "shipper", label: "المرسل", en: "Shipper", required: true, aliases: ["الشاحن"], width: 18 },
+      { key: "consignee", label: "المستلم", en: "Consignee", required: true, aliases: ["المرسل إليه"], width: 18 },
+      { key: "amount", label: "المبلغ", en: "Amount", rule: "قبل الضريبة؛ فارغ = من العقد", width: 12 },
+      { key: "weight", label: "الوزن (طن)", en: "Weight", width: 10 },
+      { key: "container", label: "رقم الحاوية", en: "Container", width: 14 },
+      { key: "notes", label: "ملاحظات", en: "Notes", width: 22 },
+    ],
+    samples: [
+      { date: "2026-10-01", customer: "شركة مثال للتجارة", from: "الدمام", to: "الكويت", vehicle: "أ ب ج 1234", driver: "", carrier: "", carrierCost: "", shipper: "مصنع المثال", consignee: "مستودع الكويت", amount: "", weight: "24", container: "MSCU1234567", notes: "" },
+    ],
+  },
+
   vehicles: {
     entity: "vehicles",
     title: "استيراد المركبات",

@@ -79,14 +79,16 @@ export function DocToolbar({
           ))}
         </select>
       )}
-      <select aria-label="الحالة" className={selectCls} value={params.status ?? ""} onChange={(e) => go({ status: e.target.value || undefined })}>
-        <option value="">{allStatuses}</option>
-        {Object.entries(statuses).map(([k, v]) => (
-          <option key={k} value={k}>
-            {v}
-          </option>
-        ))}
-      </select>
+      {Object.keys(statuses).length > 0 && (
+        <select aria-label="الحالة" className={selectCls} value={params.status ?? ""} onChange={(e) => go({ status: e.target.value || undefined })}>
+          <option value="">{allStatuses}</option>
+          {Object.entries(statuses).map(([k, v]) => (
+            <option key={k} value={k}>
+              {v}
+            </option>
+          ))}
+        </select>
+      )}
       {pay && (
         <select aria-label="السداد" className={selectCls} value={params.pay ?? ""} onChange={(e) => go({ pay: e.target.value || undefined })}>
           <option value="">كل حالات السداد</option>

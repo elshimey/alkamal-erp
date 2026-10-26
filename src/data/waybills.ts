@@ -46,3 +46,20 @@ export const WAYBILL_ACCOUNTS = {
   accrued: "2106",
 } as const;
 export type WaybillAccountKey = keyof typeof WAYBILL_ACCOUNTS;
+
+// مراحل الشحنة بالترتيب؛ تغيير الحالة من الجدول يتقدم أو يرجع عليها خطوة أو أكثر
+export const WAYBILL_FLOW = ["draft", "in_transit", "delivered", "approved"] as const satisfies readonly WaybillStatus[];
+export type WaybillFlowStatus = (typeof WAYBILL_FLOW)[number];
+
+// تبويب «بانتظار الفوترة» = معتمدة لم تدخل أي فاتورة
+export const WAYBILL_TABS = ["draft", "in_transit", "delivered", "approved", "pending_invoice", "invoiced", "rejected"] as const;
+
+export const WAYBILL_SORTS = {
+  date_desc: "الأحدث أولاً",
+  date_asc: "الأقدم أولاً",
+  amount_desc: "الأعلى مبلغاً",
+  amount_asc: "الأقل مبلغاً",
+  number_desc: "الرقم تنازلياً",
+  party_asc: "حسب العميل",
+} as const;
+export type WaybillSort = keyof typeof WAYBILL_SORTS;

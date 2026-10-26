@@ -17,12 +17,18 @@ import {
   createWaybill,
   deleteWaybill,
   deleteWaybillItem,
+  editWaybill,
+  invoiceSelectedWaybills,
+  patchWaybill,
   recordStage,
+  setWaybillStatus,
+  type WaybillInput,
   rejectWaybill,
   revertWaybill,
   updateWaybill,
 } from "@/lib/waybills";
-import { EXPENSE_BILL_TO, EXPENSE_PAYERS, FUEL_SOURCES, TRIP_STAGES } from "@/data/waybills";
+import { EXPENSE_BILL_TO, EXPENSE_PAYERS, FUEL_SOURCES, TRIP_STAGES, WAYBILL_FLOW, WAYBILL_STATUS, type WaybillFlowStatus } from "@/data/waybills";
+import type { PanelResult } from "@/components/record-panel";
 import type { FormState } from "@/components/action-form";
 import type { DocSheetResult, SheetChange } from "@/components/doc-sheet";
 
@@ -75,25 +81,6 @@ export async function saveWaybills(rows: SheetRow[]) {
   });
   refresh();
   return result;
-}
-
-/** إجراء جماعي على الشحنات المحددة في القائمة (تسليم أو اعتماد). */
-export async function bulkWaybills(kind: "deliver" | "approve", ids: number[], overrideReason?: string) {
-  const user = await guard(kind === "approve" ? "approve" : "update");
-  const canOverride = hasSpecial(user.perms, "override_controls");
-  const errors: Record<number, string> = {};
-  let done = 0;
-  for (const id of ids.slice(0, 500)) {
-    try {
-      if (kind === "approve") await approveWaybill(db, id, { userId: user.id, canOverride, overrideReason });
-      else await recordStage(db, id, "delivery", { userId: user.id });
-      done++;
-    } catch (err) {
-      errors[id] = errorMessage(err);
-    }
-  }
-  refresh();
-  return { done, errors };
 }
 
 const formNumber = (fd: FormData, key: string) => {
@@ -247,18 +234,37 @@ export async function saveWaybillSheet(payload: string): Promise<DocSheetResult>
   for (const { id, values: v } of changes) {
     try {
       const user = await guard("update", id);
-      const n = (key: string, label: string) => (v[key] === undefined ? undefined : cell.number(v[key].replace(/[,\s]/g, ""), label));
-      await updateWaybill(db, id, {
-        amount: hasSpecial(user.perms, "view_prices") && v.amount !== undefined ? (n("amount", "المبلغ") ?? 0) : undefined,
-        driverCommission: v.commission !== undefined ? (n("commission", "العمولة") ?? 0) : undefined,
-        carrierCost: v.carrierCost !== undefined ? (n("carrierCost", "تكلفة الناقل") ?? 0) : undefined,
+      const n = (key: string, label: string) => (v[key] === undefined ? undefined : (cell.number(v[key].replace(/[,\s]/g, ""), label) ?? null));
+      const ref = (key: string) => (v[key] === undefined ? undefined : optId(v[key]));
+      const patch: Partial<Omit<WaybillInput, "userId">> = {
+        waybillDate: v.date !== undefined ? (cell.date(v.date, "التاريخ") ?? undefined) : undefined,
+        customerId: v.customerId !== undefined ? Number(cell.required(v.customerId, "العميل")) : undefined,
+        routeId: v.routeId !== undefined ? Number(cell.required(v.routeId, "المسار")) : undefined,
+        vehicleId: ref("vehicleId"),
+        driverId: ref("driverId"),
         shipper: v.shipper,
         consignee: v.consignee,
-        weightTons: v.weight !== undefined ? (n("weight", "الوزن") ?? null) : undefined,
+        amount: hasSpecial(user.perms, "view_prices") && v.amount !== undefined ? n("amount", "المبلغ") : undefined,
+        driverCommission: n("commission", "العمولة"),
+        carrierCost: n("carrierCost", "تكلفة الناقل"),
+        weightTons: n("weight", "الوزن"),
         containerNumber: v.container,
-        deliveryNoteNumber: v.deliveryNote,
         notes: v.notes,
-      });
+      };
+      const core = ["waybillDate", "customerId", "routeId", "vehicleId", "driverId"].some((k) => patch[k as keyof typeof patch] !== undefined);
+      if (core) await patchWaybill(db, id, Object.fromEntries(Object.entries(patch).filter(([, x]) => x !== undefined)));
+      else
+        await updateWaybill(db, id, {
+          amount: patch.amount === undefined ? undefined : (patch.amount ?? 0),
+          driverCommission: patch.driverCommission === undefined ? undefined : (patch.driverCommission ?? 0),
+          carrierCost: patch.carrierCost === undefined ? undefined : (patch.carrierCost ?? 0),
+          shipper: patch.shipper,
+          consignee: patch.consignee,
+          weightTons: patch.weightTons,
+          containerNumber: patch.containerNumber,
+          notes: patch.notes,
+        });
+      if (v.deliveryNote !== undefined) await updateWaybill(db, id, { deliveryNoteNumber: v.deliveryNote });
       saved++;
     } catch (err) {
       errors[id] = errorMessage(err);
@@ -266,4 +272,187 @@ export async function saveWaybillSheet(payload: string): Promise<DocSheetResult>
   }
   revalidatePath("/waybills");
   return { ok: saved ? `حُفظت تعديلات ${saved} شحنة` : undefined, errors };
+}
+
+// ───────────── نافذة الإنشاء والتعديل وقائمة العمليات ─────────────
+
+const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
+const numOrNull = (fd: FormData, k: string, label: string) => {
+  const v = str(fd, k).replace(/[,\s]/g, "");
+  if (!v) return null;
+  const x = Number(v);
+  if (!Number.isFinite(x) || x < 0) throw new Error(`${label}: رقم غير صالح`);
+  return x;
+};
+
+function readWaybillForm(fd: FormData, prices: boolean) {
+  const carrier = str(fd, "execution") === "carrier";
+  return {
+    waybillDate: cell.date(str(fd, "date"), "التاريخ") ?? todayRiyadh(),
+    customerId: Number(cell.required(str(fd, "customerId"), "العميل")),
+    routeId: Number(cell.required(str(fd, "routeId"), "المسار")),
+    shipper: str(fd, "shipper"),
+    consignee: str(fd, "consignee"),
+    deliveryAddress: str(fd, "deliveryAddress"),
+    vehicleId: carrier ? null : optId(str(fd, "vehicleId")),
+    trailerId: carrier ? null : optId(str(fd, "trailerId")),
+    driverId: carrier ? null : optId(str(fd, "driverId")),
+    carrierId: carrier ? optId(str(fd, "carrierId")) : null,
+    carrierCost: carrier ? numOrNull(fd, "carrierCost", "تكلفة الناقل") : null,
+    carrierPlate: carrier ? str(fd, "carrierPlate") : null,
+    carrierDriverName: carrier ? str(fd, "carrierDriverName") : null,
+    // من لا يرى الأسعار لا يُدخلها؛ الفارغ يُحسب من العقد
+    amount: prices ? numOrNull(fd, "amount", "المبلغ") : undefined,
+    driverCommission: carrier ? null : numOrNull(fd, "commission", "العمولة"),
+    weightTons: numOrNull(fd, "weight", "الوزن"),
+    containerNumber: str(fd, "container"),
+    deliveryNoteNumber: str(fd, "deliveryNote"),
+    customsDeclaration: str(fd, "customs"),
+    notes: str(fd, "notes"),
+  };
+}
+
+/** حفظ نافذة الشحنة: إنشاء جديدة أو تعديل كامل قبل الاعتماد. */
+export async function saveWaybillPanel(id: number | null, fd: FormData): Promise<PanelResult> {
+  const user = await guard(id ? "update" : "create", id ?? undefined);
+  const prices = hasSpecial(user.perms, "view_prices");
+  try {
+    const input = readWaybillForm(fd, prices);
+    let row;
+    if (id) {
+      const [cur] = await db.select({ amount: s.waybills.amount }).from(s.waybills).where(eq(s.waybills.id, id));
+      // من لا يرى الأسعار يبقى سعر الشحنة كما هو
+      row = await editWaybill(db, id, { ...input, amount: prices ? input.amount : Number(cur?.amount ?? 0) });
+    } else {
+      row = await createWaybill(db, { ...input, amount: input.amount ?? null, userId: user.id });
+      if (input.deliveryNoteNumber || input.customsDeclaration) await updateWaybill(db, row.id, { deliveryNoteNumber: input.deliveryNoteNumber, customsDeclaration: input.customsDeclaration });
+    }
+    refresh(row.id);
+    return { ok: id ? `حُفظت الشحنة ${row.number}` : `أُنشئت الشحنة ${row.number}`, id: row.id, label: row.number };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+}
+
+const isFlow = (v: string): v is WaybillFlowStatus => (WAYBILL_FLOW as readonly string[]).includes(v);
+
+/** نقل شحنة واحدة لحالة (من قائمة العمليات). */
+export async function waybillToStatus(id: number, target: WaybillFlowStatus, fd?: FormData): Promise<FormState> {
+  const user = await guard(target === "approved" ? "approve" : "update", id);
+  try {
+    await setWaybillStatus(db, id, target, { userId: user.id, canOverride: hasSpecial(user.perms, "override_controls"), overrideReason: fd ? str(fd, "overrideReason") : undefined });
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+  refresh(id);
+  return { ok: `أصبحت الشحنة «${WAYBILL_STATUS[target].label}»` };
+}
+
+export async function rejectWaybillAction(id: number, fd: FormData): Promise<FormState> {
+  return rejectOne(id, {}, fd);
+}
+
+export async function removeWaybillAction(id: number, back: string, fd: FormData): Promise<FormState> {
+  const user = await guard("delete", id);
+  try {
+    await deleteWaybill(db, id, { reason: str(fd, "reason"), userId: user.id });
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+  refresh();
+  redirect(back);
+}
+
+/** نسخ الشحنة: شحنة جديدة مسودة بتاريخ اليوم وبنفس العميل والمسار والتنفيذ، والسعر من العقد. */
+export async function copyWaybill(id: number, back: string): Promise<FormState> {
+  const user = await guard("create");
+  let newId: number;
+  try {
+    const [w] = await db.select().from(s.waybills).where(eq(s.waybills.id, id));
+    if (!w) throw new Error("الشحنة غير موجودة");
+    const row = await createWaybill(db, {
+      waybillDate: todayRiyadh(),
+      customerId: w.customerId,
+      routeId: w.routeId,
+      shipper: w.shipper,
+      consignee: w.consignee,
+      deliveryAddress: w.deliveryAddress,
+      vehicleId: w.vehicleId,
+      trailerId: w.trailerId,
+      driverId: null,
+      carrierId: w.carrierId,
+      carrierCost: w.carrierCost != null ? Number(w.carrierCost) : null,
+      carrierPlate: w.carrierPlate,
+      carrierDriverName: w.carrierDriverName,
+      amount: w.priceNote && /يدوي/.test(w.priceNote) ? Number(w.amount) : null,
+      weightTons: w.weightTons != null ? Number(w.weightTons) : null,
+      notes: w.notes,
+      userId: user.id,
+    });
+    newId = row.id;
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+  refresh();
+  redirect(`${back}${back.includes("?") ? "&" : "?"}edit=${newId}`);
+}
+
+const idsOf = (fd: FormData) => [...new Set(fd.getAll("ids").map(Number).filter((x) => Number.isInteger(x) && x > 0))];
+
+/** فوترة شحنة واحدة أو المحدد: فاتورة مسودة لكل عميل. */
+export async function invoiceWaybills(ids: number[], invoiceDate: string) {
+  const user = await requirePermission("sales_invoices", "create");
+  const res = await invoiceSelectedWaybills(db, ids, { invoiceDate, userId: user.id });
+  revalidatePath("/waybills");
+  revalidatePath("/invoices");
+  return res;
+}
+
+export async function invoiceOne(id: number, fd: FormData): Promise<FormState> {
+  let invoiceId: number | undefined;
+  try {
+    const res = await invoiceWaybills([id], cell.date(str(fd, "invoiceDate"), "تاريخ الفاتورة") ?? todayRiyadh());
+    if (!res.created.length) return { error: res.skipped.join("\n") || "لم تُنشأ فاتورة" };
+    invoiceId = res.created[0].id;
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+  redirect(`/invoices?open=${invoiceId}`);
+}
+
+/** العمليات على الشحنات المحددة: تغيير الحالة للأمام أو الخلف، أو فوترة المحدد. */
+export async function bulkWaybillOps(_: FormState, fd: FormData): Promise<FormState> {
+  const op = str(fd, "op");
+  const ids = idsOf(fd).slice(0, 500);
+  if (!ids.length) return { error: "حدد شحنة واحدة على الأقل من الجدول" };
+  if (op === "invoice") {
+    try {
+      const res = await invoiceWaybills(ids, cell.date(str(fd, "invoiceDate"), "تاريخ الفاتورة") ?? todayRiyadh());
+      const made = res.created.map((c) => `${c.number} (${c.count} شحنة)`).join("، ");
+      const msg = made ? `أُنشئت ${res.created.length === 1 ? "الفاتورة المسودة" : "الفواتير المسودة"}: ${made}` : "";
+      if (!res.created.length) return { error: res.skipped.join("\n") || "لم تُنشأ فاتورة" };
+      return res.skipped.length ? { error: `${msg}\nولم تُفوتر:\n${res.skipped.join("\n")}` } : { ok: `${msg}؛ راجعها واعتمدها من الفواتير` };
+    } catch (err) {
+      return { error: errorMessage(err) };
+    }
+  }
+  if (!isFlow(op)) return { error: "اختر العملية" };
+  const user = await guard(op === "approved" ? "approve" : "update");
+  const canOverride = hasSpecial(user.perms, "override_controls");
+  const reason = str(fd, "overrideReason");
+  let ok = 0;
+  const failed: string[] = [];
+  for (const id of ids) {
+    try {
+      await guard(op === "approved" ? "approve" : "update", id);
+      await setWaybillStatus(db, id, op, { userId: user.id, canOverride, overrideReason: reason });
+      ok++;
+    } catch (err) {
+      failed.push(errorMessage(err));
+    }
+  }
+  refresh();
+  const what = `أصبحت «${WAYBILL_STATUS[op].label}» ${ok} شحنة`;
+  if (!ok) return { error: failed.join("\n") };
+  return failed.length ? { error: `${what}، ولم يُنفذ على ${failed.length}:\n${failed.join("\n")}` } : { ok: what };
 }

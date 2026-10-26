@@ -398,6 +398,19 @@ export async function deleteInvoice(db: Db, invoiceId: number, opts: { reason: s
   });
 }
 
+/**
+ * فك دمج فاتورة مسودة: تُحذف المسودة (مع نسخة في سجل المحذوفات) وتعود شحناتها «بانتظار الفوترة».
+ * الفاتورة المصدرة تُرجع لمسودة أولاً، وذلك ممنوع إذا خُصص عليها قبض.
+ */
+export async function unmergeInvoice(db: Db, invoiceId: number, userId?: number) {
+  const [inv] = await db.select({ status: s.salesInvoices.status, number: s.salesInvoices.number }).from(s.salesInvoices).where(eq(s.salesInvoices.id, invoiceId));
+  if (!inv) throw new Error("الفاتورة غير موجودة");
+  if (inv.status !== "draft") throw new Error(`الفاتورة ${inv.number} مُصدرة؛ أرجعها لمسودة أولاً ثم فك الدمج`);
+  const lines = await db.select({ n: sql<number>`count(distinct waybill_id)::int` }).from(s.salesInvoiceLines).where(and(eq(s.salesInvoiceLines.invoiceId, invoiceId), eq(s.salesInvoiceLines.kind, "waybill")));
+  await deleteInvoice(db, invoiceId, { reason: "فك دمج الشحنات", userId });
+  return { number: inv.number, waybills: lines[0]?.n ?? 0 };
+}
+
 // ───────────── قائمة الفواتير والتعديل من الشيت ─────────────
 
 const salesCols = {

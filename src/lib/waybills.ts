@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, like, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, like, lte, or, sql, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { Db, Tx } from "@/db";
 import { blockingDocumentIssues } from "@/lib/documents";
@@ -9,7 +9,8 @@ import { resolvePrice } from "@/lib/pricing";
 import { driverOnDate } from "@/lib/fleet";
 import { driverLeaveOn } from "@/lib/hr";
 import { waybillPostingLines } from "@/lib/waybill-posting";
-import { WAYBILL_ACCOUNTS, type WaybillAccountKey, type WaybillStatus } from "@/data/waybills";
+import { PERIODS, periodRange, type Period } from "@/lib/doc-filters";
+import { WAYBILL_ACCOUNTS, WAYBILL_FLOW, WAYBILL_SORTS, WAYBILL_STATUS, WAYBILL_TABS, type WaybillAccountKey, type WaybillFlowStatus, type WaybillSort, type WaybillStatus } from "@/data/waybills";
 
 // الشحنة = رحلة واحدة (القرار 2). لا قيد قبل الاعتماد (القرار 3).
 
@@ -83,91 +84,123 @@ async function checkTrailer(tx: Db | Tx, trailerId: number | null | undefined) {
   return trailerId;
 }
 
+/** يحسب قيم الشحنة من المدخلات: التنفيذ (أسطول أو ناقل)، السائق المسند، السعر من العقد، الضريبة من المسار. */
+async function resolveWaybill(tx: Tx, input: WaybillInput) {
+  const [route] = await tx.select().from(s.routes).where(eq(s.routes.id, input.routeId));
+  if (!route) throw new Error("المسار غير موجود");
+  if (!(await hasRole(tx, input.customerId, "customer"))) throw new Error("الجهة المختارة ليست عميلاً");
+  if (!input.shipper?.trim()) throw new Error("المرسل مطلوب");
+  if (!input.consignee?.trim()) throw new Error("المستلم مطلوب");
+
+  const carrier = input.carrierId ?? null;
+  if (carrier && (input.vehicleId || input.driverId || input.trailerId)) throw new Error("اختر مركبة من الأسطول أو ناقلاً خارجياً، لا الاثنين");
+  let vehicleId: number | null = null;
+  let driverId: number | null = null;
+  let vehicleTypeId: number | null = null;
+  if (carrier) {
+    if (!(await hasRole(tx, carrier, "carrier"))) throw new Error("الجهة المختارة ليست ناقلاً خارجياً");
+    if (!(input.carrierCost && input.carrierCost > 0)) throw new Error("تكلفة الناقل إلزامية");
+  } else {
+    if (!input.vehicleId) throw new Error("اختر المركبة أو الناقل الخارجي");
+    const [v] = await tx.select().from(s.vehicles).where(eq(s.vehicles.id, input.vehicleId));
+    if (!v) throw new Error("المركبة غير موجودة");
+    if (v.assetKind === "trailer") throw new Error(`${v.plate} مقطورة؛ اختر الرأس في «المركبة» والمقطورة في حقلها`);
+    vehicleId = v.id;
+    vehicleTypeId = v.vehicleTypeId;
+    // السائق المسند للمركبة في تاريخ الرحلة إن لم يُحدَّد
+    driverId = input.driverId ?? (await driverOnDate(tx, v.id, input.waybillDate));
+    if (!driverId) throw new Error(`المركبة ${v.plate} غير مسندة لسائق في هذا التاريخ؛ اختر السائق`);
+    const leave = await driverLeaveOn(tx, driverId, input.waybillDate);
+    if (leave) throw new Error(`السائق ${leave.name} في إجازة معتمدة (${leave.number}) حتى ${leave.toDate}؛ اختر سائقاً آخر`);
+  }
+
+  // السعر من العقد الساري (قابل للتعديل بصلاحية)
+  const contract = await activeContract(tx, input.customerId, input.waybillDate);
+  let amount = input.amount ?? null;
+  let priceNote: string | null = amount != null ? "سعر مُدخل يدوياً" : null;
+  if (amount == null) {
+    const price = contract
+      ? resolvePrice(await contractRatesFor(tx, contract.id), {
+          routeId: route.id,
+          distanceKm: route.distanceKm,
+          vehicleId,
+          vehicleTypeId,
+        })
+      : null;
+    amount = price?.amount ?? 0;
+    priceNote = price ? price.explanation : contract ? "لا يوجد بند مطابق في العقد" : "لا يوجد عقد ساري";
+  }
+
+  const [taxCode] = await tx
+    .select({ id: s.taxCodes.id })
+    .from(s.taxCodes)
+    .where(eq(s.taxCodes.code, route.isInternational ? "ZERO" : "VAT15-OUT"));
+
+  return {
+    waybillDate: input.waybillDate,
+    customerId: input.customerId,
+    contractId: contract?.id ?? null,
+    routeId: route.id,
+    shipper: input.shipper.trim(),
+    consignee: input.consignee.trim(),
+    deliveryAddress: input.deliveryAddress || null,
+    isInternational: route.isInternational,
+    currencyCode: contract?.currencyCode ?? "SAR",
+    execution: carrier ? ("carrier" as const) : ("fleet" as const),
+    vehicleId,
+    trailerId: carrier ? null : await checkTrailer(tx, input.trailerId),
+    driverId,
+    carrierId: carrier,
+    carrierCost: carrier ? String(input.carrierCost) : null,
+    carrierPlate: input.carrierPlate || null,
+    carrierDriverName: input.carrierDriverName || null,
+    distanceKm: route.distanceKm,
+    weightTons: input.weightTons != null ? String(input.weightTons) : null,
+    containerNumber: input.containerNumber || null,
+    amount: String(amount),
+    taxCodeId: taxCode?.id ?? null,
+    priceNote,
+    // العمولة من المسار، وتُعدَّل قبل الاعتماد
+    driverCommission: carrier ? "0" : String(input.driverCommission ?? num(route.driverCommission)),
+    salesRepId: input.salesRepId ?? null,
+    salesRepCommission: String(input.salesRepCommission ?? 0),
+    notes: input.notes || null,
+  };
+}
+
 export async function createWaybill(db: Db, input: WaybillInput) {
+  return db.transaction((tx) => createWaybillTx(tx, input));
+}
+
+export async function createWaybillTx(tx: Tx, input: WaybillInput) {
+  const values = await resolveWaybill(tx, input);
+  const number = await nextDocumentNumber(tx, "waybill", "WB", Number(input.waybillDate.slice(0, 4)));
+  const [row] = await tx
+    .insert(s.waybills)
+    .values({ ...values, number, createdBy: input.userId })
+    .returning();
+  return row;
+}
+
+/**
+ * تعديل الشحنة كاملة من نافذة التعديل (العميل والمسار والمركبة والتاريخ…) قبل اعتمادها.
+ * المبلغ الفارغ يُعاد حسابه من العقد الساري، والعمولة الفارغة من المسار. الرقم والمراحل والديزل والمصاريف تبقى.
+ */
+export async function editWaybill(db: Db, id: number, input: Omit<WaybillInput, "userId"> & { deliveryNoteNumber?: string | null; customsDeclaration?: string | null }) {
   return db.transaction(async (tx) => {
-    const [route] = await tx.select().from(s.routes).where(eq(s.routes.id, input.routeId));
-    if (!route) throw new Error("المسار غير موجود");
-    if (!(await hasRole(tx, input.customerId, "customer"))) throw new Error("الجهة المختارة ليست عميلاً");
-
-    const carrier = input.carrierId ?? null;
-    if (carrier && (input.vehicleId || input.driverId || input.trailerId)) throw new Error("اختر مركبة من الأسطول أو ناقلاً خارجياً، لا الاثنين");
-    let vehicleId: number | null = null;
-    let driverId: number | null = null;
-    let vehicleTypeId: number | null = null;
-    if (carrier) {
-      if (!(await hasRole(tx, carrier, "carrier"))) throw new Error("الجهة المختارة ليست ناقلاً خارجياً");
-      if (!(input.carrierCost && input.carrierCost > 0)) throw new Error("تكلفة الناقل إلزامية");
-    } else {
-      if (!input.vehicleId) throw new Error("اختر المركبة أو الناقل الخارجي");
-      const [v] = await tx.select().from(s.vehicles).where(eq(s.vehicles.id, input.vehicleId));
-      if (!v) throw new Error("المركبة غير موجودة");
-      if (v.assetKind === "trailer") throw new Error(`${v.plate} مقطورة؛ اختر الرأس في «المركبة» والمقطورة في حقلها`);
-      vehicleId = v.id;
-      vehicleTypeId = v.vehicleTypeId;
-      // السائق المسند للمركبة في تاريخ الرحلة إن لم يُحدَّد
-      driverId = input.driverId ?? (await driverOnDate(tx, v.id, input.waybillDate));
-      if (!driverId) throw new Error(`المركبة ${v.plate} غير مسندة لسائق في هذا التاريخ؛ اختر السائق`);
-      const leave = await driverLeaveOn(tx, driverId, input.waybillDate);
-      if (leave) throw new Error(`السائق ${leave.name} في إجازة معتمدة (${leave.number}) حتى ${leave.toDate}؛ اختر سائقاً آخر`);
-    }
-
-    // السعر من العقد الساري (قابل للتعديل بصلاحية)
-    const contract = await activeContract(tx, input.customerId, input.waybillDate);
-    let amount = input.amount ?? null;
-    let priceNote: string | null = amount != null ? "سعر مُدخل يدوياً" : null;
-    if (amount == null) {
-      const price = contract
-        ? resolvePrice(await contractRatesFor(tx, contract.id), {
-            routeId: route.id,
-            distanceKm: route.distanceKm,
-            vehicleId,
-            vehicleTypeId,
-          })
-        : null;
-      amount = price?.amount ?? 0;
-      priceNote = price ? price.explanation : contract ? "لا يوجد بند مطابق في العقد" : "لا يوجد عقد ساري";
-    }
-
-    const [taxCode] = await tx
-      .select({ id: s.taxCodes.id })
-      .from(s.taxCodes)
-      .where(eq(s.taxCodes.code, route.isInternational ? "ZERO" : "VAT15-OUT"));
-
-    const number = await nextDocumentNumber(tx, "waybill", "WB", Number(input.waybillDate.slice(0, 4)));
+    const w = await lockWaybill(tx, id);
+    assertEditable(w);
+    const values = await resolveWaybill(tx, input);
+    // المرفوضة تبقى مرفوضة حتى تُعاد لمسودة؛ تعديلها لا يغير حالتها
     const [row] = await tx
-      .insert(s.waybills)
-      .values({
-        number,
-        waybillDate: input.waybillDate,
-        customerId: input.customerId,
-        contractId: contract?.id ?? null,
-        routeId: route.id,
-        shipper: input.shipper.trim(),
-        consignee: input.consignee.trim(),
-        deliveryAddress: input.deliveryAddress || null,
-        isInternational: route.isInternational,
-        currencyCode: contract?.currencyCode ?? "SAR",
-        execution: carrier ? "carrier" : "fleet",
-        vehicleId,
-        trailerId: carrier ? null : await checkTrailer(tx, input.trailerId),
-        driverId,
-        carrierId: carrier,
-        carrierCost: carrier ? String(input.carrierCost) : null,
-        carrierPlate: input.carrierPlate || null,
-        carrierDriverName: input.carrierDriverName || null,
-        distanceKm: route.distanceKm,
-        weightTons: input.weightTons != null ? String(input.weightTons) : null,
-        containerNumber: input.containerNumber || null,
-        amount: String(amount),
-        taxCodeId: taxCode?.id ?? null,
-        priceNote,
-        // العمولة من المسار، وتُعدَّل قبل الاعتماد
-        driverCommission: carrier ? "0" : String(input.driverCommission ?? num(route.driverCommission)),
-        salesRepId: input.salesRepId ?? null,
-        salesRepCommission: String(input.salesRepCommission ?? 0),
-        notes: input.notes || null,
-        createdBy: input.userId,
+      .update(s.waybills)
+      .set({
+        ...values,
+        deliveryNoteNumber: input.deliveryNoteNumber !== undefined ? input.deliveryNoteNumber || null : w.deliveryNoteNumber,
+        customsDeclaration: input.customsDeclaration !== undefined ? input.customsDeclaration || null : w.customsDeclaration,
+        updatedAt: new Date(),
       })
+      .where(eq(s.waybills.id, id))
       .returning();
     return row;
   });
@@ -590,4 +623,234 @@ export async function waybillDoc(db: Db | Tx, id: number) {
   if (!w) return null;
   const stages = await db.select().from(s.tripStages).where(eq(s.tripStages.waybillId, id)).orderBy(s.tripStages.at);
   return { ...w, stages };
+}
+
+// ───────────── تغيير الحالة من الجدول (للأمام والخلف) ─────────────
+
+/**
+ * ينقل الشحنة إلى الحالة المطلوبة خطوة خطوة على المسار: مسودة ← في الطريق ← مُسلَّمة ← معتمدة.
+ * التقدم يسجل المرحلة (والاعتماد يرحّل قيد التكلفة)، والرجوع من المعتمدة يلغي القيد.
+ * المفوترة لا ترجع إلا بإلغاء فاتورتها أو إخراجها منها أولاً.
+ */
+export async function setWaybillStatus(
+  db: Db,
+  id: number,
+  target: WaybillFlowStatus,
+  opts: { userId?: number; canOverride?: boolean; overrideReason?: string | null } = {},
+) {
+  const [w] = await db.select({ status: s.waybills.status, number: s.waybills.number }).from(s.waybills).where(eq(s.waybills.id, id));
+  if (!w) throw new Error("الشحنة غير موجودة");
+  if (w.status === "invoiced") throw new Error(`الشحنة ${w.number} مفوترة؛ ألغِ الفاتورة أو أخرج الشحنة منها أولاً`);
+  if (w.status === target) return;
+  if (w.status === "approved") {
+    const [line] = await db.select({ inv: s.salesInvoices.number }).from(s.salesInvoiceLines).innerJoin(s.salesInvoices, eq(s.salesInvoices.id, s.salesInvoiceLines.invoiceId)).where(and(eq(s.salesInvoiceLines.waybillId, id), eq(s.salesInvoiceLines.kind, "waybill"))).limit(1);
+    if (line) throw new Error(`الشحنة ${w.number} في الفاتورة المسودة ${line.inv}؛ أخرجها من الفاتورة أو فك الدمج أولاً`);
+  }
+  if (w.status === "rejected") {
+    await revertWaybill(db, id);
+    if (target !== "draft") return setWaybillStatus(db, id, target, opts);
+    return;
+  }
+  const from = WAYBILL_FLOW.indexOf(w.status as WaybillFlowStatus);
+  const to = WAYBILL_FLOW.indexOf(target);
+  if (to > from) {
+    if (from < 1 && to >= 1) await recordStage(db, id, "in_transit", { userId: opts.userId });
+    if (from < 2 && to >= 2) await recordStage(db, id, "delivery", { userId: opts.userId });
+    if (to === 3) await approveWaybill(db, id, opts);
+    return;
+  }
+  if (w.status === "approved") await revertWaybill(db, id);
+  if (to < 2) await db.update(s.waybills).set({ status: target, updatedAt: new Date() }).where(eq(s.waybills.id, id));
+}
+
+// ───────────── القائمة والبحث ─────────────
+
+export interface WaybillFilter {
+  q?: string;
+  tab?: (typeof WAYBILL_TABS)[number];
+  from?: string;
+  to?: string;
+  sort?: WaybillSort;
+  /** السائق يرى شحناته فقط */
+  driverUserId?: number;
+}
+
+export function parseWaybillFilter(sp: { q?: string; status?: string; period?: string; sort?: string }, today: string): WaybillFilter {
+  const period: Period = sp.period && sp.period in PERIODS ? (sp.period as Period) : "all";
+  return {
+    q: sp.q?.trim() || undefined,
+    tab: (WAYBILL_TABS as readonly string[]).includes(sp.status ?? "") ? (sp.status as WaybillFilter["tab"]) : undefined,
+    ...periodRange(period, today),
+    sort: sp.sort && sp.sort in WAYBILL_SORTS ? (sp.sort as WaybillSort) : "date_desc",
+  };
+}
+
+const invoicedLine = sql`exists (select 1 from sales_invoice_lines l where l.waybill_id = ${s.waybills.id} and l.kind = 'waybill')`;
+
+const carrier = alias(s.parties, "carrier");
+const fromLoc = alias(s.locations, "from_loc");
+const toLoc = alias(s.locations, "to_loc");
+
+function waybillWhere(f: WaybillFilter, opts: { tab: boolean }) {
+  const where: (SQL | undefined)[] = [];
+  if (f.driverUserId) where.push(eq(s.drivers.userId, f.driverUserId));
+  if (f.from) where.push(gte(s.waybills.waybillDate, f.from));
+  if (f.to) where.push(lte(s.waybills.waybillDate, f.to));
+  if (f.q) {
+    const q = `%${f.q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    const digits = f.q.replace(/[,\s]/g, "");
+    where.push(
+      or(
+        ilike(s.waybills.number, q),
+        ilike(s.parties.nameAr, q),
+        ilike(s.waybills.shipper, q),
+        ilike(s.waybills.consignee, q),
+        ilike(s.waybills.containerNumber, q),
+        ilike(s.waybills.deliveryNoteNumber, q),
+        ilike(s.waybills.notes, q),
+        ilike(s.vehicles.plate, q),
+        ilike(s.employees.nameAr, q),
+        ilike(carrier.nameAr, q),
+        sql`exists (select 1 from routes r join locations a on a.id = r.from_location_id join locations b on b.id = r.to_location_id where r.id = ${s.waybills.routeId} and (a.name_ar ilike ${q} or b.name_ar ilike ${q}))`,
+        /^\d+(\.\d+)?$/.test(digits) ? sql`${s.waybills.amount}::text like ${`${digits}%`}` : undefined,
+      ),
+    );
+  }
+  if (opts.tab && f.tab) {
+    if (f.tab === "pending_invoice") where.push(eq(s.waybills.status, "approved"), sql`not ${invoicedLine}`);
+    else where.push(eq(s.waybills.status, f.tab));
+  }
+  return where.length ? and(...where) : undefined;
+}
+
+export async function listWaybills(db: Db | Tx, f: WaybillFilter = {}, limit = 500) {
+  const order = {
+    date_desc: [desc(s.waybills.waybillDate), desc(s.waybills.id)],
+    date_asc: [asc(s.waybills.waybillDate), asc(s.waybills.id)],
+    amount_desc: [desc(s.waybills.amount), desc(s.waybills.id)],
+    amount_asc: [asc(s.waybills.amount), asc(s.waybills.id)],
+    number_desc: [desc(s.waybills.number)],
+    party_asc: [asc(s.parties.nameAr), desc(s.waybills.waybillDate)],
+  }[f.sort ?? "date_desc"];
+  const base = () =>
+    db
+      .select({
+        w: s.waybills,
+        customer: s.parties.nameAr,
+        plate: s.vehicles.plate,
+        carrier: carrier.nameAr,
+        driver: s.employees.nameAr,
+        route: sql<string>`${fromLoc.nameAr} || ' ← ' || ${toLoc.nameAr}`,
+        invoiceId: sql<number | null>`(select l.invoice_id from sales_invoice_lines l where l.waybill_id = ${s.waybills.id} and l.kind = 'waybill' limit 1)`,
+        invoice: sql<string | null>`(select i.number from sales_invoice_lines l join sales_invoices i on i.id = l.invoice_id where l.waybill_id = ${s.waybills.id} and l.kind = 'waybill' limit 1)`,
+      })
+      .from(s.waybills)
+      .innerJoin(s.parties, eq(s.parties.id, s.waybills.customerId))
+      .leftJoin(s.vehicles, eq(s.vehicles.id, s.waybills.vehicleId))
+      .leftJoin(carrier, eq(carrier.id, s.waybills.carrierId))
+      .leftJoin(s.drivers, eq(s.drivers.id, s.waybills.driverId))
+      .leftJoin(s.employees, eq(s.employees.id, s.drivers.employeeId))
+      .innerJoin(s.routes, eq(s.routes.id, s.waybills.routeId))
+      .innerJoin(fromLoc, eq(fromLoc.id, s.routes.fromLocationId))
+      .innerJoin(toLoc, eq(toLoc.id, s.routes.toLocationId));
+  const [rows, counts] = await Promise.all([
+    base()
+      .where(waybillWhere(f, { tab: true }))
+      .orderBy(...order)
+      .limit(limit),
+    // عدد كل تبويب بنفس البحث والفترة
+    db
+      .select({
+        status: s.waybills.status,
+        pending: sql<boolean>`${s.waybills.status} = 'approved' and not ${invoicedLine}`,
+        n: sql<number>`count(*)::int`,
+      })
+      .from(s.waybills)
+      .innerJoin(s.parties, eq(s.parties.id, s.waybills.customerId))
+      .leftJoin(s.vehicles, eq(s.vehicles.id, s.waybills.vehicleId))
+      .leftJoin(carrier, eq(carrier.id, s.waybills.carrierId))
+      .leftJoin(s.drivers, eq(s.drivers.id, s.waybills.driverId))
+      .leftJoin(s.employees, eq(s.employees.id, s.drivers.employeeId))
+      .where(waybillWhere(f, { tab: false }))
+      .groupBy(s.waybills.status, sql`2`),
+  ]);
+  const tabCounts: Record<string, number> = { all: 0, pending_invoice: 0 };
+  for (const c of counts) {
+    tabCounts.all += c.n;
+    tabCounts[c.status] = (tabCounts[c.status] ?? 0) + c.n;
+    if (c.pending) tabCounts.pending_invoice += c.n;
+  }
+  return { rows, counts: tabCounts };
+}
+
+// ───────────── فوترة المحدد ─────────────
+
+/**
+ * يجمع الشحنات المحددة المعتمدة غير المفوترة في فاتورة مسودة واحدة لكل عميل وعملة.
+ * الشحنات التي لا تصلح (غير معتمدة أو داخلة في فاتورة) تُذكر بأرقامها ولا تمنع الباقي.
+ */
+export async function invoiceSelectedWaybills(db: Db, ids: number[], opts: { invoiceDate: string; userId?: number }) {
+  if (!ids.length) throw new Error("حدد شحنة واحدة على الأقل");
+  const rows = await db
+    .select({ id: s.waybills.id, number: s.waybills.number, status: s.waybills.status, customerId: s.waybills.customerId, currencyCode: s.waybills.currencyCode, date: s.waybills.waybillDate, invoiced: sql<boolean>`${invoicedLine}` })
+    .from(s.waybills)
+    .where(inArray(s.waybills.id, ids));
+  const skipped: string[] = [];
+  const groups = new Map<string, { customerId: number; currencyCode: string; ids: number[] }>();
+  for (const r of rows) {
+    if (r.status !== "approved") skipped.push(`${r.number}: ${WAYBILL_STATUS[r.status].label}، الفوترة للمعتمدة فقط`);
+    else if (r.invoiced) skipped.push(`${r.number}: داخلة في فاتورة مسبقاً`);
+    else if (r.date > opts.invoiceDate) skipped.push(`${r.number}: تاريخها بعد تاريخ الفاتورة`);
+    else {
+      const key = `${r.customerId}:${r.currencyCode}`;
+      const g = groups.get(key) ?? { customerId: r.customerId, currencyCode: r.currencyCode, ids: [] };
+      g.ids.push(r.id);
+      groups.set(key, g);
+    }
+  }
+  const created: { id: number; number: string; count: number }[] = [];
+  for (const g of groups.values()) {
+    try {
+      const { createInvoice } = await import("@/lib/invoices");
+      const inv = await createInvoice(db, { customerId: g.customerId, currencyCode: g.currencyCode, invoiceDate: opts.invoiceDate, waybillIds: g.ids, userId: opts.userId });
+      created.push({ id: inv.id, number: inv.number, count: g.ids.length });
+    } catch (err) {
+      skipped.push(err instanceof Error ? err.message : String(err));
+    }
+  }
+  return { created, skipped };
+}
+
+/**
+ * تعديل حقول محددة من الورقة (العميل، المسار، المركبة، السائق، التاريخ…) مع إبقاء الباقي.
+ * السعر غير المعدّل يدوياً يُعاد حسابه من العقد، وتغيير المركبة دون السائق يأخذ سائقها المسند.
+ */
+export async function patchWaybill(db: Db, id: number, patch: Partial<Omit<WaybillInput, "userId">>) {
+  const [w] = await db.select().from(s.waybills).where(eq(s.waybills.id, id));
+  if (!w) throw new Error("الشحنة غير موجودة");
+  const manualPrice = !!w.priceNote && /يدوي/.test(w.priceNote);
+  const has = (k: keyof typeof patch) => patch[k] !== undefined;
+  const repriced = has("customerId") || has("routeId") || has("vehicleId") || has("waybillDate") || has("carrierId");
+  return editWaybill(db, id, {
+    waybillDate: patch.waybillDate ?? w.waybillDate,
+    customerId: patch.customerId ?? w.customerId,
+    routeId: patch.routeId ?? w.routeId,
+    shipper: patch.shipper ?? w.shipper,
+    consignee: patch.consignee ?? w.consignee,
+    vehicleId: has("vehicleId") ? patch.vehicleId : w.vehicleId,
+    trailerId: has("trailerId") ? patch.trailerId : w.trailerId,
+    driverId: has("driverId") ? patch.driverId : has("vehicleId") ? null : w.driverId,
+    carrierId: has("carrierId") ? patch.carrierId : w.carrierId,
+    carrierCost: has("carrierCost") ? patch.carrierCost : w.carrierCost != null ? Number(w.carrierCost) : null,
+    carrierPlate: has("carrierPlate") ? patch.carrierPlate : w.carrierPlate,
+    carrierDriverName: has("carrierDriverName") ? patch.carrierDriverName : w.carrierDriverName,
+    amount: has("amount") ? patch.amount : repriced && !manualPrice ? null : Number(w.amount),
+    driverCommission: has("driverCommission") ? patch.driverCommission : has("routeId") ? null : Number(w.driverCommission),
+    salesRepId: w.salesRepId,
+    salesRepCommission: Number(w.salesRepCommission),
+    weightTons: has("weightTons") ? patch.weightTons : w.weightTons != null ? Number(w.weightTons) : null,
+    containerNumber: has("containerNumber") ? patch.containerNumber : w.containerNumber,
+    deliveryAddress: has("deliveryAddress") ? patch.deliveryAddress : w.deliveryAddress,
+    notes: has("notes") ? patch.notes : w.notes,
+  });
 }

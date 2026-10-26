@@ -20,7 +20,8 @@ import { RowCheck, SelectAll, SelectionTotal } from "@/components/row-selection"
 import { TaxInvoiceDocument } from "@/components/tax-invoice";
 import { Badge, EmptyRow, LimitRow, Input, PageHeader, Table, Td } from "@/components/ui";
 import { ListActions } from "@/components/list-actions";
-import { invoiceAll, invoiceCustomer, issue, issueMany, saveInvoiceSheet, sendToZatca } from "./actions";
+import { invoiceAll, invoiceCustomer, issue, issueMany, revertFromMenu, saveInvoiceSheet, sendToZatca, unmerge } from "./actions";
+import { ActionsMenu, type MenuItem } from "@/components/actions-menu";
 import { fmt } from "@/lib/format";
 
 const BASE = "/invoices";
@@ -46,6 +47,30 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
   ]);
   const [zatca, zatcaDoc, blocker] = openDoc ? await Promise.all([getSettings(db), latestDocument(db, { invoiceId: openDoc.i.id }), sendBlocker(db, { invoiceId: openDoc.i.id })]) : [null, null, null];
   const qrSvg = openDoc ? await invoiceQrSvg(company, openDoc.i, await clearedQr(db, openDoc.i.id)) : null;
+  const waybillCount = (d: NonNullable<typeof openDoc>) => new Set(d.lines.filter((l) => l.kind === "waybill").map((l) => l.waybillId)).size;
+  const invoiceMenu = (d: NonNullable<typeof openDoc>): MenuItem[] => {
+    const items: MenuItem[] = [];
+    const n = waybillCount(d);
+    if (d.i.status === "draft" && n > 0 && can(user.perms, "sales_invoices", "delete"))
+      items.push({
+        label: "فك الدمج",
+        icon: "undo",
+        hint: `تُحذف المسودة وتعود ${n} شحنة بانتظار الفوترة`,
+        action: unmerge.bind(null, d.i.id),
+        confirm: { title: `فك دمج الفاتورة ${d.i.number}`, text: `تُحذف الفاتورة المسودة وتعود شحناتها (${n}) «بانتظار الفوترة» لتفوترها من جديد.`, submit: "فك الدمج" },
+      });
+    if (d.i.status === "draft" && n > 0) items.push({ label: "إخراج شحنة من الفاتورة", icon: "pencil", hint: "من صفحة الفاتورة: زر الحذف بجانب الشحنة", href: `/invoices/${d.i.id}` });
+    if (d.i.status === "issued" && can(user.perms, "sales_invoices", "revert"))
+      items.push({
+        label: "إرجاع إلى مسودة",
+        icon: "undo",
+        hint: "يُلغى قيد الإيراد",
+        disabled: Number(d.i.paidAmount) > 0 && "عليها سندات قبض؛ أرجع السندات أولاً",
+        action: revertFromMenu.bind(null, d.i.id),
+        confirm: { title: `إرجاع الفاتورة ${d.i.number} إلى مسودة`, text: "يُلغى قيد الإيراد والضريبة وتعود الشحنات معتمدة داخل المسودة.", submit: "إرجاع" },
+      });
+    return items;
+  };
 
   const state = (i: (typeof invoices)[number]["i"]) => {
     const total = Number(i.total);
@@ -227,6 +252,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
                     <SubmitButton>إصدار وترحيل القيد</SubmitButton>
                   </ActionForm>
                 )}
+                {invoiceMenu(openDoc).length > 0 && <ActionsMenu items={invoiceMenu(openDoc)} label="العمليات" />}
               </div>
             </div>
             <ReadinessBar company={company} />
