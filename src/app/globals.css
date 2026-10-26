@@ -385,9 +385,10 @@ aside:hover > .road-line {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  /* الشاحنة مستثناة: حركتها بيد المستخدم، ويستطيع إخفاء الطريق */
+  :not(.truck-road *),
+  :not(.truck-road *)::before,
+  :not(.truck-road *)::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
