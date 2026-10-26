@@ -7,7 +7,9 @@ import { errorMessage } from "@/lib/errors";
 import { cell, saveSheetRows, type SheetRow } from "@/lib/sheet-server";
 import { createViolation, deleteViolation, payViolations, revertViolationPayment } from "@/lib/violations";
 import { todayRiyadh } from "@/lib/dates";
+import { saveDataUrl } from "@/lib/attachments";
 import type { FormState } from "@/components/action-form";
+import type { PanelResult } from "@/components/record-panel";
 
 const refresh = () => {
   revalidatePath("/violations");
@@ -37,6 +39,39 @@ export async function saveViolations(rows: SheetRow[]) {
   });
   refresh();
   return result;
+}
+
+/** تسجيل مخالفة واحدة من النافذة، مع صورتها إن أُرفقت. */
+export async function saveViolationAction(data: FormData): Promise<PanelResult> {
+  const user = await requirePermission("violations", "create");
+  const get = (k: string) => String(data.get(k) ?? "").trim();
+  try {
+    const amount = Number(get("amount").replace(/,/g, ""));
+    if (!get("vehicleId")) throw new Error("اختر المركبة");
+    if (!(amount > 0)) throw new Error("المبلغ إلزامي");
+    const chargeTo = get("chargeTo");
+    if (chargeTo !== "driver" && chargeTo !== "company") throw new Error("اختر على من المخالفة: السائق أو الشركة");
+    const v = await db.transaction(async (tx) => {
+      const row = await createViolation(tx, {
+        violationDate: get("date") || todayRiyadh(),
+        vehicleId: Number(get("vehicleId")),
+        driverId: Number(get("driverId")) || null,
+        reference: get("reference") || null,
+        violationType: get("type"),
+        location: get("location") || null,
+        amount,
+        chargeTo,
+        notes: get("notes") || null,
+        userId: user.id,
+      });
+      await saveDataUrl(tx, { entity: "traffic_violations", entityId: row.id, kind: "document", dataUrl: get("file"), userId: user.id });
+      return row;
+    });
+    refresh();
+    return { ok: `سُجلت المخالفة ${v.number}`, id: v.id, label: v.number };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
 }
 
 export async function pay(_: FormState, fd: FormData): Promise<FormState> {

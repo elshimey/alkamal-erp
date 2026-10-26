@@ -34,7 +34,7 @@ export default async function RecordPage({ params }: { params: Promise<{ kind: s
       <Card title={`بيانات ${def.noun}`} className="mb-6">
         <ActionForm action={saveRecordAction.bind(null, kind, id)} resetOnSuccess={false} className="grid gap-4 sm:grid-cols-3">
           {def.fields.map((f) => (
-            <FieldInput key={f.key} f={f} value={row[f.key]} disabled={!canEdit} />
+            <FieldInput key={f.key} f={f} value={row[f.key]} disabled={!canEdit || f.readOnly} />
           ))}
           {canEdit && (
             <div className="col-span-full">

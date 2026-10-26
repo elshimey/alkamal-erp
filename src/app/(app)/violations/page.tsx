@@ -20,16 +20,19 @@ import { Icon } from "@/components/icons";
 import { AddModeBar, ListActions } from "@/components/list-actions";
 import { ViolationDocument } from "@/components/violation-document";
 import { fmt } from "@/lib/format";
+import { listAttachments } from "@/lib/attachments";
+import { ViolationPanel } from "./violation-panel";
 
 const PAY_FORM = "pay-violations";
 const STATUSES = { posted: "غير مسددة للمرور", paid: "مسددة" };
 const BASE = "/violations";
 
-export default async function ViolationsPage({ searchParams }: { searchParams: Promise<DocListParams & { charge?: string; vehicle?: string; driver?: string; add?: string }> }) {
+export default async function ViolationsPage({ searchParams }: { searchParams: Promise<DocListParams & { charge?: string; vehicle?: string; driver?: string; add?: string; new?: string }> }) {
   const user = await requirePermission("violations", "view");
   const sp = await searchParams;
   const canCreate = can(user.perms, "violations", "create");
   const adding = sp.add === "1" && canCreate;
+  const creating = sp.new === "1" && canCreate;
   const df = parseDocFilter(sp, Object.keys(STATUSES), todayRiyadh());
   const filter: ViolationFilter = {
     q: df.q,
@@ -52,6 +55,7 @@ export default async function ViolationsPage({ searchParams }: { searchParams: P
     getCompany(db),
     getInvoiceTemplate(db),
   ]);
+  const [photo] = openId ? await listAttachments(db, "traffic_violations", [openId]) : [];
   const canPay = can(user.perms, "violations", "approve");
   const unpaid = list.filter((x) => x.v.status === "posted");
 
@@ -61,7 +65,15 @@ export default async function ViolationsPage({ searchParams }: { searchParams: P
         title="المخالفات المرورية"
         description="تُسجل المخالفة على المركبة ويُعرف السائق من سجل الإسناد في تاريخها. على السائق تُخصم من راتبه في المسير، وعلى الشركة تُقيد مصروفاً على المركبة. القيد يُنشأ فور الحفظ."
       >
-        {!adding && <ListActions addHref={canCreate && "/violations?add=1"} addLabel="تسجيل مخالفات" importHref={canCreate && "/import/violations"} />}
+        {!adding && (
+          <ListActions
+            newHref={canCreate && listHref(BASE, { ...sp, open: undefined, new: "1" } as DocListParams, {})}
+            newLabel="تسجيل مخالفة"
+            addHref={canCreate && "/violations?add=1"}
+            addLabel="تسجيل مخالفات جماعي"
+            importHref={canCreate && "/import/violations"}
+          />
+        )}
       </PageHeader>
       {adding && <AddModeBar backHref="/violations" backLabel="المخالفات المرورية" title="تسجيل مخالفات" />}
 
@@ -161,7 +173,12 @@ export default async function ViolationsPage({ searchParams }: { searchParams: P
             </Link>
             <span className="ltr-nums font-display text-lg font-semibold text-brand-900">{openDoc.v.number}</span>
             <Badge tone={openDoc.v.status === "paid" ? "green" : "red"}>{openDoc.v.status === "paid" ? "مسددة" : "غير مسددة"}</Badge>
-            <Link href={`/print/violations?ids=${openDoc.v.id}`} target="_blank" className="ms-auto rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
+            {photo && (
+              <a href={`/files/${photo.id}`} target="_blank" rel="noreferrer" className="ms-auto rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-brand-700 shadow-sm hover:bg-gray-50">
+                📎 صورة المخالفة
+              </a>
+            )}
+            <Link href={`/print/violations?ids=${openDoc.v.id}`} target="_blank" className={`${photo ? "" : "ms-auto "}rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50`}>
               طباعة
             </Link>
           </div>
@@ -261,6 +278,7 @@ export default async function ViolationsPage({ searchParams }: { searchParams: P
       </Table>
         </>
       )}
+      {creating && <ViolationPanel closeHref={listHref(BASE, { ...sp, new: undefined } as DocListParams, {})} />}
     </>
   );
 }

@@ -34,8 +34,14 @@ export async function bulkColumns(kind: RecordKind): Promise<GridColumn[]> {
   return Promise.all(
     gridFields(kind).map(async (f): Promise<GridColumn> => {
       const base = { key: f.key, label: f.label, required: f.required, ltr: f.ltr };
+      if (f.readOnly) return { ...base, readOnly: true, width: "11rem" };
       if (f.type === "bool") return { ...base, type: "select", options: YES_NO, width: "6rem" };
-      if (f.type === "select") return { ...base, type: "select", options: await resolveOptions(f), width: "11rem" };
+      if (f.type === "select") {
+        const options = await resolveOptions(f);
+        // عرض العمود يتسع لأطول خيار (أنواع الوثائق بأسماء أصحابها مثلاً) دون أن يبالغ
+        const longest = Math.max(0, ...options.map((o) => o.label.length));
+        return { ...base, type: "select", options, width: `${Math.min(18, Math.max(11, Math.ceil(longest * 0.55)))}rem` };
+      }
       if (f.type === "number") return { ...base, type: "number", width: "8rem" };
       if (f.type === "date") return { ...base, type: "date", width: "9rem" };
       // متعدد الاختيار: أسماء مفصولة بفاصلة
@@ -125,7 +131,7 @@ export async function saveBulk(kind: RecordKind, changes: BulkChange[], deletes:
       const values: Row = { ...current };
       for (const [key, raw] of Object.entries(c.values ?? {})) {
         const f = fields.get(key);
-        if (f) values[key] = await parseCell(f, String(raw ?? ""));
+        if (f && !f.readOnly) values[key] = await parseCell(f, String(raw ?? ""));
       }
       await saveRecord(kind, id, values);
       saved++;

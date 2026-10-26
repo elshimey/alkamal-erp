@@ -1,45 +1,66 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { eq } from "drizzle-orm";
 import { db } from "@/db";
+import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { assignVehicle, releaseAssignment } from "@/lib/fleet";
+import { blockingDocumentIssues } from "@/lib/documents";
 import { errorMessage } from "@/lib/errors";
 import { hasSpecial } from "@/lib/permissions";
-import type { FormState } from "@/components/action-form";
+import type { PanelResult } from "@/components/record-panel";
 
 const num = (v: FormDataEntryValue | null) => (v === null || v === "" ? null : Number(v));
+const text = (v: FormDataEntryValue | null) => String(v ?? "").trim() || null;
 
-export async function startAssignment(_: FormState, data: FormData): Promise<FormState> {
+/** الوثائق المانعة المنتهية للمركبة والسائق في تاريخ الاستلام، لتظهر في النافذة قبل الحفظ. */
+export async function assignmentWarnings(vehicleId: number | null, driverId: number | null, onDate: string) {
+  await requirePermission("vehicles", "view");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(onDate)) return [];
+  const issues = await blockingDocumentIssues(
+    db,
+    [
+      { kind: "vehicle", id: vehicleId },
+      { kind: "driver", id: driverId },
+    ],
+    onDate,
+    false,
+  );
+  return issues.map((i) => i.message);
+}
+
+export async function startAssignmentAction(data: FormData): Promise<PanelResult> {
   const user = await requirePermission("vehicles", "update");
   const vehicleId = num(data.get("vehicleId"));
   const driverId = num(data.get("driverId"));
   const fromDate = String(data.get("fromDate") ?? "");
-  if (!vehicleId || !driverId || !fromDate) return { error: "اختر المركبة والسائق وتاريخ الاستلام" };
+  if (!vehicleId) return { error: "اختر المركبة" };
+  if (!driverId) return { error: "اختر السائق" };
+  if (!fromDate) return { error: "أدخل تاريخ الاستلام" };
   try {
-    await assignVehicle(db, {
-      vehicleId,
-      driverId,
-      fromDate,
-      odometerStart: num(data.get("odometerStart")),
-      notes: String(data.get("notes") ?? "") || null,
-      userId: user.id,
-    }, { canOverride: hasSpecial(user.perms, "override_controls"), overrideReason: String(data.get("overrideReason") ?? "") });
+    const row = await assignVehicle(
+      db,
+      { vehicleId, driverId, fromDate, odometerStart: num(data.get("odometerStart")), notes: text(data.get("notes")), userId: user.id },
+      { canOverride: hasSpecial(user.perms, "override_controls"), overrideReason: text(data.get("overrideReason")) },
+    );
+    const [v] = await db.select({ plate: s.vehicles.plate }).from(s.vehicles).where(eq(s.vehicles.id, vehicleId));
     revalidatePath("/assignments");
-    return { ok: "سُجّل استلام السائق للمركبة" };
+    return { ok: `سُجّل استلام المركبة ${v?.plate ?? ""}`, id: row.id, label: v?.plate ?? "" };
   } catch (err) {
     return { error: errorMessage(err) };
   }
 }
 
-export async function endAssignment(assignmentId: number, _: FormState, data: FormData): Promise<FormState> {
+export async function endAssignmentAction(assignmentId: number, data: FormData): Promise<PanelResult> {
   await requirePermission("vehicles", "update");
   const toDate = String(data.get("toDate") ?? "");
   if (!toDate) return { error: "أدخل تاريخ التسليم" };
   try {
-    await releaseAssignment(db, { assignmentId, toDate, odometerEnd: num(data.get("odometerEnd")) });
+    await releaseAssignment(db, { assignmentId, toDate, odometerEnd: num(data.get("odometerEnd")), notes: text(data.get("notes")) });
     revalidatePath("/assignments");
-    return { ok: "سُجّل التسليم" };
+    revalidatePath("/vehicles");
+    return { ok: "سُجّل التسليم", id: assignmentId, label: "" };
   } catch (err) {
     return { error: errorMessage(err) };
   }

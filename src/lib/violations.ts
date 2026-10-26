@@ -170,6 +170,7 @@ export async function deleteViolation(db: Db, id: number, opts: { reason: string
     }
     await tx.insert(s.deletionLog).values({ entity: "traffic_violation", entityId: String(id), snapshot: v, reason: opts.reason.trim(), userId: opts.userId });
     await tx.delete(s.trafficViolations).where(eq(s.trafficViolations.id, id));
+    await tx.delete(s.attachments).where(and(eq(s.attachments.entity, "traffic_violations"), eq(s.attachments.entityId, id)));
     if (v.journalEntryId) await deleteEntryTx(tx, v.journalEntryId);
   });
 }

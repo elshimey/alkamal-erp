@@ -163,7 +163,7 @@ async function Missing({ kinds }: { kinds?: OwnerKind[] }) {
           <C>{type.nameAr}</C>
           <C className="text-xs">{type.blocking === "block" ? "تمنع التشغيل" : type.blocking === "international" ? "تمنع الدولي" : "تنبيه"}</C>
           <C>
-            <Link href={`/fleet-documents/owner/${owner.kind}-${owner.id}?add=${type.id}`} className="text-xs font-medium text-brand-700 hover:underline print:hidden">
+            <Link href={`/fleet-documents/owner/${owner.kind}-${owner.id}?new=1&type=${type.id}`} className="text-xs font-medium text-brand-700 hover:underline print:hidden">
               + إضافة
             </Link>
           </C>
