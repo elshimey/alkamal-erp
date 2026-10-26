@@ -1845,6 +1845,16 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     await platform.clearLoginFailures(client, "guess_me");
     expect(await platform.loginThrottled(client, "guess_me")).toBe(false);
     expect(await platform.schemaForLogin(client, "admin")).toBe("public");
+    // نسيت كلمة المرور: الطلب يصل لشركة صاحب الاسم، والاسم المجهول لمالك المنصة، و3 طلبات في الساعة كحد
+    await platform.createAccessRequest(client, { login: "ADMIN", name: "مدير", contact: "0511111111" });
+    await platform.createAccessRequest(client, { name: "نسي اسمه", contact: "0522222222" });
+    for (let i = 0; i < 4; i++) await platform.createAccessRequest(client, { login: "admin", name: "مكرر", contact: "0533333333" });
+    const home = await platform.openAccessRequests(client, "public");
+    expect(home.filter((r) => r.login === "admin")).toHaveLength(3);
+    const orphan = await platform.openAccessRequests(client, null);
+    expect(orphan.map((r) => r.name)).toContain("نسي اسمه");
+    for (const r of [...home, ...orphan]) await platform.resolveAccessRequest(client, r.id, r.schema_name);
+    expect(await platform.openAccessRequests(client, "public")).toHaveLength(0);
 
     const base = { name: "شركة التجربة", slug: "acme", trialDays: 15, adminName: "مدير أكمي", adminLogin: "acme_admin", adminPassword: "acme-pass-1" };
     await expect(platform.createTenant(client, tdb, { ...base, adminLogin: "admin" })).rejects.toThrow("مستخدم في شركة أخرى");

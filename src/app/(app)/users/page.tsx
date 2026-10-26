@@ -10,6 +10,8 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Badge, Card, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { createUser, linkDriverAccount, setUserActive, setUserTrial } from "./actions";
 import { AddModeBar, ListActions } from "@/components/list-actions";
+import { currentSchema } from "@/db/tenant";
+import { AccessRequests } from "./access-requests";
 
 const daysLeft = (d: Date) => Math.ceil((d.getTime() - Date.now()) / 86_400_000);
 
@@ -40,6 +42,7 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
       <PageHeader title="المستخدمون" description="حتى 50 مستخدماً من الموظفين والسائقين. لكل مستخدم دور أو أكثر.">
         {!adding && <ListActions newHref={(can(me.perms, "users", "create")) && "/users?add=1"} newLabel="مستخدم جديد" />}
       </PageHeader>
+      {!adding && canUpdate && <AccessRequests schema={await currentSchema()} />}
       {adding && <AddModeBar backHref="/users" backLabel="المستخدمون" title="مستخدم جديد" />}
       {adding && (
         <Card className="mb-6">

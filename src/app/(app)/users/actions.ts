@@ -3,9 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { and, eq, inArray, ne } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "@/db";
+import { baseSql, db } from "@/db";
+import { currentSchema } from "@/db/tenant";
+import { resolveAccessRequest } from "@/lib/platform";
 import * as s from "@/db/schema";
-import { requirePermission } from "@/lib/auth";
+import { getTenant, requireAdmin, requirePermission } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
 import { hashPassword, MIN_PASSWORD_LENGTH } from "@/lib/password";
 import { linkUserToDriver } from "@/lib/driver-app";
@@ -98,4 +100,19 @@ export async function linkDriverAccount(_: FormState, data: FormData): Promise<F
   revalidatePath("/users");
   revalidatePath("/drivers");
   return { ok: "رُبط الحساب بالسائق؛ يدخل الآن تطبيق السائق ويرى رحلاته" };
+}
+
+/** «تم» على طلب نسيان كلمة المرور: مدير الشركة لطلبات شركته فقط، ومدير شركة البداية لطلبات بلا شركة. */
+export async function resolveAccessAction(id: number, schema: string | null) {
+  if (schema === null) {
+    await requireAdmin();
+    if (!(await getTenant()).isHome) return;
+    await resolveAccessRequest(baseSql, id, null);
+    revalidatePath("/owner");
+  } else {
+    await requirePermission("users", "update");
+    await resolveAccessRequest(baseSql, id, await currentSchema());
+  }
+  revalidatePath("/users");
+  revalidatePath("/");
 }

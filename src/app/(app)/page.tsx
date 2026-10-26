@@ -13,6 +13,8 @@ import { WAYBILL_STATUS, type WaybillStatus } from "@/data/waybills";
 import { CountUp } from "@/components/count-up";
 import { Icon, Truck, type IconName } from "@/components/icons";
 import { DateInput } from "@/components/date-input";
+import { currentSchema } from "@/db/tenant";
+import { AccessRequests } from "./users/access-requests";
 
 const money = (v: number) => Math.round(v).toLocaleString("en");
 const pct = (part: number, whole: number) => (whole ? Math.round((part / whole) * 100) : 0);
@@ -37,7 +39,6 @@ const TABS: { key: Tab; label: string; icon: IconName }[] = [
   { key: "income", label: "قائمة الدخل", icon: "chart" },
   { key: "cash", label: "التدفق النقدي", icon: "cash" },
 ];
-
 export default async function Dashboard({
   searchParams,
 }: {
@@ -330,6 +331,7 @@ export default async function Dashboard({
 
   return (
     <>
+      {can(user.perms, "users", "update") && <AccessRequests schema={await currentSchema()} compact />}
       {/* لوحة القيادة: طريق تعبره شاحنة */}
       <section className="relative z-10 mb-4 rounded-2xl bg-asphalt-900 px-5 pt-6 pb-16 text-white shadow-lg sm:px-7 sm:pt-7">
         <div className="relative flex flex-wrap items-end justify-between gap-4">
