@@ -12,11 +12,12 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { BulkPdfButton } from "@/components/bulk-pdf";
 import { DocToolbar } from "@/components/doc-toolbar";
 import { Icon } from "@/components/icons";
-import { ImportLink } from "@/components/import-link";
+import { AddModeBar, ListActions } from "@/components/list-actions";
 import { BreakdownRequestDocument } from "@/components/maintenance-document";
 import { RowCheck, SelectAll, SelectionTotal } from "@/components/row-selection";
 import { SheetEditor } from "@/components/sheet-editor";
-import { Badge, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
+import { Badge, Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
+import { RequestPanel } from "../request-panel";
 import { MaintenanceTabs } from "../tabs";
 import { approveRequest, bulkRequests, rejectRequest, reviewRequest, saveRequests } from "../actions";
 
@@ -25,7 +26,7 @@ const BASE = "/maintenance/requests";
 const BULK_FORM = "bulk-requests";
 const STATUSES = Object.fromEntries(Object.entries(BREAKDOWN_STATUS).map(([k, v]) => [k, v.label]));
 const SORTS = {};
-type Params = DocListParams & { vehicle?: string; priority?: string };
+type Params = DocListParams & { vehicle?: string; priority?: string; new?: string; add?: string };
 
 export default async function BreakdownRequestsPage({ searchParams }: { searchParams: Promise<Params> }) {
   const user = await requirePermission("maintenance", "view");
@@ -57,43 +58,45 @@ export default async function BreakdownRequestsPage({ searchParams }: { searchPa
   const waiting = list.filter(({ r }) => r.status === "pending_supervisor" || r.status === "pending_approval").length;
   const urgent = list.filter(({ r }) => r.priority === "urgent" && !["completed", "rejected"].includes(r.status)).length;
 
+  const listParams = { ...sp, new: undefined, add: undefined };
+  const description = `بلاغ العطل من السائق أو المكتب. يراجعه المشرف ويعتمده إن كانت تكلفته حتى ${BREAKDOWN_APPROVAL_LIMIT.toLocaleString("en")} ر.س، وما فوقها يعتمده المدير، ثم يتحول إلى أمر صيانة.`;
+
+  if (sp.add === "1" && canCreate)
+    return (
+      <>
+        <PageHeader title="الصيانة" description={description} />
+        <AddModeBar backHref={BASE} backLabel="بلاغات الأعطال" title="تسجيل بلاغات جماعي" />
+        <Card className="mb-6">
+          <SheetEditor
+            templateName="طلبات العطل"
+            action={saveRequests}
+            initialRows={4}
+            columns={[
+              { key: "date", label: "التاريخ", type: "date", placeholder: today },
+              { key: "vehicleId", label: "المركبة", type: "select", required: true, options: vehicles, width: "9rem", create: "vehicle" },
+              { key: "driverId", label: "السائق", type: "select", options: drivers, width: "10rem" },
+              { key: "description", label: "وصف العطل", required: true, width: "20rem" },
+              { key: "priority", label: "الأولوية", type: "select", options: Object.entries(PRIORITIES).map(([value, p]) => ({ value, label: p.label })), width: "7rem", placeholder: "عادية" },
+              { key: "estimatedCost", label: "التكلفة التقديرية", type: "number", width: "8rem" },
+            ]}
+          />
+          <p className="mt-2 text-xs text-gray-500">اكتب أو الصق من Excel عدة بلاغات معاً؛ الصف المخالف يبقى في الشيت مع سبب رفضه.</p>
+        </Card>
+      </>
+    );
+
   return (
     <>
-      <PageHeader
-        title="الصيانة"
-        description={`بلاغ العطل من السائق أو المكتب. يراجعه المشرف ويعتمده إن كانت تكلفته حتى ${BREAKDOWN_APPROVAL_LIMIT.toLocaleString("en")} ر.س، وما فوقها يعتمده المدير، ثم يتحول إلى أمر صيانة.`}
-      >
-        {canCreate && <ImportLink entity="breakdown-requests" />}
+      <PageHeader title="الصيانة" description={description}>
+        <ListActions
+          newHref={canCreate && listHref(BASE, { ...listParams, open: undefined, new: "1" } as Params, {})}
+          newLabel="بلاغ عطل جديد"
+          addHref={canCreate && `${BASE}?add=1`}
+          addLabel="تسجيل بلاغات جماعي"
+          importHref={canCreate && "/import/breakdown-requests"}
+        />
       </PageHeader>
       <MaintenanceTabs active="requests" />
-
-      {canCreate && (
-        <details className="group mb-5 rounded-2xl border border-black/[0.06] bg-white shadow-sm print:hidden">
-          <summary className="flex cursor-pointer list-none items-center gap-3 px-5 py-3.5">
-            <span className="flex size-8 items-center justify-center rounded-lg bg-brand-500 text-brand-900">
-              <Icon name="alert" className="size-4" />
-            </span>
-            <span className="font-semibold text-brand-900">تسجيل بلاغات عطل</span>
-            <span className="text-xs text-gray-500">اكتب أو الصق من Excel عدة بلاغات معاً</span>
-            <span className="ms-auto text-xs text-gray-500 group-open:hidden">فتح</span>
-          </summary>
-          <div className="border-t border-gray-100 px-5 py-4">
-            <SheetEditor
-              templateName="طلبات العطل"
-              action={saveRequests}
-              initialRows={3}
-              columns={[
-                { key: "date", label: "التاريخ", type: "date", placeholder: today },
-                { key: "vehicleId", label: "المركبة", type: "select", required: true, options: vehicles, width: "9rem" },
-                { key: "driverId", label: "السائق", type: "select", options: drivers, width: "10rem" },
-                { key: "description", label: "وصف العطل", required: true, width: "20rem" },
-                { key: "priority", label: "الأولوية", type: "select", options: Object.entries(PRIORITIES).map(([value, p]) => ({ value, label: p.label })), width: "7rem", placeholder: "عادية" },
-                { key: "estimatedCost", label: "التكلفة التقديرية", type: "number", width: "8rem" },
-              ]}
-            />
-          </div>
-        </details>
-      )}
 
       {(waiting > 0 || urgent > 0) && (
         <div className="mb-4 flex flex-wrap gap-2 text-sm">
@@ -155,7 +158,7 @@ export default async function BreakdownRequestsPage({ searchParams }: { searchPa
                 </ActionForm>
               )}
               {openDoc.r.status === "approved" && !openDoc.order?.id && canCreate && (
-                <Link href={`/maintenance?vehicle=${openDoc.r.vehicleId}&request=${openDoc.r.id}`} className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-brand-900 shadow-sm hover:bg-brand-500">
+                <Link href={`/maintenance?new=1&vehicle=${openDoc.r.vehicleId}&request=${openDoc.r.id}`} className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-brand-900 shadow-sm hover:bg-brand-500">
                   إنشاء أمر صيانة
                 </Link>
               )}
@@ -238,6 +241,9 @@ export default async function BreakdownRequestsPage({ searchParams }: { searchPa
           );
         })}
       </Table>
+      {sp.new === "1" && canCreate && (
+        <RequestPanel closeHref={listHref(BASE, listParams as Params, {})} savedHref={listHref(BASE, listParams as Params, { open: "ID" }).replace("open=ID", "open={id}")} />
+      )}
     </>
   );
 }

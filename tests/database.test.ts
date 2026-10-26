@@ -878,6 +878,8 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
 
     it("الورشة الداخلية: القطع من الصندوق، والإطارات على حسابها", async () => {
       const o = await createMaintenanceOrder(db, { vehicleId: vehicle.id, orderDate: `${YEAR}-09-14`, type: "tires", provider: "internal" });
+      // بند ليس من المخزون بلا سعر يُرفض بدل أن يُحفظ بصفر
+      await expect(addMaintenanceLines(db, o.id, [{ kind: "labor", description: "أجرة", unitPrice: null }])).rejects.toThrow("إلزامي");
       await addMaintenanceLines(db, o.id, [{ kind: "part", description: "إطار", quantity: 2, unitPrice: 900 }]);
       await expect(approveMaintenanceOrder(db, o.id)).rejects.toThrow("الصندوق");
       const entry = await approveMaintenanceOrder(db, o.id, { cashAccountId: acc["110101"] });
