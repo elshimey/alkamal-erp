@@ -22,10 +22,12 @@ import {
   reviewBreakdownRequest,
   savePlan,
   updateDraftOrder,
+  updatePlan,
 } from "@/lib/maintenance";
 import type { DocSheetResult, SheetChange } from "@/components/doc-sheet";
 import { MAINTENANCE_TYPES, PRIORITIES, type MaintenanceType } from "@/data/maintenance";
 import type { FormState } from "@/components/action-form";
+import type { PanelResult } from "@/components/record-panel";
 
 const refresh = (id?: number) => {
   revalidatePath("/maintenance");
@@ -73,6 +75,67 @@ export async function createOrder(_: FormState, fd: FormData): Promise<FormState
   redirect(`/maintenance/${id}`);
 }
 
+type PanelLine = Record<string, string | undefined>;
+
+/** نافذة أمر الصيانة: الرأس والبنود في حفظ واحد؛ أي خطأ في بند يُلغي الأمر كله فلا تبقى مسودة ناقصة. */
+export async function saveOrderPanelAction(data: FormData): Promise<PanelResult> {
+  const user = await requirePermission("maintenance", "create");
+  const get = (k: string) => String(data.get(k) ?? "").trim();
+  try {
+    if (!get("vehicleId")) throw new Error("اختر المركبة");
+    const provider = get("provider") === "internal" ? "internal" : "external";
+    const raw = JSON.parse(get("lines") || "[]") as PanelLine[];
+    const lines = raw
+      .filter((r) => ["productId", "description", "unitPrice"].some((k) => (r[k] ?? "").trim()))
+      .map((r, i) => {
+        const n = i + 1;
+        const productId = Number(r.productId) || null;
+        const warehouseId = Number(r.warehouseId) || null;
+        const num = (v: string | undefined, label: string) => {
+          if (!(v ?? "").trim()) return null;
+          const x = Number(String(v).replace(/,/g, ""));
+          if (!Number.isFinite(x) || x < 0) throw new Error(`البند ${n}: ${label} غير صحيح`);
+          return x;
+        };
+        const unitPrice = num(r.unitPrice, "السعر");
+        if (unitPrice == null && !(productId && warehouseId)) throw new Error(`البند ${n}: السعر إلزامي (أو اختر الصنف والمستودع للصرف من المخزون)`);
+        const quantity = num(r.quantity, "الكمية") ?? 1;
+        if (!(quantity > 0)) throw new Error(`البند ${n}: الكمية يجب أن تكون أكبر من صفر`);
+        return {
+          kind: r.kind === "labor" ? ("labor" as const) : ("part" as const),
+          productId,
+          warehouseId,
+          description: (r.description ?? "").trim(),
+          quantity,
+          unitPrice,
+          vatRate: r.vat === "0" ? 0 : 15,
+        };
+      });
+    const order = await db.transaction(async (tx) => {
+      const o = await createMaintenanceOrder(tx, {
+        vehicleId: Number(get("vehicleId")),
+        orderDate: get("orderDate") || todayRiyadh(),
+        type: typeOf(get("type")),
+        provider,
+        supplierId: provider === "external" ? optNum(get("supplierId")) : null,
+        supplierInvoiceNo: provider === "external" ? get("supplierInvoiceNo") || null : null,
+        cashAccountId: provider === "internal" ? optNum(get("cashAccountId")) : null,
+        odometer: optNum(get("odometer")),
+        breakdownRequestId: optNum(get("breakdownRequestId")),
+        planId: optNum(get("planId")),
+        notes: get("notes") || null,
+        userId: user.id,
+      });
+      if (lines.length) await addMaintenanceLines(tx, o.id, lines);
+      return o;
+    });
+    refresh(order.id);
+    return { ok: `أُنشئ أمر الصيانة ${order.number}`, id: order.id, label: order.number };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+}
+
 export async function saveLines(orderId: number, rows: SheetRow[]) {
   await requirePermission("maintenance", "update");
   // كل صف بند مستقل؛ الصف المخالف يبقى في الشيت مع سبب رفضه
@@ -80,7 +143,7 @@ export async function saveLines(orderId: number, rows: SheetRow[]) {
     const productId = r.productId ? Number(r.productId) : null;
     const warehouseId = r.warehouseId ? Number(r.warehouseId) : null;
     const unitPrice = cell.number(r.unitPrice, "السعر");
-    if (unitPrice == null && !warehouseId) throw new Error("السعر إلزامي (أو اختر الصنف والمستودع للصرف من المخزون)");
+    if (unitPrice == null && !(productId && warehouseId)) throw new Error("السعر إلزامي (أو اختر الصنف والمستودع للصرف من المخزون)");
     await addMaintenanceLines(db, orderId, [
       {
         kind: r.kind === "labor" ? "labor" : "part",
@@ -88,7 +151,7 @@ export async function saveLines(orderId: number, rows: SheetRow[]) {
         warehouseId,
         description: cell.text(r.description) ?? "",
         quantity: cell.number(r.quantity, "الكمية") ?? 1,
-        unitPrice: unitPrice ?? 0,
+        unitPrice,
         vatRate: r.vat === "0" ? 0 : 15,
       },
     ]);
@@ -167,6 +230,32 @@ export async function saveRequests(rows: SheetRow[]) {
   return result;
 }
 
+const priorityOf = (v: unknown) => (String(v ?? "") in PRIORITIES ? (String(v) as keyof typeof PRIORITIES) : "normal");
+
+/** نافذة بلاغ عطل واحد. */
+export async function saveRequestAction(data: FormData): Promise<PanelResult> {
+  const user = await requirePermission("maintenance", "create");
+  const get = (k: string) => String(data.get(k) ?? "").trim();
+  try {
+    if (!get("vehicleId")) throw new Error("اختر المركبة");
+    const cost = get("estimatedCost").replace(/,/g, "");
+    if (cost && !(Number(cost) >= 0)) throw new Error("التكلفة التقديرية غير صحيحة");
+    const r = await createBreakdownRequest(db, {
+      vehicleId: Number(get("vehicleId")),
+      driverId: optNum(get("driverId")),
+      reportDate: get("date") || todayRiyadh(),
+      description: get("description"),
+      priority: priorityOf(get("priority")),
+      estimatedCost: cost ? Number(cost) : null,
+      userId: user.id,
+    });
+    refresh();
+    return { ok: `سُجل البلاغ ${r.number}`, id: r.id, label: r.number };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+}
+
 export async function reviewRequest(id: number, _: FormState, fd: FormData): Promise<FormState> {
   const user = await requirePermission("maintenance", "update");
   try {
@@ -217,6 +306,23 @@ export async function savePlans(rows: SheetRow[]) {
   });
   refresh();
   return result;
+}
+
+/** نافذة الخطة الدورية: إضافة (أو تحديث خطة بنفس المركبة والاسم) أو تعديل خطة بعينها، أو إيقافها. */
+export async function savePlanAction(id: number | null, data: FormData): Promise<PanelResult> {
+  await requirePermission("maintenance", "update");
+  const get = (k: string) => String(data.get(k) ?? "").trim();
+  try {
+    if (!get("vehicleId")) throw new Error("اختر المركبة");
+    const interval = Number(get("intervalDays"));
+    if (!Number.isInteger(interval) || interval < 1 || interval > 3650) throw new Error("المدة بالأيام بين 1 و 3650");
+    const input = { vehicleId: Number(get("vehicleId")), type: typeOf(get("type")), title: get("title"), intervalDays: interval, lastDoneDate: get("lastDone") || null };
+    const plan = id ? await updatePlan(db, id, { ...input, isActive: data.get("isActive") === "on" }) : await savePlan(db, input);
+    refresh();
+    return { ok: `حُفظت الخطة «${plan.title}»`, id: plan.id, label: plan.title };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
 }
 
 // ───────────── الإجراءات الجماعية (بآلية الفواتير) ─────────────

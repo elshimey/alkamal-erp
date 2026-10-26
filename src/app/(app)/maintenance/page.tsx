@@ -14,12 +14,12 @@ import { BulkPdfButton } from "@/components/bulk-pdf";
 import { DocSheet, type DocSheetRow } from "@/components/doc-sheet";
 import { DocToolbar } from "@/components/doc-toolbar";
 import { Icon } from "@/components/icons";
-import { ImportLink } from "@/components/import-link";
+import { ListActions } from "@/components/list-actions";
 import { MaintenanceOrderDocument } from "@/components/maintenance-document";
 import { RowCheck, SelectAll, SelectionTotal } from "@/components/row-selection";
 import { Badge, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { MaintenanceTabs } from "./tabs";
-import { NewOrderForm } from "./new-order-form";
+import { OrderPanel } from "./order-panel";
 import { approveOrder, bulkOrders, completeOrder, revertOrder, saveOrderSheet } from "./actions";
 import { fmt } from "@/lib/format";
 
@@ -27,7 +27,7 @@ type Status = keyof typeof MAINTENANCE_STATUS;
 const BASE = "/maintenance";
 const BULK_FORM = "bulk-orders";
 const STATUSES = Object.fromEntries(Object.entries(MAINTENANCE_STATUS).map(([k, v]) => [k, v.label]));
-type Params = DocListParams & { vehicle?: string; type?: string; provider?: string; request?: string; plan?: string };
+type Params = DocListParams & { vehicle?: string; type?: string; provider?: string; request?: string; plan?: string; new?: string };
 
 export default async function MaintenancePage({ searchParams }: { searchParams: Promise<Params> }) {
   const user = await requirePermission("maintenance", "view");
@@ -45,12 +45,13 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
     sort: sp.sort && sp.sort in ORDER_SORTS ? (sp.sort as keyof typeof ORDER_SORTS) : undefined,
   };
   const view = sp.view === "sheet" ? "sheet" : "table";
+  const fromSource = !!(sp.request || sp.plan);
   const openId = view === "table" ? Number(sp.open) || null : null;
   const [vehicles, cashes, list, unfiltered, openDoc, company, template] = await Promise.all([
     vehicleOptions(),
     cashAccounts(db),
-    // القادم من طلب عطل أو خطة بمركبة محددة يرى نموذج الإنشاء، لا تصفية القائمة بالمركبة
-    listOrders(db, sp.request || sp.plan ? { ...filter, vehicleId: undefined } : filter),
+    // القادم من طلب عطل أو خطة بمركبة محددة يرى نافذة الإنشاء، لا تصفية القائمة بالمركبة
+    listOrders(db, fromSource ? { ...filter, vehicleId: undefined, type: undefined } : filter),
     // عدادات الحالات لا تتأثر بفلتر الحالة نفسه
     filter.status ? listOrders(db, { ...filter, status: undefined }) : Promise.resolve(null),
     openId ? orderDoc(db, openId) : Promise.resolve(null),
@@ -58,6 +59,8 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
     getInvoiceTemplate(db),
   ]);
   const canCreate = can(user.perms, "maintenance", "create");
+  const creating = canCreate && (sp.new === "1" || fromSource);
+  const listParams = { ...sp, new: undefined, request: undefined, plan: undefined, ...(fromSource ? { vehicle: undefined, type: undefined } : {}) };
   const canApprove = can(user.perms, "maintenance", "approve");
   const canUpdate = can(user.perms, "maintenance", "update");
   const selectable = list.filter(({ o }) => (o.status === "draft" && canApprove) || (o.status === "approved" && canUpdate));
@@ -67,10 +70,9 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
   return (
     <>
       <PageHeader title="الصيانة" description="أمر الصيانة ببنوده (قطع غيار وشغل يد) يُقيد على مركز تكلفة مركبته عند الاعتماد، والمركبة تبقى «في الصيانة» حتى الإكمال.">
-        {canCreate && <ImportLink entity="maintenance-orders" />}
+        <ListActions newHref={canCreate && listHref(BASE, { ...listParams, open: undefined, new: "1" } as Params, {})} newLabel="أمر صيانة جديد" importHref={canCreate && "/import/maintenance-orders"} />
       </PageHeader>
       <MaintenanceTabs active="orders" />
-      {canCreate && <NewOrderForm sp={sp} />}
 
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[
@@ -323,6 +325,16 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
             })}
           </Table>
         </>
+      )}
+      {creating && (
+        <OrderPanel
+          closeHref={listHref(BASE, listParams as Params, {})}
+          savedHref={listHref(BASE, { ...listParams, view: undefined } as Params, { open: "ID" }).replace("open=ID", "open={id}")}
+          vehicle={sp.vehicle}
+          request={sp.request}
+          plan={sp.plan}
+          type={sp.type}
+        />
       )}
     </>
   );

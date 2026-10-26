@@ -194,7 +194,8 @@ export interface MaintenanceLineInput {
   warehouseId?: number | null;
   description: string;
   quantity?: number;
-  unitPrice: number;
+  /** فارغ مسموح لقطعة تُصرف من المخزون فقط (تُحمّل بمتوسط تكلفتها) */
+  unitPrice: number | null;
   vatRate?: number;
 }
 
@@ -223,6 +224,7 @@ export async function addMaintenanceLines(db: Db | Tx, orderId: number, lines: M
         rows.push({ orderId, lineNo: max + i + 1, kind: "part" as const, productId: product.id, warehouseId: l.warehouseId!, description, quantity: String(qty), unitPrice: String(unit), amount: String(round2(qty * unit)), vatRate: "0", vatAmount: "0" });
         continue;
       }
+      if (l.unitPrice == null) throw new Error(`سعر «${description}» إلزامي؛ الصرف بمتوسط التكلفة لأصناف المخزون فقط`);
       const vatRate = l.vatRate ?? 15;
       if (vatRate !== 0 && vatRate !== 15) throw new Error("الضريبة 15% أو بدون");
       const amount = round2(qty * l.unitPrice);
@@ -382,6 +384,25 @@ export async function savePlan(db: Db | Tx, input: { vehicleId: number; type: Ma
       set: { type: input.type, intervalDays: input.intervalDays, lastDoneDate: input.lastDoneDate ?? sql`${s.maintenancePlans.lastDoneDate}`, isActive: true },
     })
     .returning();
+  return row;
+}
+
+/** تعديل خطة بعينها (المركبة والاسم قابلان للتغيير)، مع إيقافها أو إعادة تفعيلها. */
+export async function updatePlan(db: Db | Tx, id: number, input: { vehicleId: number; type: MaintenanceType; title: string; intervalDays: number; lastDoneDate?: string | null; isActive: boolean }) {
+  const title = input.title.trim();
+  if (!title) throw new Error("اسم الصيانة إلزامي");
+  if (!Number.isInteger(input.intervalDays) || input.intervalDays < 1) throw new Error("المدة بالأيام إلزامية");
+  const [clash] = await db
+    .select({ id: s.maintenancePlans.id })
+    .from(s.maintenancePlans)
+    .where(and(eq(s.maintenancePlans.vehicleId, input.vehicleId), eq(s.maintenancePlans.title, title), sql`${s.maintenancePlans.id} <> ${id}`));
+  if (clash) throw new Error("للمركبة خطة أخرى بنفس الاسم");
+  const [row] = await db
+    .update(s.maintenancePlans)
+    .set({ vehicleId: input.vehicleId, type: input.type, title, intervalDays: input.intervalDays, lastDoneDate: input.lastDoneDate ?? null, isActive: input.isActive })
+    .where(eq(s.maintenancePlans.id, id))
+    .returning();
+  if (!row) throw new Error("الخطة غير موجودة");
   return row;
 }
 

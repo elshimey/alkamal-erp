@@ -35,6 +35,7 @@ export function RecordPanel({
   creating,
   embed,
   footer,
+  savedHref,
   children,
 }: {
   title: string;
@@ -46,6 +47,8 @@ export function RecordPanel({
   embed?: boolean;
   /** روابط أسفل النافذة (سجل التعديلات والحذف مثلاً) */
   footer?: ReactNode;
+  /** وجهة ما بعد الحفظ بدل closeHref، و{id} يُستبدل برقم السجل المحفوظ (معاينة الأمر مثلاً) */
+  savedHref?: string;
   children: ReactNode;
 }) {
   const router = useRouter();
@@ -60,10 +63,10 @@ export function RecordPanel({
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string>();
   const [saving, start] = useTransition();
-  const [done, setDone] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
   useEffect(() => {
-    if (done && !saving) router.replace(closeHref, { scroll: false });
-  }, [done, saving, router, closeHref]);
+    if (done && !saving) router.replace(done, { scroll: false });
+  }, [done, saving, router]);
   useUnsavedGuard(dirty && !embed);
 
   const post = (m: { type: "saved"; id: number; label: string } | { type: "close" }) => window.parent.postMessage({ source: PANEL_MESSAGE, ...m }, window.location.origin);
@@ -114,7 +117,7 @@ export function RecordPanel({
         el.querySelector<HTMLElement>("input:not([type=hidden]),select")?.focus();
       } else {
         // يُغلق بعد انتهاء انتقال الإجراء (انظر التأثير أدناه)، وإلا غلبه تحديث الصفحة الحالية بعد الحفظ
-        setDone(true);
+        setDone(savedHref ? savedHref.replace("{id}", String(res.id)) : closeHref);
       }
     });
   };

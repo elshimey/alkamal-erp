@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ClipboardEvent } from "react";
+import { useEffect, useRef, useState, type ClipboardEvent } from "react";
 import { Icon } from "./icons";
 import { fmt } from "@/lib/format";
 import type { QuickKind } from "@/lib/quick-add-types";
@@ -54,10 +54,20 @@ export function LinesEditor({
   const withCreated = useCreatedOptions();
   const columns = baseColumns.map((c) => (c.create ? { ...c, options: withCreated(c.create, c.options) } : c));
   const empty = (): Row => Object.fromEntries(columns.map((c) => [c.key, c.defaultValue ?? (c.type === "select" && c.options?.length === 1 ? c.options[0].value : "")]));
-  const [rows, setRows] = useState<Row[]>(() => {
+  const start = () => {
     const base = initial?.length ? initial : [];
     return [...base, ...Array.from({ length: Math.max(0, minRows - base.length) }, empty)];
-  });
+  };
+  const [first] = useState<Row[]>(start);
+  const [rows, setRows] = useState<Row[]>(first);
+  // تفريغ النموذج («حفظ وإضافة أخرى») يعيد السطور لبدايتها
+  const hidden = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const form = hidden.current?.form;
+    const reset = () => setRows(first);
+    form?.addEventListener("reset", reset);
+    return () => form?.removeEventListener("reset", reset);
+  }, [first]);
   const set = (n: number, key: string, value: string, picked?: Record<string, string>) =>
     setRows((prev) =>
       prev.map((r, i) => {
@@ -101,7 +111,7 @@ export function LinesEditor({
 
   return (
     <div>
-      <input type="hidden" name={name} value={JSON.stringify(filled)} />
+      <input ref={hidden} type="hidden" name={name} value={JSON.stringify(filled)} />
       <div className="overflow-x-auto">
         <table className="w-full min-w-[44rem] text-sm">
           <thead className="border-b border-gray-200 text-xs text-gray-500">

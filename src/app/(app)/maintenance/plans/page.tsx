@@ -12,10 +12,11 @@ import { MAINTENANCE_STATUS, MAINTENANCE_TYPES, PLAN_ALERT_DAYS } from "@/data/m
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { DocToolbar } from "@/components/doc-toolbar";
 import { Icon } from "@/components/icons";
-import { ImportLink } from "@/components/import-link";
+import { AddModeBar, ListActions } from "@/components/list-actions";
 import { RowCheck, SelectAll, SelectionTotal } from "@/components/row-selection";
 import { SheetEditor } from "@/components/sheet-editor";
-import { Badge, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
+import { Badge, Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
+import { PlanPanel } from "../plan-panel";
 import { MaintenanceTabs } from "../tabs";
 import { bulkPlanOrders, savePlans } from "../actions";
 import { fmt } from "@/lib/format";
@@ -23,7 +24,7 @@ import { fmt } from "@/lib/format";
 const BASE = "/maintenance/plans";
 const BULK_FORM = "plan-orders";
 const STATUSES = { overdue: "متأخرة", soon: `مستحقة خلال ${PLAN_ALERT_DAYS} أيام`, ok: "في موعدها" };
-type Params = DocListParams & { vehicle?: string; type?: string };
+type Params = DocListParams & { vehicle?: string; type?: string; new?: string; add?: string; edit?: string };
 
 export default async function PlansPage({ searchParams }: { searchParams: Promise<Params> }) {
   const user = await requirePermission("maintenance", "view");
@@ -62,38 +63,46 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
   const selectable = canCreate ? plans.filter((p) => !openByPlan.has(p.id)) : [];
   const counts = { overdue: all.filter((p) => p.days < 0).length, soon: all.filter((p) => state(p.days) === "soon").length };
 
+  const canUpdate = can(user.perms, "maintenance", "update");
+  const listParams = { ...sp, new: undefined, add: undefined, edit: undefined };
+  const description = `خطة دورية لكل مركبة بالمدة (بالأيام). تظهر في التنبيهات قبل موعدها بـ ${PLAN_ALERT_DAYS} أيام، وإكمال أمر صيانة مرتبط بها يحدّث آخر تنفيذ.`;
+  const editId = canUpdate ? Number(sp.edit) || null : null;
+
+  if (sp.add === "1" && canUpdate)
+    return (
+      <>
+        <PageHeader title="الصيانة" description={description} />
+        <AddModeBar backHref={BASE} backLabel="الصيانة الدورية" title="إضافة خطط جماعية" />
+        <Card className="mb-6">
+          <SheetEditor
+            templateName="الصيانة الدورية"
+            action={savePlans}
+            initialRows={4}
+            columns={[
+              { key: "vehicleId", label: "المركبة", type: "select", required: true, options: vehicles, width: "9rem", create: "vehicle" },
+              { key: "type", label: "النوع", type: "select", required: true, options: Object.entries(MAINTENANCE_TYPES).map(([value, label]) => ({ value, label })), width: "11rem" },
+              { key: "title", label: "اسم الصيانة", required: true, width: "14rem", placeholder: "تغيير زيت" },
+              { key: "intervalDays", label: "كل (يوم)", type: "number", required: true, width: "6rem", placeholder: "30" },
+              { key: "lastDone", label: "آخر تنفيذ", type: "date" },
+            ]}
+          />
+          <p className="mt-2 text-xs text-gray-500">نفس المركبة واسم الصيانة مرة ثانية يحدّث الخطة القائمة بدل تكرارها.</p>
+        </Card>
+      </>
+    );
+
   return (
     <>
-      <PageHeader title="الصيانة" description={`خطة دورية لكل مركبة بالمدة (بالأيام). تظهر في التنبيهات قبل موعدها بـ ${PLAN_ALERT_DAYS} أيام، وإكمال أمر صيانة مرتبط بها يحدّث آخر تنفيذ.`}>
-        {can(user.perms, "maintenance", "update") && <ImportLink entity="maintenance-plans" />}
+      <PageHeader title="الصيانة" description={description}>
+        <ListActions
+          newHref={canUpdate && listHref(BASE, { ...listParams, open: undefined, new: "1" } as Params, {})}
+          newLabel="خطة دورية جديدة"
+          addHref={canUpdate && `${BASE}?add=1`}
+          addLabel="إضافة خطط جماعية"
+          importHref={canUpdate && "/import/maintenance-plans"}
+        />
       </PageHeader>
       <MaintenanceTabs active="plans" />
-      {can(user.perms, "maintenance", "update") && (
-        <details className="group mb-5 rounded-2xl border border-black/[0.06] bg-white shadow-sm print:hidden">
-          <summary className="flex cursor-pointer list-none items-center gap-3 px-5 py-3.5">
-            <span className="flex size-8 items-center justify-center rounded-lg bg-brand-500 text-brand-900">
-              <Icon name="calendar" className="size-4" />
-            </span>
-            <span className="font-semibold text-brand-900">إضافة أو تعديل خطط</span>
-            <span className="text-xs text-gray-500">نفس المركبة واسم الصيانة مرة ثانية يعدّل الخطة القائمة</span>
-            <span className="ms-auto text-xs text-gray-500 group-open:hidden">فتح</span>
-          </summary>
-          <div className="border-t border-gray-100 px-5 py-4">
-            <SheetEditor
-              templateName="الصيانة الدورية"
-              action={savePlans}
-              initialRows={3}
-              columns={[
-                { key: "vehicleId", label: "المركبة", type: "select", required: true, options: vehicles, width: "9rem" },
-                { key: "type", label: "النوع", type: "select", required: true, options: Object.entries(MAINTENANCE_TYPES).map(([value, label]) => ({ value, label })), width: "11rem" },
-                { key: "title", label: "اسم الصيانة", required: true, width: "14rem", placeholder: "تغيير زيت" },
-                { key: "intervalDays", label: "كل (يوم)", type: "number", required: true, width: "6rem", placeholder: "30" },
-                { key: "lastDone", label: "آخر تنفيذ", type: "date" },
-              ]}
-            />
-          </div>
-        </details>
-      )}
 
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
         {[
@@ -142,8 +151,13 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
             <span className="text-xs text-gray-500">
               {MAINTENANCE_TYPES[openPlan.type]} · كل {openPlan.intervalDays} يوم · الاستحقاق <span className="ltr-nums">{openPlan.due}</span>
             </span>
+            {canUpdate && (
+              <Link href={listHref(BASE, { ...listParams, edit: String(openPlan.id) } as Params, {})} scroll={false} className="ms-auto rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
+                تعديل الخطة
+              </Link>
+            )}
             {canCreate && !openByPlan.has(openPlan.id) && (
-              <Link href={`/maintenance?vehicle=${openPlan.vehicleId}&plan=${openPlan.id}&type=${openPlan.type}`} className="ms-auto rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-brand-900 hover:bg-brand-500">
+              <Link href={`/maintenance?new=1&vehicle=${openPlan.vehicleId}&plan=${openPlan.id}&type=${openPlan.type}`} className={`${canUpdate ? "" : "ms-auto "}rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-brand-900 hover:bg-brand-500`}>
                 إنشاء أمر صيانة
               </Link>
             )}
@@ -226,6 +240,13 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
           );
         })}
       </Table>
+      {canUpdate && (sp.new === "1" || editId) && (
+        <PlanPanel
+          id={editId}
+          closeHref={listHref(BASE, listParams as Params, {})}
+          savedHref={listHref(BASE, listParams as Params, { open: "ID" }).replace("open=ID", "open={id}")}
+        />
+      )}
     </>
   );
 }
