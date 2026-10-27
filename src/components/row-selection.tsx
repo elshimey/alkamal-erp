@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 // تحديد صفوف جدول لإجراء جماعي: مربعات الصفوف تتبع نموذجاً بخاصية form فتُرسل معه.
 const EVENT = "row-selection";
@@ -44,6 +44,7 @@ export function SelectionTotal({ form, noun }: { form: string; noun: string }) {
       const on = boxes(form).filter((b) => b.checked);
       setSel({ count: on.length, total: on.reduce((t, b) => t + Number(b.dataset.amount), 0) });
     };
+    update(); // قد يظهر بعد التحديد (داخل SelectionGate)
     document.addEventListener(EVENT, update);
     return () => document.removeEventListener(EVENT, update);
   }, [form]);
@@ -55,4 +56,16 @@ export function SelectionTotal({ form, noun }: { form: string; noun: string }) {
       <span className="ltr-nums font-semibold text-brand-900">{sel.total.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
     </div>
   );
+}
+
+/** يُظهر عمليات المحدد فقط بعد تحديد صف واحد على الأقل، وقبلها تلميحاً. */
+export function SelectionGate({ form, empty, children }: { form: string; empty: ReactNode; children: ReactNode }) {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    const update = () => setCount(boxes(form).filter((b) => b.checked).length);
+    update();
+    document.addEventListener(EVENT, update);
+    return () => document.removeEventListener(EVENT, update);
+  }, [form]);
+  return <>{count > 0 ? children : empty}</>;
 }

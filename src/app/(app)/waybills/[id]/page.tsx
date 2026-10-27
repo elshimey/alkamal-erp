@@ -16,7 +16,7 @@ import { SendDocument } from "@/components/send-document";
 import { getBrand } from "@/lib/brand";
 import { ATTACHMENT_KINDS, listAttachments, type AttachmentKind } from "@/lib/attachments";
 import { Badge, Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
-import { addStage, approveOne, deleteOne, rejectOne, removeItem, revertOne, saveExpenses, saveFuel, saveWaybillDetails } from "../actions";
+import { addStage, approveOne, deleteOne, removeItem, revertOne, saveExpenses, saveFuel, saveWaybillDetails } from "../actions";
 
 const fmt = (v: string | number | null | undefined) =>
   v == null ? "—" : Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -169,12 +169,6 @@ export default async function WaybillPage({ params }: { params: Promise<{ id: st
               <ActionForm action={approveOne.bind(null, id)} className="flex flex-col gap-2" resetOnSuccess={false}>
                 {issues.length > 0 && canOverride && <Input name="overrideReason" placeholder="سبب تجاوز الضوابط" />}
                 <SubmitButton>اعتماد وترحيل القيد</SubmitButton>
-              </ActionForm>
-            )}
-            {canApprove && (
-              <ActionForm action={rejectOne.bind(null, id)} className="flex flex-col gap-2">
-                <Input name="reason" placeholder="سبب الرفض (يصل للسائق)" />
-                <SubmitButton variant="secondary">رفض</SubmitButton>
               </ActionForm>
             )}
             {canRevert && (

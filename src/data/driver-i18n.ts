@@ -9,6 +9,17 @@ export const DRIVER_LANG_COOKIE = "driver_lang";
 export const isRtl = (l: DriverLang) => l === "ar" || l === "ur";
 
 const ar = {
+  flow: {
+    newTrip: "رحلة جديدة من المكتب",
+    accept: "استلمت الرحلة",
+    acceptHint: "اضغط لتأكيد أنك استلمت هذه الرحلة",
+    accepted: "استلمت الرحلة",
+    loaded: "تم التحميل",
+    delivered: "تم التسليم",
+    photo: "صورة (اختياري)",
+    photo2: "صورة ثانية (اختياري)",
+    steps: { accept: "استلام", loading: "تحميل", delivery: "تسليم" },
+  },
   appName: "تطبيق السائق",
   tabs: { trips: "رحلاتي", expenses: "مصاريفي", breakdown: "عطل", balance: "رصيدي" },
   hello: "مرحباً",
@@ -161,6 +172,17 @@ const ar = {
 export type DriverDict = typeof ar;
 
 const ur: DriverDict = {
+  flow: {
+    newTrip: "دفتر سے نیا سفر",
+    accept: "سفر وصول کر لیا",
+    acceptHint: "تصدیق کے لیے دبائیں کہ یہ سفر آپ کو مل گیا",
+    accepted: "سفر وصول ہو گیا",
+    loaded: "لوڈنگ ہو گئی",
+    delivered: "ڈیلیوری ہو گئی",
+    photo: "تصویر (اختیاری)",
+    photo2: "دوسری تصویر (اختیاری)",
+    steps: { accept: "وصولی", loading: "لوڈنگ", delivery: "ڈیلیوری" },
+  },
   appName: "ڈرائیور ایپ",
   tabs: { trips: "میرے سفر", expenses: "میرے اخراجات", breakdown: "خرابی", balance: "میرا بیلنس" },
   hello: "خوش آمدید",
@@ -311,6 +333,17 @@ const ur: DriverDict = {
 };
 
 const hi: DriverDict = {
+  flow: {
+    newTrip: "ऑफिस से नई यात्रा",
+    accept: "यात्रा मिल गई",
+    acceptHint: "पुष्टि के लिए दबाएँ कि यह यात्रा आपको मिल गई",
+    accepted: "यात्रा मिल गई",
+    loaded: "लोडिंग हो गई",
+    delivered: "डिलीवरी हो गई",
+    photo: "फोटो (वैकल्पिक)",
+    photo2: "दूसरी फोटो (वैकल्पिक)",
+    steps: { accept: "प्राप्त", loading: "लोडिंग", delivery: "डिलीवरी" },
+  },
   appName: "ड्राइवर ऐप",
   tabs: { trips: "मेरी यात्राएँ", expenses: "मेरे खर्च", breakdown: "खराबी", balance: "मेरा बैलेंस" },
   hello: "नमस्ते",
@@ -461,6 +494,17 @@ const hi: DriverDict = {
 };
 
 const en: DriverDict = {
+  flow: {
+    newTrip: "New trip from the office",
+    accept: "I received the trip",
+    acceptHint: "Tap to confirm you received this trip",
+    accepted: "Trip received",
+    loaded: "Loaded",
+    delivered: "Delivered",
+    photo: "Photo (optional)",
+    photo2: "Second photo (optional)",
+    steps: { accept: "Received", loading: "Loading", delivery: "Delivery" },
+  },
   appName: "Driver App",
   tabs: { trips: "My trips", expenses: "Expenses", breakdown: "Breakdown", balance: "Balance" },
   hello: "Welcome",

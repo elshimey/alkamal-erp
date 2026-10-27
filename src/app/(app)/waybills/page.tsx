@@ -21,13 +21,13 @@ import { DateInput } from "@/components/date-input";
 import { DocSheet, type DocSheetRow } from "@/components/doc-sheet";
 import { DocToolbar } from "@/components/doc-toolbar";
 import { Icon } from "@/components/icons";
-import { RowCheck, SelectAll, SelectionTotal } from "@/components/row-selection";
+import { RowCheck, SelectAll, SelectionGate, SelectionTotal } from "@/components/row-selection";
 import { SendDocument } from "@/components/send-document";
 import { SheetEditor } from "@/components/sheet-editor";
 import { AddModeBar } from "@/components/list-actions";
 import { Badge, Card, EmptyRow, LimitRow, PageHeader, Table, Td } from "@/components/ui";
 import { WaybillDocument } from "@/components/waybill-document";
-import { bulkWaybillOps, copyWaybill, invoiceOne, rejectWaybillAction, removeWaybillAction, saveTransportPanel, saveWaybillPanel, saveWaybills, saveWaybillSheet, sendToDriverAction, waybillToStatus } from "./actions";
+import { bulkWaybillOps, copyWaybill, invoiceOne, removeWaybillAction, saveTransportPanel, saveWaybillPanel, saveWaybills, saveWaybillSheet, sendToDriverAction, waybillToStatus } from "./actions";
 import { TransportPanel } from "./transport-panel";
 import { WaybillEditor, type RouteOption, type WaybillDraft } from "./waybill-editor";
 
@@ -150,23 +150,6 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
         action: to("approved"),
         confirm: { title: `اعتماد الشحنة ${w.number}`, text: "يُرحّل قيد تكلفة الرحلة (الديزل والعمولة والمصاريف) وتصبح الشحنة جاهزة للفوترة.", submit: "اعتماد", fields: overrideField },
       });
-    if (canApprove && (st === "draft" || st === "in_transit" || st === "delivered"))
-      items.push({
-        label: "رفض وإرجاعها للسائق",
-        icon: "ban",
-        action: rejectWaybillAction.bind(null, w.id),
-        confirm: {
-          title: `رفض الشحنة ${w.number}`,
-          text: "تعود الشحنة للسائق بالسبب ليصحح بياناتها.",
-          submit: "رفض",
-          fields: (
-            <label className="block text-sm">
-              <span className="mb-1 block text-gray-600">سبب الرفض</span>
-              <input name="reason" required className={inputCls} />
-            </label>
-          ),
-        },
-      });
     if (st === "approved" && !invoiceId && canInvoice)
       items.push({
         label: "فوترة الشحنة",
@@ -207,7 +190,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
         items.push({
           label: w.sentToDriverAt ? "إعادة الإرسال للسائق" : "إرسال للسائق",
           icon: "truck",
-          hint: "تظهر وثيقة النقل في رحلته بالتطبيق",
+          hint: "تظهر الرحلة في تطبيقه ليستلمها ويسجل التحميل والتسليم",
           action: sendToDriverAction.bind(null, w.id),
           confirm: w.sentToDriverAt ? { title: `إعادة إرسال وثيقة ${w.number}`, text: "أُرسلت من قبل؛ ستظهر للسائق بآخر بياناتها.", submit: "إرسال" } : undefined,
         });
@@ -534,31 +517,61 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
           ) : (
             <>
               {(canUpdate || canApprove || canInvoice) && (
-                <ActionForm id={BULK_FORM} action={bulkWaybillOps} resetOnSuccess={false} className="mb-3 flex flex-wrap items-center gap-3 rounded-2xl bg-white px-4 py-2.5 shadow-sm">
-                  <SelectionTotal form={BULK_FORM} noun="شحنة" />
-                  <select name="op" required defaultValue="" aria-label="العملية على المحدد" className="h-9 rounded-lg border border-gray-200 bg-white px-2.5 text-sm shadow-sm">
-                    <option value="" disabled>
-                      اختر العملية…
-                    </option>
-                    {canInvoice && <option value="invoice">فوترة المحدد (فاتورة مسودة لكل عميل)</option>}
-                    <optgroup label="نقل الحالة إلى">
-                      {canUpdate && <option value="in_transit">في الطريق</option>}
-                      {canUpdate && <option value="delivered">مُسلَّمة</option>}
-                      {canApprove && <option value="approved">معتمدة</option>}
-                      {canUpdate && <option value="draft">مسودة</option>}
-                    </optgroup>
-                  </select>
-                  {canInvoice && (
-                    <label className="flex items-center gap-1.5 text-xs text-gray-500">
-                      تاريخ الفاتورة
-                      <DateInput name="invoiceDate" defaultValue={today} className="h-9 w-36 rounded-lg border border-gray-200 px-2 text-sm" />
-                    </label>
-                  )}
-                  {canOverride && <input name="overrideReason" placeholder="سبب التجاوز عند الاعتماد (اختياري)" className="h-9 w-56 rounded-lg border border-gray-200 px-2.5 text-sm" />}
-                  <SubmitButton variant="secondary">تنفيذ على المحدد</SubmitButton>
-                  <span className="ms-auto">
-                    <BulkPdfButton kind="waybills" ids={rows.map((r) => r.w.id)} />
-                  </span>
+                <ActionForm id={BULK_FORM} action={bulkWaybillOps} resetOnSuccess={false} className="mb-3 rounded-2xl bg-white px-4 py-2.5 shadow-sm">
+                  <input type="hidden" name="op" defaultValue="" />
+                  <SelectionGate
+                    form={BULK_FORM}
+                    empty={
+                      <div className="flex flex-wrap items-center gap-3">
+                        <span className="text-sm text-gray-500">حدد شحنة أو أكثر من الجدول لتظهر العمليات: الاعتماد، والدمج والفوترة، والإرسال للسائق، وتغيير الحالة.</span>
+                        <span className="ms-auto">
+                          <BulkPdfButton kind="waybills" ids={rows.map((r) => r.w.id)} />
+                        </span>
+                      </div>
+                    }
+                  >
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      <SelectionTotal form={BULK_FORM} noun="شحنة" />
+                      <span className="mx-1 h-6 w-px bg-gray-200" aria-hidden />
+                      {canApprove && (
+                        <SubmitButton op="approved" pendingLabel="جارٍ الاعتماد…" className="!py-1.5">
+                          اعتماد
+                        </SubmitButton>
+                      )}
+                      {canInvoice && (
+                        <span className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 p-1 ps-2">
+                          <DateInput name="invoiceDate" defaultValue={today} aria-label="تاريخ الفاتورة" title="تاريخ الفاتورة" className="h-8 w-32 rounded-md border border-gray-200 bg-white px-2 text-sm" />
+                          <SubmitButton op="invoice" variant="secondary" pendingLabel="جارٍ الفوترة…" className="!py-1.5">
+                            دمج وفوترة المحدد
+                          </SubmitButton>
+                        </span>
+                      )}
+                      {canUpdate && (
+                        <SubmitButton op="send_driver" variant="secondary" pendingLabel="جارٍ الإرسال…" className="!py-1.5">
+                          إرسال للسائق
+                        </SubmitButton>
+                      )}
+                      {canUpdate && (
+                        <details data-dropdown className="relative">
+                          <summary className="flex cursor-pointer list-none items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
+                            تغيير الحالة
+                            <span aria-hidden className="text-xs text-gray-400">▾</span>
+                          </summary>
+                          <div className="absolute start-0 z-30 mt-1 flex w-52 flex-col rounded-xl border border-gray-200 bg-white p-1 shadow-lg">
+                            {(["in_transit", "delivered", "draft"] as const).map((op) => (
+                              <SubmitButton key={op} op={op} variant="secondary" className="!justify-start !border-0 !text-start !shadow-none">
+                                {op === "draft" ? "إرجاع إلى مسودة" : `إلى «${WAYBILL_STATUS[op].label}»`}
+                              </SubmitButton>
+                            ))}
+                          </div>
+                        </details>
+                      )}
+                      {canOverride && <input name="overrideReason" placeholder="سبب التجاوز عند الاعتماد (اختياري)" className="h-9 w-56 rounded-lg border border-gray-200 px-2.5 text-sm" />}
+                      <span className="ms-auto">
+                        <BulkPdfButton kind="waybills" ids={rows.map((r) => r.w.id)} />
+                      </span>
+                    </div>
+                  </SelectionGate>
                 </ActionForm>
               )}
               <Table head={[(canUpdate || canApprove || canInvoice) && rows.length ? <SelectAll key="all" form={BULK_FORM} /> : "", "الرقم", "التاريخ", "العميل", "المسار", "نوع الشحن", "المنفّذ", "السائق", ...(showPrices ? ["المبلغ"] : []), "الحالة", "الفاتورة", ""]}>
@@ -592,6 +605,9 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
                       <Td>
                         <Badge tone={pending ? "amber" : WAYBILL_STATUS[w.status].tone}>{pending ? "بانتظار الفوترة" : WAYBILL_STATUS[w.status].label}</Badge>
                         {w.status === "rejected" && w.rejectionReason && <span className="block max-w-48 truncate text-xs text-red-600">{w.rejectionReason}</span>}
+                        {(w.status === "draft" || w.status === "in_transit") && w.sentToDriverAt && (
+                          <span className={`mt-0.5 block text-xs whitespace-nowrap ${w.driverAcceptedAt ? "text-green-700" : "text-sky-700"}`}>{w.driverAcceptedAt ? "✓ استلمها السائق" : "أُرسلت للسائق"}</span>
+                        )}
                       </Td>
                       <Td className="ltr-nums whitespace-nowrap">
                         {r.invoiceId ? (

@@ -364,7 +364,7 @@ export async function sendToDriverAction(id: number): Promise<FormState> {
   try {
     const r = await sendTransportDocToDriver(db, id);
     refresh(id);
-    return { ok: `أُرسلت وثيقة النقل إلى ${r.driver ?? "السائق"}؛ تظهر الآن في رحلته بالتطبيق` };
+    return { ok: `أُرسلت الشحنة إلى ${r.driver ?? "السائق"}؛ تظهر الآن في تطبيقه ليستلمها` };
   } catch (err) {
     return { error: errorMessage(err) };
   }
@@ -471,6 +471,24 @@ export async function bulkWaybillOps(_: FormState, fd: FormData): Promise<FormSt
     } catch (err) {
       return { error: errorMessage(err) };
     }
+  }
+  if (op === "send_driver") {
+    await guard("update");
+    let sent = 0;
+    const failed: string[] = [];
+    for (const id of ids) {
+      try {
+        await guard("update", id);
+        await sendTransportDocToDriver(db, id);
+        sent++;
+      } catch (err) {
+        failed.push(errorMessage(err));
+      }
+    }
+    refresh();
+    const what = `أُرسلت ${sent} شحنة للسائقين؛ تظهر في تطبيقاتهم ليستلموها`;
+    if (!sent) return { error: failed.join("\n") };
+    return failed.length ? { error: `${what}، ولم تُرسل ${failed.length}:\n${failed.join("\n")}` } : { ok: what };
   }
   if (!isFlow(op)) return { error: "اختر العملية" };
   const user = await guard(op === "approved" ? "approve" : "update");

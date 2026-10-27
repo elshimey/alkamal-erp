@@ -12,11 +12,14 @@ export function SubmitButton({
   variant = "primary",
   pendingLabel = "جارٍ الحفظ…",
   className = "",
+  op,
 }: {
   children: ReactNode;
   variant?: "primary" | "secondary";
   pendingLabel?: string;
   className?: string;
+  /** لنموذج بعدة أزرار: يضع قيمته في حقل op المخفي قبل الإرسال */
+  op?: string;
 }) {
   const pending = useContext(PendingContext);
   const styles =
@@ -27,6 +30,14 @@ export function SubmitButton({
     <button
       type="submit"
       disabled={pending}
+      onClick={
+        op
+          ? (e) => {
+              const field = e.currentTarget.form?.elements.namedItem("op");
+              if (field instanceof HTMLInputElement) field.value = op;
+            }
+          : undefined
+      }
       className={`rounded-lg px-4 py-2 text-sm font-medium shadow-sm transition active:scale-[0.98] disabled:opacity-70 ${styles} ${className}`}
     >
       {pending ? (

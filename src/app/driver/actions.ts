@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { requireDriver } from "@/lib/driver-auth";
 import { destroySession, getCurrentUser, hasDriverSession } from "@/lib/auth";
-import { createDriverExpense, isDriverOnly, ownTrip, recordDriverStage, reportBreakdown, setDriverLanguage, startTrip, type TripStage } from "@/lib/driver-app";
+import { acceptTrip, createDriverExpense, isDriverOnly, ownTrip, recordDriverStage, reportBreakdown, setDriverLanguage, type TripStage } from "@/lib/driver-app";
 import { requestCommissionAdvance } from "@/lib/hr";
 import { submitRenewal } from "@/lib/documents";
 import { addExpense, addFuel, deleteWaybillItem } from "@/lib/waybills";
@@ -28,30 +28,6 @@ const op = (d: FormData) => str(d, "_op") || null;
 const photo = (d: FormData) => str(d, "photo") || null;
 const STAGES: TripStage[] = ["loading", "in_transit", "border", "delivery"];
 
-export async function startTripAction(_: FormState, data: FormData): Promise<FormState> {
-  const { user, driver } = await requireDriver();
-  let id: number;
-  try {
-    const w = await startTrip(db, driver, {
-      date: todayRiyadh(),
-      customerId: Number(str(data, "customerId")),
-      routeId: Number(str(data, "routeId")),
-      shipper: str(data, "shipper"),
-      consignee: str(data, "consignee"),
-      containerNumber: str(data, "containerNumber") || null,
-      weightTons: num(data, "weightTons"),
-      odometer: num(data, "odometer"),
-      notes: str(data, "notes") || null,
-      userId: user.id,
-    });
-    id = w.id;
-  } catch (err) {
-    return { error: errorMessage(err) };
-  }
-  revalidatePath("/driver");
-  redirect(`/driver/trips/${id}`);
-}
-
 export async function stageAction(_: FormState, data: FormData): Promise<FormState> {
   const { user, driver, t } = await requireDriver();
   const waybillId = Number(str(data, "waybillId"));
@@ -60,7 +36,10 @@ export async function stageAction(_: FormState, data: FormData): Promise<FormSta
     if (!STAGES.includes(stage)) throw new Error("اختر المرحلة");
     await onceForOp(db, op(data), async () => {
       await recordDriverStage(db, driver.id, waybillId, stage, { odometer: num(data, "odometer"), note: str(data, "note") || null, userId: user.id });
-      await saveDataUrl(db, { entity: "waybills", entityId: waybillId, kind: stage === "delivery" ? "pod" : "odometer", dataUrl: photo(data), userId: user.id });
+      // صورة أو صورتان اختياريتان مع كل مرحلة
+      for (const dataUrl of [photo(data), str(data, "photo2") || null]) {
+        await saveDataUrl(db, { entity: "waybills", entityId: waybillId, kind: stage === "delivery" ? "pod" : "other", dataUrl, userId: user.id });
+      }
     });
   } catch (err) {
     return { error: errorMessage(err) };
@@ -68,6 +47,19 @@ export async function stageAction(_: FormState, data: FormData): Promise<FormSta
   revalidatePath(`/driver/trips/${waybillId}`);
   revalidatePath("/driver");
   return { ok: t.stageDone };
+}
+
+export async function acceptTripAction(_: FormState, data: FormData): Promise<FormState> {
+  const { driver, t } = await requireDriver();
+  const waybillId = Number(str(data, "waybillId"));
+  try {
+    await onceForOp(db, op(data), () => acceptTrip(db, driver.id, waybillId));
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+  revalidatePath(`/driver/trips/${waybillId}`);
+  revalidatePath("/driver");
+  return { ok: t.flow.accepted };
 }
 
 export async function fuelAction(_: FormState, data: FormData): Promise<FormState> {
