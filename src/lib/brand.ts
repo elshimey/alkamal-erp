@@ -2,7 +2,7 @@ import "server-only";
 import { cache } from "react";
 import { cookies } from "next/headers";
 import { db } from "@/db";
-import { isSchemaName, TENANT_COOKIE } from "@/db/tenant";
+import { tenantFromCookies } from "@/db/tenant";
 import { getCompany } from "@/lib/company";
 
 // هوية الشركة الحالية (اسمها وشعارها من بيانات المنشأة) لتظهر في القائمة والدخول وتطبيق السائق.
@@ -16,7 +16,7 @@ export interface Brand {
 }
 
 export const getBrand = cache(async (anonymous = false): Promise<Brand> => {
-  if (anonymous && !isSchemaName((await cookies()).get(TENANT_COOKIE)?.value)) return { name: PRODUCT_NAME, logo: null, known: false };
+  if (anonymous && !tenantFromCookies(await cookies())) return { name: PRODUCT_NAME, logo: null, known: false };
   try {
     const c = await getCompany(db);
     return { name: c.nameAr, logo: c.logo, known: true };

@@ -68,7 +68,7 @@ export default async function DriverExpenses() {
                 <div className="truncate text-sm font-medium">
                   {e.description}
                   {photos.has(e.id) && (
-                    <a href={`/files/${photos.get(e.id)}`} target="_blank" rel="noreferrer" className="ms-1" aria-label={t.photos}>
+                    <a href={`/driver/files/${photos.get(e.id)}`} target="_blank" rel="noreferrer" className="ms-1" aria-label={t.photos}>
                       📷
                     </a>
                   )}

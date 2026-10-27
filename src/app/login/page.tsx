@@ -10,7 +10,7 @@ import { Truck } from "@/components/icons";
 import { login } from "./actions";
 import { lastCompanyCode } from "./company-code";
 
-export default async function LoginPage({ searchParams }: { searchParams: Promise<{ reset?: string }> }) {
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ reset?: string; driver?: string }> }) {
   if (await getCurrentUser()) redirect("/");
   const brand = await getBrand(true);
   const code = await lastCompanyCode();
@@ -55,6 +55,14 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           {(await searchParams).reset === "1" && (
             <p role="status" className="-mt-3 mb-5 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-800">
               عُيّنت كلمة المرور الجديدة؛ ادخل بها الآن.
+            </p>
+          )}
+          {(await searchParams).driver === "1" && (
+            <p role="status" className="-mt-3 mb-5 rounded-lg bg-brand-50 px-3 py-2 text-sm leading-relaxed text-brand-800">
+              هذا الجهاز مسجّل في تطبيق السائق، ويبقى التطبيق يعمل كما هو. للدخول إلى البرنامج استخدم حساب المكتب.{" "}
+              <Link href="/driver" className="font-semibold underline">
+                فتح تطبيق السائق
+              </Link>
             </p>
           )}
           <ActionForm action={login} className="flex flex-col gap-4" resetOnSuccess={false}>

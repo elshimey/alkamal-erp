@@ -4,7 +4,8 @@ import { baseSql, db } from "@/db";
 import { runInTenant } from "@/db/tenant";
 import { clearLoginFailures, LOGIN_LOCK_MINUTES, loginThrottled, recordLoginFailure, schemaForCompany, tenantState } from "@/lib/platform";
 import * as s from "@/db/schema";
-import { createSession } from "@/lib/auth";
+import { createSession, type Surface } from "@/lib/auth";
+import { isDriverOnly } from "@/lib/driver-app";
 import { hashPassword, verifyPassword } from "@/lib/password";
 
 // مقارنة وهمية حين لا يوجد المستخدم: يستغرق الرد نفس الوقت فلا يُعرف من سرعته أن الاسم غير موجود
@@ -15,7 +16,8 @@ export type SignInResult = { error: string; locked?: boolean; throttled?: boolea
 const WRONG = "رمز الشركة أو اسم الدخول أو كلمة المرور غير صحيحة";
 
 /** يتحقق من بيانات الدخول (رمز الشركة واسم الدخول وكلمة المرور) وينشئ الجلسة. ليس إجراء خادم بذاته؛ تستدعيه صفحتا الدخول فقط. */
-export async function signIn(companyCode: string, loginName: string, password: string): Promise<SignInResult> {
+/** surface: أين تُحفظ الجلسة؛ «auto» يضع حساب السائق في تطبيق السائق وغيره في البرنامج. */
+export async function signIn(companyCode: string, loginName: string, password: string, surface: Surface | "auto" = "auto"): Promise<SignInResult> {
   // المحاولات الخاطئة تُعد لكل اسم دخول داخل شركته
   const key = `${companyCode.trim().toLowerCase()}:${loginName}`;
   if (await loginThrottled(baseSql, key)) {
@@ -42,8 +44,8 @@ export async function signIn(companyCode: string, loginName: string, password: s
     if (blocked) return { error: blocked, locked: true };
 
     await clearLoginFailures(baseSql, key);
-    await createSession(user.id);
     const roles = await db.select({ key: s.roles.key }).from(s.userRoles).innerJoin(s.roles, eq(s.roles.id, s.userRoles.roleId)).where(eq(s.userRoles.userId, user.id));
+    await createSession(user.id, surface === "auto" ? (isDriverOnly(roles) ? "driver" : "office") : surface);
     return { roles, userId: user.id, schema };
   });
 }

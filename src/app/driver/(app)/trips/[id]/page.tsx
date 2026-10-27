@@ -128,9 +128,9 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
         <Section title={t.photos}>
           <div className="grid grid-cols-3 gap-2">
             {photos.map((ph) => (
-              <a key={ph.id} href={`/files/${ph.id}`} target="_blank" rel="noreferrer" className="block">
+              <a key={ph.id} href={`/driver/files/${ph.id}`} target="_blank" rel="noreferrer" className="block">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={`/files/${ph.id}`} alt="" loading="lazy" className="aspect-square w-full rounded-lg object-cover ring-1 ring-black/10" />
+                <img src={`/driver/files/${ph.id}`} alt="" loading="lazy" className="aspect-square w-full rounded-lg object-cover ring-1 ring-black/10" />
               </a>
             ))}
           </div>

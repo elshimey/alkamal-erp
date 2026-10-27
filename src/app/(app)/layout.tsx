@@ -38,8 +38,8 @@ const FOOTER: NavGroup[] = [
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
-  // السائق يعمل من تطبيقه فقط
-  if (isDriverOnly(user.roles)) redirect("/driver");
+  // السائق يعمل من تطبيقه فقط: جلسته القديمة تُنقل للتطبيق ويظهر للبرنامج دخول المكتب
+  if (isDriverOnly(user.roles)) redirect("/driver/session/move");
   const tenant = await getTenant();
   const brand = await getBrand();
   const today = todayRiyadh();

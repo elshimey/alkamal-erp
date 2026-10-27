@@ -6,6 +6,7 @@ import { getBrand } from "@/lib/brand";
 import { TabBar } from "../tab-bar";
 import { driverLogout } from "../actions";
 import { OfflineSync } from "../offline";
+import { Icon } from "@/components/icons";
 
 export default async function DriverLayout({ children }: { children: React.ReactNode }) {
   const { user, driver, lang, t } = await getDriverContext();
@@ -21,6 +22,14 @@ export default async function DriverLayout({ children }: { children: React.React
             <div className="truncate text-[11px] text-white/55">{brand.known ? brand.name : t.appName}</div>
             <div className="truncate font-display text-base font-semibold">{driver ? <>{t.hello} <bdi>{driver.name}</bdi></> : t.appName}</div>
           </div>
+          {driver && (
+            <form action={driverLogout}>
+              <button aria-label={t.logout} title={t.logout} className="flex flex-col items-center gap-0.5 rounded-lg px-1.5 py-1 text-white/80 active:bg-white/10">
+                <Icon name="logout" className="size-5" />
+                <span className="text-[10px] leading-none">{t.logout}</span>
+              </button>
+            </form>
+          )}
           {driver?.vehicle && (
             <div className="rounded-lg border-2 border-white/80 bg-white px-2 py-1 text-center text-asphalt-900 shadow" title={t.vehicle}>
               <div className="text-[9px] leading-none text-gray-500">{t.vehicle}</div>
