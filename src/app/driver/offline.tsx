@@ -3,11 +3,11 @@
 import { useRouter } from "next/navigation";
 import { startTransition, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { PendingContext, type FormState } from "@/components/action-form";
-import { breakdownAction, documentAction, expenseAction, fuelAction, stageAction, tripExpenseAction } from "./actions";
+import { acceptTripAction, breakdownAction, documentAction, expenseAction, fuelAction, stageAction, tripExpenseAction } from "./actions";
 
 // العمل دون إنترنت: ما يُدخله السائق بلا شبكة يُحفظ في الجوال (IndexedDB) ويُرسل تلقائياً عند عودتها.
 // كل عملية تحمل معرّفاً (_op) فلا تتكرر في الخادم إن أُرسلت مرتين.
-const ACTIONS = { stage: stageAction, fuel: fuelAction, tripExpense: tripExpenseAction, expense: expenseAction, breakdown: breakdownAction, document: documentAction } as const;
+const ACTIONS = { accept: acceptTripAction, stage: stageAction, fuel: fuelAction, tripExpense: tripExpenseAction, expense: expenseAction, breakdown: breakdownAction, document: documentAction } as const;
 export type OfflineActionKey = keyof typeof ACTIONS;
 type Queued = { id: string; key: OfflineActionKey; fields: [string, string][]; at: number };
 

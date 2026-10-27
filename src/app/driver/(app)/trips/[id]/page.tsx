@@ -21,7 +21,9 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
   const chargeTypes = editable ? await chargeTypeOptions() : [];
   const photos = await listAttachments(db, "waybills", [trip.id]);
   const time = (at: Date) => at.toLocaleString("en-GB", { timeZone: "Asia/Riyadh", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
-  const needsOdometer = next.includes("delivery") && next.length === 1;
+  // ما يضغطه السائق الآن: «استلمت الرحلة» ثم «تم التحميل» ثم «تم التسليم»
+  const needsAccept = editable && !trip.driverAcceptedAt && stages.length === 0 && ["draft", "in_transit"].includes(trip.status);
+  const step = next[0];
 
   return (
     <>
@@ -67,6 +69,30 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
         {(trip.status === "approved" || trip.status === "invoiced") && <p className="mt-3 rounded-xl bg-green-50 p-3 text-sm text-green-800">{t.closed}</p>}
       </Section>
 
+      {needsAccept ? (
+        <DriverForm actionKey="accept" savedOffline={t.savedOffline} className="mb-3">
+          <input type="hidden" name="waybillId" value={trip.id} />
+          <SubmitButton pendingLabel={t.saving} className="flex w-full flex-col items-center gap-1 !rounded-2xl !py-5 text-xl">
+            <span aria-hidden className="text-3xl">✋</span>
+            {t.flow.accept}
+          </SubmitButton>
+          <p className="mt-1.5 text-center text-xs text-gray-500">{t.flow.acceptHint}</p>
+        </DriverForm>
+      ) : (
+        step && (
+          <DriverForm actionKey="stage" savedOffline={t.savedOffline} className="mb-3 flex flex-col gap-3 rounded-2xl bg-white p-4 shadow-sm">
+            <input type="hidden" name="waybillId" value={trip.id} />
+            <input type="hidden" name="stage" value={step} />
+            <PhotoInput label={t.flow.photo} />
+            <PhotoInput name="photo2" label={t.flow.photo2} />
+            <SubmitButton pendingLabel={t.saving} className={`flex w-full flex-col items-center gap-1 !rounded-2xl !py-5 text-xl ${step === "delivery" ? "!bg-green-600 !text-white" : ""}`}>
+              <span aria-hidden className="text-3xl">{step === "delivery" ? "✅" : "📦"}</span>
+              {step === "delivery" ? t.flow.delivered : t.flow.loaded}
+            </SubmitButton>
+          </DriverForm>
+        )
+      )}
+
       {trip.sentToDriverAt && (
         <Link href={`/driver/trips/${trip.id}/document`} className="mb-3 flex items-center justify-between gap-3 rounded-2xl border-2 border-brand-500 bg-brand-50 p-4 shadow-sm">
           <span>
@@ -80,6 +106,7 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
         </Link>
       )}
 
+      {stages.length > 0 && (
       <Section title={t.timeline}>
         <ol className="relative ms-3 border-s-2 border-dashed border-brand-600/50">
           {stages.map((st) => (
@@ -94,35 +121,8 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
             </li>
           ))}
         </ol>
-        {next.length > 0 && (
-          <DriverForm actionKey="stage" savedOffline={t.savedOffline} className="mt-2 flex flex-col gap-3 rounded-xl bg-brand-50 p-3">
-            <input type="hidden" name="waybillId" value={trip.id} />
-            <div className="text-sm font-semibold text-asphalt-900">{t.nextStage}</div>
-            <div className="flex flex-wrap gap-2">
-              {next.map((st, i) => (
-                <label key={st} className="cursor-pointer">
-                  <input type="radio" name="stage" value={st} defaultChecked={i === 0} className="peer sr-only" />
-                  <span className="block rounded-full border border-gray-300 bg-white px-4 py-2 text-sm font-medium peer-checked:border-asphalt-900 peer-checked:bg-asphalt-900 peer-checked:text-brand-500">
-                    {t.stages[st]}
-                  </span>
-                </label>
-              ))}
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <DField label={t.odometer} hint={needsOdometer ? undefined : t.optional}>
-                <DInput name="odometer" inputMode="numeric" dir="ltr" required={needsOdometer} />
-              </DField>
-              <DField label={t.note} hint={t.optional}>
-                <DInput name="note" />
-              </DField>
-            </div>
-            <PhotoInput label={next.includes("delivery") ? `${t.podPhoto} / ${t.odometerPhoto}` : t.odometerPhoto} />
-            <SubmitButton pendingLabel={t.saving} className="w-full py-3 text-base">
-              {t.record}
-            </SubmitButton>
-          </DriverForm>
-        )}
       </Section>
+      )}
 
       {photos.length > 0 && (
         <Section title={t.photos}>

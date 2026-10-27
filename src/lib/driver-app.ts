@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
@@ -11,7 +11,6 @@ import { DRIVER_EXPENSE_ACCOUNTS, type DriverExpenseType, type DriverLang } from
 // تطبيق السائق: كل عملية هنا مقيّدة بسائق الحساب نفسه، ولا يرى الأسعار.
 
 export type TripStage = (typeof s.tripStageType.enumValues)[number];
-const STAGE_ORDER: TripStage[] = ["loading", "in_transit", "border", "delivery"];
 const OPEN: (typeof s.waybillStatus.enumValues)[number][] = ["draft", "in_transit", "delivered", "rejected"];
 
 export interface DriverProfile {
@@ -59,6 +58,8 @@ export async function driverTrips(db: Db | Tx, driverId: number, opts: { open: b
       to: to.nameAr,
       isInternational: s.waybills.isInternational,
       lastStage: sql<TripStage | null>`(select stage from trip_stages ts where ts.waybill_id = ${s.waybills.id} order by ts.at desc, ts.id desc limit 1)`,
+      sentToDriverAt: s.waybills.sentToDriverAt,
+      driverAcceptedAt: s.waybills.driverAcceptedAt,
     })
     .from(s.waybills)
     .innerJoin(s.parties, eq(s.parties.id, s.waybills.customerId))
@@ -68,6 +69,8 @@ export async function driverTrips(db: Db | Tx, driverId: number, opts: { open: b
     .where(
       and(
         eq(s.waybills.driverId, driverId),
+        // تظهر للسائق الرحلة التي أرسلها له المكتب (أو رحلة بدأها هو من قبل)
+        or(isNotNull(s.waybills.sentToDriverAt), sql`exists (select 1 from trip_stages ts where ts.waybill_id = ${s.waybills.id})`),
         opts.open ? inArray(s.waybills.status, OPEN) : sql`${s.waybills.status} not in ('draft','in_transit','delivered','rejected')`,
       ),
     )
@@ -97,7 +100,7 @@ export async function tripDetail(db: Db | Tx, driverId: number, waybillId: numbe
       .orderBy(s.waybillExpenses.id),
   ]);
   return {
-    trip: { ...trip, shipper: w.shipper, consignee: w.consignee, containerNumber: w.containerNumber, weightTons: w.weightTons, rejectionReason: w.rejectionReason, sentToDriverAt: w.sentToDriverAt, logistiNumber: w.logistiNumber },
+    trip: { ...trip, shipper: w.shipper, consignee: w.consignee, containerNumber: w.containerNumber, weightTons: w.weightTons, rejectionReason: w.rejectionReason, sentToDriverAt: w.sentToDriverAt, driverAcceptedAt: w.driverAcceptedAt, logistiNumber: w.logistiNumber },
     stages,
     fuel,
     expenses,
@@ -129,12 +132,19 @@ async function driverTripsById(db: Db | Tx, waybillId: number) {
     .where(eq(s.waybills.id, waybillId));
 }
 
-/** المراحل المتاحة الآن: لا تسجيل بعد التسليم، والحدود للرحلات الدولية فقط. */
-export function nextStages(w: { status: string; isInternational: boolean }, done: TripStage[]): TripStage[] {
+/**
+ * ما يضغطه السائق الآن: «تم التحميل» ثم «تم التسليم» فقط (زران كبيران بلا كتابة).
+ * التحميل يجعل الشحنة «في الطريق» والتسليم يجعلها «مُسلَّمة» تلقائياً.
+ */
+export function nextStages(w: { status: string }, done: TripStage[]): TripStage[] {
   if (!["draft", "in_transit"].includes(w.status) || done.includes("delivery")) return [];
-  if (!done.includes("loading")) return ["loading"];
-  const last = Math.max(...done.map((x) => STAGE_ORDER.indexOf(x)));
-  return STAGE_ORDER.filter((x, i) => i > last && x !== "loading" && (x !== "border" || w.isInternational));
+  return done.includes("loading") ? ["delivery"] : ["loading"];
+}
+
+/** السائق يؤكد استلام الرحلة التي أرسلها له المكتب. */
+export async function acceptTrip(db: Db, driverId: number, waybillId: number) {
+  const w = await ownTrip(db, driverId, waybillId);
+  if (!w.driverAcceptedAt) await db.update(s.waybills).set({ driverAcceptedAt: new Date() }).where(eq(s.waybills.id, waybillId));
 }
 
 export async function startTrip(
@@ -162,8 +172,10 @@ export async function startTrip(
 }
 
 export async function recordDriverStage(db: Db, driverId: number, waybillId: number, stage: TripStage, opts: { odometer?: number | null; note?: string | null; userId?: number }) {
-  const { next } = await tripDetail(db, driverId, waybillId);
+  const { next, trip } = await tripDetail(db, driverId, waybillId);
   if (!next.includes(stage)) throw new Error("هذه المرحلة غير متاحة الآن");
+  // التحميل يعني أنه استلم الرحلة حتى لو لم يضغط «استلمت»
+  if (!trip.driverAcceptedAt) await db.update(s.waybills).set({ driverAcceptedAt: new Date() }).where(eq(s.waybills.id, waybillId));
   await recordStage(db, waybillId, stage, opts);
 }
 

@@ -32,7 +32,7 @@ import { createViolation, deleteViolation, listViolations, payViolations, revert
 import { computePayrollLine } from "@/data/payroll";
 import { accountLedger, balanceSheet, costCenterProfit, incomeStatement, previousRange, trialBalance, vatReturn } from "@/lib/reports";
 import { alertCounts, cashFlow, financials, operations, periodRange, receivablesAging, vehicleProfit } from "@/lib/dashboard";
-import { createDriverExpense, createDriverLogin, linkUserToDriver, removeDriverLogin, resetDriverPassword, driverBalances, driverBreakdowns, driverForUser, driverTrips, isDriverOnly, nextStages, recordDriverStage, reportBreakdown, startTrip, tripDetail } from "@/lib/driver-app";
+import { acceptTrip, createDriverExpense, createDriverLogin, linkUserToDriver, removeDriverLogin, resetDriverPassword, driverBalances, driverBreakdowns, driverForUser, driverTrips, isDriverOnly, nextStages, recordDriverStage, reportBreakdown, startTrip, tripDetail } from "@/lib/driver-app";
 import { runImport } from "@/lib/importers";
 import { applyAdvance, customerCredit, postReceipt } from "@/lib/receipts";
 import { createNote, postNote, revertNote } from "@/lib/notes";
@@ -1192,7 +1192,7 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(w.amount).toBe("1800.000");
       let d = await tripDetail(db, me.id, w.id);
       expect(d.trip.status).toBe("in_transit");
-      expect(d.next).toEqual(["in_transit", "delivery"]);
+      expect(d.next).toEqual(["delivery"]);
       await expect(recordDriverStage(db, me.id, w.id, "border", {})).rejects.toThrow("غير متاحة");
       await expect(tripDetail(db, otherDriverId, w.id)).rejects.toThrow("ليست لك");
       await expect(recordDriverStage(db, otherDriverId, w.id, "delivery", {})).rejects.toThrow("ليست لك");
@@ -1203,8 +1203,28 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect((await driverTrips(db, me.id, { open: true })).map((x) => x.lastStage)).toEqual(["delivery"]);
       await approveWaybill(db, w.id);
       expect(await driverTrips(db, me.id, { open: true })).toHaveLength(0);
-      expect(nextStages({ status: "in_transit", isInternational: true }, ["loading"])).toEqual(["in_transit", "border", "delivery"]);
-      expect(nextStages({ status: "in_transit", isInternational: true }, ["loading", "border"])).toEqual(["delivery"]);
+      expect(nextStages({ status: "draft" }, [])).toEqual(["loading"]);
+      expect(nextStages({ status: "in_transit" }, ["loading"])).toEqual(["delivery"]);
+      expect(nextStages({ status: "delivered" }, ["loading", "delivery"])).toEqual([]);
+    });
+
+    it("المكتب ينشئ الشحنة ويرسلها، والسائق يستلمها ثم «تم التحميل» و«تم التسليم» فتتغير حالتها", async () => {
+      const w = await createWaybill(db, { waybillDate: D, customerId, routeId, shipper: "مصنع", consignee: "مستودع", vehicleId: me.vehicle!.id, driverId: me.id, userId });
+      const open = async () => (await driverTrips(db, me.id, { open: true })).map((x) => x.id);
+      expect(await open()).not.toContain(w.id); // لم تُرسل بعد
+      await sendTransportDocToDriver(db, w.id);
+      expect(await open()).toContain(w.id);
+      await acceptTrip(db, me.id, w.id);
+      let d = await tripDetail(db, me.id, w.id);
+      expect(d.trip.driverAcceptedAt).not.toBeNull();
+      expect(d.next).toEqual(["loading"]);
+      await recordDriverStage(db, me.id, w.id, "loading", { userId });
+      d = await tripDetail(db, me.id, w.id);
+      expect(d.trip.status).toBe("in_transit");
+      await recordDriverStage(db, me.id, w.id, "delivery", { userId });
+      d = await tripDetail(db, me.id, w.id);
+      expect(d.trip.status).toBe("delivered");
+      await expect(acceptTrip(db, otherDriverId, w.id)).rejects.toThrow("ليست لك");
     });
 
     it("مصروف السائق ينتظر الاعتماد ثم يُخصم من عهدته، والرصيد يجمع العمولة والمستحق", async () => {

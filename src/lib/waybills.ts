@@ -743,6 +743,7 @@ export async function sendTransportDocToDriver(db: Db, id: number) {
   if (!w) throw new Error("الشحنة غير موجودة");
   if (w.execution !== "fleet" || !w.driverId) throw new Error("الشحنة منفذة بناقل خارجي؛ لا يوجد سائق في التطبيق");
   if (w.status === "rejected") throw new Error(`الشحنة ${w.number} مرفوضة`);
+  if (w.status === "approved" || w.status === "invoiced") throw new Error(`الشحنة ${w.number} معتمدة؛ انتهت رحلتها`);
   await db.update(s.waybills).set({ sentToDriverAt: new Date() }).where(eq(s.waybills.id, id));
   return { number: w.number, driver: w.driver, mobile: w.mobile };
 }

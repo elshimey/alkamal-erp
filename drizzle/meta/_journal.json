@@ -218,6 +218,13 @@
       "when": 1792976473322,
       "tag": "0030_transport_document",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1792986473322,
+      "tag": "0031_driver_acceptance",
+      "breakpoints": true
     }
   ]
 }

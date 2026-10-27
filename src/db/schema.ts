@@ -763,6 +763,7 @@ export const waybills = pgTable(
     logistiNumber: varchar("logisti_number", { length: 40 }),
     logistiStatus: varchar("logisti_status", { length: 12 }).notNull().default("none"),
     sentToDriverAt: timestamp("sent_to_driver_at", { withTimezone: true }),
+    driverAcceptedAt: timestamp("driver_accepted_at", { withTimezone: true }),
     status: waybillStatus("status").notNull().default("draft"),
     rejectionReason: text("rejection_reason"),
     // سبب تجاوز الضوابط (بلا عقد ساري، الحد الائتماني) لمن يملك الصلاحية
