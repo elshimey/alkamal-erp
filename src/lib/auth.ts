@@ -5,21 +5,33 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { and, eq, gt, isNull, or } from "drizzle-orm";
 import { baseSql, db } from "@/db";
-import { currentSchema, HOME_SCHEMA, TENANT_COOKIE } from "@/db/tenant";
+import { currentSchema, DRIVER_SESSION_COOKIE, DRIVER_TENANT_COOKIE, HOME_SCHEMA, SESSION_COOKIE, TENANT_COOKIE } from "@/db/tenant";
 import { tenantState } from "@/lib/platform";
 import * as s from "@/db/schema";
 import { can, type Action, type Entity, type PermissionSet, type Scope } from "@/lib/permissions";
 
-const COOKIE = "erp_session";
 const SESSION_DAYS = 30;
+
+/** واجهة الدخول: البرنامج (المكتب) أو تطبيق السائق، ولكلٍّ جلسته على الجهاز. */
+export type Surface = "office" | "driver";
+const SURFACES = {
+  office: { session: SESSION_COOKIE, tenant: TENANT_COOKIE, path: "/" },
+  driver: { session: DRIVER_SESSION_COOKIE, tenant: DRIVER_TENANT_COOKIE, path: "/driver" },
+} as const;
+
+/** رمز جلسة هذا الطلب: صفحات السائق تصلها جلسة السائق إن وُجدت، وإلا جلسة المكتب. */
+async function sessionToken() {
+  const c = await cookies();
+  return c.get(DRIVER_SESSION_COOKIE)?.value ?? c.get(SESSION_COOKIE)?.value;
+}
 
 const hashToken = (token: string) => createHash("sha256").update(token).digest("hex");
 
-const cookieOptions = (expires: Date) => ({
+const cookieOptions = (expires: Date, path = "/") => ({
   httpOnly: true,
   sameSite: "lax" as const,
   secure: process.env.NODE_ENV === "production",
-  path: "/",
+  path,
   expires,
 });
 
@@ -30,29 +42,51 @@ export const getTenant = cache(async () => {
   return { schema, isHome: schema === HOME_SCHEMA, ...state };
 });
 
-export async function createSession(userId: number) {
+export async function createSession(userId: number, surface: Surface = "office") {
+  const c = SURFACES[surface];
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000);
   await db.insert(s.sessions).values({ id: hashToken(token), userId, expiresAt });
   await db.update(s.users).set({ lastLoginAt: new Date() }).where(eq(s.users.id, userId));
   const store = await cookies();
-  store.set(COOKIE, token, cookieOptions(expiresAt));
+  store.set(c.session, token, cookieOptions(expiresAt, c.path));
   // الشركة التي ينتمي لها المستخدم؛ الجلسة نفسها محفوظة داخل مخطط الشركة فلا يفيد تزوير هذه القيمة
-  store.set(TENANT_COOKIE, await currentSchema(), cookieOptions(new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)));
+  store.set(c.tenant, await currentSchema(), cookieOptions(new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), c.path));
 }
 
 /** معرّف جلسة هذا الجهاز (مخزن مُجزّأً كما في الجدول). */
 export async function currentSessionId() {
-  const token = (await cookies()).get(COOKIE)?.value;
+  const token = await sessionToken();
   return token ? hashToken(token) : null;
 }
 
-export async function destroySession() {
+export async function destroySession(surface: Surface = "office") {
+  const c = SURFACES[surface];
   const store = await cookies();
-  const token = store.get(COOKIE)?.value;
+  const token = store.get(c.session)?.value;
   if (token) await db.delete(s.sessions).where(eq(s.sessions.id, hashToken(token)));
   // يبقى ملف الشركة بعد الخروج لتظهر هويتها في صفحة الدخول؛ لا يمنح أي صلاحية بلا جلسة
-  store.delete(COOKIE);
+  store.delete({ name: c.session, path: c.path });
+}
+
+/** هل في هذا الطلب جلسة لتطبيق السائق نفسه (لا جلسة المكتب)؟ */
+export async function hasDriverSession() {
+  return (await cookies()).has(DRIVER_SESSION_COOKIE);
+}
+
+/**
+ * جهاز سجّل فيه السائق قبل فصل الجلستين يحمل جلسته باسم المكتب: تُنقل لتطبيق السائق كما هي
+ * (لا يحتاج السائق للدخول من جديد)، ويعود رابط البرنامج لصفحة دخول المكتب.
+ */
+export async function moveSessionToDriver() {
+  const store = await cookies();
+  const token = store.get(SESSION_COOKIE)?.value;
+  const tenant = store.get(TENANT_COOKIE)?.value;
+  if (!token) return;
+  const expires = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000);
+  store.set(DRIVER_SESSION_COOKIE, token, cookieOptions(expires, "/driver"));
+  if (tenant) store.set(DRIVER_TENANT_COOKIE, tenant, cookieOptions(new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), "/driver"));
+  store.delete({ name: SESSION_COOKIE, path: "/" });
 }
 
 export interface CurrentUser {
@@ -64,7 +98,7 @@ export interface CurrentUser {
 }
 
 export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
-  const token = (await cookies()).get(COOKIE)?.value;
+  const token = await sessionToken();
   if (!token) return null;
   if ((await getTenant()).blocked) return null; // انتهت التجربة أو أوقف الاشتراك
   const [row] = await db

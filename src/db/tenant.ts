@@ -7,6 +7,20 @@ import type postgres from "postgres";
 
 export const HOME_SCHEMA = "public";
 export const TENANT_COOKIE = "erp_tenant";
+
+// تطبيق السائق له دخول مستقل عن البرنامج على نفس الجهاز: ملفاته محصورة في المسار /driver،
+// فلا يرسلها المتصفح لصفحات المكتب، ويبقى دخول المكتب ودخول السائق منفصلين تماماً.
+export const DRIVER_SESSION_COOKIE = "erp_driver_session";
+export const DRIVER_TENANT_COOKIE = "erp_driver_tenant";
+export const SESSION_COOKIE = "erp_session";
+
+type CookieReader = { get(name: string): { value: string } | undefined; has(name: string): boolean };
+
+/** مخطط الشركة المحفوظ في ملفات هذا الطلب: شركة جلسة السائق إن وُجدت، وإلا شركة جلسة المكتب. */
+export function tenantFromCookies(c: CookieReader): string | undefined {
+  const v = c.has(DRIVER_SESSION_COOKIE) ? c.get(DRIVER_TENANT_COOKIE)?.value : c.has(SESSION_COOKIE) ? c.get(TENANT_COOKIE)?.value : (c.get(DRIVER_TENANT_COOKIE)?.value ?? c.get(TENANT_COOKIE)?.value);
+  return isSchemaName(v) ? v : undefined;
+}
 const SCHEMA_RE = /^(public|t_[a-z0-9_]{2,40})$/;
 
 export const isSchemaName = (v: unknown): v is string => typeof v === "string" && SCHEMA_RE.test(v);
@@ -26,8 +40,8 @@ export async function currentSchema(): Promise<string> {
   if (explicit) return explicit;
   try {
     const { cookies } = await import("next/headers");
-    const v = (await cookies()).get(TENANT_COOKIE)?.value;
-    if (isSchemaName(v)) return v;
+    const v = tenantFromCookies(await cookies());
+    if (v) return v;
   } catch {
     // خارج طلب ويب (سكربت أو اختبار)
   }

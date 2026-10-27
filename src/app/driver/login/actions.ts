@@ -16,7 +16,7 @@ export async function driverLogin(lang: DriverLang, _: FormState, data: FormData
   const loginName = String(data.get("login") ?? "").trim();
   const password = String(data.get("password") ?? "");
   if (!company || !loginName || !password) return { error: t.wrongLogin };
-  const result = await signIn(company, loginName, password);
+  const result = await signIn(company, loginName, password, "driver");
   if ("error" in result) return { error: result.throttled ? t.tooManyAttempts : result.locked ? t.accountLocked : t.wrongLogin };
 
   // اللغة التي اختارها في صفحة الدخول تصبح لغة تطبيقه

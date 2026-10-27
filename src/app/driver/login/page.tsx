@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, hasDriverSession } from "@/lib/auth";
 import { getBrand } from "@/lib/brand";
 import { DRIVER_DICT, DRIVER_LANG_COOKIE, DRIVER_LANGS, isRtl, LANG_NAMES, type DriverLang } from "@/data/driver-i18n";
 import { ActionForm, SubmitButton } from "@/components/action-form";
@@ -14,7 +14,8 @@ export const viewport = { themeColor: "#1b2126" };
 
 // صفحة دخول السائق: بلغته (عربي، أردو، هندي، إنجليزي)، وتفتح من رابط التطبيق مباشرة
 export default async function DriverLoginPage() {
-  if (await getCurrentUser()) redirect("/driver");
+  // دخول المكتب على نفس الجهاز لا يغني عن دخول السائق
+  if ((await hasDriverSession()) && (await getCurrentUser())) redirect("/driver");
   const saved = (await cookies()).get(DRIVER_LANG_COOKIE)?.value as DriverLang | undefined;
   const lang: DriverLang = saved && DRIVER_LANGS.includes(saved) ? saved : "ar";
   const t = DRIVER_DICT[lang];

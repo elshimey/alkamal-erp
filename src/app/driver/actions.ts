@@ -4,8 +4,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { requireDriver } from "@/lib/driver-auth";
-import { destroySession } from "@/lib/auth";
-import { createDriverExpense, ownTrip, recordDriverStage, reportBreakdown, setDriverLanguage, startTrip, type TripStage } from "@/lib/driver-app";
+import { destroySession, getCurrentUser, hasDriverSession } from "@/lib/auth";
+import { createDriverExpense, isDriverOnly, ownTrip, recordDriverStage, reportBreakdown, setDriverLanguage, startTrip, type TripStage } from "@/lib/driver-app";
 import { requestCommissionAdvance } from "@/lib/hr";
 import { submitRenewal } from "@/lib/documents";
 import { addExpense, addFuel, deleteWaybillItem } from "@/lib/waybills";
@@ -216,6 +216,11 @@ export async function languageAction(data: FormData) {
 }
 
 export async function driverLogout() {
-  await destroySession();
+  // يخرج من تطبيق السائق فقط ويبقى البرنامج على حاله؛ جلسة سائق قديمة باسم المكتب تُغلق أيضاً
+  if (await hasDriverSession()) await destroySession("driver");
+  else {
+    const user = await getCurrentUser();
+    if (user && isDriverOnly(user.roles)) await destroySession("office");
+  }
   redirect("/driver/login");
 }
