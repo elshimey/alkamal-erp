@@ -363,7 +363,7 @@ export async function deleteWaybillItem(db: Db, waybillId: number, kind: "fuel" 
   });
 }
 
-/** تسجيل مرحلة الرحلة؛ التحميل والطريق والحدود تجعلها «في الطريق»، والتسليم يجعلها «مُسلَّمة». */
+/** تسجيل مرحلة الرحلة؛ التحميل والطريق والحدود تجعلها «في الطريق»، والتسليم يجعلها «مُسلَّمة» (ما لم تُعتمد). */
 export async function recordStage(
   db: Db,
   waybillId: number,
@@ -372,8 +372,10 @@ export async function recordStage(
 ) {
   return db.transaction(async (tx) => {
     const w = await lockWaybill(tx, waybillId);
-    assertEditable(w);
     if (w.status === "rejected") throw new Error("الشحنة مرفوضة؛ أعدها لمسودة أولاً");
+    // الاعتماد مراجعة للفوترة لا تُنهي الرحلة: تُسجَّل مراحلها بعده دون أن تتغير حالة المستند
+    const reviewed = w.status === "approved" || w.status === "invoiced";
+    if (!reviewed) assertEditable(w);
     await tx.insert(s.tripStages).values({
       waybillId,
       stage,
@@ -384,7 +386,7 @@ export async function recordStage(
     });
     const set: Partial<typeof s.waybills.$inferInsert> = { updatedAt: new Date() };
     if (stage === "delivery") {
-      set.status = "delivered";
+      if (!reviewed) set.status = "delivered";
       if (opts.odometer != null) set.odometerEnd = opts.odometer;
     } else {
       if (w.status === "draft") set.status = "in_transit";
@@ -759,7 +761,7 @@ export async function saveTransportDoc(db: Db | Tx, id: number, input: Transport
 
 /**
  * ينقل الشحنة إلى الحالة المطلوبة خطوة خطوة على المسار: مسودة ← في الطريق ← مُسلَّمة ← معتمدة.
- * التقدم يسجل المرحلة (والاعتماد يرحّل قيد التكلفة)، والرجوع من المعتمدة يلغي القيد.
+ * الحالة مستقلة عن مراحل الرحلة التي يسجلها السائق؛ الاعتماد يرحّل قيد التكلفة، والرجوع من المعتمدة يلغي القيد.
  * المفوترة لا ترجع إلا بإلغاء فاتورتها أو إخراجها منها أولاً.
  */
 export async function setWaybillStatus(
@@ -793,9 +795,9 @@ export async function setWaybillStatus(
         throw new Error(issues.map((i) => i.message).join("، ") + hint);
       }
     }
-    if (from < 1 && to >= 1) await recordStage(db, id, "in_transit", { userId: opts.userId });
-    if (from < 2 && to >= 2) await recordStage(db, id, "delivery", { userId: opts.userId });
+    // تغيير الحالة من المكتب لا يسجّل مراحل رحلة: التحميل والتسليم يسجّلهما السائق من تطبيقه
     if (to === 3) await approveWaybill(db, id, opts);
+    else await db.update(s.waybills).set({ status: target, updatedAt: new Date() }).where(eq(s.waybills.id, id));
     return;
   }
   if (w.status === "approved") await revertWaybill(db, id);

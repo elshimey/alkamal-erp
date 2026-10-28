@@ -20,9 +20,9 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
   if (!d) notFound();
   const { trip, stages, fuel, expenses, next, editable } = d;
   const [photos, [box], mine] = await Promise.all([listAttachments(db, "waybills", [trip.id]), tripCustodySummary(db, driver.id, [trip.id]), driverExpenses(db, driver.id, trip.id)]);
-  // التراجع عن آخر مرحلة ما دامت الرحلة غير مغلقة
+  // التراجع عن آخر مرحلة سجّلها السائق نفسه
   const lastStage = stages.at(-1);
-  const canUndo = !!lastStage && lastStage.createdBy === user.id && ["draft", "in_transit", "delivered"].includes(trip.status);
+  const canUndo = !!lastStage && lastStage.createdBy === user.id && trip.status !== "rejected";
   const time = (at: Date) => at.toLocaleString("en-GB", { timeZone: "Asia/Riyadh", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
   // ما يضغطه السائق الآن: «استلمت الرحلة» ثم «تم التحميل» ثم «تم التسليم»
   const needsAccept = editable && !trip.driverAcceptedAt && stages.length === 0 && ["draft", "in_transit"].includes(trip.status);

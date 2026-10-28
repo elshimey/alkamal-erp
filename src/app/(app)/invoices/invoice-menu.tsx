@@ -40,7 +40,7 @@ export function invoiceActions(
       confirm: { title: `إرجاع الفاتورة ${i.number} إلى مسودة`, text: "يُلغى قيد الإيراد والضريبة وتعود الفاتورة مسودة لتعديلها، وتحتفظ برقمها الرسمي نفسه.", submit: "إرجاع" },
     });
   const trips = p.trips ?? [];
-  const sendable = trips.filter((w) => !w.sentAt && ["draft", "in_transit", "delivered"].includes(w.status));
+  const sendable = trips.filter((w) => !w.sentAt && w.status !== "rejected");
   const sent = trips.filter((w) => w.sentAt);
   if (p.canSend && sendable.length) {
     const custody = sendable.reduce((t, w) => t + Number(w.custody), 0);

@@ -1053,7 +1053,8 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       // للأمام خطوة خطوة حتى الاعتماد، ثم للخلف يلغي القيد
       await setWaybillStatus(db, w1.id, "delivered");
       expect((await status(w1.id)).status).toBe("delivered");
-      expect((await db.select().from(s.tripStages).where(eq(s.tripStages.waybillId, w1.id))).map((x) => x.stage)).toEqual(["in_transit", "delivery"]);
+      // تغيير الحالة من المكتب لا يسجّل مراحل؛ المراحل يسجلها السائق
+      expect(await db.select().from(s.tripStages).where(eq(s.tripStages.waybillId, w1.id))).toEqual([]);
       await setWaybillStatus(db, w1.id, "approved", ov);
       const entryId = (await status(w1.id)).journalEntryId;
       expect(entryId).not.toBeNull();
@@ -1441,7 +1442,7 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       await expect(updateDriverExpense(db, me, bad.id, { date: D, kind: "tires", amount: 80, reportedPayer: "custody" })).rejects.toThrow("ينتظر الاعتماد");
     });
 
-    it("مراحل الرحلة: التراجع عن آخر مرحلة يعيد الحالة، ولا تراجع بعد إغلاق الرحلة", async () => {
+    it("مراحل الرحلة: التراجع عن آخر مرحلة يعيد الحالة، والاعتماد لا يُنهي الرحلة عند السائق", async () => {
       const w = await createWaybill(db, { waybillDate: D, customerId, routeId, shipper: "مصنع", consignee: "مستودع", vehicleId: me.vehicle!.id, driverId: me.id, userId });
       await expect(undoDriverStage(db, me.id, w.id)).rejects.toThrow("لا توجد مرحلة");
       await recordDriverStage(db, me.id, w.id, "loading", { odometer: 1000, userId });
@@ -1456,9 +1457,19 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       await expect(undoDriverStage(db, otherDriverId, w.id)).rejects.toThrow("ليست لك");
       await recordDriverStage(db, me.id, w.id, "loading", { userId });
       await setWaybillStatus(db, w.id, "approved", { canOverride: true, overrideReason: "اختبار" });
+      // الاعتماد مراجعة قبل الفوترة: يبقى للسائق «تم التسليم» والرحلة مفتوحة عنده
       d = await tripDetail(db, me.id, w.id);
-      expect(d.next).toEqual([]);
-      await expect(undoDriverStage(db, me.id, w.id)).rejects.toThrow("مغلقة");
+      expect([d.trip.status, d.next]).toEqual(["in_transit", ["delivery"]]);
+      expect((await driverTrips(db, me.id, { open: true })).some((x) => x.id === w.id)).toBe(true);
+      await recordDriverStage(db, me.id, w.id, "delivery", { userId });
+      const [after] = await db.select({ status: s.waybills.status }).from(s.waybills).where(eq(s.waybills.id, w.id));
+      expect(after.status).toBe("approved");
+      expect((await tripDetail(db, me.id, w.id)).trip.status).toBe("approved");
+      expect((await driverTrips(db, me.id, { open: false })).some((x) => x.id === w.id)).toBe(true);
+      // التراجع عن التسليم بعد الاعتماد لا يغيّر حالة المستند
+      await undoDriverStage(db, me.id, w.id, userId);
+      const [still] = await db.select({ status: s.waybills.status }).from(s.waybills).where(eq(s.waybills.id, w.id));
+      expect(still.status).toBe("approved");
     });
 
     it("طلب الصيانة بنوعه، والسلفة من العهدة تُقيد على عهدة السائق وتُقسط وتصل للسائق", async () => {
