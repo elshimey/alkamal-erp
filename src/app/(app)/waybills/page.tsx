@@ -225,7 +225,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
     if (canUpdate && st === "rejected") items.push({ label: "إعادة إلى مسودة للتصحيح", icon: "undo", action: to("draft") });
     if (canUpdate && st !== "rejected") {
       items.push({ label: "بيانات وثيقة النقل", icon: "pencil", hint: "المرسل والمستلم والبضاعة ورقم لوجستي", href: withParam(listUrl({ open: String(w.id) }), "transport", String(w.id)), divider: true });
-      if (w.execution === "fleet" && !w.sentToDriverAt && (st === "draft" || st === "in_transit" || st === "delivered")) {
+      if (w.execution === "fleet" && !w.sentToDriverAt) {
         const custody = Number(w.tripCustody);
         items.push({
           label: "إرسال للسائق",

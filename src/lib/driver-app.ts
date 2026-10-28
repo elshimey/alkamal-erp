@@ -11,7 +11,20 @@ import { DRIVER_EXPENSE_ACCOUNTS, type DriverExpenseType, type DriverLang } from
 // تطبيق السائق: كل عملية هنا مقيّدة بسائق الحساب نفسه، ولا يرى الأسعار.
 
 export type TripStage = (typeof s.tripStageType.enumValues)[number];
-const OPEN: (typeof s.waybillStatus.enumValues)[number][] = ["draft", "in_transit", "delivered", "rejected"];
+type WaybillStatus = (typeof s.waybillStatus.enumValues)[number];
+
+// مراحل السائق نفسه على الرحلة (لا ما سجّله المكتب)
+const OWN_STAGE = sql.raw(`ts.waybill_id = "waybills"."id" and ts.created_by = (select dr.user_id from drivers dr where dr.id = "waybills"."driver_id")`);
+
+/**
+ * حالة الرحلة كما يراها السائق: من مراحله هو لا من حالة المستند في المكتب.
+ * اعتماد المكتب مراجعة قبل الفوترة؛ لا تُغلق الرحلة عند السائق حتى يسجّل التسليم.
+ */
+export function driverStatus(status: WaybillStatus, stages: TripStage[]): WaybillStatus {
+  if (status === "rejected") return "rejected";
+  if (stages.includes("delivery")) return status === "approved" || status === "invoiced" ? status : "delivered";
+  return stages.length ? "in_transit" : "draft";
+}
 
 export interface DriverProfile {
   id: number;
@@ -57,7 +70,8 @@ export async function driverTrips(db: Db | Tx, driverId: number, opts: { open: b
       from: from.nameAr,
       to: to.nameAr,
       isInternational: s.waybills.isInternational,
-      lastStage: sql<TripStage | null>`(select stage from trip_stages ts where ts.waybill_id = ${s.waybills.id} order by ts.at desc, ts.id desc limit 1)`,
+      lastStage: sql<TripStage | null>`(select stage from trip_stages ts where ${OWN_STAGE} order by ts.at desc, ts.id desc limit 1)`,
+      delivered: sql<boolean>`exists (select 1 from trip_stages ts where ${OWN_STAGE} and ts.stage = 'delivery')`,
       sentToDriverAt: s.waybills.sentToDriverAt,
       driverAcceptedAt: s.waybills.driverAcceptedAt,
     })
@@ -75,12 +89,18 @@ export async function driverTrips(db: Db | Tx, driverId: number, opts: { open: b
           isNotNull(s.waybills.sentToDriverAt),
           sql`exists (select 1 from trip_stages ts join drivers dr on dr.user_id = ts.created_by where ts.waybill_id = ${s.waybills.id} and dr.id = ${s.waybills.driverId})`,
         ),
-        opts.open ? inArray(s.waybills.status, OPEN) : sql`${s.waybills.status} not in ('draft','in_transit','delivered','rejected')`,
+        // المعتمدة تبقى مفتوحة عند السائق حتى يسجّل التسليم بنفسه
+        opts.open
+          ? sql`(${s.waybills.status} in ('draft','in_transit','delivered','rejected') or not exists (select 1 from trip_stages ts where ${OWN_STAGE} and ts.stage = 'delivery'))`
+          : sql`(${s.waybills.status} in ('approved','invoiced') and exists (select 1 from trip_stages ts where ${OWN_STAGE} and ts.stage = 'delivery'))`,
       ),
     )
     .orderBy(desc(s.waybills.waybillDate), desc(s.waybills.id))
     .limit(opts.limit ?? 50);
-  return rows;
+  return rows.map(({ delivered, ...r }) => ({
+    ...r,
+    status: driverStatus(r.status, [...(r.lastStage ? [r.lastStage] : []), ...(delivered ? (["delivery"] as TripStage[]) : [])]),
+  }));
 }
 
 export async function ownTrip(db: Db | Tx, driverId: number, waybillId: number) {
@@ -94,7 +114,12 @@ export async function tripDetail(db: Db | Tx, driverId: number, waybillId: numbe
   const w = await ownTrip(db, driverId, waybillId);
   const [trip] = await driverTripsById(db, waybillId);
   const [stages, fuel, expenses] = await Promise.all([
-    db.select().from(s.tripStages).where(eq(s.tripStages.waybillId, waybillId)).orderBy(s.tripStages.at, s.tripStages.id),
+    // السائق يرى مراحله هو؛ ما سجّله المكتب يبقى في المكتب
+    db
+      .select()
+      .from(s.tripStages)
+      .where(and(eq(s.tripStages.waybillId, waybillId), w.driverId ? sql`${s.tripStages.createdBy} = (select user_id from drivers where id = ${w.driverId})` : sql`false`))
+      .orderBy(s.tripStages.at, s.tripStages.id),
     db.select().from(s.waybillFuel).where(eq(s.waybillFuel.waybillId, waybillId)).orderBy(s.waybillFuel.id),
     db
       .select({ e: s.waybillExpenses, type: s.chargeTypes.nameAr })
@@ -103,13 +128,14 @@ export async function tripDetail(db: Db | Tx, driverId: number, waybillId: numbe
       .where(eq(s.waybillExpenses.waybillId, waybillId))
       .orderBy(s.waybillExpenses.id),
   ]);
+  const done = stages.map((x) => x.stage);
   return {
-    trip: { ...trip, shipper: w.shipper, consignee: w.consignee, containerNumber: w.containerNumber, weightTons: w.weightTons, rejectionReason: w.rejectionReason, sentToDriverAt: w.sentToDriverAt, driverAcceptedAt: w.driverAcceptedAt, logistiNumber: w.logistiNumber, tripCustody: w.tripCustody },
+    trip: { ...trip, status: driverStatus(w.status, done), shipper: w.shipper, consignee: w.consignee, containerNumber: w.containerNumber, weightTons: w.weightTons, rejectionReason: w.rejectionReason, sentToDriverAt: w.sentToDriverAt, driverAcceptedAt: w.driverAcceptedAt, logistiNumber: w.logistiNumber, tripCustody: w.tripCustody },
     stages,
     fuel,
     expenses,
-    next: nextStages(w, stages.map((x) => x.stage)),
-    editable: OPEN.includes(w.status),
+    next: nextStages(w, done),
+    editable: w.status !== "rejected" && !done.includes("delivery"),
   };
 }
 
@@ -137,21 +163,20 @@ async function driverTripsById(db: Db | Tx, waybillId: number) {
 }
 
 /**
- * ما يضغطه السائق الآن: «تم التحميل» ثم «تم التسليم» فقط (زران كبيران بلا كتابة).
+ * ما يضغطه السائق الآن: «تم التحميل» ثم «تم التسليم» فقط (زران كبيران بلا كتابة)، من مراحله هو.
  * التحميل يجعل الشحنة «في الطريق» والتسليم يجعلها «مُسلَّمة» تلقائياً.
- * تبقى متاحة مهما غيّر المكتب الحالة، حتى تُعتمد الرحلة (تُغلق) أو تُعاد للتصحيح.
+ * تبقى متاحة مهما غيّر المكتب الحالة، حتى لو اعتمدها (الاعتماد مراجعة لا إغلاق)، إلا إن رُفضت للتصحيح.
  */
 export function nextStages(w: { status: string }, done: TripStage[]): TripStage[] {
-  if (!["draft", "in_transit", "delivered"].includes(w.status) || done.includes("delivery")) return [];
+  if (w.status === "rejected" || done.includes("delivery")) return [];
   return done.includes("loading") ? ["delivery"] : ["loading"];
 }
 
-/** التراجع عن آخر مرحلة ضغطها السائق بالخطأ، ما دامت الرحلة غير مغلقة. صورها تبقى محفوظة. */
+/** التراجع عن آخر مرحلة ضغطها السائق بالخطأ. صورها تبقى محفوظة. */
 export async function undoDriverStage(db: Db, driverId: number, waybillId: number, userId?: number) {
   return db.transaction(async (tx) => {
     const [w] = await tx.select().from(s.waybills).where(and(eq(s.waybills.id, waybillId), eq(s.waybills.driverId, driverId))).for("update");
     if (!w) throw new Error("هذه الرحلة ليست لك");
-    if (!["draft", "in_transit", "delivered"].includes(w.status)) throw new Error("الرحلة مغلقة؛ لا يمكن التراجع");
     const stages = await tx.select().from(s.tripStages).where(eq(s.tripStages.waybillId, waybillId)).orderBy(desc(s.tripStages.at), desc(s.tripStages.id));
     const last = stages[0];
     if (!last) throw new Error("لا توجد مرحلة للتراجع عنها");
@@ -161,7 +186,9 @@ export async function undoDriverStage(db: Db, driverId: number, waybillId: numbe
     const rest = stages.slice(1).map((x) => x.stage);
     // التسليم الذي سجّله المكتب يدوياً لا يلغيه تراجع السائق عن التحميل
     const status = rest.includes("delivery") || (w.status === "delivered" && last.stage !== "delivery") ? "delivered" : rest.length ? "in_transit" : "draft";
-    const set: Partial<typeof s.waybills.$inferInsert> = { status, updatedAt: new Date() };
+    // المعتمدة والمرفوضة تبقى على حالتها؛ التراجع يخص مراحل الرحلة فقط
+    const set: Partial<typeof s.waybills.$inferInsert> = { updatedAt: new Date() };
+    if (["draft", "in_transit", "delivered"].includes(w.status)) set.status = status;
     if (last.stage === "delivery") set.odometerEnd = null;
     if (last.stage === "loading" && !rest.includes("loading")) set.odometerStart = null;
     await tx.update(s.waybills).set(set).where(eq(s.waybills.id, waybillId));

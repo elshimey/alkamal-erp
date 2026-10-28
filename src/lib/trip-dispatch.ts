@@ -13,7 +13,13 @@ const STAGE_LABEL: Record<string, string> = { loading: "تحميل", in_transit:
 /** ما سجّله السائق على الرحلة (مراحل ومصاريف)؛ فارغ = يمكن سحبها منه. */
 export async function driverActivity(db: Db | Tx, waybillId: number) {
   const [stages, expenses] = await Promise.all([
-    db.select({ stage: s.tripStages.stage }).from(s.tripStages).where(eq(s.tripStages.waybillId, waybillId)),
+    // مراحل السائق نفسه فقط؛ ما سجّله المكتب لا يمنع سحب الرحلة
+    db
+      .select({ stage: s.tripStages.stage })
+      .from(s.tripStages)
+      .innerJoin(s.waybills, eq(s.waybills.id, s.tripStages.waybillId))
+      .innerJoin(s.drivers, and(eq(s.drivers.id, s.waybills.driverId), eq(s.drivers.userId, s.tripStages.createdBy)))
+      .where(eq(s.tripStages.waybillId, waybillId)),
     db
       .select({ number: s.expenses.number })
       .from(s.expenses)
@@ -42,13 +48,14 @@ export async function sendTrip(db: Db, id: number, opts: SendOptions = {}) {
   if (t.execution !== "fleet" || !t.driverId) throw new Error(`${t.number}: منفذة بناقل خارجي؛ لا يوجد سائق في التطبيق`);
   if (t.sentToDriverAt) throw new Error(`${t.number}: أُرسلت للسائق من قبل`);
   if (t.status === "rejected") throw new Error(`${t.number}: مرفوضة`);
-  if (t.status === "approved" || t.status === "invoiced") throw new Error(`${t.number}: معتمدة؛ انتهت رحلتها`);
   const custody = Number(t.tripCustody);
   let paymentId: number | null = null;
   let paymentNumber: string | null = null;
   if (custody > 0) {
     if (!opts.cashAccountId) throw new Error(`${t.number}: اختر الصندوق أو البنك الذي تُصرف منه عهدة الرحلة`);
     const [acc] = await db.select({ code: s.accounts.code }).from(s.accounts).where(eq(s.accounts.id, opts.cashAccountId));
+    const [own] = await db.select({ custody: s.drivers.custodyAccountId }).from(s.drivers).where(eq(s.drivers.id, t.driverId));
+    if (own?.custody === opts.cashAccountId) throw new Error(`${t.number}: لا تُصرف عهدة السائق من حساب عهدته نفسه؛ اختر صندوقاً أو حساباً آخر`);
     const p = await createPayment(db, {
       paymentDate: opts.date ?? todayRiyadh(),
       kind: "custody",
@@ -89,7 +96,6 @@ export async function unsendTrip(db: Db, id: number, userId?: number) {
   const acts = await driverActivity(db, id);
   if (acts.length)
     throw new Error(`${t.number}: سجّل السائق عليها (${acts.join("، ")})؛ لا يُلغى الإرسال حتى يتراجع عنها السائق أو تُرفض مصاريفه`);
-  if (t.status === "approved" || t.status === "invoiced") throw new Error(`${t.number}: معتمدة؛ انتهت رحلتها`);
   await db.update(s.waybills).set({ sentToDriverAt: null, driverAcceptedAt: null, custodyPaymentId: null, updatedAt: new Date() }).where(eq(s.waybills.id, id));
   if (t.custodyPaymentId) await dropPayment(db, t.custodyPaymentId, `إلغاء إرسال الرحلة ${t.number}`, userId);
   await notifyDriver(db, t.driverId, { kind: "trip_unsent", body: t.number, href: "/driver" });
