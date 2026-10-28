@@ -92,7 +92,7 @@ export function ActionForm({
           </p>
         )}
         {state?.ok && (
-          <p role="status" className="saved-pop col-span-full basis-full mt-2 flex items-center gap-2 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-800">
+          <p role="status" className="saved-pop col-span-full basis-full mt-2 flex items-center gap-2 rounded-lg bg-green-50 px-3 py-2 text-sm whitespace-pre-line text-green-800">
             <span aria-hidden="true" className="flex size-5 shrink-0 items-center justify-center rounded-full bg-green-600 text-xs text-white">✓</span>
             {state.ok}
           </p>

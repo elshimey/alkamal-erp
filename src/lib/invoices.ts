@@ -24,6 +24,12 @@ async function lockInvoice(tx: Tx, id: number) {
   return inv;
 }
 
+/** رقم من سلسلة المسودات؛ الرقم الرسمي (INV) يُعطى عند أول إصدار فلا تنقطع سلسلة الفواتير الصادرة. */
+const draftNumber = (tx: Tx, date: string) => nextDocumentNumber(tx, "sales_invoice_draft", "DRF", Number(date.slice(0, 4)));
+
+/** أخذت الفاتورة رقماً رسمياً (أُصدرت ولو مرة)، فلا تُحذف حفاظاً على تسلسل الفواتير. */
+export const hasOfficialNumber = (i: { number: string; draftNumber: string | null }) => i.number !== i.draftNumber;
+
 const addDays = (iso: string, days: number) => {
   const d = new Date(`${iso}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);
@@ -193,11 +199,12 @@ export async function createInvoice(db: Db, input: InvoiceInput) {
     const contractId = candidates.find((c) => c.contractId)?.contractId ?? null;
     const [contract] = contractId ? await tx.select().from(s.contracts).where(eq(s.contracts.id, contractId)) : [];
     const rate = await rateOn(tx, currency, input.invoiceDate);
-    const number = await nextDocumentNumber(tx, "sales_invoice", "INV", Number(input.invoiceDate.slice(0, 4)));
+    const number = await draftNumber(tx, input.invoiceDate);
     const [inv] = await tx
       .insert(s.salesInvoices)
       .values({
         number,
+        draftNumber: number,
         invoiceDate: input.invoiceDate,
         dueDate: addDays(input.invoiceDate, contract?.paymentTermsDays ?? 30),
         customerId: input.customerId,
@@ -219,7 +226,8 @@ export interface ManualInvoiceInput {
   invoiceDate: string;
   dueDate: string;
   currencyCode: string;
-  reference: string;
+  // رقم الفاتورة في النظام السابق أو رقم عرض السعر؛ فارغ للفاتورة المباشرة
+  reference?: string | null;
   notes?: string | null;
   userId?: number;
   lines: {
@@ -236,18 +244,48 @@ export interface ManualInvoiceInput {
   }[];
 }
 
-/** فاتورة مسودة بسطور حرة (المستوردة من Excel أو نظام سابق)، بلا شحنات. */
+function manualLines(lines: ManualInvoiceInput["lines"]) {
+  return lines.map((l) => ({
+    invoiceId: 0,
+    lineNo: 0,
+    kind: "manual" as const,
+    description: l.description,
+    quantity: String(l.quantity),
+    unitPrice: String(l.unitPrice),
+    discountPercent: l.discountPercent ? String(l.discountPercent) : null,
+    amount: String(l.amount),
+    vatRate: String(l.vatRate),
+    vatAmount: String(l.vatAmount),
+    taxCodeId: l.taxCodeId,
+    accountId: l.accountId,
+    costCenterId: l.costCenterId,
+  }));
+}
+
+function checkHeader(input: { invoiceDate: string; dueDate: string; customerId: number }) {
+  if (!input.customerId) throw new Error("اختر العميل");
+  if (!ISO_DATE.test(input.invoiceDate)) throw new Error("تاريخ الفاتورة إلزامي");
+  if (!ISO_DATE.test(input.dueDate)) throw new Error("تاريخ الاستحقاق إلزامي");
+  if (input.dueDate < input.invoiceDate) throw new Error("تاريخ الاستحقاق قبل تاريخ الفاتورة");
+}
+
+/** فاتورة مسودة بسطور حرة: مباشرة من صفحة الفواتير، أو من عرض سعر، أو مستوردة من Excel أو نظام سابق. */
 export async function createManualInvoiceTx(tx: Tx, input: ManualInvoiceInput) {
   if (!input.lines.length) throw new Error("الفاتورة بلا بنود");
-  const [dup] = await tx.select({ number: s.salesInvoices.number }).from(s.salesInvoices).where(eq(s.salesInvoices.reference, input.reference));
-  if (dup) throw new Error(`الفاتورة ${input.reference} مستوردة مسبقاً برقم ${dup.number}`);
+  checkHeader(input);
+  const reference = input.reference?.trim() || null;
+  if (reference) {
+    const [dup] = await tx.select({ number: s.salesInvoices.number }).from(s.salesInvoices).where(eq(s.salesInvoices.reference, reference));
+    if (dup) throw new Error(`المرجع ${reference} مسجل مسبقاً على الفاتورة ${dup.number}`);
+  }
   const rate = await rateOn(tx, input.currencyCode, input.invoiceDate);
-  const number = await nextDocumentNumber(tx, "sales_invoice", "INV", Number(input.invoiceDate.slice(0, 4)));
+  const number = await draftNumber(tx, input.invoiceDate);
   const [inv] = await tx
     .insert(s.salesInvoices)
     .values({
       number,
-      reference: input.reference,
+      draftNumber: number,
+      reference,
       invoiceDate: input.invoiceDate,
       dueDate: input.dueDate,
       customerId: input.customerId,
@@ -257,27 +295,58 @@ export async function createManualInvoiceTx(tx: Tx, input: ManualInvoiceInput) {
       createdBy: input.userId,
     })
     .returning();
-  await insertLines(
-    tx,
-    inv.id,
-    input.lines.map((l) => ({
-      invoiceId: inv.id,
-      lineNo: 0,
-      kind: "manual" as const,
-      description: l.description,
-      quantity: String(l.quantity),
-      unitPrice: String(l.unitPrice),
-      discountPercent: l.discountPercent ? String(l.discountPercent) : null,
-      amount: String(l.amount),
-      vatRate: String(l.vatRate),
-      vatAmount: String(l.vatAmount),
-      taxCodeId: l.taxCodeId,
-      accountId: l.accountId,
-      costCenterId: l.costCenterId,
-    })),
-  );
+  await insertLines(tx, inv.id, manualLines(input.lines));
   await recomputeTotals(tx, inv.id);
   return inv;
+}
+
+/** فاتورة مباشرة من صفحة الفواتير، دون شحنة؛ تُحفظ مسودة حتى تُعتمد. */
+export async function createDirectInvoice(db: Db, input: ManualInvoiceInput) {
+  return db.transaction((tx) => createManualInvoiceTx(tx, input));
+}
+
+/**
+ * تعديل مسودة من النافذة: البيانات الأساسية والبنود الحرة. سطور الشحنات تبقى كما هي (تُدار من الشحنات)،
+ * ولذلك لا يتغير العميل ولا العملة ما دامت فيها شحنات.
+ */
+export async function updateDirectInvoice(db: Db, id: number, input: ManualInvoiceInput) {
+  checkHeader(input);
+  return db.transaction(async (tx) => {
+    const inv = await lockInvoice(tx, id);
+    if (inv.status !== "draft") throw new Error(`الفاتورة ${inv.number} صادرة؛ أرجعها لمسودة لتعديلها`);
+    const fixed = await tx.select({ kind: s.salesInvoiceLines.kind }).from(s.salesInvoiceLines).where(and(eq(s.salesInvoiceLines.invoiceId, id), sql`${s.salesInvoiceLines.kind} <> 'manual'`));
+    if (fixed.length && (input.customerId !== inv.customerId || input.currencyCode !== inv.currencyCode)) throw new Error("في الفاتورة شحنات؛ لا يتغير العميل ولا العملة. فك الدمج أو أخرج الشحنات أولاً");
+    if (!fixed.length && !input.lines.length) throw new Error("الفاتورة بلا بنود");
+    if (fixed.length && input.invoiceDate !== inv.invoiceDate) {
+      const [late] = await tx
+        .select({ number: s.waybills.number, date: s.waybills.waybillDate })
+        .from(s.waybills)
+        .where(and(sql`${s.waybills.id} in (select waybill_id from sales_invoice_lines where invoice_id = ${id} and kind = 'waybill')`, sql`${s.waybills.waybillDate} > ${input.invoiceDate}`))
+        .limit(1);
+      if (late) throw new Error(`تاريخ الفاتورة قبل الشحنة ${late.number} (${late.date})`);
+    }
+    if (input.invoiceDate.slice(0, 4) !== inv.invoiceDate.slice(0, 4) && hasOfficialNumber(inv)) throw new Error("لا تُنقل فاتورة لها رقم رسمي إلى سنة أخرى");
+    const reference = input.reference?.trim() || null;
+    if (reference && reference !== inv.reference) {
+      const [dup] = await tx.select({ number: s.salesInvoices.number }).from(s.salesInvoices).where(eq(s.salesInvoices.reference, reference));
+      if (dup) throw new Error(`المرجع ${reference} مسجل مسبقاً على الفاتورة ${dup.number}`);
+    }
+    const rate = input.invoiceDate === inv.invoiceDate && input.currencyCode === inv.currencyCode ? num(inv.exchangeRate) : await rateOn(tx, input.currencyCode, input.invoiceDate);
+    await tx
+      .update(s.salesInvoices)
+      .set({ customerId: input.customerId, invoiceDate: input.invoiceDate, dueDate: input.dueDate, currencyCode: input.currencyCode, exchangeRate: String(rate), reference, notes: input.notes?.trim() || null, updatedAt: new Date() })
+      .where(eq(s.salesInvoices.id, id));
+    await tx.delete(s.salesInvoiceLines).where(and(eq(s.salesInvoiceLines.invoiceId, id), eq(s.salesInvoiceLines.kind, "manual")));
+    if (fixed.length && rate !== num(inv.exchangeRate)) {
+      // سطور الشحنات بعملة الفاتورة بسعر يومها؛ تُبنى من جديد بالسعر الجديد
+      const waybillIds = (await tx.selectDistinct({ id: s.salesInvoiceLines.waybillId }).from(s.salesInvoiceLines).where(and(eq(s.salesInvoiceLines.invoiceId, id), eq(s.salesInvoiceLines.kind, "waybill")))).map((r) => r.id!);
+      await tx.delete(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, id));
+      await insertLines(tx, id, await buildLines(tx, waybillIds, input.currencyCode, rate));
+    }
+    await insertLines(tx, id, manualLines(input.lines));
+    await recomputeTotals(tx, id);
+    return { ...inv, number: inv.number };
+  });
 }
 
 /** فوترة الكل: فاتورة لكل عميل وعملة بكل شحناته المعتمدة غير المفوترة. */
@@ -341,6 +410,11 @@ export async function issueInvoice(db: Db, invoiceId: number, userId?: number) {
     const notApproved = locked.filter((w) => w.status !== "approved");
     if (notApproved.length) throw new Error(`شحنات لم تعد معتمدة: ${notApproved.map((w) => w.number).join("، ")}`);
 
+    // أول إصدار يأخذ الرقم الرسمي التالي، والمُرجعة لمسودة تحتفظ برقمها فلا تنقطع السلسلة
+    if (!hasOfficialNumber(inv)) {
+      inv.number = await nextDocumentNumber(tx, "sales_invoice", "INV", Number(inv.invoiceDate.slice(0, 4)));
+      await tx.update(s.salesInvoices).set({ number: inv.number }).where(eq(s.salesInvoices.id, invoiceId));
+    }
     const [vatOut] = await tx.select({ id: s.taxCodes.id }).from(s.taxCodes).where(eq(s.taxCodes.code, "VAT15-OUT"));
     const entry = await createJournalEntryTx(tx, {
       entryDate: inv.invoiceDate,
@@ -366,8 +440,8 @@ export async function issueInvoice(db: Db, invoiceId: number, userId?: number) {
       .update(s.salesInvoices)
       .set({ status: "issued", journalEntryId: entry.id, issuedBy: userId ?? null, issuedAt: new Date(), updatedAt: new Date() })
       .where(eq(s.salesInvoices.id, invoiceId));
-    await tx.update(s.waybills).set({ status: "invoiced", updatedAt: new Date() }).where(inArray(s.waybills.id, waybillIds));
-    return entry;
+    if (waybillIds.length) await tx.update(s.waybills).set({ status: "invoiced", updatedAt: new Date() }).where(inArray(s.waybills.id, waybillIds));
+    return Object.assign(entry, { invoiceNumber: inv.number });
   });
 }
 
@@ -376,8 +450,8 @@ export async function revertInvoice(db: Db, invoiceId: number) {
   return db.transaction(async (tx) => {
     const inv = await lockInvoice(tx, invoiceId);
     if (inv.status !== "issued") throw new Error("الفاتورة ليست مُصدرة");
-    if (num(inv.paidAmount) > 0) throw new Error("على الفاتورة سندات قبض مخصصة؛ أرجع السندات أولاً");
-    if (inv.zatcaStatus === "accepted") throw new Error("الفاتورة مقبولة لدى الزكاة؛ صحّحها بإشعار دائن");
+    if (num(inv.paidAmount) > 0) throw new Error(`على الفاتورة ${inv.number} دفعات سداد؛ احذف الدفعة أو أرجعها أولاً`);
+    if (inv.zatcaStatus === "accepted") throw new Error(`الفاتورة ${inv.number} معتمدة لدى هيئة الزكاة؛ لا تُعدّل، وتُصحح بإشعار دائن`);
     await tx.update(s.salesInvoices).set({ status: "draft", journalEntryId: null, issuedBy: null, issuedAt: null, updatedAt: new Date() }).where(eq(s.salesInvoices.id, invoiceId));
     if (inv.journalEntryId) await deleteEntryTx(tx, inv.journalEntryId);
     await tx
@@ -391,24 +465,151 @@ export async function deleteInvoice(db: Db, invoiceId: number, opts: { reason: s
   if (!opts.reason.trim()) throw new Error("اكتب سبب الحذف");
   return db.transaction(async (tx) => {
     const inv = await lockInvoice(tx, invoiceId);
-    if (inv.status !== "draft") throw new Error("الحذف متاح للمسودة فقط");
+    if (inv.status !== "draft") throw new Error(`الفاتورة ${inv.number} صادرة؛ الحذف للمسودة فقط`);
+    if (hasOfficialNumber(inv)) throw new Error(`الفاتورة ${inv.number} أُصدرت سابقاً وأخذت رقماً رسمياً، فلا تُحذف حفاظاً على تسلسل الفواتير. عدّلها وأعد إصدارها، أو ألغها بإشعار دائن بعد إصدارها`);
     const lines = await tx.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, invoiceId));
     await tx.insert(s.deletionLog).values({ entity: "sales_invoice", entityId: String(invoiceId), snapshot: { invoice: inv, lines }, reason: opts.reason.trim(), userId: opts.userId });
     await tx.delete(s.salesInvoices).where(eq(s.salesInvoices.id, invoiceId));
   });
 }
 
+type LineRow = typeof s.salesInvoiceLines.$inferSelect;
+
+/** مجموعات الفاتورة: كل شحنة بمصاريفها مجموعة، والبنود الحرة مجموعة لكل فاتورة دُمجت فيها (أو للفاتورة نفسها). */
+function lineGroups(lines: LineRow[]) {
+  const groups = new Map<string, LineRow[]>();
+  for (const l of [...lines].sort((a, b) => a.lineNo - b.lineNo)) {
+    const key = l.waybillId != null ? `w${l.waybillId}` : `m${l.groupKey ?? "own"}`;
+    groups.set(key, [...(groups.get(key) ?? []), l]);
+  }
+  return groups;
+}
+
+/** عدد ما يُفك دمجه في الفاتورة (شحنات وفواتير مدمجة)؛ أكثر من واحد يعني أنها مدمجة. */
+export function mergedParts(lines: LineRow[]) {
+  return lineGroups(lines).size;
+}
+
 /**
- * فك دمج فاتورة مسودة: تُحذف المسودة (مع نسخة في سجل المحذوفات) وتعود شحناتها «بانتظار الفوترة».
- * الفاتورة المصدرة تُرجع لمسودة أولاً، وذلك ممنوع إذا خُصص عليها قبض.
+ * فك الدمج: تبقى الفاتورة بأول مجموعة (بنودها الأصلية أو أول شحنة)، وكل شحنة أو فاتورة مدمجة أخرى
+ * تصبح فاتورة مسودة مستقلة برقم مسودة جديد. الحذف خطوة أخرى مستقلة.
  */
 export async function unmergeInvoice(db: Db, invoiceId: number, userId?: number) {
-  const [inv] = await db.select({ status: s.salesInvoices.status, number: s.salesInvoices.number }).from(s.salesInvoices).where(eq(s.salesInvoices.id, invoiceId));
-  if (!inv) throw new Error("الفاتورة غير موجودة");
-  if (inv.status !== "draft") throw new Error(`الفاتورة ${inv.number} مُصدرة؛ أرجعها لمسودة أولاً ثم فك الدمج`);
-  const lines = await db.select({ n: sql<number>`count(distinct waybill_id)::int` }).from(s.salesInvoiceLines).where(and(eq(s.salesInvoiceLines.invoiceId, invoiceId), eq(s.salesInvoiceLines.kind, "waybill")));
-  await deleteInvoice(db, invoiceId, { reason: "فك دمج الشحنات", userId });
-  return { number: inv.number, waybills: lines[0]?.n ?? 0 };
+  return db.transaction(async (tx) => {
+    const inv = await lockInvoice(tx, invoiceId);
+    if (inv.status !== "draft") throw new Error(`الفاتورة ${inv.number} صادرة؛ أرجعها لمسودة أولاً ثم فك الدمج`);
+    const lines = await tx.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, invoiceId));
+    const groups = [...lineGroups(lines).entries()];
+    if (groups.length < 2) throw new Error(`الفاتورة ${inv.number} غير مدمجة: فيها شحنة واحدة أو بنودها فقط`);
+    // البنود الحرة الأصلية تبقى في الفاتورة، وإلا أول شحنة
+    const own = groups.findIndex(([k]) => k === "mown");
+    const [keep] = groups.splice(own >= 0 ? own : 0, 1);
+    const created: string[] = [];
+    for (const [, part] of groups) {
+      const number = await draftNumber(tx, inv.invoiceDate);
+      const [piece] = await tx
+        .insert(s.salesInvoices)
+        .values({
+          number,
+          draftNumber: number,
+          invoiceDate: inv.invoiceDate,
+          dueDate: inv.dueDate,
+          customerId: inv.customerId,
+          contractId: inv.contractId,
+          currencyCode: inv.currencyCode,
+          exchangeRate: inv.exchangeRate,
+          notes: inv.notes,
+          createdBy: userId ?? inv.createdBy,
+        })
+        .returning({ id: s.salesInvoices.id });
+      await tx.update(s.salesInvoiceLines).set({ invoiceId: piece.id, groupKey: null }).where(inArray(s.salesInvoiceLines.id, part.map((l) => l.id)));
+      await renumberLines(tx, piece.id);
+      await recomputeTotals(tx, piece.id);
+      created.push(number);
+    }
+    await tx.update(s.salesInvoiceLines).set({ groupKey: null }).where(inArray(s.salesInvoiceLines.id, keep[1].map((l) => l.id)));
+    await renumberLines(tx, invoiceId);
+    await recomputeTotals(tx, invoiceId);
+    return { number: inv.number, created };
+  });
+}
+
+async function renumberLines(tx: Tx, invoiceId: number) {
+  await tx.execute(sql`
+    update sales_invoice_lines l set line_no = r.n
+    from (select id, row_number() over (order by line_no, id) as n from sales_invoice_lines where invoice_id = ${invoiceId}) r
+    where l.id = r.id`);
+}
+
+/**
+ * دمج مسودات لعميل واحد وعملة واحدة في فاتورة واحدة. تبقى الفاتورة ذات الرقم الرسمي إن وُجدت،
+ * وإلا الأحدث تاريخاً، وتُحذف المسودات الأخرى بعد نقل بنودها (البنود الحرة تحفظ أصلها لفك الدمج).
+ */
+export async function mergeInvoices(db: Db, ids: number[], userId?: number) {
+  const unique = [...new Set(ids)];
+  if (unique.length < 2) throw new Error("حدد فاتورتين مسودة أو أكثر لنفس العميل");
+  return db.transaction(async (tx) => {
+    const invs = await tx.select().from(s.salesInvoices).where(inArray(s.salesInvoices.id, unique)).for("update");
+    const issued = invs.filter((i) => i.status !== "draft");
+    if (issued.length) throw new Error(`الدمج للمسودات فقط؛ صادرة: ${issued.map((i) => i.number).join("، ")}`);
+    if (new Set(invs.map((i) => `${i.customerId}:${i.currencyCode}`)).size > 1) throw new Error("الفواتير المحددة لعملاء أو عملات مختلفة؛ الدمج لفواتير عميل واحد بعملة واحدة");
+    const official = invs.filter(hasOfficialNumber);
+    if (official.length > 1) throw new Error(`لكل من ${official.map((i) => i.number).join(" و")} رقم رسمي؛ لا تُدمج فاتورتان أُصدرتا سابقاً`);
+    const host = official[0] ?? [...invs].sort((a, b) => b.invoiceDate.localeCompare(a.invoiceDate) || a.id - b.id)[0];
+    const others = invs.filter((i) => i.id !== host.id);
+    const [late] = await tx
+      .select({ number: s.waybills.number, date: s.waybills.waybillDate })
+      .from(s.waybills)
+      .where(and(sql`${s.waybills.id} in (select waybill_id from sales_invoice_lines where invoice_id in (${sql.join(others.map((o) => sql`${o.id}`), sql`, `)}))`, sql`${s.waybills.waybillDate} > ${host.invoiceDate}`))
+      .limit(1);
+    if (late) throw new Error(`تاريخ الفاتورة ${host.number} (${host.invoiceDate}) قبل الشحنة ${late.number}؛ عدّل التاريخ ثم ادمج`);
+    for (const o of others) {
+      await tx.execute(sql`
+        update sales_invoice_lines set invoice_id = ${host.id}, line_no = line_no + 1000,
+          group_key = case when kind = 'manual' then coalesce(group_key, ${o.id}) else group_key end
+        where invoice_id = ${o.id}`);
+      const notes = o.notes && o.notes !== host.notes ? o.notes : null;
+      if (notes) await tx.update(s.salesInvoices).set({ notes: [host.notes, notes].filter(Boolean).join(" · ") }).where(eq(s.salesInvoices.id, host.id));
+      await tx.delete(s.salesInvoices).where(eq(s.salesInvoices.id, o.id));
+    }
+    await renumberLines(tx, host.id);
+    await recomputeTotals(tx, host.id);
+    void userId;
+    return { number: host.number, id: host.id, merged: others.map((o) => o.number) };
+  });
+}
+
+/**
+ * إخراج شحنات من مسوداتها (فك الدمج من صفحة الشحنات): تعود «بانتظار الفوترة»،
+ * والمسودة التي لا يبقى فيها شيء تُحذف إن لم يكن لها رقم رسمي.
+ */
+export async function removeWaybillsFromDrafts(db: Db, waybillIds: number[]) {
+  const done: string[] = [];
+  const skipped: string[] = [];
+  for (const wid of [...new Set(waybillIds)]) {
+    try {
+      await db.transaction(async (tx) => {
+        const [w] = await tx.select({ number: s.waybills.number }).from(s.waybills).where(eq(s.waybills.id, wid));
+        const [line] = await tx.select({ invoiceId: s.salesInvoiceLines.invoiceId }).from(s.salesInvoiceLines).where(and(eq(s.salesInvoiceLines.waybillId, wid), eq(s.salesInvoiceLines.kind, "waybill")));
+        if (!line) throw new Error(`${w?.number}: غير مدمجة في فاتورة`);
+        const inv = await lockInvoice(tx, line.invoiceId);
+        if (inv.status !== "draft") throw new Error(`${w?.number}: فاتورتها ${inv.number} صادرة؛ أرجعها لمسودة أولاً`);
+        await tx.delete(s.salesInvoiceLines).where(and(eq(s.salesInvoiceLines.invoiceId, inv.id), eq(s.salesInvoiceLines.waybillId, wid)));
+        const [{ n }] = await tx.select({ n: sql<number>`count(*)::int` }).from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, inv.id));
+        if (n === 0) {
+          if (hasOfficialNumber(inv)) throw new Error(`${w?.number}: هي آخر ما في الفاتورة ${inv.number} ذات الرقم الرسمي؛ أضف لها بنداً أولاً`);
+          await tx.delete(s.salesInvoices).where(eq(s.salesInvoices.id, inv.id));
+        } else {
+          await renumberLines(tx, inv.id);
+          await recomputeTotals(tx, inv.id);
+        }
+        done.push(w.number);
+      });
+    } catch (err) {
+      skipped.push(err instanceof Error ? err.message : String(err));
+    }
+  }
+  return { done, skipped };
 }
 
 // ───────────── قائمة الفواتير والتعديل من الشيت ─────────────
@@ -431,6 +632,8 @@ export async function listSalesInvoices(db: Db | Tx, f: DocFilter, limit = 500) 
       i: s.salesInvoices,
       customer: s.parties.nameAr,
       waybills: sql<number>`(select count(*) from sales_invoice_lines l where l.invoice_id = ${s.salesInvoices.id} and l.kind = 'waybill')::int`,
+      // أجزاء الدمج (كل شحنة، وكل فاتورة دُمجت ببنودها)؛ أكثر من جزء = مدمجة
+      parts: sql<number>`(select count(distinct coalesce('w' || l.waybill_id, 'm' || coalesce(l.group_key::text, 'own'))) from sales_invoice_lines l where l.invoice_id = ${s.salesInvoices.id})::int`,
     })
     .from(s.salesInvoices)
     .innerJoin(s.parties, eq(s.parties.id, s.salesInvoices.customerId))

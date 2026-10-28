@@ -5,7 +5,6 @@ import { db } from "@/db";
 import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
-import { todayRiyadh } from "@/lib/dates";
 import { getCompany, getInvoiceTemplate } from "@/lib/company";
 import { invoiceQrSvg } from "@/lib/zatca-qr";
 import { clearedQr, getSettings, latestDocument, sendBlocker } from "@/lib/zatca/service";
@@ -15,8 +14,10 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { AutoPrint, PrintButton } from "@/components/print-button";
 import { TaxInvoiceDocument } from "@/components/tax-invoice";
 import { SendDocument } from "@/components/send-document";
-import { Badge, Card, Input, PageHeader, Table, Td } from "@/components/ui";
-import { addWaybills, issue, remove, removeLine, revert, sendToZatca } from "../actions";
+import { Badge, Card, PageHeader, Table, Td } from "@/components/ui";
+import { addWaybills, issue, removeLine, sendToZatca } from "../actions";
+import { invoiceActions } from "../invoice-menu";
+import { ActionsMenu } from "@/components/actions-menu";
 import { fmt } from "@/lib/format";
 
 export default async function InvoicePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ print?: string }> }) {
@@ -79,14 +80,18 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
             {!draft && <SendDocument kind="invoices" id={id} label={`فاتورة ضريبية رقم ${i.number}`} company={company.nameAr} phone={customer.mobile} email={customer.email} />}
             {draft && can(user.perms, "sales_invoices", "approve") && (
               <ActionForm action={issue.bind(null, id)} resetOnSuccess={false}>
-                <SubmitButton>إصدار وترحيل القيد</SubmitButton>
+                <SubmitButton>اعتماد وإصدار</SubmitButton>
               </ActionForm>
             )}
-            {!draft && i.zatcaStatus !== "accepted" && can(user.perms, "sales_invoices", "revert") && (
-              <ActionForm action={revert.bind(null, id)} resetOnSuccess={false}>
-                <SubmitButton variant="secondary">إرجاع لمسودة</SubmitButton>
-              </ActionForm>
-            )}
+            <ActionsMenu
+              label="العمليات"
+              items={invoiceActions(i, lines, "/invoices", {
+                canUpdate: can(user.perms, "sales_invoices", "update"),
+                canRevert: can(user.perms, "sales_invoices", "revert"),
+                canDelete: can(user.perms, "sales_invoices", "delete"),
+                editHref: `/invoices?open=${id}&edit=${id}`,
+              })}
+            />
             <Link href="/invoices" className="text-sm text-brand-700 hover:underline">
               ← فواتير المبيعات
             </Link>
@@ -157,15 +162,6 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
                 ))}
               </Table>
             )}
-          </Card>
-        )}
-        {draft && can(user.perms, "sales_invoices", "delete") && (
-          <Card title="حذف المسودة">
-            <ActionForm action={remove.bind(null, id)} className="flex gap-2">
-              <Input name="reason" placeholder="سبب الحذف" className="flex-1" />
-              <SubmitButton variant="secondary">حذف</SubmitButton>
-            </ActionForm>
-            <p className="mt-2 text-xs text-gray-500">تعود شحناتها للقائمة بانتظار الفوترة. اليوم {todayRiyadh()}.</p>
           </Card>
         )}
       </div>

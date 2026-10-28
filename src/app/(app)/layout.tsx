@@ -6,7 +6,6 @@ import { getTenant, requireUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { EXTRA_PAGES, NAV, NAV_KEYWORDS } from "@/data/nav";
 import { GlobalSearch, type SearchPage } from "@/components/global-search";
-import { Icon } from "@/components/icons";
 import { BrandMark, Logo } from "@/components/logo";
 import { getBrand } from "@/lib/brand";
 import { MobileNav, NavLinks, type NavGroup } from "@/components/nav-links";
@@ -19,6 +18,9 @@ import { alertKindsFor, expiryCounts } from "@/lib/documents";
 import { todayRiyadh } from "@/lib/dates";
 import { db } from "@/db";
 import { logout } from "../login/actions";
+import { LogoutButton } from "@/components/logout-button";
+import { WelcomeToast } from "@/components/welcome-toast";
+import { WELCOME_COOKIE, welcomeMessage } from "@/lib/welcome";
 
 // الدعم الفني (واتساب واتصال)
 const SUPPORT_PHONE = "966535443598";
@@ -57,9 +59,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     ...EXTRA_PAGES.filter((p) => (!p.admin || user.perms.isAdmin) && (!p.entity || can(user.perms, p.entity, "view"))).map(({ href, label, group, keywords }) => ({ href, label, group, keywords })),
   ];
 
+  const jar = await cookies();
+  const welcome = jar.get(WELCOME_COOKIE) ? welcomeMessage(user.name) : null;
+
   return (
     <div className="flex min-h-screen">
-      <Sidebar initialPinned={(await cookies()).get(SIDEBAR_COOKIE)?.value !== "collapsed"}>
+      {welcome && <WelcomeToast cookie={WELCOME_COOKIE} title={welcome.title} text={welcome.text} />}
+      <Sidebar initialPinned={jar.get(SIDEBAR_COOKIE)?.value !== "collapsed"}>
         <div className="border-b border-white/5 py-5 ps-5 pe-10">
           <Logo light name={brand.name} logo={brand.logo} />
         </div>
@@ -82,12 +88,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                 <span className="ms-2 text-xs text-gray-400">{user.roles.map((r) => r.nameAr).join("، ")}</span>
               </span>
             </Link>
-            <form action={logout}>
-              <button aria-label="خروج" className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-gray-500 transition hover:bg-red-50 hover:text-red-600">
-                <Icon name="logout" className="size-4" />
-                <span className="hidden sm:inline">خروج</span>
-              </button>
-            </form>
+            <LogoutButton action={logout} />
           </div>
         </header>
         {trialDays !== null && (

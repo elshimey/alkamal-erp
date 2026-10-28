@@ -39,11 +39,13 @@ async function sampleInvoice() {
     vatAmount: (amount * 0.15).toFixed(2),
     accountId: 0,
     costCenterId: null,
+    groupKey: null,
   });
   return {
     i: {
       id: 0,
       number: "INV-0000-000001",
+      draftNumber: null,
       invoiceDate: today,
       dueDate: today,
       customerId: 0,

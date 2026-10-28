@@ -1,6 +1,8 @@
 import { SendDocument } from "@/components/send-document";
 import Link from "next/link";
+import { and, asc, eq, like } from "drizzle-orm";
 import { db } from "@/db";
+import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { invoicingQueue, listSalesInvoices, salesInvoiceDoc } from "@/lib/invoices";
@@ -16,23 +18,37 @@ import { DocSheet, type DocSheetRow } from "@/components/doc-sheet";
 import { BulkPdfButton } from "@/components/bulk-pdf";
 import { DocToolbar } from "@/components/doc-toolbar";
 import { Icon } from "@/components/icons";
-import { RowCheck, SelectAll, SelectionTotal } from "@/components/row-selection";
+import { RowCheck, SelectAll, SelectionGate, SelectionTotal } from "@/components/row-selection";
+import { ConfirmSubmit } from "@/components/confirm-submit";
+import { ClickRow } from "@/components/click-row";
+import { InvoiceEditor, type InvoiceDraft } from "./invoice-editor";
+import { invoiceActions } from "./invoice-menu";
 import { TaxInvoiceDocument } from "@/components/tax-invoice";
 import { Badge, EmptyRow, LimitRow, Input, PageHeader, Table, Td } from "@/components/ui";
 import { ListActions } from "@/components/list-actions";
-import { invoiceAll, invoiceCustomer, issue, issueMany, revertFromMenu, saveInvoiceSheet, sendToZatca, unmerge } from "./actions";
+import { bulkInvoiceOps, invoiceAll, invoiceCustomer, issue, saveInvoicePanel, saveInvoiceSheet, sendToZatca } from "./actions";
 import { ActionsMenu, type MenuItem } from "@/components/actions-menu";
 import { fmt } from "@/lib/format";
 
 const BASE = "/invoices";
-const ISSUE_FORM = "issue-invoices";
+const BULK_FORM = "invoice-bulk";
+const withParam = (url: string, key: string, value: string) => `${url}${url.includes("?") ? "&" : "?"}${key}=${value}`;
+const plusDays = (d: string, n: number) => {
+  const x = new Date(`${d}T00:00:00Z`);
+  x.setUTCDate(x.getUTCDate() + n);
+  return x.toISOString().slice(0, 10);
+};
 const STATUSES = { draft: INVOICE_STATUS.draft.label, issued: INVOICE_STATUS.issued.label };
 
-export default async function InvoicesPage({ searchParams }: { searchParams: Promise<DocListParams> }) {
+export default async function InvoicesPage({ searchParams }: { searchParams: Promise<DocListParams & { new?: string; edit?: string }> }) {
   const user = await requirePermission("sales_invoices", "view");
   const sp = await searchParams;
   const canCreate = can(user.perms, "sales_invoices", "create");
   const canIssue = can(user.perms, "sales_invoices", "approve");
+  const canUpdate = can(user.perms, "sales_invoices", "update");
+  const canRevert = can(user.perms, "sales_invoices", "revert");
+  const canDelete = can(user.perms, "sales_invoices", "delete");
+  const lp: DocListParams = { q: sp.q, status: sp.status, period: sp.period, sort: sp.sort, view: sp.view, pay: sp.pay };
   const canReceive = can(user.perms, "receipts", "create");
   const today = todayRiyadh();
   const filter = parseDocFilter(sp, Object.keys(STATUSES), today);
@@ -47,30 +63,69 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
   ]);
   const [zatca, zatcaDoc, blocker] = openDoc ? await Promise.all([getSettings(db), latestDocument(db, { invoiceId: openDoc.i.id }), sendBlocker(db, { invoiceId: openDoc.i.id })]) : [null, null, null];
   const qrSvg = openDoc ? await invoiceQrSvg(company, openDoc.i, await clearedQr(db, openDoc.i.id)) : null;
-  const waybillCount = (d: NonNullable<typeof openDoc>) => new Set(d.lines.filter((l) => l.kind === "waybill").map((l) => l.waybillId)).size;
+  const listUrl = (patch: Partial<Record<keyof DocListParams, string | undefined>> = {}) => listHref(BASE, lp, patch);
   const invoiceMenu = (d: NonNullable<typeof openDoc>): MenuItem[] => {
-    const items: MenuItem[] = [];
-    const n = waybillCount(d);
-    if (d.i.status === "draft" && n > 0 && can(user.perms, "sales_invoices", "delete"))
-      items.push({
-        label: "فك الدمج",
-        icon: "undo",
-        hint: `تُحذف المسودة وتعود ${n} شحنة بانتظار الفوترة`,
-        action: unmerge.bind(null, d.i.id),
-        confirm: { title: `فك دمج الفاتورة ${d.i.number}`, text: `تُحذف الفاتورة المسودة وتعود شحناتها (${n}) «بانتظار الفوترة» لتفوترها من جديد.`, submit: "فك الدمج" },
-      });
-    if (d.i.status === "draft" && n > 0) items.push({ label: "إخراج شحنة من الفاتورة", icon: "pencil", hint: "من صفحة الفاتورة: زر الحذف بجانب الشحنة", href: `/invoices/${d.i.id}` });
-    if (d.i.status === "issued" && can(user.perms, "sales_invoices", "revert"))
-      items.push({
-        label: "إرجاع إلى مسودة",
-        icon: "undo",
-        hint: "يُلغى قيد الإيراد",
-        disabled: Number(d.i.paidAmount) > 0 && "عليها سندات قبض؛ أرجع السندات أولاً",
-        action: revertFromMenu.bind(null, d.i.id),
-        confirm: { title: `إرجاع الفاتورة ${d.i.number} إلى مسودة`, text: "يُلغى قيد الإيراد والضريبة وتعود الشحنات معتمدة داخل المسودة.", submit: "إرجاع" },
-      });
-    return items;
+    const back = listUrl();
+    return invoiceActions(d.i, d.lines, back, { canUpdate, canRevert, canDelete, editHref: withParam(listUrl({ open: String(d.i.id) }), "edit", String(d.i.id)) });
   };
+
+  // نافذة الإنشاء والتعديل
+  const editId = canUpdate ? Number(sp.edit) || null : null;
+  const creating = canCreate && sp.new === "1";
+  const editDoc = editId ? await salesInvoiceDoc(db, editId) : null;
+  const editing = !!editDoc && editDoc.i.status === "draft";
+  const [customers, revenue, centers, currencies] =
+    creating || editing
+      ? await Promise.all([
+          db
+            .selectDistinct({ id: s.parties.id, nameAr: s.parties.nameAr, vat: s.parties.vatNumber })
+            .from(s.parties)
+            .innerJoin(s.partyRoles, eq(s.partyRoles.partyId, s.parties.id))
+            .where(eq(s.partyRoles.role, "customer"))
+            .orderBy(asc(s.parties.nameAr)),
+          db
+            .select({ id: s.accounts.id, code: s.accounts.code, nameAr: s.accounts.nameAr })
+            .from(s.accounts)
+            .where(and(eq(s.accounts.isPostable, true), eq(s.accounts.isActive, true), like(s.accounts.code, "4%")))
+            .orderBy(asc(s.accounts.code)),
+          db.select({ id: s.costCenters.id, code: s.costCenters.code, nameAr: s.costCenters.nameAr }).from(s.costCenters).where(eq(s.costCenters.isActive, true)).orderBy(asc(s.costCenters.code)),
+          db.select({ code: s.currencies.code }).from(s.currencies).orderBy(asc(s.currencies.code)),
+        ])
+      : [[], [], [], []];
+  const terms = creating || editing ? await db.select({ customerId: s.contracts.customerId, days: s.contracts.paymentTermsDays }).from(s.contracts) : [];
+  const editorInitial = (): InvoiceDraft | null => {
+    if (editing && editDoc) {
+      const i = editDoc.i;
+      return {
+        id: i.id,
+        number: i.number,
+        customerId: String(i.customerId),
+        invoiceDate: i.invoiceDate,
+        dueDate: i.dueDate,
+        currencyCode: i.currencyCode,
+        reference: i.reference ?? "",
+        notes: i.notes ?? "",
+        lines: editDoc.lines
+          .filter((l) => l.kind === "manual")
+          .map((l) => ({
+            description: l.description,
+            quantity: String(Number(l.quantity ?? 1)),
+            price: String(Number(l.unitPrice ?? l.amount)),
+            discount: l.discountPercent ? String(Number(l.discountPercent)) : "",
+            vatRate: Number(l.vatRate) > 0 ? "15" : "0",
+            accountId: String(l.accountId),
+            costCenterId: l.costCenterId ? String(l.costCenterId) : "",
+          })),
+        fixedLines: editDoc.lines.filter((l) => l.kind !== "manual").map((l) => ({ kind: l.kind === "waybill" ? "waybill" : "expense", description: l.description, amount: l.amount, vatAmount: l.vatAmount, vatRate: l.vatRate })),
+      };
+    }
+    if (creating) return { customerId: "", invoiceDate: today, dueDate: plusDays(today, 30), currencyCode: "SAR", reference: "", notes: "", lines: [], fixedLines: [] };
+    return null;
+  };
+  const initial = editorInitial();
+  const editorBack = listUrl(openId ? { open: String(openId) } : {});
+  const returnTo = listUrl({ open: "{id}" }).replace("%7Bid%7D", "{id}");
+  const domestic = revenue.find((a) => a.code === "4101");
 
   const state = (i: (typeof invoices)[number]["i"]) => {
     const total = Number(i.total);
@@ -79,13 +134,17 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
     const pay = paymentState(total, paid);
     return { total, paid, overdue, pay: i.status === "issued" ? (overdue ? { label: "متأخرة", tone: "red" as const } : pay) : null };
   };
-  const drafts = invoices.filter(({ i }) => i.status === "draft");
   const totals = invoices.reduce((a, { i }) => ({ total: a.total + Number(i.total) * Number(i.exchangeRate), due: a.due + (Number(i.total) - Number(i.paidAmount)) * Number(i.exchangeRate) }), { total: 0, due: 0 });
 
   return (
     <>
-      <PageHeader title="فواتير المبيعات" description="فاتورة تجميعية لعدة شحنات معتمدة، سطر لكل شحنة بمركز تكلفة مركبتها. الإيراد والضريبة يُقيدان عند الإصدار.">
-        <ListActions bulkHref={can(user.perms, "sales_invoices", "update") && "/invoices?view=sheet&status=draft"} importHref={canCreate && "/import/sales-invoices"} />
+      <PageHeader title="فواتير المبيعات" description="فاتورة لشحنة أو لعدة شحنات مدمجة، أو فاتورة مباشرة ببنود حرة. تُحفظ مسودة برقم مسودة، وعند الاعتماد تأخذ رقمها الرسمي ويُقيد الإيراد والضريبة.">
+        <ListActions bulkHref={canUpdate && "/invoices?view=sheet&status=draft"} importHref={canCreate && "/import/sales-invoices"} />
+        {canCreate && (
+          <Link href={withParam(listUrl(), "new", "1")} scroll={false} className="rounded-lg bg-brand-600 px-5 py-2 text-sm font-semibold text-brand-900 shadow-sm transition hover:bg-brand-500">
+            + إنشاء فاتورة
+          </Link>
+        )}
       </PageHeader>
 
       {canCreate && queue.length > 0 && (
@@ -102,7 +161,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
             <ActionForm action={invoiceAll} className="mb-3 flex flex-wrap items-center gap-3" resetOnSuccess={false}>
               <span className="text-sm text-gray-600">تاريخ الفاتورة</span>
               <Input name="invoiceDate" type="date" defaultValue={today} className="w-44" />
-              <SubmitButton>فوترة الكل (فاتورة لكل عميل)</SubmitButton>
+              <SubmitButton>دمج الكل في مسودات (مسودة لكل عميل)</SubmitButton>
             </ActionForm>
             <Table head={["العميل", "العملة", "عدد الشحنات", "الفترة", "المبلغ قبل الضريبة", ""]}>
               {queue.map((q) => (
@@ -117,7 +176,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
                   <Td>
                     <ActionForm action={invoiceCustomer.bind(null, q.customerId, q.currencyCode)} resetOnSuccess={false}>
                       <input type="hidden" name="invoiceDate" value={today} />
-                      <SubmitButton variant="secondary">إنشاء فاتورة</SubmitButton>
+                      <SubmitButton variant="secondary">دمج في مسودة</SubmitButton>
                     </ActionForm>
                   </Td>
                 </tr>
@@ -234,9 +293,15 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
                 <Link href={`/invoices/${openDoc.i.id}?print=1`} target="_blank" className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
                   طباعة
                 </Link>
-                <Link href={`/invoices/${openDoc.i.id}`} className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
-                  {openDoc.i.status === "draft" ? "تعديل" : "فتح الفاتورة"}
-                </Link>
+                {openDoc.i.status === "draft" && canUpdate ? (
+                  <Link href={withParam(listUrl({ open: String(openDoc.i.id) }), "edit", String(openDoc.i.id))} scroll={false} className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
+                    تعديل
+                  </Link>
+                ) : (
+                  <Link href={`/invoices/${openDoc.i.id}`} className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
+                    فتح الفاتورة
+                  </Link>
+                )}
                 {openDoc.i.status === "issued" && Number(openDoc.i.paidAmount) < Number(openDoc.i.total) && canReceive && (
                   <Link href={`/receipts/new?customer=${openDoc.i.customerId}&invoice=${openDoc.i.id}`} className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-brand-900 shadow-sm hover:bg-brand-500">
                     تسجيل دفعة
@@ -249,7 +314,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
                 )}
                 {openDoc.i.status === "draft" && canIssue && (
                   <ActionForm action={issue.bind(null, openDoc.i.id)} resetOnSuccess={false}>
-                    <SubmitButton>إصدار وترحيل القيد</SubmitButton>
+                    <SubmitButton>اعتماد وإصدار</SubmitButton>
                   </ActionForm>
                 )}
                 {invoiceMenu(openDoc).length > 0 && <ActionsMenu items={invoiceMenu(openDoc)} label="العمليات" />}
@@ -266,16 +331,83 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
         </div>
       ) : (
         <>
-          {canIssue && drafts.length > 0 && (
-            <ActionForm id={ISSUE_FORM} action={issueMany} className="mb-3 flex flex-wrap items-center gap-3 rounded-2xl bg-white px-4 py-2.5 shadow-sm">
-              <SelectionTotal form={ISSUE_FORM} noun="فاتورة" />
-              <SubmitButton variant="secondary">إصدار المحدد</SubmitButton>
-              <span className="text-xs text-gray-400">حدد المسودات من الجدول؛ تُصدر كل فاتورة بقيدها.</span>
+          {(canIssue || canUpdate || canRevert || canDelete) && (
+            <ActionForm id={BULK_FORM} action={bulkInvoiceOps} resetOnSuccess={false} className="mb-3 rounded-2xl bg-white px-4 py-2.5 shadow-sm">
+              <input type="hidden" name="op" defaultValue="" />
+              <SelectionGate form={BULK_FORM} empty={<span className="text-sm text-gray-500">حدد فاتورة أو أكثر من الجدول لتظهر العمليات: الاعتماد، والإرجاع لمسودة، والدمج، وفك الدمج، والحذف.</span>}>
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <SelectionTotal form={BULK_FORM} noun="فاتورة" />
+                  <span className="mx-1 h-6 w-px bg-gray-200" aria-hidden />
+                  {canIssue && (
+                    <SubmitButton op="issue" pendingLabel="جارٍ الاعتماد…" className="!py-1.5">
+                      اعتماد وإصدار
+                    </SubmitButton>
+                  )}
+                  {canUpdate && (
+                    <SubmitButton op="merge" variant="secondary" pendingLabel="جارٍ الدمج…" className="!py-1.5">
+                      دمج المحدد
+                    </SubmitButton>
+                  )}
+                  {(canUpdate || canRevert || canDelete) && (
+                    <details data-dropdown className="relative">
+                      <summary className="flex cursor-pointer list-none items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
+                        عمليات أخرى
+                        <span aria-hidden className="text-xs text-gray-400">▾</span>
+                      </summary>
+                      <div className="absolute start-0 z-30 mt-1 flex w-56 flex-col rounded-xl border border-gray-200 bg-white p-1 shadow-lg">
+                        {canRevert && (
+                          <ConfirmSubmit
+                            op="revert"
+                            className="!justify-start !border-0 !text-start !shadow-none"
+                            title="إرجاع الفواتير المحددة إلى مسودة"
+                            text="يُلغى قيد الإيراد والضريبة لكل فاتورة صادرة محددة، وتحتفظ برقمها الرسمي. لا تُرجع فاتورة عليها دفعة سداد، ولا فاتورة اعتمدتها هيئة الزكاة."
+                            submit="إرجاع إلى مسودة"
+                          >
+                            إرجاع إلى مسودة
+                          </ConfirmSubmit>
+                        )}
+                        {canUpdate && (
+                          <ConfirmSubmit
+                            op="unmerge"
+                            className="!justify-start !border-0 !text-start !shadow-none"
+                            title="فك دمج الفواتير المحددة"
+                            text="كل شحنة أو فاتورة مدمجة في المسودة تصبح فاتورة مسودة مستقلة. لا يُحذف شيء."
+                            submit="فك الدمج"
+                          >
+                            فك الدمج
+                          </ConfirmSubmit>
+                        )}
+                        {canDelete && (
+                          <ConfirmSubmit
+                            op="delete"
+                            danger
+                            className="!justify-start !border-0 !text-start !shadow-none"
+                            title="حذف المسودات المحددة"
+                            text="تُحذف الفواتير المسودة المحددة وتعود شحناتها «معتمدة · بانتظار الفوترة»، وتُحفظ نسخة في سجل المحذوفات. الفواتير الصادرة وما أخذ رقماً رسمياً لا يُحذف."
+                            submit="حذف"
+                            fields={
+                              <label className="block text-sm">
+                                <span className="mb-1 block text-gray-600">سبب الحذف</span>
+                                <input name="reason" className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" placeholder="مثال: أُنشئت بالخطأ" />
+                              </label>
+                            }
+                          >
+                            حذف المسودات
+                          </ConfirmSubmit>
+                        )}
+                      </div>
+                    </details>
+                  )}
+                  <span className="ms-auto">
+                    <BulkPdfButton kind="invoices" ids={invoices.map((x) => x.i.id)} />
+                  </span>
+                </div>
+              </SelectionGate>
             </ActionForm>
           )}
           <Table
             head={[
-              canIssue && drafts.length ? <SelectAll key="all" form={ISSUE_FORM} /> : "",
+              invoices.length && (canIssue || canUpdate || canRevert || canDelete) ? <SelectAll key="all" form={BULK_FORM} /> : "",
               "الرقم",
               "التاريخ",
               "الاستحقاق",
@@ -289,12 +421,12 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
           >
             {invoices.length === 0 && <EmptyRow cols={10}>{filter.q || filter.status || filter.pay || filter.from ? "لا توجد فواتير بهذه الشروط" : "لا توجد فواتير بعد"}</EmptyRow>}
             <LimitRow cols={10} shown={invoices.length} limit={500} />
-            {invoices.map(({ i, customer }) => {
+            {invoices.map(({ i, customer, waybills, parts }) => {
               const st = state(i);
-              const open = listHref(BASE, sp, { open: String(i.id) });
+              const open = listUrl({ open: String(i.id) });
               return (
-                <tr key={i.id} className="transition hover:bg-brand-50/40">
-                  <Td>{canIssue && i.status === "draft" && <RowCheck form={ISSUE_FORM} id={i.id} amount={i.total} />}</Td>
+                <ClickRow key={i.id} href={open} className="transition hover:bg-brand-50/40">
+                  <Td>{(canIssue || canUpdate || canRevert || canDelete) && <RowCheck form={BULK_FORM} id={i.id} amount={i.total} />}</Td>
                   <Td className="font-medium whitespace-nowrap">
                     <Link href={open} scroll={false} className="ltr-nums text-brand-700 hover:underline">
                       {i.number}
@@ -313,6 +445,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
                   <Td className="ltr-nums">{fmt(st.total - st.paid)}</Td>
                   <Td>
                     <Badge tone={INVOICE_STATUS[i.status].tone}>{INVOICE_STATUS[i.status].label}</Badge>
+                    {parts > 1 && i.status === "draft" && <span className="mt-0.5 block text-xs whitespace-nowrap text-sky-700">مدمجة{waybills > 1 ? ` · ${waybills} شحنات` : ""}</span>}
                   </Td>
                   <Td>{st.pay ? <Badge tone={st.pay.tone}>{st.pay.label}</Badge> : "—"}</Td>
                   <Td>
@@ -320,7 +453,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
                       <Icon name="expand" className="size-4" />
                     </Link>
                   </Td>
-                </tr>
+                </ClickRow>
               );
             })}
           </Table>
@@ -331,6 +464,23 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
             </p>
           )}
         </>
+      )}
+
+      {initial && (
+        <InvoiceEditor
+          key={editing ? `edit-${editId}` : "new"}
+          title={editing ? `تعديل الفاتورة ${initial.number}` : "فاتورة مبيعات جديدة"}
+          initial={initial}
+          customers={customers.map((c) => ({ value: String(c.id), label: c.nameAr, vatNumber: c.vat, days: terms.find((t) => t.customerId === c.id)?.days ?? null }))}
+          accounts={[...(domestic ? [domestic] : []), ...revenue.filter((a) => a !== domestic)].map((a) => ({ value: String(a.id), label: `${a.code} ${a.nameAr}` }))}
+          costCenters={centers.map((c) => ({ value: String(c.id), label: c.nameAr }))}
+          currencies={currencies.map((c) => c.code)}
+          company={company}
+          template={template}
+          action={saveInvoicePanel.bind(null, editing ? editId : null)}
+          closeHref={editorBack}
+          savedHref={returnTo}
+        />
       )}
     </>
   );

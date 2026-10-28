@@ -10,7 +10,7 @@ import { newKeyPair } from "@/lib/zatca/der";
 import { clearedQr, submitDocument } from "@/lib/zatca/service";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { closeYear, openYear, reopenYear, setPeriodStatus, yearClosePreview } from "@/lib/periods";
 import postgres from "postgres";
 import * as s from "@/db/schema";
@@ -23,7 +23,22 @@ import { assignVehicle, createDriver, deleteDriver, updateDriver, createVehicle,
 import { addDocument, saveOwnerDocumentFields, approveSubmission, blockingDocumentIssues, dailySummary, documentRegister, expiringDocuments, listSubmissions, ownerDocuments, rejectSubmission, submitRenewal, summaryText } from "@/lib/documents";
 import { addSubAccount } from "@/lib/accounts";
 import { activeContract, createContract, createLocation, createParty, createRoute, priceTrip, setContractStatus } from "@/lib/operations";
-import { createInvoice, createReceipt, invoicingQueue, issueInvoice, listSalesInvoices, revertInvoice, revertReceipt, unmergeInvoice, updateDraftInvoice } from "@/lib/invoices";
+import {
+  createDirectInvoice,
+  createInvoice,
+  createReceipt,
+  deleteInvoice,
+  invoicingQueue,
+  issueInvoice,
+  listSalesInvoices,
+  mergeInvoices,
+  removeWaybillsFromDrafts,
+  revertInvoice,
+  revertReceipt,
+  unmergeInvoice,
+  updateDirectInvoice,
+  updateDraftInvoice,
+} from "@/lib/invoices";
 import { parseDocFilter } from "@/lib/doc-filters";
 import { createExpense, approveExpense, createPayment, createPurchaseInvoice, custodyBalances, deletePurchaseInvoice, listPurchaseInvoices, postPurchaseInvoice, updateDraftPurchase, rejectExpense, revertExpense, revertPayment, revertPurchaseInvoice, supplierBalances } from "@/lib/purchases";
 import { addMaintenanceLines, approveBreakdownRequest, approveMaintenanceOrder, completeMaintenanceOrder, createBreakdownRequest, createMaintenanceOrder, deleteMaintenanceOrder, planSchedule, rejectBreakdownRequest, revertMaintenanceOrder, reviewBreakdownRequest, savePlan, listOrders, orderDoc, updateDraftOrder, createOrdersFrom, listRequests, requestDoc } from "@/lib/maintenance";
@@ -56,7 +71,7 @@ import { IMPORT_SPECS } from "@/data/import-specs";
 import * as hr from "@/lib/hr";
 import * as platform from "@/lib/platform";
 import { runInTenant, tenantClient } from "@/db/tenant";
-import { addExpense, addFuel, approvalIssues, approveWaybill, createWaybill, deleteWaybill, invoiceSelectedWaybills, listWaybills, parseWaybillFilter, patchWaybill, recordStage, rejectWaybill, revertWaybill, saveTransportDoc, sendTransportDocToDriver, setWaybillStatus, updateWaybill, waybillDoc } from "@/lib/waybills";
+import { addExpense, addFuel, approvalIssues, approveWaybill, createWaybill, deleteWaybill, invoiceSelectedWaybills, invoiceWaybillsNow, listWaybills, parseWaybillFilter, patchWaybill, recordStage, rejectWaybill, revertWaybill, saveTransportDoc, sendTransportDocToDriver, setWaybillStatus, updateWaybill, waybillDoc } from "@/lib/waybills";
 import { parseTransport } from "@/lib/transport-draft";
 
 const url = process.env.TEST_DATABASE_URL;
@@ -616,7 +631,8 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(queue.find((q) => q.customerId === customerId)?.count).toBe(3);
 
       const inv = await createInvoice(db, { customerId, invoiceDate: `${YEAR}-08-31` });
-      expect(inv.number).toBe(`INV-${YEAR}-000001`);
+      // المسودة برقم مسودة، والرقم الرسمي عند الاعتماد
+      expect(inv.number).toBe(`DRF-${YEAR}-000001`);
       const lines = await db.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, inv.id));
       expect(lines.filter((l) => l.kind === "waybill")).toHaveLength(3);
       expect(lines.filter((l) => l.kind === "expense").map((l) => Number(l.amount))).toEqual([200]);
@@ -628,6 +644,7 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       await expect(createInvoice(db, { customerId, invoiceDate: `${YEAR}-08-31` })).rejects.toThrow("لا توجد شحنات");
 
       const entry = await issueInvoice(db, inv.id);
+      expect(entry.invoiceNumber).toBe(`INV-${YEAR}-000001`);
       const jl = await linesOf(entry.id);
       const sum = (code: string, k: "debit" | "credit") => jl.filter((l) => l.code === code).reduce((a, l) => a + l[k], 0);
       expect(Math.round(sum("1103", "debit") * 100) / 100).toBe(7131.15);
@@ -641,9 +658,13 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       await revertInvoice(db, inv.id);
       const [w2] = await db.select().from(s.waybills).where(eq(s.waybills.id, firstId));
       expect(w2.status).toBe("approved");
+      // المُرجعة لمسودة تحتفظ برقمها الرسمي ولا تُحذف حفاظاً على التسلسل
+      [row] = await db.select().from(s.salesInvoices).where(eq(s.salesInvoices.id, inv.id));
+      expect(row.number).toBe(`INV-${YEAR}-000001`);
+      await expect(deleteInvoice(db, inv.id, { reason: "تجربة" })).rejects.toThrow("رقماً رسمياً");
       await issueInvoice(db, inv.id);
       [row] = await db.select().from(s.salesInvoices).where(eq(s.salesInvoices.id, inv.id));
-      expect(row.status).toBe("issued");
+      expect([row.status, row.number]).toEqual(["issued", `INV-${YEAR}-000001`]);
     });
 
     it("قائمة الفواتير بالبحث والفلترة، وتعديل المسودة من الورقة بقواعدها", async () => {
@@ -678,7 +699,7 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       await createReceipt(db, { receiptDate: `${YEAR}-09-06`, customerId, amount: 3000, method: "cash", cashAccountId: acc["110101"], post: true });
       [row] = await db.select().from(s.salesInvoices).where(eq(s.salesInvoices.id, inv.id));
       expect(Number(row.paidAmount)).toBe(7131.15);
-      await expect(revertInvoice(db, inv.id)).rejects.toThrow("سندات قبض");
+      await expect(revertInvoice(db, inv.id)).rejects.toThrow("دفعات سداد");
       await revertReceipt(db, r1.id);
       [row] = await db.select().from(s.salesInvoices).where(eq(s.salesInvoices.id, inv.id));
       expect(Number(row.paidAmount)).toBe(2131.15);
@@ -1058,12 +1079,33 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(pending.rows).toHaveLength(0);
       expect((await list({ q: "TBLU7654" })).rows[0].invoice).toBe(invA.number);
 
-      // فك الدمج يعيد الشحنات بانتظار الفوترة، والمصدرة لا تُفك ولا ترجع شحنتها
-      expect(await unmergeInvoice(db, invA.id)).toMatchObject({ waybills: 2 });
+      expect((await list({ status: "merged", q: "مصنع الجدول" })).counts).toMatchObject({ merged: 3, pending_invoice: 0 });
+      expect((await list({ q: "TBLU7654" })).rows[0].invoiceWaybills).toBe(2);
+
+      // فك دمج الفاتورة: كل شحنة تصبح فاتورة مسودة مستقلة ولا يُحذف شيء
+      const split = await unmergeInvoice(db, invA.id);
+      expect(split.created).toHaveLength(1);
+      const pieces = await db.select({ id: s.salesInvoices.id, total: s.salesInvoices.subtotal }).from(s.salesInvoices).where(inArray(s.salesInvoices.number, [invA.number, ...split.created]));
+      expect(pieces.map((p) => Number(p.total))).toEqual([1000, 1000]);
+      await expect(unmergeInvoice(db, invA.id)).rejects.toThrow("غير مدمجة");
+
+      // دمجها من جديد يعيدها فاتورة واحدة، وفك الدمج من الشحنات يعيدها بانتظار الفوترة
+      const merged = await mergeInvoices(db, pieces.map((p) => p.id));
+      expect(merged.merged).toHaveLength(1);
+      await expect(mergeInvoices(db, [merged.id, invB.id])).rejects.toThrow("لعملاء أو عملات مختلفة");
+      const back = await removeWaybillsFromDrafts(db, [w1.id, w2.id]);
+      expect(back.done).toHaveLength(2);
+      expect(await db.select().from(s.salesInvoices).where(eq(s.salesInvoices.id, merged.id))).toHaveLength(0);
       pending = await list({ status: "pending_invoice", q: "مصنع الجدول" });
       expect(pending.rows.map((r) => r.w.id).sort()).toEqual([w1.id, w2.id].sort());
-      await issueInvoice(db, invB.id);
-      await expect(unmergeInvoice(db, invB.id)).rejects.toThrow("مُصدرة");
+
+      // فوترة المحدد: كل شحنة غير مدمجة تأخذ فاتورة صادرة برقم رسمي، والمدمجة تصدر مسودتها
+      const now = await invoiceWaybillsNow(db, [w1.id, w3.id], { invoiceDate: today });
+      expect(now.skipped).toEqual([]);
+      expect(now.issued).toHaveLength(2);
+      expect(now.issued.every((i) => i.number.startsWith("INV-"))).toBe(true);
+      expect((await db.select({ st: s.waybills.status }).from(s.waybills).where(inArray(s.waybills.id, [w1.id, w3.id]))).map((w) => w.st)).toEqual(["invoiced", "invoiced"]);
+      await expect(unmergeInvoice(db, invB.id)).rejects.toThrow("صادرة");
       await expect(setWaybillStatus(db, w3.id, "draft")).rejects.toThrow("مفوترة");
 
       // تعديل حقول من الورقة: تغيير التاريخ يعيد حساب السعر غير اليدوي، والمرسل يبقى
@@ -1084,6 +1126,33 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(report.issues[0].message).toContain("لا يوجد مسار");
       const [imp] = await db.select().from(s.waybills).where(eq(s.waybills.shipper, "مصنع الاستيراد"));
       expect([imp.status, Number(imp.amount), imp.driverId]).toEqual(["draft", 3000, driver.id]);
+    });
+
+    it("الفاتورة المباشرة: مسودة بلا شحنة برقم مسودة، تُعدّل وتُدمج مع مسودة أخرى ويُفك دمجها، والحذف للمسودة فقط", async () => {
+      const D = `${YEAR}-12-20`;
+      const line = (description: string, amount: number) => ({ description, quantity: 1, unitPrice: amount, discountPercent: 0, amount, vatRate: 15, vatAmount: amount * 0.15, taxCodeId: null, accountId: acc["4101"], costCenterId: null });
+      const head = { customerId, invoiceDate: D, dueDate: `${YEAR}-12-30`, currencyCode: "SAR" };
+      await expect(createDirectInvoice(db, { ...head, lines: [] })).rejects.toThrow("بلا بنود");
+      await expect(createDirectInvoice(db, { ...head, dueDate: `${YEAR}-12-01`, lines: [line("x", 1)] })).rejects.toThrow("الاستحقاق قبل");
+      const a = await createDirectInvoice(db, { ...head, lines: [line("تخزين حاوية", 500)] });
+      const b = await createDirectInvoice(db, { ...head, reference: "PO-77", lines: [line("تحميل وتنزيل", 300)] });
+      expect([a.number.startsWith("DRF-"), a.status, a.reference]).toEqual([true, "draft", null]);
+      await expect(createDirectInvoice(db, { ...head, reference: "PO-77", lines: [line("y", 1)] })).rejects.toThrow("مسجل مسبقاً");
+
+      await updateDirectInvoice(db, a.id, { ...head, notes: "شهر ديسمبر", lines: [line("تخزين حاوية", 500), line("رسوم ميناء", 100)] });
+      let [row] = await db.select().from(s.salesInvoices).where(eq(s.salesInvoices.id, a.id));
+      expect([Number(row.subtotal), Number(row.vatTotal), row.notes]).toEqual([600, 90, "شهر ديسمبر"]);
+
+      const m = await mergeInvoices(db, [a.id, b.id]);
+      [row] = await db.select().from(s.salesInvoices).where(eq(s.salesInvoices.id, m.id));
+      expect(Number(row.subtotal)).toBe(900);
+      const split = await unmergeInvoice(db, m.id);
+      expect(split.created).toHaveLength(1);
+      const totals = (await db.select({ t: s.salesInvoices.subtotal }).from(s.salesInvoices).where(inArray(s.salesInvoices.number, [m.number, ...split.created]))).map((r) => Number(r.t)).sort((x, y) => x - y);
+      expect(totals).toEqual([300, 600]);
+
+      await deleteInvoice(db, m.id, { reason: "تجربة" });
+      expect(await db.select().from(s.salesInvoices).where(eq(s.salesInvoices.id, m.id))).toHaveLength(0);
     });
 
     it("وثيقة النقل: بيانات الأطراف والبضاعة وأجور النقل، والإرسال للسائق، والمدن المسجلة مسبقاً", async () => {
@@ -1381,7 +1450,7 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
 
       // لا تُستورد الفاتورة مرتين
       report = await runImport(db, spec, rows.slice(0, 1), { dryRun: true });
-      expect(report.issues[0].message).toContain("مستوردة مسبقاً");
+      expect(report.issues[0].message).toContain("مسجل مسبقاً");
 
       // الإصدار يرحّل الإيراد على مركز تكلفة المركبة، وتغيير التاريخ لا يمس السطور الحرة
       await updateDraftInvoice(db, inv2.id, { invoiceDate: `${YEAR}-11-04` });

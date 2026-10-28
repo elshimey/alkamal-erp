@@ -14,6 +14,7 @@ import { fmt } from "@/lib/format";
 import { EDITABLE, listWaybills, parseWaybillFilter, waybillDoc } from "@/lib/waybills";
 import { WAYBILL_SORTS, WAYBILL_STATUS, type WaybillStatus } from "@/data/waybills";
 import { ActionForm, SubmitButton } from "@/components/action-form";
+import { ConfirmSubmit } from "@/components/confirm-submit";
 import { ActionsMenu, type MenuItem } from "@/components/actions-menu";
 import { BulkPdfButton } from "@/components/bulk-pdf";
 import { ClickRow } from "@/components/click-row";
@@ -27,7 +28,7 @@ import { SheetEditor } from "@/components/sheet-editor";
 import { AddModeBar } from "@/components/list-actions";
 import { Badge, Card, EmptyRow, LimitRow, PageHeader, Table, Td } from "@/components/ui";
 import { WaybillDocument } from "@/components/waybill-document";
-import { bulkWaybillOps, copyWaybill, invoiceOne, removeWaybillAction, saveTransportPanel, saveWaybillPanel, saveWaybills, saveWaybillSheet, sendToDriverAction, waybillToStatus } from "./actions";
+import { bulkWaybillOps, copyWaybill, invoiceOne, issueOne, unmergeOne, removeWaybillAction, saveTransportPanel, saveWaybillPanel, saveWaybills, saveWaybillSheet, sendToDriverAction, waybillToStatus } from "./actions";
 import { TransportPanel } from "./transport-panel";
 import { WaybillEditor, type RouteOption, type WaybillDraft } from "./waybill-editor";
 
@@ -40,8 +41,8 @@ const TABS: { key: string; label: string }[] = [
   { key: "draft", label: "مسودة" },
   { key: "in_transit", label: "في الطريق" },
   { key: "delivered", label: "مُسلَّمة" },
-  { key: "pending_invoice", label: "بانتظار الفوترة" },
-  { key: "approved", label: "معتمدة" },
+  { key: "pending_invoice", label: "معتمدة · بانتظار الفوترة" },
+  { key: "merged", label: "مدمجة" },
   { key: "invoiced", label: "مفوترة" },
   { key: "rejected", label: "مرفوضة" },
 ];
@@ -54,6 +55,13 @@ const SHEET_TONE: Record<WaybillStatus, "gray" | "green" | "blue" | "amber" | "r
   invoiced: "green",
   rejected: "red",
 };
+
+/** حالة الشحنة كما تُعرض: المعتمدة بانتظار الفوترة، أو مدمجة في مسودة، أو مفوترة. */
+function waybillState(status: WaybillStatus, invoiceId: number | null, invoiceWaybills: number) {
+  if (status === "approved" && !invoiceId) return { label: "معتمدة", tone: "amber" as const, sub: "بانتظار الفوترة" };
+  if (status === "approved") return invoiceWaybills > 1 ? { label: "مدمجة", tone: "blue" as const } : { label: "في مسودة فاتورة", tone: "blue" as const };
+  return { label: WAYBILL_STATUS[status].label, tone: WAYBILL_STATUS[status].tone };
+}
 
 const withParam = (url: string, key: string, value: string) => `${url}${url.includes("?") ? "&" : "?"}${key}=${value}`;
 const inputCls = "w-full rounded-lg border border-gray-300 px-3 py-2 text-sm";
@@ -76,6 +84,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
   const canRevert = can(user.perms, "waybills", "revert");
   const canDelete = can(user.perms, "waybills", "delete");
   const canInvoice = can(user.perms, "sales_invoices", "create");
+  const canIssueInvoice = can(user.perms, "sales_invoices", "approve");
   const canOverride = hasSpecial(user.perms, "override_controls");
   const view = sp.view === "sheet" ? "sheet" : "table";
   const lp: DocListParams = { q: sp.q, status: sp.status, period: sp.period, sort: sp.sort, view: sp.view };
@@ -150,26 +159,49 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
         action: to("approved"),
         confirm: { title: `اعتماد الشحنة ${w.number}`, text: "يُرحّل قيد تكلفة الرحلة (الديزل والعمولة والمصاريف) وتصبح الشحنة جاهزة للفوترة.", submit: "اعتماد", fields: overrideField },
       });
+    const dateField = (
+      <label className="block text-sm">
+        <span className="mb-1 block text-gray-600">تاريخ الفاتورة</span>
+        <DateInput name="invoiceDate" defaultValue={today} required className={inputCls} />
+      </label>
+    );
     if (st === "approved" && !invoiceId && canInvoice)
       items.push({
-        label: "فوترة الشحنة",
+        label: "إنشاء فاتورة مسودة",
         icon: "invoice",
-        hint: "فاتورة مسودة تراجعها ثم تعتمدها",
+        hint: "تراجعها ثم تعتمدها من الفواتير",
         divider: true,
         action: invoiceOne.bind(null, w.id),
         confirm: {
-          title: `فوترة الشحنة ${w.number}`,
-          text: "تُنشأ فاتورة مبيعات مسودة بهذه الشحنة. لفوترة عدة شحنات معاً حددها من الجدول واختر «فوترة المحدد».",
-          submit: "إنشاء الفاتورة",
-          fields: (
-            <label className="block text-sm">
-              <span className="mb-1 block text-gray-600">تاريخ الفاتورة</span>
-              <DateInput name="invoiceDate" defaultValue={today} required className={inputCls} />
-            </label>
-          ),
+          title: `فاتورة مسودة للشحنة ${w.number}`,
+          text: "تُنشأ فاتورة مبيعات مسودة بهذه الشحنة وحدها. لجمع عدة شحنات في فاتورة حددها من الجدول واختر «دمج المحدد».",
+          submit: "إنشاء المسودة",
+          fields: dateField,
         },
       });
-    if (invoiceId) items.push({ label: `فتح الفاتورة ${invoice ?? ""}`, icon: "invoice", hint: st === "approved" ? "مسودة؛ منها تُخرج الشحنة أو تفك الدمج" : undefined, href: `/invoices?open=${invoiceId}`, divider: true });
+    if (st === "approved" && canIssueInvoice)
+      items.push({
+        label: invoiceId ? `فوترة (إصدار ${invoice ?? "الفاتورة"})` : "فوترة الشحنة",
+        icon: "check",
+        hint: invoiceId ? "تصدر فاتورتها المسودة بكل ما فيها" : "فاتورة صادرة ويُرحّل قيد الإيراد",
+        divider: !!invoiceId,
+        action: issueOne.bind(null, w.id),
+        confirm: {
+          title: invoiceId ? `إصدار الفاتورة ${invoice ?? ""}` : `فوترة الشحنة ${w.number}`,
+          text: invoiceId ? "تصدر الفاتورة المسودة التي فيها هذه الشحنة ويُرحّل قيد الإيراد والضريبة، وتصبح شحناتها «مفوترة»." : "تُنشأ فاتورة لهذه الشحنة وتصدر مباشرة ويُرحّل قيد الإيراد والضريبة.",
+          submit: "فوترة",
+          fields: invoiceId ? undefined : dateField,
+        },
+      });
+    if (st === "approved" && invoiceId && can(user.perms, "sales_invoices", "update"))
+      items.push({
+        label: "فك الدمج",
+        icon: "undo",
+        hint: "تخرج من المسودة وتعود «بانتظار الفوترة»",
+        action: unmergeOne.bind(null, w.id),
+        confirm: { title: `فك دمج الشحنة ${w.number}`, text: `تخرج الشحنة من الفاتورة المسودة ${invoice ?? ""} وتعود «معتمدة · بانتظار الفوترة». باقي شحنات الفاتورة تبقى فيها.`, submit: "فك الدمج" },
+      });
+    if (invoiceId) items.push({ label: `فتح الفاتورة ${invoice ?? ""}`, icon: "invoice", href: `/invoices?open=${invoiceId}`, divider: st !== "approved" });
     if (canRevert && st === "approved" && !invoiceId) {
       items.push({
         label: "إرجاع إلى مُسلَّمة",
@@ -402,14 +434,14 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
                     deliveryNote: w.deliveryNoteNumber,
                     notes: w.notes,
                   },
-                  badges: { status: { label: WAYBILL_STATUS[w.status].label, tone: SHEET_TONE[w.status] } },
+                  badges: { status: w.status === "approved" ? waybillState(w.status, r.invoiceId, r.invoiceWaybills) : { label: WAYBILL_STATUS[w.status].label, tone: SHEET_TONE[w.status] } },
                 };
               })}
             />
           ) : openDoc ? (
             <div className="grid items-start gap-4 lg:grid-cols-[minmax(17rem,22rem)_1fr]">
               <ul className="hidden max-h-[calc(100vh-9rem)] divide-y divide-gray-100 overflow-y-auto rounded-2xl border border-black/[0.06] bg-white shadow-sm lg:sticky lg:top-4 lg:block print:hidden">
-                {rows.map(({ w, customer }) => (
+                {rows.map(({ w, customer, invoiceId, invoiceWaybills }) => (
                   <li key={w.id}>
                     <Link
                       href={listUrl({ open: String(w.id) })}
@@ -425,7 +457,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
                         <span className="text-gray-300">|</span>
                         <span className="ltr-nums whitespace-nowrap">{w.waybillDate}</span>
                         <span className="ms-auto">
-                          <Badge tone={WAYBILL_STATUS[w.status].tone}>{WAYBILL_STATUS[w.status].label}</Badge>
+                          <Badge tone={waybillState(w.status, invoiceId, invoiceWaybills).tone}>{waybillState(w.status, invoiceId, invoiceWaybills).label}</Badge>
                         </span>
                       </div>
                     </Link>
@@ -443,8 +475,10 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
                       <span className="font-display text-lg font-semibold text-brand-900">
                         شحنة <span className="ltr-nums">{openDoc.w.number}</span>
                       </span>
-                      <Badge tone={WAYBILL_STATUS[openDoc.w.status].tone}>{WAYBILL_STATUS[openDoc.w.status].label}</Badge>
-                      {openDoc.w.status === "approved" && !openInvoiceId && <Badge tone="amber">بانتظار الفوترة</Badge>}
+                      {(() => {
+                        const st = waybillState(openDoc.w.status, openInvoiceId, openRow?.invoiceWaybills ?? 0);
+                        return <Badge tone={st.tone}>{st.label}</Badge>;
+                      })()}
                     </div>
                     <div className="text-xs text-gray-500">
                       {openDoc.customer} · {openDoc.from} ← {openDoc.to} · {openDoc.w.isInternational ? "دولي، ضريبة صفرية" : "داخلي، ضريبة 15%"}
@@ -506,7 +540,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
                           {l}
                         </Link>
                       ))}
-                      {openDoc.w.sentToDriverAt && <Badge tone="blue">أُرسلت للسائق</Badge>}
+                      {openDoc.w.sentToDriverAt && <Badge tone={openDoc.w.driverAcceptedAt ? "green" : "blue"}>{openDoc.w.driverAcceptedAt ? "✓ أُرسلت للسائق واستلمها" : "✓ أُرسلت للسائق"}</Badge>}
                       {openDoc.w.logistiNumber && <Badge tone="gray">لوجستي {openDoc.w.logistiNumber}</Badge>}
                     </div>
                     <WaybillDocument company={company} doc={openDoc} template={template} compact variant={docVariant} />
@@ -523,7 +557,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
                     form={BULK_FORM}
                     empty={
                       <div className="flex flex-wrap items-center gap-3">
-                        <span className="text-sm text-gray-500">حدد شحنة أو أكثر من الجدول لتظهر العمليات: الاعتماد، والدمج والفوترة، والإرسال للسائق، وتغيير الحالة.</span>
+                        <span className="text-sm text-gray-500">حدد شحنة أو أكثر من الجدول لتظهر العمليات: الإرسال للسائق، والاعتماد، والدمج، والفوترة، وفك الدمج، وتغيير الحالة.</span>
                         <span className="ms-auto">
                           <BulkPdfButton kind="waybills" ids={rows.map((r) => r.w.id)} />
                         </span>
@@ -533,23 +567,36 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
                     <div className="flex flex-wrap items-center gap-2.5">
                       <SelectionTotal form={BULK_FORM} noun="شحنة" />
                       <span className="mx-1 h-6 w-px bg-gray-200" aria-hidden />
+                      {canUpdate && (
+                        <SubmitButton op="send_driver" variant="secondary" pendingLabel="جارٍ الإرسال…" className="!py-1.5">
+                          إرسال للسائق
+                        </SubmitButton>
+                      )}
                       {canApprove && (
                         <SubmitButton op="approved" pendingLabel="جارٍ الاعتماد…" className="!py-1.5">
                           اعتماد
                         </SubmitButton>
                       )}
-                      {canInvoice && (
-                        <span className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 p-1 ps-2">
+                      {(canInvoice || canIssueInvoice) && (
+                        <span className="flex flex-wrap items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 p-1 ps-2">
                           <DateInput name="invoiceDate" defaultValue={today} aria-label="تاريخ الفاتورة" title="تاريخ الفاتورة" className="h-8 w-32 rounded-md border border-gray-200 bg-white px-2 text-sm" />
-                          <SubmitButton op="invoice" variant="secondary" pendingLabel="جارٍ الفوترة…" className="!py-1.5">
-                            دمج وفوترة المحدد
-                          </SubmitButton>
+                          {canInvoice && (
+                            <SubmitButton op="merge" variant="secondary" pendingLabel="جارٍ الدمج…" className="!py-1.5">
+                              دمج المحدد
+                            </SubmitButton>
+                          )}
+                          {canIssueInvoice && (
+                            <ConfirmSubmit
+                              op="invoice"
+                              className="!py-1.5"
+                              title="فوترة الشحنات المحددة"
+                              text="تصدر فاتورة كل شحنة ويُرحّل قيد الإيراد والضريبة. الشحنة المدمجة تصدر فاتورتها المسودة بكل ما فيها، وغير المدمجة تأخذ فاتورة مستقلة. لجمع عدة شحنات في فاتورة واحدة اضغط «دمج المحدد» أولاً."
+                              submit="فوترة"
+                            >
+                              فوترة المحدد
+                            </ConfirmSubmit>
+                          )}
                         </span>
-                      )}
-                      {canUpdate && (
-                        <SubmitButton op="send_driver" variant="secondary" pendingLabel="جارٍ الإرسال…" className="!py-1.5">
-                          إرسال للسائق
-                        </SubmitButton>
                       )}
                       {canUpdate && (
                         <details data-dropdown className="relative">
@@ -563,6 +610,17 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
                                 {op === "draft" ? "إرجاع إلى مسودة" : `إلى «${WAYBILL_STATUS[op].label}»`}
                               </SubmitButton>
                             ))}
+                            {can(user.perms, "sales_invoices", "update") && (
+                              <ConfirmSubmit
+                                op="unmerge"
+                                className="!justify-start !border-0 !text-start !shadow-none"
+                                title="فك دمج الشحنات المحددة"
+                                text="تخرج كل شحنة محددة من فاتورتها المسودة وتعود «معتمدة · بانتظار الفوترة». المسودة التي لا يبقى فيها شيء تُحذف. الفواتير الصادرة لا تتأثر."
+                                submit="فك الدمج"
+                              >
+                                فك الدمج
+                              </ConfirmSubmit>
+                            )}
                           </div>
                         </details>
                       )}
@@ -580,7 +638,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
                 {rows.map((r) => {
                   const { w } = r;
                   const open = listUrl({ open: String(w.id) });
-                  const pending = w.status === "approved" && !r.invoiceId;
+                  const st = waybillState(w.status, r.invoiceId, r.invoiceWaybills);
                   return (
                     <ClickRow key={w.id} href={open} className="transition hover:bg-brand-50/40">
                       <Td>{(canUpdate || canApprove || canInvoice) && <RowCheck form={BULK_FORM} id={w.id} amount={showPrices ? w.amount : "0"} />}</Td>
@@ -603,10 +661,11 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
                         </Td>
                       )}
                       <Td>
-                        <Badge tone={pending ? "amber" : WAYBILL_STATUS[w.status].tone}>{pending ? "بانتظار الفوترة" : WAYBILL_STATUS[w.status].label}</Badge>
+                        <Badge tone={st.tone}>{st.label}</Badge>
+                        {"sub" in st && <span className="mt-0.5 block text-xs whitespace-nowrap text-amber-700">{st.sub}</span>}
                         {w.status === "rejected" && w.rejectionReason && <span className="block max-w-48 truncate text-xs text-red-600">{w.rejectionReason}</span>}
-                        {(w.status === "draft" || w.status === "in_transit") && w.sentToDriverAt && (
-                          <span className={`mt-0.5 block text-xs whitespace-nowrap ${w.driverAcceptedAt ? "text-green-700" : "text-sky-700"}`}>{w.driverAcceptedAt ? "✓ استلمها السائق" : "أُرسلت للسائق"}</span>
+                        {w.sentToDriverAt && (
+                          <span className={`mt-0.5 block text-xs whitespace-nowrap ${w.driverAcceptedAt ? "text-green-700" : "text-sky-700"}`}>{w.driverAcceptedAt ? "✓ أُرسلت للسائق واستلمها" : "✓ أُرسلت للسائق"}</span>
                         )}
                       </Td>
                       <Td className="ltr-nums whitespace-nowrap">
