@@ -784,6 +784,15 @@ export async function setWaybillStatus(
   const from = WAYBILL_FLOW.indexOf(w.status as WaybillFlowStatus);
   const to = WAYBILL_FLOW.indexOf(target);
   if (to > from) {
+    // الاعتماد الذي ستمنعه الضوابط (مثل عدم وجود عقد) يُرفض قبل أي تغيير، فلا تتحول الشحنة لمُسلَّمة ولا تُسجَّل مراحل
+    if (to === 3) {
+      const [row] = await db.select().from(s.waybills).where(eq(s.waybills.id, id));
+      const issues = await approvalIssues(db, row);
+      if (issues.length && !(opts.canOverride && opts.overrideReason?.trim())) {
+        const hint = opts.canOverride ? "؛ اكتب سبب التجاوز للاعتماد" : "؛ يلزم مستخدم بصلاحية تجاوز الضوابط";
+        throw new Error(issues.map((i) => i.message).join("، ") + hint);
+      }
+    }
     if (from < 1 && to >= 1) await recordStage(db, id, "in_transit", { userId: opts.userId });
     if (from < 2 && to >= 2) await recordStage(db, id, "delivery", { userId: opts.userId });
     if (to === 3) await approveWaybill(db, id, opts);
