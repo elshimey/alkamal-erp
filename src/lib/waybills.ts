@@ -808,7 +808,9 @@ export function parseWaybillFilter(sp: { q?: string; status?: string; period?: s
   };
 }
 
-const invoicedLine = sql`exists (select 1 from sales_invoice_lines l where l.waybill_id = ${s.waybills.id} and l.kind = 'waybill')`;
+// العمود باسم جدوله صراحة: في استعلام جدول واحد يُكتب بلا اسم الجدول فيقرأه الاستعلام الداخلي عموداً من جدوله هو
+const WAYBILL_ID = sql.raw(`"waybills"."id"`);
+const invoicedLine = sql`exists (select 1 from sales_invoice_lines l where l.waybill_id = ${WAYBILL_ID} and l.kind = 'waybill')`;
 
 const carrier = alias(s.parties, "carrier");
 const fromLoc = alias(s.locations, "from_loc");
@@ -841,6 +843,7 @@ function waybillWhere(f: WaybillFilter, opts: { tab: boolean }) {
   }
   if (opts.tab && f.tab) {
     if (f.tab === "pending_invoice") where.push(eq(s.waybills.status, "approved"), sql`not ${invoicedLine}`);
+    else if (f.tab === "merged") where.push(eq(s.waybills.status, "approved"), invoicedLine);
     else where.push(eq(s.waybills.status, f.tab));
   }
   return where.length ? and(...where) : undefined;
@@ -866,6 +869,8 @@ export async function listWaybills(db: Db | Tx, f: WaybillFilter = {}, limit = 5
         route: sql<string>`${fromLoc.nameAr} || ' ← ' || ${toLoc.nameAr}`,
         invoiceId: sql<number | null>`(select l.invoice_id from sales_invoice_lines l where l.waybill_id = ${s.waybills.id} and l.kind = 'waybill' limit 1)`,
         invoice: sql<string | null>`(select i.number from sales_invoice_lines l join sales_invoices i on i.id = l.invoice_id where l.waybill_id = ${s.waybills.id} and l.kind = 'waybill' limit 1)`,
+        // عدد الشحنات في فاتورتها: أكثر من واحدة = مدمجة
+        invoiceWaybills: sql<number>`coalesce((select count(*) from sales_invoice_lines x where x.kind = 'waybill' and x.invoice_id = (select l.invoice_id from sales_invoice_lines l where l.waybill_id = ${s.waybills.id} and l.kind = 'waybill' limit 1)), 0)::int`,
       })
       .from(s.waybills)
       .innerJoin(s.parties, eq(s.parties.id, s.waybills.customerId))
@@ -897,19 +902,20 @@ export async function listWaybills(db: Db | Tx, f: WaybillFilter = {}, limit = 5
       .where(waybillWhere(f, { tab: false }))
       .groupBy(s.waybills.status, sql`2`),
   ]);
-  const tabCounts: Record<string, number> = { all: 0, pending_invoice: 0 };
+  const tabCounts: Record<string, number> = { all: 0, pending_invoice: 0, merged: 0 };
   for (const c of counts) {
     tabCounts.all += c.n;
     tabCounts[c.status] = (tabCounts[c.status] ?? 0) + c.n;
     if (c.pending) tabCounts.pending_invoice += c.n;
+    else if (c.status === "approved") tabCounts.merged += c.n;
   }
   return { rows, counts: tabCounts };
 }
 
-// ───────────── فوترة المحدد ─────────────
+// ───────────── دمج المحدد وفوترته ─────────────
 
 /**
- * يجمع الشحنات المحددة المعتمدة غير المفوترة في فاتورة مسودة واحدة لكل عميل وعملة.
+ * دمج المحدد: يجمع الشحنات المعتمدة غير المفوترة في فاتورة مسودة واحدة لكل عميل وعملة.
  * الشحنات التي لا تصلح (غير معتمدة أو داخلة في فاتورة) تُذكر بأرقامها ولا تمنع الباقي.
  */
 export async function invoiceSelectedWaybills(db: Db, ids: number[], opts: { invoiceDate: string; userId?: number }) {
@@ -922,7 +928,7 @@ export async function invoiceSelectedWaybills(db: Db, ids: number[], opts: { inv
   const groups = new Map<string, { customerId: number; currencyCode: string; ids: number[] }>();
   for (const r of rows) {
     if (r.status !== "approved") skipped.push(`${r.number}: ${WAYBILL_STATUS[r.status].label}، الفوترة للمعتمدة فقط`);
-    else if (r.invoiced) skipped.push(`${r.number}: داخلة في فاتورة مسبقاً`);
+    else if (r.invoiced) skipped.push(`${r.number}: مدمجة في فاتورة مسبقاً`);
     else if (r.date > opts.invoiceDate) skipped.push(`${r.number}: تاريخها بعد تاريخ الفاتورة`);
     else {
       const key = `${r.customerId}:${r.currencyCode}`;
@@ -942,6 +948,52 @@ export async function invoiceSelectedWaybills(db: Db, ids: number[], opts: { inv
     }
   }
   return { created, skipped };
+}
+
+/**
+ * فوترة المحدد: تُصدر فاتورة كل شحنة ويُرحّل قيدها. المدمجة تُصدر مسودتها (بكل ما فيها)،
+ * وغير المدمجة تأخذ فاتورة مستقلة بتاريخ الفوترة. للفاتورة الواحدة لعدة شحنات: ادمجها أولاً.
+ */
+export async function invoiceWaybillsNow(db: Db, ids: number[], opts: { invoiceDate: string; userId?: number }) {
+  if (!ids.length) throw new Error("حدد شحنة واحدة على الأقل");
+  const { createInvoice, issueInvoice } = await import("@/lib/invoices");
+  const rows = await db
+    .select({
+      id: s.waybills.id,
+      number: s.waybills.number,
+      status: s.waybills.status,
+      customerId: s.waybills.customerId,
+      currencyCode: s.waybills.currencyCode,
+      date: s.waybills.waybillDate,
+      invoiceId: sql<number | null>`(select l.invoice_id from sales_invoice_lines l where l.waybill_id = ${WAYBILL_ID} and l.kind = 'waybill' limit 1)`.mapWith(Number),
+    })
+    .from(s.waybills)
+    .where(inArray(s.waybills.id, ids));
+  const skipped: string[] = [];
+  const invoiceIds = new Set<number>();
+  for (const r of rows) {
+    if (r.status === "invoiced") skipped.push(`${r.number}: مفوترة مسبقاً`);
+    else if (r.status !== "approved") skipped.push(`${r.number}: ${WAYBILL_STATUS[r.status].label}، الفوترة للمعتمدة فقط`);
+    else if (r.invoiceId) invoiceIds.add(r.invoiceId);
+    else if (r.date > opts.invoiceDate) skipped.push(`${r.number}: تاريخها بعد تاريخ الفاتورة`);
+    else {
+      try {
+        const inv = await createInvoice(db, { customerId: r.customerId, currencyCode: r.currencyCode, invoiceDate: opts.invoiceDate, waybillIds: [r.id], userId: opts.userId });
+        invoiceIds.add(inv.id);
+      } catch (err) {
+        skipped.push(`${r.number}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  }
+  const issued: { id: number; number: string }[] = [];
+  for (const id of invoiceIds) {
+    try {
+      issued.push({ id, number: (await issueInvoice(db, id, opts.userId)).invoiceNumber });
+    } catch (err) {
+      skipped.push(err instanceof Error ? err.message : String(err));
+    }
+  }
+  return { issued, skipped };
 }
 
 /**

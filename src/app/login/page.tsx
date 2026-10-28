@@ -9,9 +9,12 @@ import { getBrand } from "@/lib/brand";
 import { Truck } from "@/components/icons";
 import { login } from "./actions";
 import { lastCompanyCode } from "./company-code";
+import { farewellMessage } from "@/lib/welcome";
 
-export default async function LoginPage({ searchParams }: { searchParams: Promise<{ reset?: string; driver?: string }> }) {
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ reset?: string; driver?: string; bye?: string }> }) {
   if (await getCurrentUser()) redirect("/");
+  const bye = (await searchParams).bye?.slice(0, 40);
+  const farewell = bye ? farewellMessage(bye) : null;
   const brand = await getBrand(true);
   const code = await lastCompanyCode();
   return (
@@ -52,6 +55,17 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           </div>
           <h2 className="text-2xl font-semibold text-brand-900">تسجيل الدخول</h2>
           <p className="mt-1 mb-7 text-sm text-gray-500">أدخل رمز شركتك واسم الدخول وكلمة المرور للمتابعة.</p>
+          {farewell && (
+            <div role="status" className="animate-rise -mt-3 mb-5 flex items-center gap-3 rounded-2xl bg-asphalt-900 px-4 py-3 text-white">
+              <span className="shrink-0">
+                <Truck className="w-12" spinning />
+              </span>
+              <span>
+                <span className="block font-display font-semibold text-brand-500">{farewell.title} 👋</span>
+                <span className="text-sm text-white/75">{farewell.text}</span>
+              </span>
+            </div>
+          )}
           {(await searchParams).reset === "1" && (
             <p role="status" className="-mt-3 mb-5 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-800">
               عُيّنت كلمة المرور الجديدة؛ ادخل بها الآن.

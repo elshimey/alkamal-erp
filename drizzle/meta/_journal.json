@@ -225,6 +225,13 @@
       "when": 1792986473322,
       "tag": "0031_driver_acceptance",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1793073600000,
+      "tag": "0032_invoice_draft_numbers",
+      "breakpoints": true
     }
   ]
 }

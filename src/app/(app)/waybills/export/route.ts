@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
     const { w } = r;
     const vat = w.isInternational ? 0 : 15;
     const amount = Number(w.amount);
-    const pending = w.status === "approved" && !r.invoiceId;
+    const state = w.status !== "approved" ? WAYBILL_STATUS[w.status].label : !r.invoiceId ? "معتمدة · بانتظار الفوترة" : r.invoiceWaybills > 1 ? "مدمجة" : "في مسودة فاتورة";
     return [
       w.number,
       w.waybillDate,
@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
       w.weightTons != null ? Number(w.weightTons) : "",
       w.containerNumber ?? "",
       w.deliveryNoteNumber ?? "",
-      pending ? "بانتظار الفوترة" : WAYBILL_STATUS[w.status].label,
+      state,
       r.invoice ?? "",
       w.notes ?? "",
     ];

@@ -2,13 +2,30 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
 import { todayRiyadh } from "@/lib/dates";
-import { addWaybillsToInvoice, createAllInvoices, createInvoice, deleteInvoice, issueInvoice, removeInvoiceLine, revertInvoice, unmergeInvoice, updateDraftInvoice, type DraftInvoicePatch } from "@/lib/invoices";
+import {
+  addWaybillsToInvoice,
+  createAllInvoices,
+  createDirectInvoice,
+  createInvoice,
+  deleteInvoice,
+  issueInvoice,
+  mergeInvoices,
+  removeInvoiceLine,
+  revertInvoice,
+  unmergeInvoice,
+  updateDirectInvoice,
+  updateDraftInvoice,
+  type DraftInvoicePatch,
+  type ManualInvoiceInput,
+} from "@/lib/invoices";
+import { lineVat, round2 } from "@/lib/invoice-posting";
+import type { PanelResult } from "@/components/record-panel";
 import type { SheetChange, DocSheetResult } from "@/components/doc-sheet";
 import type { FormState } from "@/components/action-form";
 import { autoSubmit, submitDocument } from "@/lib/zatca/service";
@@ -70,7 +87,7 @@ export async function issue(id: number): Promise<FormState> {
     const entry = await issueInvoice(db, id, user.id);
     const zatca = await autoSubmit(db, { invoiceId: id }, user.id);
     refresh(id);
-    return { ok: `صدرت الفاتورة ورُحّل القيد ${entry.number}${zatca ? ` ${zatca}` : ""}` };
+    return { ok: `اعتُمدت الفاتورة برقم ${entry.invoiceNumber} ورُحّل القيد ${entry.number}${zatca ? ` ${zatca}` : ""}` };
   } catch (err) {
     return { error: errorMessage(err) };
   }
@@ -81,7 +98,7 @@ export async function revert(id: number): Promise<FormState> {
   try {
     await revertInvoice(db, id);
     refresh(id);
-    return { ok: "أُرجعت الفاتورة لمسودة وأُلغي قيدها" };
+    return { ok: "أُرجعت الفاتورة لمسودة وأُلغي قيدها، وتحتفظ برقمها الرسمي" };
   } catch (err) {
     return { error: errorMessage(err) };
   }
@@ -159,23 +176,123 @@ export async function saveInvoiceSheet(payload: string): Promise<DocSheetResult>
   return { ok: saved ? `حُفظت تعديلات ${saved} فاتورة` : undefined, errors };
 }
 
-/** فك الدمج من قائمة عمليات الفاتورة المسودة: تعود الشحنات بانتظار الفوترة. */
+/** فك الدمج: كل شحنة أو فاتورة مدمجة تصبح فاتورة مسودة مستقلة، وتبقى هذه بأول جزء. */
 export async function unmerge(id: number): Promise<FormState> {
-  const user = await requirePermission("sales_invoices", "delete");
-  let msg: string;
+  const user = await requirePermission("sales_invoices", "update");
   try {
     const r = await unmergeInvoice(db, id, user.id);
-    msg = r.number;
+    refresh(id);
+    return { ok: `فُك دمج ${r.number}: أُنشئت ${r.created.length} فاتورة مسودة مستقلة (${r.created.join("، ")})` };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+}
+
+/** إرجاع فاتورة مصدرة لمسودة من قائمة العمليات (ممنوع إذا عليها دفعة سداد). */
+export async function revertFromMenu(id: number): Promise<FormState> {
+  return revert(id);
+}
+
+/** حذف المسودة من قائمة العمليات بعد التأكيد وسبب الحذف. */
+export async function removeFromMenu(id: number, back: string, fd: FormData): Promise<FormState> {
+  const user = await requirePermission("sales_invoices", "delete");
+  try {
+    await deleteInvoice(db, id, { reason: String(fd.get("reason") ?? ""), userId: user.id });
   } catch (err) {
     return { error: errorMessage(err) };
   }
   refresh();
-  revalidatePath("/waybills");
-  void msg;
-  redirect("/waybills?status=pending_invoice");
+  redirect(back);
 }
 
-/** إرجاع فاتورة مصدرة لمسودة من قائمة العمليات (ممنوع إذا عليها قبض). */
-export async function revertFromMenu(id: number): Promise<FormState> {
-  return revert(id);
+const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
+const toNum = (v: unknown) => Number(String(v ?? "").replace(/[,\s]/g, "")) || 0;
+
+async function readInvoiceForm(fd: FormData): Promise<ManualInvoiceInput> {
+  const rows = (JSON.parse(str(fd, "lines") || "[]") as Record<string, string>[]).filter((l) => (l.description ?? "").trim() || toNum(l.price));
+  const taxes = await db.select({ id: s.taxCodes.id, code: s.taxCodes.code }).from(s.taxCodes).where(inArray(s.taxCodes.code, ["VAT15-OUT", "ZERO"]));
+  const [domestic] = await db.select({ id: s.accounts.id }).from(s.accounts).where(eq(s.accounts.code, "4101"));
+  return {
+    customerId: Number(str(fd, "customerId")) || 0,
+    invoiceDate: str(fd, "invoiceDate"),
+    dueDate: str(fd, "dueDate"),
+    currencyCode: str(fd, "currencyCode") || "SAR",
+    reference: str(fd, "reference") || null,
+    notes: str(fd, "notes") || null,
+    lines: rows.map((l, i) => {
+      const description = (l.description ?? "").trim();
+      if (!description) throw new Error(`البند ${i + 1}: اكتب الوصف`);
+      const quantity = l.quantity === "" || l.quantity == null ? 1 : toNum(l.quantity);
+      const unitPrice = toNum(l.price);
+      if (!(quantity > 0)) throw new Error(`البند ${i + 1}: الكمية يجب أن تكون أكبر من صفر`);
+      if (!(unitPrice > 0)) throw new Error(`البند ${i + 1}: اكتب السعر`);
+      const discountPercent = Math.min(100, Math.max(0, toNum(l.discount)));
+      const amount = round2(quantity * unitPrice * (1 - discountPercent / 100));
+      const vatRate = l.vatRate === "0" ? 0 : 15;
+      return {
+        description,
+        quantity,
+        unitPrice,
+        discountPercent,
+        amount,
+        vatRate,
+        vatAmount: lineVat(amount, vatRate),
+        taxCodeId: taxes.find((t) => t.code === (vatRate ? "VAT15-OUT" : "ZERO"))?.id ?? null,
+        accountId: Number(l.accountId) || domestic.id,
+        costCenterId: Number(l.costCenterId) || null,
+      };
+    }),
+  };
+}
+
+/** حفظ نافذة إنشاء الفاتورة المباشرة أو تعديل مسودة. */
+export async function saveInvoicePanel(id: number | null, fd: FormData): Promise<PanelResult> {
+  const user = await requirePermission("sales_invoices", id ? "update" : "create");
+  try {
+    const input = await readInvoiceForm(fd);
+    const inv = id ? await updateDirectInvoice(db, id, input) : await createDirectInvoice(db, { ...input, userId: user.id });
+    refresh(inv.id);
+    return { ok: id ? `حُفظت الفاتورة ${inv.number}` : `أُنشئت الفاتورة ${inv.number} مسودة؛ اعتمدها لتصدر برقمها الرسمي`, id: inv.id, label: inv.number };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+}
+
+/** العمليات على الفواتير المحددة: الاعتماد، والإرجاع لمسودة، والدمج، وفك الدمج، والحذف. */
+export async function bulkInvoiceOps(_: FormState, fd: FormData): Promise<FormState> {
+  const op = str(fd, "op");
+  const ids = [...new Set(fd.getAll("ids").map(Number).filter((x) => Number.isInteger(x) && x > 0))];
+  if (!ids.length) return { error: "حدد فاتورة واحدة على الأقل من الجدول" };
+  if (op === "issue") return issueMany(undefined, fd);
+  if (op === "merge") {
+    const user = await requirePermission("sales_invoices", "update");
+    try {
+      const r = await mergeInvoices(db, ids, user.id);
+      refresh(r.id);
+      return { ok: `دُمجت ${r.merged.length + 1} فواتير في ${r.number}` };
+    } catch (err) {
+      return { error: errorMessage(err) };
+    }
+  }
+  const perm = op === "revert" ? "revert" : op === "delete" ? "delete" : "update";
+  if (!["revert", "unmerge", "delete"].includes(op)) return { error: "اختر العملية" };
+  const user = await requirePermission("sales_invoices", perm);
+  const done: string[] = [];
+  const errors: string[] = [];
+  const rows = await db.select({ id: s.salesInvoices.id, number: s.salesInvoices.number }).from(s.salesInvoices).where(inArray(s.salesInvoices.id, ids));
+  for (const r of rows) {
+    try {
+      if (op === "revert") await revertInvoice(db, r.id);
+      else if (op === "unmerge") await unmergeInvoice(db, r.id, user.id);
+      else await deleteInvoice(db, r.id, { reason: str(fd, "reason") || "حذف من قائمة الفواتير", userId: user.id });
+      done.push(r.number);
+    } catch (err) {
+      errors.push(errorMessage(err));
+    }
+  }
+  refresh();
+  const verb = { revert: "أُرجعت لمسودة", unmerge: "فُك دمج", delete: "حُذفت" }[op as "revert" | "unmerge" | "delete"];
+  const msg = done.length ? `${verb} ${done.length} فاتورة: ${done.join("، ")}` : "";
+  if (!done.length) return { error: errors.join("\n") };
+  return errors.length ? { error: `${msg}\nولم يُنفذ:\n${errors.join("\n")}` } : { ok: msg };
 }

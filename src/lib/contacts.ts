@@ -52,8 +52,9 @@ export async function listContacts(db: Db | Tx, f: ContactFilter) {
   return db
     .select({
       p: s.parties,
-      roles: sql<string[]>`coalesce((select array_agg(r.role::text order by r.role) from party_roles r where r.party_id = ${s.parties.id}), '{}')`,
-      people: sql<number>`(select count(*)::int from party_contacts c where c.party_id = ${s.parties.id})`,
+      // "parties"."id" صراحة: في استعلام جدول واحد يُكتب العمود بلا اسم جدوله فيقرأه الاستعلام الداخلي من جدوله هو
+      roles: sql<string[]>`coalesce((select array_agg(r.role::text order by r.role) from party_roles r where r.party_id = "parties"."id"), '{}')`,
+      people: sql<number>`(select count(*)::int from party_contacts c where c.party_id = "parties"."id")`,
     })
     .from(s.parties)
     .where(where.length ? and(...where) : undefined)

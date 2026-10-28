@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
 import { requirePermission, type CurrentUser } from "@/lib/auth";
@@ -20,6 +20,7 @@ import {
   deleteWaybillItem,
   editWaybill,
   invoiceSelectedWaybills,
+  invoiceWaybillsNow,
   patchWaybill,
   recordStage,
   setWaybillStatus,
@@ -33,6 +34,8 @@ import {
 import { EXPENSE_BILL_TO, EXPENSE_PAYERS, FUEL_SOURCES, TRIP_STAGES, WAYBILL_FLOW, WAYBILL_STATUS, type WaybillFlowStatus } from "@/data/waybills";
 import { parseTransport } from "@/lib/transport-draft";
 import type { PanelResult } from "@/components/record-panel";
+import { removeWaybillsFromDrafts } from "@/lib/invoices";
+import { autoSubmit } from "@/lib/zatca/service";
 import type { FormState } from "@/components/action-form";
 import type { DocSheetResult, SheetChange } from "@/components/doc-sheet";
 
@@ -435,13 +438,53 @@ export async function copyWaybill(id: number, back: string): Promise<FormState> 
 
 const idsOf = (fd: FormData) => [...new Set(fd.getAll("ids").map(Number).filter((x) => Number.isInteger(x) && x > 0))];
 
-/** فوترة شحنة واحدة أو المحدد: فاتورة مسودة لكل عميل. */
+/** دمج شحنة واحدة أو المحدد: فاتورة مسودة لكل عميل. */
 export async function invoiceWaybills(ids: number[], invoiceDate: string) {
   const user = await requirePermission("sales_invoices", "create");
   const res = await invoiceSelectedWaybills(db, ids, { invoiceDate, userId: user.id });
   revalidatePath("/waybills");
   revalidatePath("/invoices");
   return res;
+}
+
+/** فوترة: إصدار فاتورة الشحنات وترحيل قيدها (والإرسال للهيئة إن كان الربط مفعّلاً). */
+async function issueWaybills(ids: number[], invoiceDate: string): Promise<FormState> {
+  const user = await requirePermission("sales_invoices", "approve");
+  try {
+    const res = await invoiceWaybillsNow(db, ids, { invoiceDate, userId: user.id });
+    const notes: string[] = [];
+    for (const inv of res.issued) {
+      const zatca = await autoSubmit(db, { invoiceId: inv.id }, user.id);
+      if (zatca && !zatca.startsWith("واعتمد")) notes.push(`${inv.number} ${zatca}`);
+    }
+    revalidatePath("/waybills");
+    revalidatePath("/invoices");
+    revalidatePath("/");
+    const msg = res.issued.length ? `صدرت ${res.issued.length === 1 ? "الفاتورة" : `${res.issued.length} فواتير`} ورُحّل القيد: ${res.issued.map((i) => i.number).join("، ")}${notes.length ? `\nملاحظة: ${notes.join("\n")}` : ""}` : "";
+    if (!res.issued.length) return { error: res.skipped.join("\n") || "لم تصدر فاتورة" };
+    return res.skipped.length ? { error: `${msg}\nولم يُنفذ:\n${res.skipped.join("\n")}` } : { ok: msg };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+}
+
+/** فك الدمج: إخراج الشحنات من مسوداتها فتعود «بانتظار الفوترة». */
+async function unmergeWaybills(ids: number[]): Promise<FormState> {
+  await requirePermission("sales_invoices", "update");
+  const res = await removeWaybillsFromDrafts(db, ids);
+  revalidatePath("/waybills");
+  revalidatePath("/invoices");
+  const msg = res.done.length ? `فُك دمج ${res.done.length} شحنة وعادت «بانتظار الفوترة»` : "";
+  if (!res.done.length) return { error: res.skipped.join("\n") || "لا توجد شحنات مدمجة في المحدد" };
+  return res.skipped.length ? { error: `${msg}\nولم يُنفذ:\n${res.skipped.join("\n")}` } : { ok: msg };
+}
+
+export async function issueOne(id: number, fd: FormData): Promise<FormState> {
+  return issueWaybills([id], cell.date(str(fd, "invoiceDate"), "تاريخ الفاتورة") ?? todayRiyadh());
+}
+
+export async function unmergeOne(id: number): Promise<FormState> {
+  return unmergeWaybills([id]);
 }
 
 export async function invoiceOne(id: number, fd: FormData): Promise<FormState> {
@@ -456,18 +499,20 @@ export async function invoiceOne(id: number, fd: FormData): Promise<FormState> {
   redirect(`/invoices?open=${invoiceId}`);
 }
 
-/** العمليات على الشحنات المحددة: تغيير الحالة للأمام أو الخلف، أو فوترة المحدد. */
+/** العمليات على الشحنات المحددة: تغيير الحالة، أو الدمج في مسودة، أو الفوترة، أو فك الدمج. */
 export async function bulkWaybillOps(_: FormState, fd: FormData): Promise<FormState> {
   const op = str(fd, "op");
   const ids = idsOf(fd).slice(0, 500);
   if (!ids.length) return { error: "حدد شحنة واحدة على الأقل من الجدول" };
-  if (op === "invoice") {
+  if (op === "invoice") return issueWaybills(ids, cell.date(str(fd, "invoiceDate"), "تاريخ الفاتورة") ?? todayRiyadh());
+  if (op === "unmerge") return unmergeWaybills(ids);
+  if (op === "merge") {
     try {
       const res = await invoiceWaybills(ids, cell.date(str(fd, "invoiceDate"), "تاريخ الفاتورة") ?? todayRiyadh());
       const made = res.created.map((c) => `${c.number} (${c.count} شحنة)`).join("، ");
-      const msg = made ? `أُنشئت ${res.created.length === 1 ? "الفاتورة المسودة" : "الفواتير المسودة"}: ${made}` : "";
+      const msg = made ? `دُمجت في ${res.created.length === 1 ? "الفاتورة المسودة" : "الفواتير المسودة"}: ${made}` : "";
       if (!res.created.length) return { error: res.skipped.join("\n") || "لم تُنشأ فاتورة" };
-      return res.skipped.length ? { error: `${msg}\nولم تُفوتر:\n${res.skipped.join("\n")}` } : { ok: `${msg}؛ راجعها واعتمدها من الفواتير` };
+      return res.skipped.length ? { error: `${msg}\nولم تُدمج:\n${res.skipped.join("\n")}` } : { ok: `${msg}. الخطوة التالية: «فوترة المحدد» أو اعتمادها من الفواتير` };
     } catch (err) {
       return { error: errorMessage(err) };
     }
@@ -476,7 +521,16 @@ export async function bulkWaybillOps(_: FormState, fd: FormData): Promise<FormSt
     await guard("update");
     let sent = 0;
     const failed: string[] = [];
+    const already = new Set(
+      (await db.select({ id: s.waybills.id, number: s.waybills.number, at: s.waybills.sentToDriverAt }).from(s.waybills).where(inArray(s.waybills.id, ids)))
+        .filter((w) => w.at)
+        .map((w) => {
+          failed.push(`${w.number}: أُرسلت للسائق من قبل (لإعادة الإرسال افتح عملياتها)`);
+          return w.id;
+        }),
+    );
     for (const id of ids) {
+      if (already.has(id)) continue;
       try {
         await guard("update", id);
         await sendTransportDocToDriver(db, id);

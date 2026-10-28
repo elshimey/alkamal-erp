@@ -1,7 +1,9 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { destroySession } from "@/lib/auth";
+import { cookies } from "next/headers";
+import { destroySession, getCurrentUser } from "@/lib/auth";
+import { WELCOME_COOKIE } from "@/lib/welcome";
 import { signIn } from "@/lib/sign-in";
 import { isDriverOnly } from "@/lib/driver-app";
 import type { FormState } from "@/components/action-form";
@@ -19,12 +21,17 @@ export async function login(_: FormState, data: FormData): Promise<FormState> {
   if (!company || !loginName || !password) return { error: "أدخل رمز الشركة واسم الدخول وكلمة المرور" };
   const result = await signIn(company, loginName, password);
   if ("error" in result) return { error: result.error };
-  redirect(isDriverOnly(result.roles) ? "/driver" : "/");
+  if (isDriverOnly(result.roles)) redirect("/driver");
+  // ترحيب قصير بعد الدخول يظهر مرة واحدة
+  (await cookies()).set(WELCOME_COOKIE, "1", { path: "/", maxAge: 120, sameSite: "lax" });
+  redirect("/");
 }
 
 export async function logout() {
+  const user = await getCurrentUser();
   await destroySession();
-  redirect("/login");
+  const first = user?.name.trim().split(/\s+/)[0];
+  redirect(first ? `/login?bye=${encodeURIComponent(first)}` : "/login");
 }
 
 /** «نسيت كلمة المرور أو اسم الدخول»: الطلب يصل لمدير النظام في شركة المستخدم. */

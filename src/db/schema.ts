@@ -894,6 +894,8 @@ export const salesInvoices = pgTable(
   {
     id: id(),
     number: varchar("number", { length: 30 }).notNull().unique(),
+    // رقم المسودة؛ يبقى الرقم مساوياً له حتى أول إصدار فيأخذ الرقم الرسمي التالي في التسلسل
+    draftNumber: varchar("draft_number", { length: 30 }),
     invoiceDate: date("invoice_date").notNull(),
     dueDate: date("due_date").notNull(),
     customerId: ref("customer_id").notNull().references(() => parties.id),
@@ -949,6 +951,8 @@ export const salesInvoiceLines = pgTable(
     accountId: ref("account_id").notNull().references(() => accounts.id),
     // مركز التكلفة = مركبة الشحنة (أو مركز الناقلين الخارجيين)
     costCenterId: ref("cost_center_id").references(() => costCenters.id),
+    // للبند الحر بعد الدمج: رقم الفاتورة التي جاء منها، ليعود إليها عند فك الدمج
+    groupKey: integer("group_key"),
   },
   (t) => [
     uniqueIndex("sales_invoice_lines_waybill_uq").on(t.waybillId).where(sql`${t.kind} = 'waybill'`),

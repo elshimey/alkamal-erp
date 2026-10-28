@@ -16,9 +16,38 @@ export function Sidebar({ initialPinned, children }: { initialPinned: boolean; c
   const [hover, setHover] = useState(false);
   const [menu, setMenu] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const aside = useRef<HTMLElement>(null);
   const expanded = pinned || hover || menu;
 
   useEffect(() => () => clearTimeout(timer.current), []);
+
+  // حدثا الدخول والخروج وحدهما قد يفوتان (انتقال صفحة، نافذة منبثقة، إطار مضمّن، خروج سريع من الشاشة)
+  // فيبقى الشريط مفتوحاً والماوس بعيد عنه. ما دام مفتوحاً نراقب موضع الماوس نفسه ونطويه متى ابتعد.
+  useEffect(() => {
+    if (pinned || !hover) return;
+    const away = () => {
+      clearTimeout(timer.current);
+      timer.current = setTimeout(() => setHover(false), 280);
+    };
+    const move = (e: PointerEvent) => {
+      const r = aside.current?.getBoundingClientRect();
+      const inside = r && e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+      if (inside) clearTimeout(timer.current);
+      else away();
+    };
+    const out = (e: MouseEvent) => !e.relatedTarget && away();
+    const hide = () => document.visibilityState === "hidden" && setHover(false);
+    document.addEventListener("pointermove", move, { passive: true });
+    document.addEventListener("mouseout", out);
+    window.addEventListener("blur", away);
+    document.addEventListener("visibilitychange", hide);
+    return () => {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("mouseout", out);
+      window.removeEventListener("blur", away);
+      document.removeEventListener("visibilitychange", hide);
+    };
+  }, [pinned, hover]);
 
   const enter = () => {
     clearTimeout(timer.current);
@@ -38,6 +67,7 @@ export function Sidebar({ initialPinned, children }: { initialPinned: boolean; c
   return (
     <div className={`sticky top-0 z-40 hidden h-screen shrink-0 transition-[width] duration-200 md:block print:hidden ${pinned ? "w-64" : "w-16"}`}>
       <aside
+        ref={aside}
         // مطوي: أيقونات فقط بلا كتابة (تظهر الأسماء عند الفتح)
         data-rail={!expanded}
         onMouseEnter={pinned ? undefined : enter}

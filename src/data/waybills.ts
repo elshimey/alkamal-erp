@@ -51,8 +51,8 @@ export type WaybillAccountKey = keyof typeof WAYBILL_ACCOUNTS;
 export const WAYBILL_FLOW = ["draft", "in_transit", "delivered", "approved"] as const satisfies readonly WaybillStatus[];
 export type WaybillFlowStatus = (typeof WAYBILL_FLOW)[number];
 
-// تبويب «بانتظار الفوترة» = معتمدة لم تدخل أي فاتورة
-export const WAYBILL_TABS = ["draft", "in_transit", "delivered", "approved", "pending_invoice", "invoiced", "rejected"] as const;
+// «بانتظار الفوترة» = معتمدة لم تدخل أي فاتورة، و«مدمجة» = معتمدة داخل مسودة فاتورة لم تصدر بعد
+export const WAYBILL_TABS = ["draft", "in_transit", "delivered", "approved", "pending_invoice", "merged", "invoiced", "rejected"] as const;
 
 export const WAYBILL_SORTS = {
   date_desc: "الأحدث أولاً",
