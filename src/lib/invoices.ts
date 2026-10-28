@@ -763,6 +763,15 @@ export async function updateDraftInvoice(db: Db, id: number, patch: DraftInvoice
 export { createReceipt, deleteReceipt, postReceipt, revertReceipt, type ReceiptInput } from "@/lib/receipts";
 
 /** الصناديق والبنوك التفصيلية لقائمة الاختيار. */
+/** الحسابات التي يُصرف منها النقد للسائق: الصناديق والبنوك أولاً، ثم بقية حسابات الأصول والالتزامات التفصيلية. */
+export async function fundingAccounts(db: Db | Tx) {
+  return db
+    .select({ id: s.accounts.id, code: s.accounts.code, nameAr: s.accounts.nameAr, currencyCode: s.accounts.currencyCode })
+    .from(s.accounts)
+    .where(and(eq(s.accounts.isPostable, true), eq(s.accounts.isActive, true), sql`(${s.accounts.code} like '1%' or ${s.accounts.code} like '2%')`))
+    .orderBy(sql`case when ${s.accounts.code} like '1101%' or ${s.accounts.code} like '1102%' then 0 else 1 end`, asc(s.accounts.code));
+}
+
 export async function cashAccounts(db: Db | Tx) {
   return db
     .select({ id: s.accounts.id, code: s.accounts.code, nameAr: s.accounts.nameAr, currencyCode: s.accounts.currencyCode })

@@ -70,7 +70,11 @@ export async function driverTrips(db: Db | Tx, driverId: number, opts: { open: b
       and(
         eq(s.waybills.driverId, driverId),
         // تظهر للسائق الرحلة التي أرسلها له المكتب (أو رحلة بدأها هو من قبل)
-        or(isNotNull(s.waybills.sentToDriverAt), sql`exists (select 1 from trip_stages ts where ts.waybill_id = ${s.waybills.id})`),
+        // مراحل سجّلها المكتب بتغيير الحالة لا تُظهر الرحلة للسائق؛ يراها فقط إن أرسلها المسؤول أو بدأها السائق بنفسه
+        or(
+          isNotNull(s.waybills.sentToDriverAt),
+          sql`exists (select 1 from trip_stages ts join drivers dr on dr.user_id = ts.created_by where ts.waybill_id = ${s.waybills.id} and dr.id = ${s.waybills.driverId})`,
+        ),
         opts.open ? inArray(s.waybills.status, OPEN) : sql`${s.waybills.status} not in ('draft','in_transit','delivered','rejected')`,
       ),
     )
@@ -143,7 +147,7 @@ export function nextStages(w: { status: string }, done: TripStage[]): TripStage[
 }
 
 /** التراجع عن آخر مرحلة ضغطها السائق بالخطأ، ما دامت الرحلة غير مغلقة. صورها تبقى محفوظة. */
-export async function undoDriverStage(db: Db, driverId: number, waybillId: number) {
+export async function undoDriverStage(db: Db, driverId: number, waybillId: number, userId?: number) {
   return db.transaction(async (tx) => {
     const [w] = await tx.select().from(s.waybills).where(and(eq(s.waybills.id, waybillId), eq(s.waybills.driverId, driverId))).for("update");
     if (!w) throw new Error("هذه الرحلة ليست لك");
@@ -151,6 +155,8 @@ export async function undoDriverStage(db: Db, driverId: number, waybillId: numbe
     const stages = await tx.select().from(s.tripStages).where(eq(s.tripStages.waybillId, waybillId)).orderBy(desc(s.tripStages.at), desc(s.tripStages.id));
     const last = stages[0];
     if (!last) throw new Error("لا توجد مرحلة للتراجع عنها");
+    // ما سجّله المكتب بتغيير الحالة لا يتراجع عنه السائق
+    if (userId && last.createdBy !== userId) throw new Error("آخر مرحلة سجّلها المكتب؛ لا يمكنك التراجع عنها");
     await tx.delete(s.tripStages).where(eq(s.tripStages.id, last.id));
     const rest = stages.slice(1).map((x) => x.stage);
     // التسليم الذي سجّله المكتب يدوياً لا يلغيه تراجع السائق عن التحميل

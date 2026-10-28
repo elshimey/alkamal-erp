@@ -619,6 +619,11 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       const w = await createWaybill(db, { waybillDate: D, customerId: other.id, routeId, shipper: "أ", consignee: "ب", vehicleId: vehicle.id });
       expect(w.priceNote).toBe("لا يوجد عقد ساري");
       await expect(approveWaybill(db, w.id)).rejects.toThrow("لا يوجد عقد ساري");
+      // الاعتماد من القائمة يُرفض قبل أي تغيير: تبقى مسودة بلا مراحل
+      await expect(setWaybillStatus(db, w.id, "approved", { canOverride: true })).rejects.toThrow("اكتب سبب التجاوز");
+      const [still] = await db.select().from(s.waybills).where(eq(s.waybills.id, w.id));
+      expect(still.status).toBe("draft");
+      expect(await db.select().from(s.tripStages).where(eq(s.tripStages.waybillId, w.id))).toHaveLength(0);
       await rejectWaybill(db, w.id, "صورة العداد غير واضحة");
       await expect(approveWaybill(db, w.id, { canOverride: true, overrideReason: "x" })).rejects.toThrow("مرفوضة");
       await deleteWaybill(db, w.id, { reason: "مكررة" });
@@ -1385,9 +1390,19 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       const [mt] = await db.select().from(s.maintenanceTypes).orderBy(s.maintenanceTypes.sortOrder).limit(1);
       const w = await createWaybill(db, { waybillDate: D, customerId, routeId, shipper: "مصنع", consignee: "مستودع", vehicleId: me.vehicle!.id, driverId: me.id, tripCustody: 1000, userId });
       await markNotificationsRead(db, me.id);
+      // الشحنة التي غيّر المكتب حالتها لا تظهر للسائق قبل إرسالها
+      await setWaybillStatus(db, w.id, "in_transit", {});
+      expect((await driverTrips(db, me.id, { open: true })).some((x) => x.id === w.id)).toBe(false);
+      await setWaybillStatus(db, w.id, "draft", { userId });
+      await db.delete(s.tripStages).where(eq(s.tripStages.waybillId, w.id));
+      // العهدة تُصرف من أي حساب تفصيلي، مثل عهدة موظف إداري، لا الصندوق فقط
+      const [admin] = await db.select().from(s.accounts).where(and(sql`${s.accounts.code} like '1%'`, sql`${s.accounts.code} not like '110%'`, eq(s.accounts.isPostable, true))).limit(1);
+      await sendTrip(db, w.id, { cashAccountId: admin.id, date: D, userId });
+      expect((await driverTrips(db, me.id, { open: true })).some((x) => x.id === w.id)).toBe(true);
+      await unsendTrip(db, w.id, userId);
       await sendTrip(db, w.id, { cashAccountId: box.id, date: D, userId });
       expect((await driverNotifications(db, me.id))[0]).toMatchObject({ kind: "trip_sent", href: `/driver/trips/${w.id}` });
-      expect(await unreadCount(db, me.id)).toBe(1);
+      expect(await unreadCount(db, me.id)).toBe(3); // إرسال وإلغاء ثم إرسال
       const before = (await driverBalances(db, me, D)).custody;
       // ديزل من العهدة، وصيانة قال السائق إن الشركة دفعتها
       const diesel = await createDriverExpense(db, me, { date: D, kind: "diesel", amount: 230, reportedPayer: "custody", waybillId: w.id, userId });

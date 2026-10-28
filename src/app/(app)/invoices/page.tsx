@@ -5,7 +5,7 @@ import { db } from "@/db";
 import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
-import { cashAccounts, currentTrip, invoicingQueue, listSalesInvoices, salesInvoiceDoc } from "@/lib/invoices";
+import { fundingAccounts, currentTrip, invoicingQueue, listSalesInvoices, salesInvoiceDoc } from "@/lib/invoices";
 import { driverOptions, routeOptions, vehicleOptions } from "@/lib/lookups";
 import { getCompany, getInvoiceTemplate, invoiceReadiness } from "@/lib/company";
 import { invoiceQrSvg } from "@/lib/zatca-qr";
@@ -69,7 +69,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
   const qrSvg = openDoc ? await invoiceQrSvg(company, openDoc.i, await clearedQr(db, openDoc.i.id)) : null;
   const listUrl = (patch: Partial<Record<keyof DocListParams, string | undefined>> = {}) => listHref(BASE, lp, patch);
   const canSend = can(user.perms, "waybills", "update");
-  const cashOpts = canSend ? await cashAccounts(db) : [];
+  const cashOpts = canSend ? await fundingAccounts(db) : [];
   const invoiceMenu = (d: NonNullable<typeof openDoc>): MenuItem[] => {
     const back = listUrl();
     return invoiceActions(d.i, d.lines, back, { canUpdate, canRevert, canDelete, canSend, trips: d.trips, cashField: <CashAccountField options={cashOpts} />, editHref: withParam(listUrl({ open: String(d.i.id) }), "edit", String(d.i.id)) });
@@ -182,7 +182,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
             <ActionForm action={invoiceAll} className="mb-3 flex flex-wrap items-center gap-3" resetOnSuccess={false}>
               <span className="text-sm text-gray-600">تاريخ الفاتورة</span>
               <Input name="invoiceDate" type="date" defaultValue={today} className="w-44" />
-              <SubmitButton>دمج الكل في مسودات (مسودة لكل عميل)</SubmitButton>
+              <SubmitButton>تحويل الكل إلى مسودات فواتير (مسودة لكل عميل)</SubmitButton>
             </ActionForm>
             <Table head={["العميل", "العملة", "عدد الشحنات", "الفترة", "المبلغ قبل الضريبة", ""]}>
               {queue.map((q) => (
@@ -197,7 +197,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
                   <Td>
                     <ActionForm action={invoiceCustomer.bind(null, q.customerId, q.currencyCode)} resetOnSuccess={false}>
                       <input type="hidden" name="invoiceDate" value={today} />
-                      <SubmitButton variant="secondary">دمج في مسودة</SubmitButton>
+                      <SubmitButton variant="secondary">تحويل إلى مسودة فاتورة</SubmitButton>
                     </ActionForm>
                   </Td>
                 </tr>

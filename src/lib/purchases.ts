@@ -542,7 +542,9 @@ export async function createPayment(db: Db, input: PaymentInput) {
   return db.transaction(async (tx) => {
     if (!(input.amount > 0)) throw new Error("المبلغ إلزامي");
     const [cash] = await tx.select().from(s.accounts).where(eq(s.accounts.id, input.cashAccountId));
-    if (!cash || !cash.isPostable || !/^110[12]/.test(cash.code)) throw new Error("اختر صندوقاً أو حساب بنك تفصيلياً");
+    // صرف العهدة يجوز من أي حساب أصول أو التزامات تفصيلي (خزينة فرعية، عهدة أمين الصندوق…)، وسداد المورد من صندوق أو بنك فقط
+    const anyFunding = input.kind === "custody" && !!cash && /^[12]/.test(cash.code);
+    if (!cash || !cash.isPostable || !cash.isActive || !(anyFunding || /^110[12]/.test(cash.code))) throw new Error("اختر صندوقاً أو حساب بنك تفصيلياً");
     const currency = input.currencyCode ?? "SAR";
     if (cash.currencyCode && cash.currencyCode !== currency) throw new Error(`الحساب ${cash.nameAr} بعملة ${cash.currencyCode}`);
     let debitAccountId: number;

@@ -19,7 +19,7 @@ import { addWaybills, issue, removeLine, sendToZatca } from "../actions";
 import { invoiceActions } from "../invoice-menu";
 import { ActionsMenu } from "@/components/actions-menu";
 import { fmt } from "@/lib/format";
-import { cashAccounts, invoiceTrips } from "@/lib/invoices";
+import { fundingAccounts, invoiceTrips } from "@/lib/invoices";
 import { CashAccountField } from "@/components/cash-account-field";
 
 export default async function InvoicePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ print?: string }> }) {
@@ -64,7 +64,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
     getCompany(db),
     getInvoiceTemplate(db),
   ]);
-  const [trips, cashOpts] = await Promise.all([invoiceTrips(db, id), can(user.perms, "waybills", "update") ? cashAccounts(db) : Promise.resolve([])]);
+  const [trips, cashOpts] = await Promise.all([invoiceTrips(db, id), can(user.perms, "waybills", "update") ? fundingAccounts(db) : Promise.resolve([])]);
   const [zatca, zatcaDoc, blocker] = await Promise.all([getSettings(db), latestDocument(db, { invoiceId: id }), sendBlocker(db, { invoiceId: id })]);
   const qrSvg = await invoiceQrSvg(company, i, await clearedQr(db, id));
   const total = Number(i.total);

@@ -9,7 +9,7 @@ import { cityNames, contactCards, customerOptions, driverOptions, locationOption
 import { emptyTransport, toTransportDraft } from "@/lib/transport-draft";
 import { getCompany, getInvoiceTemplate } from "@/lib/company";
 import { todayRiyadh } from "@/lib/dates";
-import { cashAccounts } from "@/lib/invoices";
+import { fundingAccounts } from "@/lib/invoices";
 import { listHref, type DocListParams } from "@/lib/doc-filters";
 import { fmt } from "@/lib/format";
 import { EDITABLE, listWaybills, parseWaybillFilter, waybillDoc } from "@/lib/waybills";
@@ -113,7 +113,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
     getCompany(db),
     getInvoiceTemplate(db),
   ]);
-  const cashOpts = canUpdate ? await cashAccounts(db) : [];
+  const cashOpts = canUpdate ? await fundingAccounts(db) : [];
   const cashField = <CashAccountField options={cashOpts} />;
   const transportOpen = !!transportDoc && transportDoc.w.status !== "rejected";
   const editing = !!editRow && EDITABLE.includes(editRow.status);

@@ -52,9 +52,9 @@ export async function stageAction(_: FormState, data: FormData): Promise<FormSta
 }
 
 export async function undoStageAction(waybillId: number): Promise<FormState> {
-  const { driver, t } = await requireDriver();
+  const { user, driver, t } = await requireDriver();
   try {
-    await undoDriverStage(db, driver.id, waybillId);
+    await undoDriverStage(db, driver.id, waybillId, user.id);
   } catch (err) {
     return { error: errorMessage(err) };
   }
