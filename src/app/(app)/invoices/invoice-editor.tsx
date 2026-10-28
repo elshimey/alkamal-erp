@@ -26,6 +26,8 @@ export interface InvoiceDraft {
   lines: Record<string, string>[];
   /** سطور الشحنات في المسودة: تُعرض ولا تُعدّل هنا */
   fixedLines: { kind: "waybill" | "expense"; description: string; amount: string; vatAmount: string; vatRate: string }[];
+  /** رحلة السائق للفاتورة المباشرة: تظهر في تطبيقه عند الإرسال ومعها عهدتها */
+  trip: { on: boolean; routeId: string; vehicleId: string; driverId: string; shipper: string; consignee: string; custody: string; number?: string; sent?: boolean };
 }
 
 type Row = Record<string, string>;
@@ -54,6 +56,9 @@ export function InvoiceEditor({
   accounts,
   costCenters,
   currencies,
+  routes,
+  vehicles,
+  drivers,
   company,
   template,
   action,
@@ -66,6 +71,9 @@ export function InvoiceEditor({
   accounts: LineOption[];
   costCenters: LineOption[];
   currencies: string[];
+  routes: QuickOption[];
+  vehicles: QuickOption[];
+  drivers: QuickOption[];
   company: CompanyProfile;
   template: InvoiceTemplate;
   action: (data: FormData) => Promise<PanelResult>;
@@ -85,6 +93,11 @@ export function InvoiceEditor({
     touch();
   };
   const customer = customers.find((c) => c.value === d.customerId);
+  const trip = d.trip;
+  const setTrip = (patch: Partial<InvoiceDraft["trip"]>) => {
+    setD((x) => ({ ...x, trip: { ...x.trip, ...patch } }));
+    touch();
+  };
 
   const used = lines.filter((l) => (l.description ?? "").trim() || num(l.price));
   const viewLines: Line[] = [
@@ -263,6 +276,39 @@ export function InvoiceEditor({
               ]}
             />
           </PanelSection>
+
+          {!locked && (
+            <PanelSection title="رحلة السائق" optional open={trip.on} hint={trip.sent ? `أُرسلت للسائق (${trip.number})` : "لتظهر الفاتورة رحلةً في تطبيق السائق مع عهدتها"}>
+              <input type="hidden" name="tripOn" value={trip.on ? "1" : "0"} />
+              <label className="mb-3 flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={trip.on} disabled={trip.sent} onChange={(e) => setTrip({ on: e.target.checked })} className="accent-brand-600" />
+                ينفذها سائق من الأسطول
+              </label>
+              {trip.on && (
+                <>
+                  {trip.sent && <p className="mb-3 rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-800">الرحلة مرسلة للسائق؛ لتغيير السائق أو المركبة أو العهدة ألغِ الإرسال من «العمليات» أولاً.</p>}
+                  <PanelField label="المسار" required>
+                    <ComboField name="tripRouteId" options={routes} defaultValue={trip.routeId} create="route" required placeholder="من ← إلى" onChange={(v) => setTrip({ routeId: v })} />
+                  </PanelField>
+                  <PanelField label="المركبة" required>
+                    <ComboField name="tripVehicleId" options={vehicles} defaultValue={trip.vehicleId} create="vehicle" required placeholder="رقم اللوحة" onChange={(v) => setTrip({ vehicleId: v })} />
+                  </PanelField>
+                  <PanelField label="السائق" hint="فارغ = المسند للمركبة">
+                    <ComboField name="tripDriverId" options={drivers} defaultValue={trip.driverId} create="driver" placeholder="السائق المسند تلقائياً" onChange={(v) => setTrip({ driverId: v })} />
+                  </PanelField>
+                  <PanelField label="المرسل" required>
+                    <input name="tripShipper" value={trip.shipper} onChange={(e) => setTrip({ shipper: e.target.value })} required className={field} placeholder={customer?.label ?? ""} />
+                  </PanelField>
+                  <PanelField label="المستلم" required>
+                    <input name="tripConsignee" value={trip.consignee} onChange={(e) => setTrip({ consignee: e.target.value })} required className={field} />
+                  </PanelField>
+                  <PanelField label="عهدة الرحلة" hint={trip.sent ? "مقيدة على السائق" : "تُصرف للسائق عند الإرسال"}>
+                    <input name="tripCustody" value={trip.custody} readOnly={trip.sent} onChange={(e) => setTrip({ custody: e.target.value })} inputMode="decimal" className={`${field} ltr-nums ${trip.sent ? "bg-gray-50 text-gray-500" : ""}`} placeholder="0" />
+                  </PanelField>
+                </>
+              )}
+            </PanelSection>
+          )}
 
           <PanelSection title="ملاحظات" optional open={!!d.notes}>
             <PanelField label="ملاحظات" hint="تظهر في الفاتورة المطبوعة">

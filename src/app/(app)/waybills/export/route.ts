@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
     const { w } = r;
     const vat = w.isInternational ? 0 : 15;
     const amount = Number(w.amount);
-    const state = w.status !== "approved" ? WAYBILL_STATUS[w.status].label : !r.invoiceId ? "معتمدة · بانتظار الفوترة" : r.invoiceWaybills > 1 ? "مدمجة" : "في مسودة فاتورة";
+    const state = w.status !== "approved" ? WAYBILL_STATUS[w.status].label : r.invoiceWaybills < 0 ? "معتمدة · رحلة فاتورة مباشرة" : !r.invoiceId ? "معتمدة · بانتظار الفوترة" : r.invoiceWaybills > 1 ? "مدمجة" : "في مسودة فاتورة";
     return [
       w.number,
       w.waybillDate,

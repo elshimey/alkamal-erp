@@ -8,13 +8,16 @@ import { waybillDoc } from "@/lib/waybills";
 import { WaybillDocument } from "@/components/waybill-document";
 import { PrintButton } from "@/components/print-button";
 
+const TRANSPORT_DOC_IN_APP = false;
+
 /** وثيقة النقل في تطبيق السائق: تظهر بعد أن يرسلها المكتب، ليعرضها عند نقاط التفتيش والمنافذ. */
 export default async function TransportDocPage({ params }: { params: Promise<{ id: string }> }) {
   const { driver, t } = await getDriverContext();
   if (!driver) return null;
   const id = Number((await params).id);
   const w = await ownTrip(db, driver.id, id).catch(() => null);
-  if (!w || !w.sentToDriverAt) notFound();
+  // لا تُعرض للسائق حتى الربط مع منصة بيان (لوجستي): الوثيقة المعتمدة عند المنافذ تصدر من هناك
+  if (!w || !w.sentToDriverAt || !w.logistiNumber || !TRANSPORT_DOC_IN_APP) notFound();
   const [doc, company, template] = await Promise.all([waybillDoc(db, id), getCompany(db), getInvoiceTemplate(db)]);
   if (!doc) notFound();
   return (

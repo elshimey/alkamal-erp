@@ -1,17 +1,21 @@
 import { db } from "@/db";
 import { getDriverContext } from "@/lib/driver-auth";
-import { driverBreakdowns } from "@/lib/driver-app";
+import { driverBreakdowns, maintenanceTypeOptions } from "@/lib/driver-app";
+import { listAttachments } from "@/lib/attachments";
 import { SubmitButton } from "@/components/action-form";
-import { DriverForm } from "../../offline";
-import { DField, DTextarea, Pill, Section } from "../../driver-ui";
+import { DriverForm, PhotoInput } from "../../offline";
+import { DField, DSelect, DTextarea, Pill, Section } from "../../driver-ui";
 
 const TONE = { pending_supervisor: "amber", pending_approval: "amber", approved: "blue", in_progress: "blue", completed: "green", rejected: "red" } as const;
 const PRIORITY_TONE = { low: "gray", normal: "blue", urgent: "red" } as const;
 
 export default async function DriverBreakdown() {
-  const { driver, t } = await getDriverContext();
+  const { driver, t, lang } = await getDriverContext();
   if (!driver) return null;
-  const rows = await driverBreakdowns(db, driver.id);
+  const [rows, types] = await Promise.all([driverBreakdowns(db, driver.id), maintenanceTypeOptions(db)]);
+  const photos = await listAttachments(db, "breakdown_requests", rows.map((r) => r.r.id));
+  const photoOf = new Map<number, number>();
+  for (const a of photos) if (!photoOf.has(a.entityId)) photoOf.set(a.entityId, a.id);
 
   return (
     <>
@@ -21,10 +25,23 @@ export default async function DriverBreakdown() {
         ) : (
           <DriverForm actionKey="breakdown" savedOffline={t.savedOffline} className="flex flex-col gap-3">
             <p className="text-sm text-gray-500">{t.breakdownHint}</p>
-            <DField label={t.breakdownDesc}>
-              <DTextarea name="description" required rows={4} />
+            <DField label={t.x.maintenanceType}>
+              <DSelect name="maintenanceTypeId" required defaultValue="">
+                <option value="" disabled>
+                  {t.choose}
+                </option>
+                {types.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {lang === "ar" ? m.nameAr : (m.nameEn ?? m.nameAr)}
+                  </option>
+                ))}
+              </DSelect>
             </DField>
-            <DField label={t.priority}>
+            <PhotoInput label={t.x.maintPhoto} required />
+            <DField label={t.breakdownDesc}>
+              <DTextarea name="description" rows={2} />
+            </DField>
+            <DField label={t.priority} group>
               <div className="grid grid-cols-3 gap-2">
                 {(["low", "normal", "urgent"] as const).map((p) => (
                   <label key={p} className="cursor-pointer">
@@ -56,7 +73,14 @@ export default async function DriverBreakdown() {
                 </span>
                 <Pill tone={TONE[r.status]}>{t.breakdownStatus[r.status]}</Pill>
               </div>
-              <p className="mt-1 text-sm">{r.description}</p>
+              <p className="mt-1 text-sm">
+                {r.description}
+                {photoOf.has(r.id) && (
+                  <a href={`/driver/files/${photoOf.get(r.id)}`} target="_blank" rel="noreferrer" className="ms-1" aria-label={t.photos}>
+                    📷
+                  </a>
+                )}
+              </p>
               <div className="mt-1 flex items-center gap-2">
                 <Pill tone={PRIORITY_TONE[r.priority]}>{t.priorities[r.priority]}</Pill>
                 {r.status === "rejected" && r.rejectReason && <span className="text-xs text-red-600">{r.rejectReason}</span>}

@@ -49,14 +49,14 @@ export default async function AdvanceRequestsPage({ searchParams }: { searchPara
     <>
       <PageHeader
         title="الموارد البشرية"
-        description="يطلب السائق مقدم العمولة من تطبيقه في أيام الطلب، وبحد شهري حسب فئته. الاعتماد ينشئ سلفة تُستقطع كاملة من مسير الشهر، وتُصرف فوراً إن اخترت الصندوق أو البنك، أو لاحقاً من شاشة السلف."
+        description="يطلب السائق من تطبيقه مقدم عمولة نقداً (في أيام الطلب وبحد شهري حسب فئته) أو سلفة من العهدة التي معه. مقدم العمولة يُستقطع كاملاً من مسير الشهر ويُصرف من الصندوق أو البنك. سلفة العهدة تُقيد على عهدة السائق (مدين سلف الموظفين، دائن عهدة السائق) وتُقسّط على الرواتب بالقسط الذي تحدده."
       />
       <HrTabs active="advances" />
       <Kpis
         items={[
           { label: "نافذة الطلب", value: `${settings.advanceOpenDay} – ${settings.advanceCloseDay}`, hint: isOpen ? "مفتوحة اليوم" : "مغلقة اليوم", href: "/settings/hr" },
           { label: "سقف الداخلي / الدولي", value: `${fmt(settings.advanceCapDomestic)} / ${fmt(settings.advanceCapInternational)}`, href: "/settings/hr" },
-          { label: "طُلب هذا الشهر", value: fmt(month.filter((x) => x.r.status !== "rejected").reduce((t, x) => t + Number(x.r.amount), 0)) },
+          { label: "مقدم العمولة هذا الشهر", value: fmt(month.filter((x) => x.r.status !== "rejected" && x.r.source !== "custody").reduce((t, x) => t + Number(x.r.amount), 0)) },
           { label: "بانتظار الاعتماد", value: pending.length, strong: true },
         ]}
       />
@@ -66,12 +66,13 @@ export default async function AdvanceRequestsPage({ searchParams }: { searchPara
       {canApprove && pending.length > 0 && (
         <ActionForm id={BULK_FORM} action={bulkAdvances} className="mb-3 flex flex-wrap items-end gap-3 rounded-2xl bg-white px-4 py-2.5 shadow-sm">
           <SelectionTotal form={BULK_FORM} noun="طلب" />
-          <Field label="الصرف">{cashSelect}</Field>
+          <Field label="صرف مقدم العمولة">{cashSelect}</Field>
+          <span className="pb-2 text-xs text-gray-500">سلف العهدة تُقيد على عهدة السائق بقسط يساوي مبلغها</span>
           <SubmitButton variant="secondary">اعتماد المحدد</SubmitButton>
         </ActionForm>
       )}
 
-      <Table head={[canApprove && pending.length ? <SelectAll key="all" form={BULK_FORM} /> : "", "الرقم", "التاريخ", "السائق", "الفئة", "المبلغ", "ملاحظة", "الحالة", ""]}>
+      <Table head={[canApprove && pending.length ? <SelectAll key="all" form={BULK_FORM} /> : "", "الرقم", "التاريخ", "السائق", "النوع", "المبلغ", "ملاحظة", "الحالة", ""]}>
         {list.length === 0 && <EmptyRow cols={9}>لا توجد طلبات بعد. يطلبها السائق من تبويب «رصيدي» في تطبيقه.</EmptyRow>}
         {list.map(({ r, name, commissionClass, advance }) => (
           <tr key={r.id} className="transition hover:bg-brand-50/40">
@@ -79,7 +80,10 @@ export default async function AdvanceRequestsPage({ searchParams }: { searchPara
             <Td className="ltr-nums font-medium whitespace-nowrap text-brand-700">{r.number}</Td>
             <Td className="ltr-nums whitespace-nowrap">{r.requestDate}</Td>
             <Td className="font-medium">{name}</Td>
-            <Td>{commissionClass === "international" ? "دولي" : "داخلي"}</Td>
+            <Td>
+              {r.source === "custody" ? <Badge tone="blue">سلفة من العهدة</Badge> : "مقدم عمولة"}
+              <div className="text-xs text-gray-400">{commissionClass === "international" ? "دولي" : "داخلي"}</div>
+            </Td>
             <Td className="ltr-nums font-semibold">{fmt(r.amount)}</Td>
             <Td>
               {r.notes}
@@ -97,7 +101,7 @@ export default async function AdvanceRequestsPage({ searchParams }: { searchPara
               {r.status === "pending" && canApprove && (
                 <div className="flex flex-wrap items-center gap-2">
                   <ActionForm action={approveAdvanceAction.bind(null, r.id)} resetOnSuccess={false} className="flex items-center gap-1.5">
-                    {cashSelect}
+                    {r.source === "custody" ? <Input name="installment" inputMode="decimal" dir="ltr" placeholder={`القسط الشهري (${fmt(r.amount)})`} className="w-36" /> : cashSelect}
                     <SubmitButton>اعتماد</SubmitButton>
                   </ActionForm>
                   <ActionForm action={rejectAdvanceAction.bind(null, r.id)} className="flex items-center gap-1.5">

@@ -8,6 +8,7 @@ import { rateOn } from "@/lib/waybills";
 import type { DocFilter } from "@/lib/doc-filters";
 import { docOrder, docWhere } from "@/lib/doc-query";
 import { PAYABLE_BY_ROLE, PURCHASE_ACCOUNTS, SUPPLIER_ROLES, isExpenseAccount } from "@/data/purchases";
+import { notifyDriver } from "@/lib/driver-notify";
 
 // المشتريات والمصروفات وسندات الصرف. كل مستند يُرحّل قيده عند الاعتماد، وكل مدين يقابله دائن
 // بالمبلغ نفسه فيبقى القيد متوازناً بالريال مع أي سعر صرف.
@@ -42,7 +43,7 @@ async function expenseAccount(db: Db | Tx, accountId: number) {
   return a;
 }
 
-async function vehicleCostCenter(db: Db | Tx, vehicleId: number | null | undefined) {
+export async function vehicleCostCenter(db: Db | Tx, vehicleId: number | null | undefined) {
   if (!vehicleId) return null;
   const [v] = await db.select({ cc: s.vehicles.costCenterId }).from(s.vehicles).where(eq(s.vehicles.id, vehicleId));
   if (!v) throw new Error("المركبة غير موجودة");
@@ -341,6 +342,10 @@ export interface ExpenseInput {
   reference?: string | null;
   approve?: boolean;
   userId?: number;
+  // ما رفعه السائق من تطبيقه
+  driverKind?: string | null;
+  reportedPayer?: "custody" | "company" | null;
+  maintenanceTypeId?: number | null;
 }
 
 export async function createExpense(db: Db, input: ExpenseInput) {
@@ -385,6 +390,9 @@ export async function createExpense(db: Db, input: ExpenseInput) {
         exchangeRate: String(input.exchangeRate ?? (await rateOn(tx, currency, input.expenseDate))),
         vendorName: input.vendorName || null,
         reference: input.reference || null,
+        driverKind: input.driverKind ?? null,
+        reportedPayer: input.reportedPayer ?? null,
+        maintenanceTypeId: input.maintenanceTypeId ?? null,
         createdBy: input.userId,
       })
       .returning();
@@ -402,6 +410,9 @@ async function lockExpense(tx: Tx, id: number) {
 async function approveExpenseTx(tx: Tx, id: number, userId?: number) {
   const e = await lockExpense(tx, id);
   if (e.status === "approved") throw new Error(`المصروف ${e.number} معتمد مسبقاً`);
+  if (e.status === "voided") throw new Error(`المصروف ${e.number} ألغاه السائق (رُفع بالخطأ)`);
+  if (e.payer === "driver_custody" && e.reportedPayer === "company")
+    throw new Error(`المصروف ${e.number}: قال السائق إن الشركة دفعته؛ اعتمده منفرداً واختر الدافع والحساب`);
   let creditAccountId = e.cashAccountId;
   if (e.payer === "driver_custody") {
     const [d] = await tx.select({ custody: s.drivers.custodyAccountId }).from(s.drivers).where(eq(s.drivers.id, e.driverId!));
@@ -422,11 +433,57 @@ async function approveExpenseTx(tx: Tx, id: number, userId?: number) {
   }
   const entry = await createJournalEntryTx(tx, { entryDate: e.expenseDate, description: `مصروف ${e.number}`, source: { type: "expense", id: e.id }, post: true, userId, lines });
   await tx.update(s.expenses).set({ status: "approved", rejectReason: null, journalEntryId: entry.id, approvedBy: userId ?? null }).where(eq(s.expenses.id, id));
+  if (e.driverKind) await notifyDriver(tx, e.driverId, { kind: "expense_approved", body: `${e.number} · ${round2(amount + vat)}`, href: "/driver/expenses" });
   return entry;
 }
 
 export async function approveExpense(db: Db, id: number, userId?: number) {
   return db.transaction((tx) => approveExpenseTx(tx, id, userId));
+}
+
+export interface ExpenseReview {
+  payer: "driver_custody" | "cash";
+  cashAccountId?: number | null;
+  accountId?: number | null;
+  vatAmount?: number;
+  vendorName?: string | null;
+  userId?: number;
+}
+
+/**
+ * اعتماد مصروف السائق بعد مراجعته: يحدد المعتمد من دفع فعلاً (عهدة السائق أو صندوق / بنك الشركة)،
+ * ونوع المصروف، ويفصل الضريبة من المبلغ الإجمالي الذي أدخله السائق، والمورد إن أراد.
+ */
+export async function approveExpenseWith(db: Db, id: number, r: ExpenseReview) {
+  return db.transaction(async (tx) => {
+    const e = await lockExpense(tx, id);
+    if (e.status !== "pending") throw new Error(`المصروف ${e.number} ليس بانتظار الاعتماد`);
+    const total = round2(num(e.amount) + num(e.vatAmount));
+    const vat = round2(r.vatAmount ?? num(e.vatAmount));
+    if (vat < 0 || vat > round2((total * 15) / 115) + 0.01) throw new Error("الضريبة أكبر من 15% من المبلغ قبلها");
+    const account = await expenseAccount(tx, r.accountId ?? e.accountId);
+    if (account.requiresCostCenter && !e.costCenterId) throw new Error(`الحساب ${account.nameAr} يتطلب المركبة`);
+    let cashAccountId: number | null = null;
+    if (r.payer === "cash") {
+      const [cash] = await tx.select().from(s.accounts).where(eq(s.accounts.id, r.cashAccountId ?? 0));
+      if (!cash || !cash.isPostable || !/^110[12]/.test(cash.code)) throw new Error("اختر الصندوق أو البنك الذي دفعت منه الشركة");
+      cashAccountId = cash.id;
+    } else if (!e.driverId) throw new Error("لا يوجد سائق لهذا المصروف؛ اختر صندوقاً أو بنكاً");
+    await tx
+      .update(s.expenses)
+      .set({
+        payer: r.payer,
+        cashAccountId,
+        accountId: account.id,
+        amount: String(round2(total - vat)),
+        vatAmount: String(vat),
+        vendorName: r.vendorName === undefined ? e.vendorName : r.vendorName?.trim() || null,
+        // ما دام المعتمد حدد الدافع فقرار السائق لم يعد يمنع الاعتماد
+        reportedPayer: r.payer === "cash" ? "company" : "custody",
+      })
+      .where(eq(s.expenses.id, id));
+    return approveExpenseTx(tx, id, r.userId);
+  });
 }
 
 export async function rejectExpense(db: Db, id: number, reason: string) {
@@ -435,6 +492,7 @@ export async function rejectExpense(db: Db, id: number, reason: string) {
     const e = await lockExpense(tx, id);
     if (e.status !== "pending") throw new Error("الرفض متاح للمصروف المعلّق فقط");
     await tx.update(s.expenses).set({ status: "rejected", rejectReason: reason.trim() }).where(eq(s.expenses.id, id));
+    if (e.driverKind) await notifyDriver(tx, e.driverId, { kind: "expense_rejected", body: `${e.number}: ${reason.trim()}`, href: "/driver/expenses" });
   });
 }
 
@@ -443,6 +501,7 @@ export async function revertExpense(db: Db, id: number) {
   return db.transaction(async (tx) => {
     const e = await lockExpense(tx, id);
     if (e.status === "pending") throw new Error("المصروف معلّق أصلاً");
+    if (e.status === "voided") throw new Error("ألغاه السائق لأنه رُفع بالخطأ");
     await tx.update(s.expenses).set({ status: "pending", rejectReason: null, journalEntryId: null, approvedBy: null }).where(eq(s.expenses.id, id));
     if (e.journalEntryId) await deleteEntryTx(tx, e.journalEntryId);
   });
@@ -453,6 +512,7 @@ export async function deleteExpense(db: Db, id: number, opts: { reason: string; 
   return db.transaction(async (tx) => {
     const e = await lockExpense(tx, id);
     if (e.status === "approved") throw new Error("المصروف معتمد؛ أرجعه أولاً");
+    if (e.driverKind) throw new Error("رفعه السائق من تطبيقه؛ لا يُحذف، ارفضه مع ذكر السبب");
     await tx.insert(s.deletionLog).values({ entity: "expense", entityId: String(id), snapshot: e, reason: opts.reason.trim(), userId: opts.userId });
     await tx.delete(s.expenses).where(eq(s.expenses.id, id));
   });

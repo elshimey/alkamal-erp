@@ -9,6 +9,7 @@ import { payableAccountFor, purchasePostingLines } from "@/lib/purchases";
 import { rateOn } from "@/lib/waybills";
 import { PURCHASE_ACCOUNTS } from "@/data/purchases";
 import { BREAKDOWN_APPROVAL_LIMIT, maintenanceAccountCode, type MaintenanceType } from "@/data/maintenance";
+import { notifyDriver } from "@/lib/driver-notify";
 
 // الصيانة: طلب العطل ← أمر الصيانة ببنوده ← قيد على مركز تكلفة المركبة عند الاعتماد.
 // القطع تُشترى على الأمر (دائنة للورشة الخارجية أو للصندوق)، أو تُصرف من المستودع بمتوسط التكلفة.
@@ -36,6 +37,7 @@ export interface BreakdownInput {
   description: string;
   priority?: "low" | "normal" | "urgent";
   estimatedCost?: number | null;
+  maintenanceTypeId?: number | null;
   userId?: number;
 }
 
@@ -53,6 +55,7 @@ export async function createBreakdownRequest(db: Db | Tx, input: BreakdownInput)
         description: input.description.trim(),
         priority: input.priority ?? "normal",
         estimatedCost: input.estimatedCost != null ? String(input.estimatedCost) : null,
+        maintenanceTypeId: input.maintenanceTypeId ?? null,
         createdBy: input.userId,
       })
       .returning();
@@ -79,6 +82,7 @@ export async function reviewBreakdownRequest(db: Db | Tx, id: number, opts: { es
       .set({ status, estimatedCost: String(cost), reviewedBy: opts.userId ?? null, approvedBy: status === "approved" ? (opts.userId ?? null) : null })
       .where(eq(s.breakdownRequests.id, id))
       .returning();
+    if (status === "approved") await notifyDriver(tx, r.driverId, { kind: "maint_approved", body: r.number, href: "/driver/breakdown" });
     return row;
   });
 }
@@ -88,6 +92,7 @@ export async function approveBreakdownRequest(db: Db | Tx, id: number, userId?: 
     const r = await lockRequest(tx, id);
     if (r.status !== "pending_approval") throw new Error("الطلب ليس بانتظار الاعتماد");
     await tx.update(s.breakdownRequests).set({ status: "approved", approvedBy: userId ?? null }).where(eq(s.breakdownRequests.id, id));
+    await notifyDriver(tx, r.driverId, { kind: "maint_approved", body: r.number, href: "/driver/breakdown" });
   });
 }
 
@@ -97,6 +102,7 @@ export async function rejectBreakdownRequest(db: Db | Tx, id: number, reason: st
     const r = await lockRequest(tx, id);
     if (!["pending_supervisor", "pending_approval", "approved"].includes(r.status)) throw new Error("لا يمكن رفض طلب تحت التنفيذ أو مكتمل");
     await tx.update(s.breakdownRequests).set({ status: "rejected", rejectReason: reason.trim() }).where(eq(s.breakdownRequests.id, id));
+    await notifyDriver(tx, r.driverId, { kind: "maint_rejected", body: `${r.number}: ${reason.trim()}`, href: "/driver/breakdown" });
   });
 }
 
@@ -625,4 +631,19 @@ export async function createOrdersFrom(db: Db | Tx, source: { requests?: number[
     created.push(o.number);
   }
   return created;
+}
+
+// ───────────── أنواع الصيانة (قائمة يختار منها السائق ويُفلتر بها لاحقاً) ─────────────
+
+export async function saveMaintenanceType(db: Db | Tx, input: { id?: number | null; nameAr: string; nameEn?: string | null; sortOrder?: number | null; isActive: boolean }) {
+  const nameAr = input.nameAr.trim();
+  if (!nameAr) throw new Error("اكتب اسم نوع الصيانة");
+  const values = { nameAr, nameEn: input.nameEn?.trim() || null, sortOrder: input.sortOrder ?? 50, isActive: input.isActive };
+  if (input.id) {
+    const [row] = await db.update(s.maintenanceTypes).set(values).where(eq(s.maintenanceTypes.id, input.id)).returning();
+    if (!row) throw new Error("النوع غير موجود");
+    return row;
+  }
+  const [row] = await db.insert(s.maintenanceTypes).values(values).returning();
+  return row;
 }

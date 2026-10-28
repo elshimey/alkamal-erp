@@ -301,7 +301,7 @@ export async function promoteAction(_: FormState, fd: FormData): Promise<FormSta
 export async function approveAdvanceAction(id: number, _: FormState, fd: FormData): Promise<FormState> {
   const user = await requirePermission("payroll", "approve");
   return run(async () => {
-    const adv = await approveAdvanceRequest(db, id, { cashAccountId: Number(str(fd, "cashAccountId")) || null, userId: user.id });
+    const adv = await approveAdvanceRequest(db, id, { cashAccountId: Number(str(fd, "cashAccountId")) || null, installment: Number(str(fd, "installment")) || null, userId: user.id });
     return `اعتُمد وأُنشئت السلفة ${adv.number}`;
   });
 }

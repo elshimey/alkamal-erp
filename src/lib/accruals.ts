@@ -36,7 +36,7 @@ export async function unbilledWaybills(db: Db | Tx, monthEnd: string) {
     from waybills w
     join parties p on p.id = w.customer_id
     left join vehicles v on v.id = w.vehicle_id
-    where w.status in ('approved', 'invoiced') and w.waybill_date <= ${monthEnd}
+    where w.status in ('approved', 'invoiced') and w.waybill_date <= ${monthEnd} and w.source_invoice_id is null
       and not exists (
         select 1 from sales_invoice_lines l join sales_invoices i on i.id = l.invoice_id
         where l.waybill_id = w.id and l.kind = 'waybill' and i.status = 'issued' and i.invoice_date <= ${monthEnd})

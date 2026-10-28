@@ -5,7 +5,8 @@ import { db } from "@/db";
 import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
-import { invoicingQueue, listSalesInvoices, salesInvoiceDoc } from "@/lib/invoices";
+import { cashAccounts, currentTrip, invoicingQueue, listSalesInvoices, salesInvoiceDoc } from "@/lib/invoices";
+import { driverOptions, routeOptions, vehicleOptions } from "@/lib/lookups";
 import { getCompany, getInvoiceTemplate, invoiceReadiness } from "@/lib/company";
 import { invoiceQrSvg } from "@/lib/zatca-qr";
 import { clearedQr, getSettings, latestDocument, sendBlocker } from "@/lib/zatca/service";
@@ -21,6 +22,8 @@ import { Icon } from "@/components/icons";
 import { RowCheck, SelectAll, SelectionGate, SelectionTotal } from "@/components/row-selection";
 import { ConfirmSubmit } from "@/components/confirm-submit";
 import { ClickRow } from "@/components/click-row";
+import { CashAccountField } from "@/components/cash-account-field";
+import { DriverSentTag } from "@/components/driver-sent";
 import { InvoiceEditor, type InvoiceDraft } from "./invoice-editor";
 import { invoiceActions } from "./invoice-menu";
 import { TaxInvoiceDocument } from "@/components/tax-invoice";
@@ -38,6 +41,7 @@ const plusDays = (d: string, n: number) => {
   x.setUTCDate(x.getUTCDate() + n);
   return x.toISOString().slice(0, 10);
 };
+const NO_TRIP: InvoiceDraft["trip"] = { on: false, routeId: "", vehicleId: "", driverId: "", shipper: "", consignee: "", custody: "" };
 const STATUSES = { draft: INVOICE_STATUS.draft.label, issued: INVOICE_STATUS.issued.label };
 
 export default async function InvoicesPage({ searchParams }: { searchParams: Promise<DocListParams & { new?: string; edit?: string }> }) {
@@ -64,9 +68,11 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
   const [zatca, zatcaDoc, blocker] = openDoc ? await Promise.all([getSettings(db), latestDocument(db, { invoiceId: openDoc.i.id }), sendBlocker(db, { invoiceId: openDoc.i.id })]) : [null, null, null];
   const qrSvg = openDoc ? await invoiceQrSvg(company, openDoc.i, await clearedQr(db, openDoc.i.id)) : null;
   const listUrl = (patch: Partial<Record<keyof DocListParams, string | undefined>> = {}) => listHref(BASE, lp, patch);
+  const canSend = can(user.perms, "waybills", "update");
+  const cashOpts = canSend ? await cashAccounts(db) : [];
   const invoiceMenu = (d: NonNullable<typeof openDoc>): MenuItem[] => {
     const back = listUrl();
-    return invoiceActions(d.i, d.lines, back, { canUpdate, canRevert, canDelete, editHref: withParam(listUrl({ open: String(d.i.id) }), "edit", String(d.i.id)) });
+    return invoiceActions(d.i, d.lines, back, { canUpdate, canRevert, canDelete, canSend, trips: d.trips, cashField: <CashAccountField options={cashOpts} />, editHref: withParam(listUrl({ open: String(d.i.id) }), "edit", String(d.i.id)) });
   };
 
   // نافذة الإنشاء والتعديل
@@ -92,6 +98,8 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
           db.select({ code: s.currencies.code }).from(s.currencies).orderBy(asc(s.currencies.code)),
         ])
       : [[], [], [], []];
+  const [tripRoutes, tripVehicles, tripDrivers, editTrip] =
+    creating || editing ? await Promise.all([routeOptions(), vehicleOptions("head"), driverOptions(), editing && editId ? currentTrip(db, editId) : Promise.resolve(null)]) : [[], [], [], null];
   const terms = creating || editing ? await db.select({ customerId: s.contracts.customerId, days: s.contracts.paymentTermsDays }).from(s.contracts) : [];
   const editorInitial = (): InvoiceDraft | null => {
     if (editing && editDoc) {
@@ -117,9 +125,22 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
             costCenterId: l.costCenterId ? String(l.costCenterId) : "",
           })),
         fixedLines: editDoc.lines.filter((l) => l.kind !== "manual").map((l) => ({ kind: l.kind === "waybill" ? "waybill" : "expense", description: l.description, amount: l.amount, vatAmount: l.vatAmount, vatRate: l.vatRate })),
+        trip: editTrip
+          ? {
+              on: true,
+              routeId: String(editTrip.routeId),
+              vehicleId: String(editTrip.vehicleId),
+              driverId: editTrip.driverId ? String(editTrip.driverId) : "",
+              shipper: editTrip.shipper,
+              consignee: editTrip.consignee,
+              custody: editTrip.tripCustody ? String(editTrip.tripCustody) : "",
+              number: editTrip.number,
+              sent: !!editTrip.sentToDriverAt,
+            }
+          : { ...NO_TRIP },
       };
     }
-    if (creating) return { customerId: "", invoiceDate: today, dueDate: plusDays(today, 30), currencyCode: "SAR", reference: "", notes: "", lines: [], fixedLines: [] };
+    if (creating) return { customerId: "", invoiceDate: today, dueDate: plusDays(today, 30), currencyCode: "SAR", reference: "", notes: "", lines: [], fixedLines: [], trip: { ...NO_TRIP } };
     return null;
   };
   const initial = editorInitial();
@@ -282,6 +303,11 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
                     فاتورة <span className="ltr-nums">{openDoc.i.number}</span>
                   </span>
                   <Badge tone={INVOICE_STATUS[openDoc.i.status].tone}>{INVOICE_STATUS[openDoc.i.status].label}</Badge>
+                  {openDoc.trips.length > 0 && (
+                    <Badge tone={openDoc.trips.every((w) => w.sentAt) ? "blue" : openDoc.trips.some((w) => w.sentAt) ? "amber" : "gray"}>
+                      {openDoc.trips.every((w) => w.sentAt) ? "✓ أُرسلت للسائق" : openDoc.trips.some((w) => w.sentAt) ? `أُرسلت ${openDoc.trips.filter((w) => w.sentAt).length} من ${openDoc.trips.length} للسائق` : "لم تُرسل للسائق"}
+                    </Badge>
+                  )}
                 </div>
                 <div className="text-xs text-gray-500">
                   {openDoc.customer.nameAr}
@@ -348,13 +374,36 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
                       دمج المحدد
                     </SubmitButton>
                   )}
-                  {(canUpdate || canRevert || canDelete) && (
+                  {(canUpdate || canRevert || canDelete || canSend) && (
                     <details data-dropdown className="relative">
                       <summary className="flex cursor-pointer list-none items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
                         عمليات أخرى
                         <span aria-hidden className="text-xs text-gray-400">▾</span>
                       </summary>
                       <div className="absolute start-0 z-30 mt-1 flex w-56 flex-col rounded-xl border border-gray-200 bg-white p-1 shadow-lg">
+                        {canSend && (
+                          <>
+                            <ConfirmSubmit
+                              op="send_driver"
+                              className="!justify-start !border-0 !text-start !shadow-none"
+                              title="إرسال رحلات الفواتير المحددة للسائقين"
+                              text="تظهر رحلة كل فاتورة في تطبيق سائقها، وما عليه عهدة رحلة تُصرف له بسند عهدة من الحساب المختار. ما أُرسل من قبل لا يُعاد إرساله."
+                              submit="إرسال"
+                              fields={<CashAccountField options={cashOpts} />}
+                            >
+                              إرسال للسائق
+                            </ConfirmSubmit>
+                            <ConfirmSubmit
+                              op="unsend_driver"
+                              className="!justify-start !border-0 !text-start !shadow-none"
+                              title="إلغاء إرسال رحلات الفواتير المحددة"
+                              text="تُسحب الرحلات من تطبيق السائقين وتُعكس عهدتها. ما سجّل عليه السائق تحميلاً أو تسليماً أو مصروفاً لا يُلغى."
+                              submit="إلغاء الإرسال"
+                            >
+                              إلغاء الإرسال للسائق
+                            </ConfirmSubmit>
+                          </>
+                        )}
                         {canRevert && (
                           <ConfirmSubmit
                             op="revert"
@@ -421,7 +470,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
           >
             {invoices.length === 0 && <EmptyRow cols={10}>{filter.q || filter.status || filter.pay || filter.from ? "لا توجد فواتير بهذه الشروط" : "لا توجد فواتير بعد"}</EmptyRow>}
             <LimitRow cols={10} shown={invoices.length} limit={500} />
-            {invoices.map(({ i, customer, waybills, parts }) => {
+            {invoices.map(({ i, customer, waybills, parts, trips, tripsSent }) => {
               const st = state(i);
               const open = listUrl({ open: String(i.id) });
               return (
@@ -446,6 +495,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
                   <Td>
                     <Badge tone={INVOICE_STATUS[i.status].tone}>{INVOICE_STATUS[i.status].label}</Badge>
                     {parts > 1 && i.status === "draft" && <span className="mt-0.5 block text-xs whitespace-nowrap text-sky-700">مدمجة{waybills > 1 ? ` · ${waybills} شحنات` : ""}</span>}
+                    <DriverSentTag fleet={trips > 0} sentAt={tripsSent > 0 ? "1" : null} partial={tripsSent > 0 && tripsSent < trips ? `أُرسلت ${tripsSent} من ${trips} رحلات للسائق` : undefined} />
                   </Td>
                   <Td>{st.pay ? <Badge tone={st.pay.tone}>{st.pay.label}</Badge> : "—"}</Td>
                   <Td>
@@ -475,6 +525,9 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
           accounts={[...(domestic ? [domestic] : []), ...revenue.filter((a) => a !== domestic)].map((a) => ({ value: String(a.id), label: `${a.code} ${a.nameAr}` }))}
           costCenters={centers.map((c) => ({ value: String(c.id), label: c.nameAr }))}
           currencies={currencies.map((c) => c.code)}
+          routes={tripRoutes}
+          vehicles={tripVehicles}
+          drivers={tripDrivers}
           company={company}
           template={template}
           action={saveInvoicePanel.bind(null, editing ? editId : null)}

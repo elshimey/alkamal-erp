@@ -1,9 +1,9 @@
-import { and, asc, eq, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lte, sql } from "drizzle-orm";
 import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
 import { createJournalEntryTx, deleteEntryTx, nextDocumentNumber } from "@/lib/ledger";
 import { invoicePostingLines, lineVat, round2 } from "@/lib/invoice-posting";
-import { rateOn } from "@/lib/waybills";
+import { rateOn, syncInvoiceTripTx, type InvoiceTripInput } from "@/lib/waybills";
 import { SALES_ACCOUNTS } from "@/data/sales";
 import type { DocFilter } from "@/lib/doc-filters";
 import { docOrder, docWhere } from "@/lib/doc-query";
@@ -41,6 +41,8 @@ function uninvoicedWaybills() {
   return and(
     eq(s.waybills.status, "approved"),
     sql`not exists (select 1 from sales_invoice_lines l where l.waybill_id = ${s.waybills.id} and l.kind = 'waybill')`,
+    // رحلة الفاتورة المباشرة إيرادها في فاتورتها
+    isNull(s.waybills.sourceInvoiceId),
   );
 }
 
@@ -230,6 +232,8 @@ export interface ManualInvoiceInput {
   reference?: string | null;
   notes?: string | null;
   userId?: number;
+  // رحلة السائق للفاتورة المباشرة؛ undefined = تبقى كما هي، null = بلا رحلة
+  trip?: InvoiceTripInput | null;
   lines: {
     description: string;
     quantity: number;
@@ -302,7 +306,23 @@ export async function createManualInvoiceTx(tx: Tx, input: ManualInvoiceInput) {
 
 /** فاتورة مباشرة من صفحة الفواتير، دون شحنة؛ تُحفظ مسودة حتى تُعتمد. */
 export async function createDirectInvoice(db: Db, input: ManualInvoiceInput) {
-  return db.transaction((tx) => createManualInvoiceTx(tx, input));
+  return db.transaction(async (tx) => {
+    const inv = await createManualInvoiceTx(tx, input);
+    if (input.trip) await syncTrip(tx, inv.id, input.userId, input.trip);
+    return inv;
+  });
+}
+
+/** بيانات رحلة الفاتورة الحالية بصيغة الإدخال (للمحرر ولإعادة المزامنة). */
+export async function currentTrip(db: Db | Tx, invoiceId: number): Promise<(InvoiceTripInput & { id: number; number: string; sentToDriverAt: Date | null; status: string }) | null> {
+  const [w] = await db.select().from(s.waybills).where(eq(s.waybills.sourceInvoiceId, invoiceId));
+  if (!w || !w.vehicleId) return null;
+  return { id: w.id, number: w.number, sentToDriverAt: w.sentToDriverAt, status: w.status, routeId: w.routeId, vehicleId: w.vehicleId, driverId: w.driverId, shipper: w.shipper, consignee: w.consignee, tripCustody: num(w.tripCustody) };
+}
+
+async function syncTrip(tx: Tx, id: number, userId: number | undefined, trip: InvoiceTripInput | null) {
+  const [inv] = await tx.select().from(s.salesInvoices).where(eq(s.salesInvoices.id, id));
+  return syncInvoiceTripTx(tx, { ...inv, userId }, trip);
 }
 
 /**
@@ -345,6 +365,9 @@ export async function updateDirectInvoice(db: Db, id: number, input: ManualInvoi
     }
     await insertLines(tx, id, manualLines(input.lines));
     await recomputeTotals(tx, id);
+    // الرحلة تتبع الفاتورة (التاريخ والعميل والمبلغ)؛ بلا تغيير في بياناتها إن لم تُرسل
+    const trip = input.trip !== undefined ? input.trip : await currentTrip(tx, id);
+    if (input.trip !== undefined || trip) await syncTrip(tx, id, input.userId, trip);
     return { ...inv, number: inv.number };
   });
 }
@@ -467,6 +490,7 @@ export async function deleteInvoice(db: Db, invoiceId: number, opts: { reason: s
     const inv = await lockInvoice(tx, invoiceId);
     if (inv.status !== "draft") throw new Error(`الفاتورة ${inv.number} صادرة؛ الحذف للمسودة فقط`);
     if (hasOfficialNumber(inv)) throw new Error(`الفاتورة ${inv.number} أُصدرت سابقاً وأخذت رقماً رسمياً، فلا تُحذف حفاظاً على تسلسل الفواتير. عدّلها وأعد إصدارها، أو ألغها بإشعار دائن بعد إصدارها`);
+    await syncInvoiceTripTx(tx, { ...inv, userId: opts.userId }, null);
     const lines = await tx.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, invoiceId));
     await tx.insert(s.deletionLog).values({ entity: "sales_invoice", entityId: String(invoiceId), snapshot: { invoice: inv, lines }, reason: opts.reason.trim(), userId: opts.userId });
     await tx.delete(s.salesInvoices).where(eq(s.salesInvoices.id, invoiceId));
@@ -570,6 +594,8 @@ export async function mergeInvoices(db: Db, ids: number[], userId?: number) {
         where invoice_id = ${o.id}`);
       const notes = o.notes && o.notes !== host.notes ? o.notes : null;
       if (notes) await tx.update(s.salesInvoices).set({ notes: [host.notes, notes].filter(Boolean).join(" · ") }).where(eq(s.salesInvoices.id, host.id));
+      // رحلات الفواتير المدمجة تتبع الفاتورة الباقية
+      await tx.update(s.waybills).set({ sourceInvoiceId: host.id }).where(eq(s.waybills.sourceInvoiceId, o.id));
       await tx.delete(s.salesInvoices).where(eq(s.salesInvoices.id, o.id));
     }
     await renumberLines(tx, host.id);
@@ -633,6 +659,9 @@ export async function listSalesInvoices(db: Db | Tx, f: DocFilter, limit = 500) 
       customer: s.parties.nameAr,
       waybills: sql<number>`(select count(*) from sales_invoice_lines l where l.invoice_id = ${s.salesInvoices.id} and l.kind = 'waybill')::int`,
       // أجزاء الدمج (كل شحنة، وكل فاتورة دُمجت ببنودها)؛ أكثر من جزء = مدمجة
+      // رحلات السائقين في الفاتورة وكم منها أُرسل
+      trips: sql<number>`(select count(*) from waybills w where w.execution = 'fleet' and (w.source_invoice_id = ${s.salesInvoices.id} or w.id in (select waybill_id from sales_invoice_lines where invoice_id = ${s.salesInvoices.id} and kind = 'waybill')))::int`,
+      tripsSent: sql<number>`(select count(*) from waybills w where w.execution = 'fleet' and w.sent_to_driver_at is not null and (w.source_invoice_id = ${s.salesInvoices.id} or w.id in (select waybill_id from sales_invoice_lines where invoice_id = ${s.salesInvoices.id} and kind = 'waybill')))::int`,
       parts: sql<number>`(select count(distinct coalesce('w' || l.waybill_id, 'm' || coalesce(l.group_key::text, 'own'))) from sales_invoice_lines l where l.invoice_id = ${s.salesInvoices.id})::int`,
     })
     .from(s.salesInvoices)
@@ -650,8 +679,33 @@ export async function salesInvoiceDoc(db: Db | Tx, id: number) {
     .innerJoin(s.parties, eq(s.parties.id, s.salesInvoices.customerId))
     .where(eq(s.salesInvoices.id, id));
   if (!row) return null;
-  const lines = await db.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, id)).orderBy(asc(s.salesInvoiceLines.lineNo));
-  return { ...row, lines };
+  const [lines, trips] = await Promise.all([
+    db.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, id)).orderBy(asc(s.salesInvoiceLines.lineNo)),
+    invoiceTrips(db, id),
+  ]);
+  return { ...row, lines, trips };
+}
+
+/** رحلات السائقين في الفاتورة (رحلتها المباشرة والشحنات التي فيها) وحالة إرسالها. */
+export async function invoiceTrips(db: Db | Tx, id: number) {
+  return db
+    .select({
+      id: s.waybills.id,
+      number: s.waybills.number,
+      status: s.waybills.status,
+      sentAt: s.waybills.sentToDriverAt,
+      acceptedAt: s.waybills.driverAcceptedAt,
+      custody: s.waybills.tripCustody,
+      linked: sql<boolean>`${s.waybills.sourceInvoiceId} is not null`,
+    })
+    .from(s.waybills)
+    .where(
+      and(
+        eq(s.waybills.execution, "fleet"),
+        sql`(${s.waybills.sourceInvoiceId} = ${id} or "waybills"."id" in (select waybill_id from sales_invoice_lines where invoice_id = ${id} and kind = 'waybill'))`,
+      ),
+    )
+    .orderBy(asc(s.waybills.id));
 }
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;

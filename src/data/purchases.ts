@@ -9,6 +9,7 @@ export const EXPENSE_STATUS = {
   pending: { label: "بانتظار الاعتماد", tone: "amber" },
   approved: { label: "معتمد", tone: "green" },
   rejected: { label: "مرفوض", tone: "red" },
+  voided: { label: "ملغى · رُفع بالخطأ", tone: "gray" },
 } as const;
 
 export const EXPENSE_PAYERS = {

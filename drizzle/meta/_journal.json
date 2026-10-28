@@ -232,6 +232,20 @@
       "when": 1793073600000,
       "tag": "0032_invoice_draft_numbers",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1793160000000,
+      "tag": "0033_trip_custody",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1793170000000,
+      "tag": "0034_driver_submissions",
+      "breakpoints": true
     }
   ]
 }

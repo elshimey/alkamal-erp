@@ -5,6 +5,7 @@ import { can } from "@/lib/permissions";
 import { driverOptions, vehicleOptions } from "@/lib/lookups";
 import { getCompany, getInvoiceTemplate } from "@/lib/company";
 import { listRequests, requestDoc, type RequestFilter } from "@/lib/maintenance";
+import { listAttachments } from "@/lib/attachments";
 import { listHref, parseDocFilter, type DocListParams } from "@/lib/doc-filters";
 import { todayRiyadh } from "@/lib/dates";
 import { BREAKDOWN_APPROVAL_LIMIT, BREAKDOWN_STATUS, MAINTENANCE_STATUS, PRIORITIES, type BreakdownStatus } from "@/data/maintenance";
@@ -50,6 +51,9 @@ export default async function BreakdownRequestsPage({ searchParams }: { searchPa
     getCompany(db),
     getInvoiceTemplate(db),
   ]);
+  // صورة المشكلة التي رفعها السائق مع طلب الصيانة
+  const photoOf = new Map<number, number>();
+  for (const a of await listAttachments(db, "breakdown_requests", list.map((x) => x.r.id))) if (!photoOf.has(a.entityId)) photoOf.set(a.entityId, a.id);
   const canCreate = can(user.perms, "maintenance", "create");
   const canReview = can(user.perms, "maintenance", "update");
   const canApprove = can(user.perms, "maintenance", "approve");
@@ -218,6 +222,11 @@ export default async function BreakdownRequestsPage({ searchParams }: { searchPa
               </Td>
               <Td>
                 <span className="line-clamp-2">{r.description}</span>
+                {photoOf.has(r.id) && (
+                  <a href={`/files/${photoOf.get(r.id)}`} target="_blank" rel="noreferrer" className="text-xs font-medium text-brand-700 hover:underline">
+                    📷 صورة السائق
+                  </a>
+                )}
                 {r.rejectReason && <div className="text-xs text-red-600">سبب الرفض: {r.rejectReason}</div>}
               </Td>
               <Td>

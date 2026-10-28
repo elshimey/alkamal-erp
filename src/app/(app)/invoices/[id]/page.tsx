@@ -19,6 +19,8 @@ import { addWaybills, issue, removeLine, sendToZatca } from "../actions";
 import { invoiceActions } from "../invoice-menu";
 import { ActionsMenu } from "@/components/actions-menu";
 import { fmt } from "@/lib/format";
+import { cashAccounts, invoiceTrips } from "@/lib/invoices";
+import { CashAccountField } from "@/components/cash-account-field";
 
 export default async function InvoicePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ print?: string }> }) {
   const user = await requirePermission("sales_invoices", "view");
@@ -54,6 +56,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
               eq(s.waybills.status, "approved"),
               eq(s.waybills.currencyCode, i.currencyCode),
               sql`not exists (select 1 from sales_invoice_lines l where l.waybill_id = ${s.waybills.id} and l.kind = 'waybill')`,
+              sql`${s.waybills.sourceInvoiceId} is null`,
             ),
           )
           .orderBy(asc(s.waybills.waybillDate))
@@ -61,6 +64,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
     getCompany(db),
     getInvoiceTemplate(db),
   ]);
+  const [trips, cashOpts] = await Promise.all([invoiceTrips(db, id), can(user.perms, "waybills", "update") ? cashAccounts(db) : Promise.resolve([])]);
   const [zatca, zatcaDoc, blocker] = await Promise.all([getSettings(db), latestDocument(db, { invoiceId: id }), sendBlocker(db, { invoiceId: id })]);
   const qrSvg = await invoiceQrSvg(company, i, await clearedQr(db, id));
   const total = Number(i.total);
@@ -89,6 +93,9 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
                 canUpdate: can(user.perms, "sales_invoices", "update"),
                 canRevert: can(user.perms, "sales_invoices", "revert"),
                 canDelete: can(user.perms, "sales_invoices", "delete"),
+                canSend: can(user.perms, "waybills", "update"),
+                trips,
+                cashField: <CashAccountField options={cashOpts} />,
                 editHref: `/invoices?open=${id}&edit=${id}`,
               })}
             />
