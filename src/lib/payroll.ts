@@ -135,11 +135,17 @@ async function lockAdvance(tx: Tx, id: number) {
 }
 
 /** صرف السلفة: من حـ/ سلف الموظفين إلى حـ/ الصندوق أو البنك. */
-export async function payAdvance(db: Db | Tx, id: number, opts: { cashAccountId: number; userId?: number }) {
+export async function payAdvance(db: Db | Tx, id: number, opts: { cashAccountId?: number | null; fromCustodyOf?: number | null; userId?: number }) {
   return db.transaction(async (tx) => {
     const a = await lockAdvance(tx, id);
     if (a.status !== "pending") throw new Error(`السلفة ${a.number} مصروفة مسبقاً`);
-    const cash = await cashAccount(tx, opts.cashAccountId, "الصندوق أو البنك الذي صُرفت منه السلفة");
+    // سلفة من العهدة: يأخذها السائق من النقد الذي معه، فتُقيد على عهدته بدل الصندوق
+    let cash: { id: number };
+    if (opts.fromCustodyOf) {
+      const [d] = await tx.select({ custody: s.drivers.custodyAccountId }).from(s.drivers).where(eq(s.drivers.id, opts.fromCustodyOf));
+      if (!d?.custody) throw new Error("لا يوجد حساب عهدة لهذا السائق");
+      cash = { id: d.custody };
+    } else cash = await cashAccount(tx, opts.cashAccountId ?? 0, "الصندوق أو البنك الذي صُرفت منه السلفة");
     const [emp] = await tx.select().from(s.employees).where(eq(s.employees.id, a.employeeId));
     const description = `سلفة ${a.number} – ${emp.nameAr}`;
     const entry = await createJournalEntryTx(tx, {
@@ -150,7 +156,7 @@ export async function payAdvance(db: Db | Tx, id: number, opts: { cashAccountId:
       userId: opts.userId,
       lines: [
         { accountId: await accountIdByCode(tx, PAYROLL_ACCOUNTS.advances), debit: num(a.amount), description },
-        { accountId: cash.id, credit: num(a.amount), description },
+        { accountId: cash.id, credit: num(a.amount), description, driverId: opts.fromCustodyOf ?? null },
       ],
     });
     await tx

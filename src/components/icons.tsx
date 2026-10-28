@@ -72,6 +72,7 @@ const PATHS = {
   building: <path d="M4 21V5l8-2v18m0-11h8v11M3 21h18M7.5 8h1m-1 3.5h1m-1 3.5h1m7-2h1m-1 3.5h1" />,
   book: <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5Zm0 15A2.5 2.5 0 0 1 6.5 18H20v3H6.5M8 7.5h8M8 11h5" />,
   sparkle: <path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8Zm6.5 11 .8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8Z" />,
+  bell: <path d="M6 16V11a6 6 0 1 1 12 0v5l2 2H4Zm4 4h4" />,
   alert: <path d="M12 3 2 20h20Zm0 6v5m0 3v.5" />,
   invoice: <path d="M6 3h12v18l-3-2-3 2-3-2-3 2Zm3 5h6m-6 4h6m-6 4h3" />,
   cash: <path d="M3 7h18v10H3Zm9 2.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5ZM6 10v4m12-4v4" />,

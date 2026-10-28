@@ -1,4 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
+import type { DriverDict } from "@/data/driver-i18n";
 
 export const fmt = (v: number | string | null | undefined) =>
   Number(v ?? 0).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -17,15 +18,17 @@ export function Section({ title, children, action }: { title?: string; children:
   );
 }
 
-export function DField({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
+/** حقل بعنوانه؛ مجموعة الأزرار (group) لا تُلف بـ label حتى لا يختار الضغط على العنوان أول خيار. */
+export function DField({ label, children, hint, group = false }: { label: string; children: ReactNode; hint?: string; group?: boolean }) {
+  const Tag = group ? "div" : "label";
   return (
-    <label className="flex flex-col gap-1.5 text-sm">
+    <Tag className="flex flex-col gap-1.5 text-sm" {...(group ? { role: "group", "aria-label": label } : {})}>
       <span className="font-medium text-gray-700">
         {label}
         {hint && <span className="ms-1 text-xs font-normal text-gray-400">({hint})</span>}
       </span>
       {children}
-    </label>
+    </Tag>
   );
 }
 
@@ -56,3 +59,23 @@ export function Pill({ children, tone = "gray" }: { children: ReactNode; tone?: 
 }
 
 export const STATUS_TONE = { draft: "gray", in_transit: "blue", delivered: "amber", approved: "green", invoiced: "green", rejected: "red" } as const;
+
+/** عهدة الرحلة: المبلغ والمعتمد والمنتظر والمتبقي (قد يكون سالباً). */
+export function CustodyBox({ t, box }: { t: DriverDict; box: { custody: number; approved: number; pending: number; remaining: number } }) {
+  const cells = [
+    { label: t.x.box.custody, v: box.custody, cls: "text-asphalt-900" },
+    { label: t.x.box.approved, v: box.approved, cls: "text-green-700" },
+    { label: t.x.box.pending, v: box.pending, cls: "text-amber-700" },
+    { label: t.x.box.remaining, v: box.remaining, cls: box.remaining < 0 ? "text-red-600" : "text-asphalt-900" },
+  ];
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      {cells.map((c) => (
+        <div key={c.label} className="rounded-xl bg-gray-50 px-3 py-2">
+          <div className="text-xs text-gray-500">{c.label}</div>
+          <div className={`ltr-nums text-lg font-bold ${c.cls}`}>{fmt(c.v)}</div>
+        </div>
+      ))}
+    </div>
+  );
+}

@@ -190,6 +190,15 @@ export function OfflineSync({ labels }: { labels: { offline: string; pending: st
 export function PhotoInput({ name = "photo", label, required = false }: { name?: string; label: string; required?: boolean }) {
   const [data, setData] = useState("");
   const [busy, setBusy] = useState(false);
+  const hidden = useRef<HTMLInputElement>(null);
+  // بعد الحفظ يُفرَّغ النموذج، فتُمسح الصورة المختارة أيضاً حتى لا تُرسل مع العملية التالية
+  useEffect(() => {
+    const form = hidden.current?.form;
+    if (!form) return;
+    const clear = () => setData("");
+    form.addEventListener("reset", clear);
+    return () => form.removeEventListener("reset", clear);
+  }, []);
   const pick = async (file: File | undefined) => {
     if (!file) return;
     setBusy(true);
@@ -216,7 +225,7 @@ export function PhotoInput({ name = "photo", label, required = false }: { name?:
         // eslint-disable-next-line @next/next/no-img-element
         <img src={data} alt="" className="size-14 rounded-lg object-cover ring-1 ring-black/10" />
       )}
-      <input type="hidden" name={name} value={data} />
+      <input ref={hidden} type="hidden" name={name} value={data} />
     </div>
   );
 }

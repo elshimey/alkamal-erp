@@ -71,6 +71,8 @@ export interface WaybillInput {
   containerNumber?: string | null;
   deliveryAddress?: string | null;
   notes?: string | null;
+  // عهدة الرحلة للسائق (تُصرف عند الإرسال)
+  tripCustody?: number | null;
   userId?: number;
 }
 
@@ -165,7 +167,24 @@ async function resolveWaybill(tx: Tx, input: WaybillInput) {
     salesRepId: input.salesRepId ?? null,
     salesRepCommission: String(input.salesRepCommission ?? 0),
     notes: input.notes || null,
+    tripCustody: carrier ? "0" : String(Math.max(0, input.tripCustody ?? 0)),
   };
+}
+
+/**
+ * الشحنة المرسلة للسائق: لا يتغير سائقها أو مركبتها أو عهدتها إلا بعد «إلغاء الإرسال»،
+ * فما يراه السائق في تطبيقه وما قُيد على عهدته يبقيان مطابقين للشحنة.
+ */
+export function assertSentLocks(
+  w: { number: string; sentToDriverAt: Date | null; driverId: number | null; vehicleId: number | null; execution: string; tripCustody: string },
+  next: { driverId?: number | null; vehicleId?: number | null; execution?: string; tripCustody?: string | number | null },
+) {
+  if (!w.sentToDriverAt) return;
+  const why = `الشحنة ${w.number} مرسلة للسائق؛ ألغِ الإرسال أولاً`;
+  if (next.execution !== undefined && next.execution !== w.execution) throw new Error(`${why} لتغيير طريقة التنفيذ`);
+  if (next.driverId !== undefined && next.driverId !== w.driverId) throw new Error(`${why} لتغيير السائق`);
+  if (next.vehicleId !== undefined && next.vehicleId !== w.vehicleId) throw new Error(`${why} لتغيير المركبة`);
+  if (next.tripCustody != null && Number(next.tripCustody) !== Number(w.tripCustody)) throw new Error(`${why} لتعديل عهدة الرحلة`);
 }
 
 export async function createWaybill(db: Db, input: WaybillInput) {
@@ -191,6 +210,9 @@ export async function editWaybill(db: Db, id: number, input: Omit<WaybillInput, 
     const w = await lockWaybill(tx, id);
     assertEditable(w);
     const values = await resolveWaybill(tx, input);
+    // من لا يرسل العهدة في النموذج (الجدول) تبقى عهدته كما هي
+    if (input.tripCustody == null) values.tripCustody = w.tripCustody;
+    assertSentLocks(w, values);
     // المرفوضة تبقى مرفوضة حتى تُعاد لمسودة؛ تعديلها لا يغير حالتها
     const [row] = await tx
       .update(s.waybills)
@@ -579,6 +601,7 @@ export async function deleteWaybill(db: Db, id: number, opts: { reason: string; 
   return db.transaction(async (tx) => {
     const w = await lockWaybill(tx, id);
     if (w.status !== "draft" && w.status !== "rejected") throw new Error("الحذف متاح للمسودة والمرفوضة فقط");
+    if (w.sentToDriverAt) throw new Error(`الشحنة ${w.number} مرسلة للسائق؛ ألغِ الإرسال أولاً ثم احذفها`);
     const fuel = await tx.select().from(s.waybillFuel).where(eq(s.waybillFuel.waybillId, id));
     const expenses = await tx.select().from(s.waybillExpenses).where(eq(s.waybillExpenses.waybillId, id));
     await tx.insert(s.deletionLog).values({
@@ -732,22 +755,6 @@ export async function saveTransportDoc(db: Db | Tx, id: number, input: Transport
   return db.transaction(run);
 }
 
-/** يرسل وثيقة النقل لتطبيق السائق: تظهر له في رحلته. يُعيد جواله لتنبيهه بواتساب. */
-export async function sendTransportDocToDriver(db: Db, id: number) {
-  const [w] = await db
-    .select({ number: s.waybills.number, status: s.waybills.status, execution: s.waybills.execution, driverId: s.waybills.driverId, mobile: s.drivers.mobile, driver: s.employees.nameAr })
-    .from(s.waybills)
-    .leftJoin(s.drivers, eq(s.drivers.id, s.waybills.driverId))
-    .leftJoin(s.employees, eq(s.employees.id, s.drivers.employeeId))
-    .where(eq(s.waybills.id, id));
-  if (!w) throw new Error("الشحنة غير موجودة");
-  if (w.execution !== "fleet" || !w.driverId) throw new Error("الشحنة منفذة بناقل خارجي؛ لا يوجد سائق في التطبيق");
-  if (w.status === "rejected") throw new Error(`الشحنة ${w.number} مرفوضة`);
-  if (w.status === "approved" || w.status === "invoiced") throw new Error(`الشحنة ${w.number} معتمدة؛ انتهت رحلتها`);
-  await db.update(s.waybills).set({ sentToDriverAt: new Date() }).where(eq(s.waybills.id, id));
-  return { number: w.number, driver: w.driver, mobile: w.mobile };
-}
-
 // ───────────── تغيير الحالة من الجدول (للأمام والخلف) ─────────────
 
 /**
@@ -810,7 +817,8 @@ export function parseWaybillFilter(sp: { q?: string; status?: string; period?: s
 
 // العمود باسم جدوله صراحة: في استعلام جدول واحد يُكتب بلا اسم الجدول فيقرأه الاستعلام الداخلي عموداً من جدوله هو
 const WAYBILL_ID = sql.raw(`"waybills"."id"`);
-const invoicedLine = sql`exists (select 1 from sales_invoice_lines l where l.waybill_id = ${WAYBILL_ID} and l.kind = 'waybill')`;
+// داخلة في فاتورة: سطرها في فاتورة، أو رحلة أنشأتها فاتورة مباشرة
+const invoicedLine = sql`(exists (select 1 from sales_invoice_lines l where l.waybill_id = ${WAYBILL_ID} and l.kind = 'waybill') or "waybills"."source_invoice_id" is not null)`;
 
 const carrier = alias(s.parties, "carrier");
 const fromLoc = alias(s.locations, "from_loc");
@@ -867,10 +875,10 @@ export async function listWaybills(db: Db | Tx, f: WaybillFilter = {}, limit = 5
         carrier: carrier.nameAr,
         driver: s.employees.nameAr,
         route: sql<string>`${fromLoc.nameAr} || ' ← ' || ${toLoc.nameAr}`,
-        invoiceId: sql<number | null>`(select l.invoice_id from sales_invoice_lines l where l.waybill_id = ${s.waybills.id} and l.kind = 'waybill' limit 1)`,
-        invoice: sql<string | null>`(select i.number from sales_invoice_lines l join sales_invoices i on i.id = l.invoice_id where l.waybill_id = ${s.waybills.id} and l.kind = 'waybill' limit 1)`,
+        invoiceId: sql<number | null>`coalesce(${s.waybills.sourceInvoiceId}, (select l.invoice_id from sales_invoice_lines l where l.waybill_id = ${WAYBILL_ID} and l.kind = 'waybill' limit 1))`.mapWith((v) => (v == null ? null : Number(v))),
+        invoice: sql<string | null>`coalesce((select i.number from sales_invoices i where i.id = ${s.waybills.sourceInvoiceId}), (select i.number from sales_invoice_lines l join sales_invoices i on i.id = l.invoice_id where l.waybill_id = ${WAYBILL_ID} and l.kind = 'waybill' limit 1))`,
         // عدد الشحنات في فاتورتها: أكثر من واحدة = مدمجة
-        invoiceWaybills: sql<number>`coalesce((select count(*) from sales_invoice_lines x where x.kind = 'waybill' and x.invoice_id = (select l.invoice_id from sales_invoice_lines l where l.waybill_id = ${s.waybills.id} and l.kind = 'waybill' limit 1)), 0)::int`,
+        invoiceWaybills: sql<number>`case when ${s.waybills.sourceInvoiceId} is not null then -1 else coalesce((select count(*) from sales_invoice_lines x where x.kind = 'waybill' and x.invoice_id = (select l.invoice_id from sales_invoice_lines l where l.waybill_id = ${s.waybills.id} and l.kind = 'waybill' limit 1)), 0) end::int`,
       })
       .from(s.waybills)
       .innerJoin(s.parties, eq(s.parties.id, s.waybills.customerId))
@@ -965,7 +973,7 @@ export async function invoiceWaybillsNow(db: Db, ids: number[], opts: { invoiceD
       customerId: s.waybills.customerId,
       currencyCode: s.waybills.currencyCode,
       date: s.waybills.waybillDate,
-      invoiceId: sql<number | null>`(select l.invoice_id from sales_invoice_lines l where l.waybill_id = ${WAYBILL_ID} and l.kind = 'waybill' limit 1)`.mapWith(Number),
+      invoiceId: sql<number | null>`coalesce("waybills"."source_invoice_id", (select l.invoice_id from sales_invoice_lines l where l.waybill_id = ${WAYBILL_ID} and l.kind = 'waybill' limit 1))`.mapWith(Number),
     })
     .from(s.waybills)
     .where(inArray(s.waybills.id, ids));
@@ -1027,5 +1035,66 @@ export async function patchWaybill(db: Db, id: number, patch: Partial<Omit<Waybi
     containerNumber: has("containerNumber") ? patch.containerNumber : w.containerNumber,
     deliveryAddress: has("deliveryAddress") ? patch.deliveryAddress : w.deliveryAddress,
     notes: has("notes") ? patch.notes : w.notes,
+    tripCustody: has("tripCustody") ? patch.tripCustody : Number(w.tripCustody),
   });
+}
+
+// ───────────── رحلة الفاتورة المباشرة ─────────────
+
+export interface InvoiceTripInput {
+  routeId: number;
+  vehicleId: number;
+  driverId?: number | null;
+  shipper: string;
+  consignee: string;
+  tripCustody?: number | null;
+}
+
+/**
+ * الفاتورة المباشرة التي ينفذها سائق من الأسطول: تُنشأ لها شحنة مرتبطة (رحلة) تظهر للسائق عند الإرسال.
+ * إيرادها في الفاتورة نفسها، فلا تدخل «بانتظار الفوترة» ولا الاستحقاق الشهري. null = بلا رحلة.
+ */
+export async function syncInvoiceTripTx(
+  tx: Tx,
+  inv: { id: number; number: string; invoiceDate: string; customerId: number; currencyCode: string; subtotal: string; userId?: number },
+  trip: InvoiceTripInput | null,
+) {
+  const [existing] = await tx.select().from(s.waybills).where(eq(s.waybills.sourceInvoiceId, inv.id)).for("update");
+  if (!trip) {
+    if (!existing) return null;
+    if (existing.sentToDriverAt) throw new Error(`رحلة الفاتورة (${existing.number}) مرسلة للسائق؛ ألغِ الإرسال أولاً`);
+    if (!EDITABLE.includes(existing.status) || existing.status === "rejected") throw new Error(`رحلة الفاتورة ${existing.number} ${WAYBILL_STATUS[existing.status].label}؛ أرجعها أولاً`);
+    await tx.insert(s.deletionLog).values({ entity: "waybill", entityId: String(existing.id), snapshot: { waybill: existing }, reason: `حُذفت رحلة الفاتورة ${inv.number}`, userId: inv.userId });
+    await tx.delete(s.waybills).where(eq(s.waybills.id, existing.id));
+    return null;
+  }
+  const values = await resolveWaybill(tx, {
+    waybillDate: inv.invoiceDate,
+    customerId: inv.customerId,
+    routeId: trip.routeId,
+    vehicleId: trip.vehicleId,
+    driverId: trip.driverId ?? null,
+    shipper: trip.shipper,
+    consignee: trip.consignee,
+    amount: num(inv.subtotal),
+    tripCustody: trip.tripCustody ?? 0,
+    notes: `رحلة الفاتورة ${inv.number}`,
+  });
+  const row = { ...values, currencyCode: inv.currencyCode, priceNote: `من الفاتورة ${inv.number}`, sourceInvoiceId: inv.id };
+  if (existing) {
+    if (!EDITABLE.includes(existing.status)) {
+      // رحلة منتهية (معتمدة): تتغير فواتيرها وأسعارها، أما بيانات الرحلة فبعد إرجاعها
+      const same =
+        existing.routeId === row.routeId && existing.vehicleId === row.vehicleId && existing.driverId === row.driverId && existing.shipper === row.shipper && existing.consignee === row.consignee && num(existing.tripCustody) === num(row.tripCustody);
+      if (!same) throw new Error(`رحلة الفاتورة ${existing.number} ${WAYBILL_STATUS[existing.status].label}؛ أرجعها لمسودة لتعديل بياناتها`);
+      const [u] = await tx.update(s.waybills).set({ amount: row.amount, updatedAt: new Date() }).where(eq(s.waybills.id, existing.id)).returning();
+      return u;
+    }
+    assertSentLocks(existing, row);
+    const [u] = await tx.update(s.waybills).set({ ...row, updatedAt: new Date() }).where(eq(s.waybills.id, existing.id)).returning();
+    return u;
+  }
+  const number = await nextDocumentNumber(tx, "waybill", "WB", Number(inv.invoiceDate.slice(0, 4)));
+  const [created] = await tx.insert(s.waybills).values({ ...row, number, createdBy: inv.userId }).returning();
+  return created;
 }

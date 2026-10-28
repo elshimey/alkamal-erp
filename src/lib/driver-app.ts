@@ -3,7 +3,7 @@ import { alias } from "drizzle-orm/pg-core";
 import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
 import { createWaybill, recordStage } from "@/lib/waybills";
-import { createExpense } from "@/lib/purchases";
+import { createExpense, vehicleCostCenter } from "@/lib/purchases";
 import { createBreakdownRequest } from "@/lib/maintenance";
 import { hashPassword, MIN_PASSWORD_LENGTH } from "@/lib/password";
 import { DRIVER_EXPENSE_ACCOUNTS, type DriverExpenseType, type DriverLang } from "@/data/driver-i18n";
@@ -100,7 +100,7 @@ export async function tripDetail(db: Db | Tx, driverId: number, waybillId: numbe
       .orderBy(s.waybillExpenses.id),
   ]);
   return {
-    trip: { ...trip, shipper: w.shipper, consignee: w.consignee, containerNumber: w.containerNumber, weightTons: w.weightTons, rejectionReason: w.rejectionReason, sentToDriverAt: w.sentToDriverAt, driverAcceptedAt: w.driverAcceptedAt, logistiNumber: w.logistiNumber },
+    trip: { ...trip, shipper: w.shipper, consignee: w.consignee, containerNumber: w.containerNumber, weightTons: w.weightTons, rejectionReason: w.rejectionReason, sentToDriverAt: w.sentToDriverAt, driverAcceptedAt: w.driverAcceptedAt, logistiNumber: w.logistiNumber, tripCustody: w.tripCustody },
     stages,
     fuel,
     expenses,
@@ -135,10 +135,32 @@ async function driverTripsById(db: Db | Tx, waybillId: number) {
 /**
  * ما يضغطه السائق الآن: «تم التحميل» ثم «تم التسليم» فقط (زران كبيران بلا كتابة).
  * التحميل يجعل الشحنة «في الطريق» والتسليم يجعلها «مُسلَّمة» تلقائياً.
+ * تبقى متاحة مهما غيّر المكتب الحالة، حتى تُعتمد الرحلة (تُغلق) أو تُعاد للتصحيح.
  */
 export function nextStages(w: { status: string }, done: TripStage[]): TripStage[] {
-  if (!["draft", "in_transit"].includes(w.status) || done.includes("delivery")) return [];
+  if (!["draft", "in_transit", "delivered"].includes(w.status) || done.includes("delivery")) return [];
   return done.includes("loading") ? ["delivery"] : ["loading"];
+}
+
+/** التراجع عن آخر مرحلة ضغطها السائق بالخطأ، ما دامت الرحلة غير مغلقة. صورها تبقى محفوظة. */
+export async function undoDriverStage(db: Db, driverId: number, waybillId: number) {
+  return db.transaction(async (tx) => {
+    const [w] = await tx.select().from(s.waybills).where(and(eq(s.waybills.id, waybillId), eq(s.waybills.driverId, driverId))).for("update");
+    if (!w) throw new Error("هذه الرحلة ليست لك");
+    if (!["draft", "in_transit", "delivered"].includes(w.status)) throw new Error("الرحلة مغلقة؛ لا يمكن التراجع");
+    const stages = await tx.select().from(s.tripStages).where(eq(s.tripStages.waybillId, waybillId)).orderBy(desc(s.tripStages.at), desc(s.tripStages.id));
+    const last = stages[0];
+    if (!last) throw new Error("لا توجد مرحلة للتراجع عنها");
+    await tx.delete(s.tripStages).where(eq(s.tripStages.id, last.id));
+    const rest = stages.slice(1).map((x) => x.stage);
+    // التسليم الذي سجّله المكتب يدوياً لا يلغيه تراجع السائق عن التحميل
+    const status = rest.includes("delivery") || (w.status === "delivered" && last.stage !== "delivery") ? "delivered" : rest.length ? "in_transit" : "draft";
+    const set: Partial<typeof s.waybills.$inferInsert> = { status, updatedAt: new Date() };
+    if (last.stage === "delivery") set.odometerEnd = null;
+    if (last.stage === "loading" && !rest.includes("loading")) set.odometerStart = null;
+    await tx.update(s.waybills).set(set).where(eq(s.waybills.id, waybillId));
+    return last.stage;
+  });
 }
 
 /** السائق يؤكد استلام الرحلة التي أرسلها له المكتب. */
@@ -179,43 +201,175 @@ export async function recordDriverStage(db: Db, driverId: number, waybillId: num
   await recordStage(db, waybillId, stage, opts);
 }
 
-export async function createDriverExpense(
-  db: Db,
-  driver: DriverProfile,
-  input: { date: string; type: DriverExpenseType; description: string; amount: number; vatAmount?: number; vendorName?: string | null; reference?: string | null; userId?: number },
-) {
-  const code = DRIVER_EXPENSE_ACCOUNTS[input.type];
-  if (!code) throw new Error("نوع المصروف غير معروف");
+// ما يكتبه البرنامج بياناً لمصروف السائق (السائق لا يكتب بياناً)
+const KIND_AR: Record<DriverExpenseType, string> = { diesel: "ديزل", maintenance: "صيانة", road: "مصاريف طريق ورسوم", tires: "إطارات", other: "مصروف آخر" };
+
+export interface DriverExpenseInput {
+  kind: DriverExpenseType;
+  amount: number;
+  reportedPayer: "custody" | "company";
+  waybillId?: number | null;
+  maintenanceTypeId?: number | null;
+  date: string;
+  userId?: number;
+}
+
+async function resolveDriverExpense(db: Db | Tx, driver: DriverProfile, input: DriverExpenseInput) {
+  const code = DRIVER_EXPENSE_ACCOUNTS[input.kind];
+  if (!code) throw new Error("اختر نوع المصروف");
+  if (!(input.amount > 0)) throw new Error("المبلغ إلزامي");
+  const trip = input.waybillId ? await ownTrip(db, driver.id, input.waybillId) : null;
+  let maintenance: { id: number; nameAr: string } | null = null;
+  if (input.kind === "maintenance") {
+    if (!input.maintenanceTypeId) throw new Error("اختر نوع الصيانة");
+    [maintenance] = await db.select({ id: s.maintenanceTypes.id, nameAr: s.maintenanceTypes.nameAr }).from(s.maintenanceTypes).where(eq(s.maintenanceTypes.id, input.maintenanceTypeId));
+    if (!maintenance) throw new Error("نوع الصيانة غير موجود");
+  }
   const [account] = await db.select({ id: s.accounts.id }).from(s.accounts).where(eq(s.accounts.code, code));
-  // المصروف يبقى بانتظار اعتماد المكتب، ولا قيد قبل ذلك
+  if (!account) throw new Error(`الحساب ${code} غير موجود في الدليل`);
+  return {
+    accountId: account.id,
+    vehicleId: trip?.vehicleId ?? driver.vehicle?.id ?? null,
+    waybillId: trip?.id ?? null,
+    maintenanceTypeId: maintenance?.id ?? null,
+    description: [KIND_AR[input.kind], maintenance?.nameAr, trip ? `رحلة ${trip.number}` : null].filter(Boolean).join(" · "),
+  };
+}
+
+/**
+ * مصروف من تطبيق السائق: النوع والمبلغ الإجمالي والصورة ومن دفع، عاماً أو لرحلة.
+ * يبقى بانتظار اعتماد المكتب بلا قيد؛ والمعتمد يحدد الدافع الفعلي والحساب ويفصل الضريبة.
+ */
+export async function createDriverExpense(db: Db, driver: DriverProfile, input: DriverExpenseInput) {
+  const r = await resolveDriverExpense(db, driver, input);
   return createExpense(db, {
     expenseDate: input.date,
     payer: "driver_custody",
     driverId: driver.id,
-    accountId: account.id,
-    vehicleId: driver.vehicle?.id ?? null,
-    description: input.description,
+    accountId: r.accountId,
+    vehicleId: r.vehicleId,
+    waybillId: r.waybillId,
+    description: r.description,
     amount: input.amount,
-    vatAmount: input.vatAmount ?? 0,
-    vendorName: input.vendorName,
-    reference: input.reference,
+    driverKind: input.kind,
+    reportedPayer: input.reportedPayer,
+    maintenanceTypeId: r.maintenanceTypeId,
     userId: input.userId,
   });
 }
 
-export async function driverExpenses(db: Db | Tx, driverId: number) {
+async function lockDriverExpense(tx: Tx, driverId: number, id: number) {
+  const [e] = await tx.select().from(s.expenses).where(and(eq(s.expenses.id, id), eq(s.expenses.driverId, driverId))).for("update");
+  if (!e || !e.driverKind) throw new Error("المصروف غير موجود");
+  if (e.status !== "pending") throw new Error("لا يُعدّل إلا ما ينتظر الاعتماد");
+  return e;
+}
+
+/** تعديل مصروف ما زال بانتظار الاعتماد (الصورة الجديدة تُضاف ولا تُحذف القديمة). */
+export async function updateDriverExpense(db: Db, driver: DriverProfile, id: number, input: DriverExpenseInput) {
+  return db.transaction(async (tx) => {
+    await lockDriverExpense(tx, driver.id, id);
+    const r = await resolveDriverExpense(tx, driver, input);
+    await tx
+      .update(s.expenses)
+      .set({
+        accountId: r.accountId,
+        vehicleId: r.vehicleId,
+        costCenterId: await vehicleCostCenter(tx, r.vehicleId),
+        waybillId: r.waybillId,
+        description: r.description,
+        amount: String(Math.round(input.amount * 100) / 100),
+        vatAmount: "0",
+        driverKind: input.kind,
+        reportedPayer: input.reportedPayer,
+        maintenanceTypeId: r.maintenanceTypeId,
+      })
+      .where(eq(s.expenses.id, id));
+  });
+}
+
+/** «رُفع بالخطأ»: لا يُحذف ما رفعه السائق، بل يُلغى ويبقى ظاهراً كملغى. */
+export async function voidDriverExpense(db: Db, driverId: number, id: number, reason?: string | null) {
+  return db.transaction(async (tx) => {
+    await lockDriverExpense(tx, driverId, id);
+    await tx.update(s.expenses).set({ status: "voided", voidReason: reason?.trim() || "رُفع بالخطأ" }).where(eq(s.expenses.id, id));
+  });
+}
+
+export async function driverExpenses(db: Db | Tx, driverId: number, waybillId?: number) {
   return db
-    .select({ e: s.expenses, code: s.accounts.code })
+    .select({ e: s.expenses, code: s.accounts.code, maintenance: s.maintenanceTypes.nameAr, maintenanceEn: s.maintenanceTypes.nameEn, trip: s.waybills.number })
     .from(s.expenses)
     .innerJoin(s.accounts, eq(s.accounts.id, s.expenses.accountId))
-    .where(eq(s.expenses.driverId, driverId))
+    .leftJoin(s.maintenanceTypes, eq(s.maintenanceTypes.id, s.expenses.maintenanceTypeId))
+    .leftJoin(s.waybills, eq(s.waybills.id, s.expenses.waybillId))
+    .where(and(eq(s.expenses.driverId, driverId), waybillId ? eq(s.expenses.waybillId, waybillId) : undefined))
     .orderBy(desc(s.expenses.expenseDate), desc(s.expenses.id))
     .limit(50);
 }
 
-export async function reportBreakdown(db: Db, driver: DriverProfile, input: { date: string; description: string; priority: "low" | "normal" | "urgent"; userId?: number }) {
+export async function maintenanceTypeOptions(db: Db | Tx, opts: { all?: boolean } = {}) {
+  return db
+    .select()
+    .from(s.maintenanceTypes)
+    .where(opts.all ? undefined : eq(s.maintenanceTypes.isActive, true))
+    .orderBy(s.maintenanceTypes.sortOrder, s.maintenanceTypes.id);
+}
+
+/**
+ * عهدة كل رحلة أُرسلت للسائق: المبلغ، وما اعتُمد من مصاريفها على عهدته، وما ينتظر الاعتماد، والمتبقي.
+ * ما دفعته الشركة لا يُخصم من العهدة، والمتبقي قد يكون سالباً.
+ */
+export async function tripCustodySummary(db: Db | Tx, driverId: number, waybillIds?: number[]) {
+  if (waybillIds && !waybillIds.length) return [];
+  const rows = await db
+    .select({
+      id: s.waybills.id,
+      number: s.waybills.number,
+      status: s.waybills.status,
+      custody: s.waybills.tripCustody,
+      approved: sql<string>`coalesce((select sum(e.amount + e.vat_amount) from expenses e where e.waybill_id = "waybills"."id" and e.status = 'approved' and e.payer = 'driver_custody'), 0)`,
+      pending: sql<string>`coalesce((select sum(e.amount + e.vat_amount) from expenses e where e.waybill_id = "waybills"."id" and e.status = 'pending' and coalesce(e.reported_payer, 'custody') <> 'company'), 0)`,
+    })
+    .from(s.waybills)
+    .where(
+      and(
+        eq(s.waybills.driverId, driverId),
+        waybillIds ? inArray(s.waybills.id, waybillIds) : and(isNotNull(s.waybills.sentToDriverAt), sql`${s.waybills.tripCustody} > 0`),
+      ),
+    )
+    .orderBy(desc(s.waybills.waybillDate), desc(s.waybills.id))
+    .limit(waybillIds ? 100 : 30);
+  return rows.map((r) => {
+    const custody = Number(r.custody);
+    const approved = Number(r.approved);
+    const pending = Number(r.pending);
+    return { id: r.id, number: r.number, status: r.status, custody, approved, pending, remaining: Math.round((custody - approved - pending) * 100) / 100 };
+  });
+}
+
+export async function reportBreakdown(
+  db: Db,
+  driver: DriverProfile,
+  input: { date: string; description?: string | null; maintenanceTypeId?: number | null; priority: "low" | "normal" | "urgent"; userId?: number },
+) {
   if (!driver.vehicle) throw new Error("لا توجد مركبة مسندة لك");
-  return createBreakdownRequest(db, { vehicleId: driver.vehicle.id, driverId: driver.id, reportDate: input.date, description: input.description, priority: input.priority, userId: input.userId });
+  let type: string | null = null;
+  if (input.maintenanceTypeId) {
+    const [m] = await db.select({ nameAr: s.maintenanceTypes.nameAr }).from(s.maintenanceTypes).where(eq(s.maintenanceTypes.id, input.maintenanceTypeId));
+    if (!m) throw new Error("نوع الصيانة غير موجود");
+    type = m.nameAr;
+  }
+  const description = [type, input.description?.trim()].filter(Boolean).join(" – ");
+  return createBreakdownRequest(db, {
+    vehicleId: driver.vehicle.id,
+    driverId: driver.id,
+    reportDate: input.date,
+    description,
+    priority: input.priority,
+    maintenanceTypeId: input.maintenanceTypeId ?? null,
+    userId: input.userId,
+  });
 }
 
 export async function driverBreakdowns(db: Db | Tx, driverId: number) {
@@ -251,7 +405,7 @@ export async function driverBalances(db: Db | Tx, driver: DriverProfile, today: 
     db
       .select({ v: sql<string>`coalesce(sum(${s.expenses.amount} + ${s.expenses.vatAmount}), 0)`, n: sql<number>`count(*)::int` })
       .from(s.expenses)
-      .where(and(eq(s.expenses.driverId, driver.id), eq(s.expenses.status, "pending"))),
+      .where(and(eq(s.expenses.driverId, driver.id), eq(s.expenses.status, "pending"), sql`coalesce(${s.expenses.reportedPayer}, 'custody') <> 'company'`)),
     db
       .select({ date: s.journalEntries.entryDate, description: sql<string>`coalesce(${s.journalLines.description}, ${s.journalEntries.description})`, debit: s.journalLines.debitBase, credit: s.journalLines.creditBase })
       .from(s.journalLines)

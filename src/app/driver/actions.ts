@@ -5,14 +5,14 @@ import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { requireDriver } from "@/lib/driver-auth";
 import { destroySession, getCurrentUser, hasDriverSession } from "@/lib/auth";
-import { acceptTrip, createDriverExpense, isDriverOnly, ownTrip, recordDriverStage, reportBreakdown, setDriverLanguage, type TripStage } from "@/lib/driver-app";
+import { acceptTrip, createDriverExpense, isDriverOnly, ownTrip, recordDriverStage, reportBreakdown, setDriverLanguage, undoDriverStage, updateDriverExpense, voidDriverExpense, type DriverExpenseInput, type DriverProfile, type TripStage } from "@/lib/driver-app";
 import { requestCommissionAdvance } from "@/lib/hr";
 import { submitRenewal } from "@/lib/documents";
 import { addExpense, addFuel, deleteWaybillItem } from "@/lib/waybills";
 import { todayRiyadh } from "@/lib/dates";
 import { errorMessage } from "@/lib/errors";
 import { onceForOp, saveDataUrl } from "@/lib/attachments";
-import { DRIVER_EXPENSE_ACCOUNTS, DRIVER_LANGS, type DriverExpenseType, type DriverLang } from "@/data/driver-i18n";
+import { DRIVER_EXPENSE_ACCOUNTS, DRIVER_LANGS, type DriverDict, type DriverExpenseType, type DriverLang } from "@/data/driver-i18n";
 import type { FormState } from "@/components/action-form";
 
 const str = (d: FormData, k: string) => String(d.get(k) ?? "").trim();
@@ -34,9 +34,11 @@ export async function stageAction(_: FormState, data: FormData): Promise<FormSta
   const stage = str(data, "stage") as TripStage;
   try {
     if (!STAGES.includes(stage)) throw new Error("اختر المرحلة");
+    // التحميل والتسليم يُثبتان بصورة
+    if ((stage === "loading" || stage === "delivery") && !photo(data)) throw new Error(t.x.photoMissing);
     await onceForOp(db, op(data), async () => {
       await recordDriverStage(db, driver.id, waybillId, stage, { odometer: num(data, "odometer"), note: str(data, "note") || null, userId: user.id });
-      // صورة أو صورتان اختياريتان مع كل مرحلة
+      // صورة إجبارية وثانية اختيارية مع كل مرحلة
       for (const dataUrl of [photo(data), str(data, "photo2") || null]) {
         await saveDataUrl(db, { entity: "waybills", entityId: waybillId, kind: stage === "delivery" ? "pod" : "other", dataUrl, userId: user.id });
       }
@@ -47,6 +49,18 @@ export async function stageAction(_: FormState, data: FormData): Promise<FormSta
   revalidatePath(`/driver/trips/${waybillId}`);
   revalidatePath("/driver");
   return { ok: t.stageDone };
+}
+
+export async function undoStageAction(waybillId: number): Promise<FormState> {
+  const { driver, t } = await requireDriver();
+  try {
+    await undoDriverStage(db, driver.id, waybillId);
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+  revalidatePath(`/driver/trips/${waybillId}`);
+  revalidatePath("/driver");
+  return { ok: t.x.undone };
 }
 
 export async function acceptTripAction(_: FormState, data: FormData): Promise<FormState> {
@@ -118,50 +132,98 @@ export async function removeTripItem(waybillId: number, kind: "fuel" | "expense"
   revalidatePath(`/driver/trips/${waybillId}`);
 }
 
+function readExpense(data: FormData, t: DriverDict, userId: number): DriverExpenseInput {
+  const kind = str(data, "type") as DriverExpenseType;
+  if (!(kind in DRIVER_EXPENSE_ACCOUNTS)) throw new Error("اختر نوع المصروف");
+  const amount = num(data, "amount");
+  if (!amount) throw new Error("المبلغ إلزامي");
+  return {
+    kind,
+    amount,
+    reportedPayer: str(data, "payer") === "company" ? "company" : "custody",
+    waybillId: Number(str(data, "waybillId")) || null,
+    maintenanceTypeId: kind === "maintenance" ? Number(str(data, "maintenanceTypeId")) || null : null,
+    date: todayRiyadh(),
+    userId,
+  };
+}
+
+const saveReceipt = (expenseId: number, kind: DriverExpenseType, dataUrl: string | null, userId: number) =>
+  saveDataUrl(db, { entity: "expenses", entityId: expenseId, kind: kind === "diesel" ? "fuel_receipt" : "expense_receipt", dataUrl, userId });
+
+function refreshExpenses(waybillId?: number | null) {
+  revalidatePath("/driver/expenses");
+  revalidatePath("/driver/balance");
+  revalidatePath("/expenses");
+  if (waybillId) revalidatePath(`/driver/trips/${waybillId}`);
+}
+
 export async function expenseAction(_: FormState, data: FormData): Promise<FormState> {
   const { user, driver, t } = await requireDriver();
+  let input: DriverExpenseInput;
   try {
-    const type = str(data, "type") as DriverExpenseType;
-    if (!(type in DRIVER_EXPENSE_ACCOUNTS)) throw new Error("اختر نوع المصروف");
-    const amount = num(data, "amount");
-    if (!amount) throw new Error("المبلغ إلزامي");
+    input = readExpense(data, t, user.id);
+    // صورة الفاتورة أو الإيصال إجبارية
+    if (!photo(data)) throw new Error(t.x.photoMissing);
     await onceForOp(db, op(data), async () => {
-      const e = await createDriverExpense(db, driver, {
-        date: str(data, "date") || todayRiyadh(),
-        type,
-        description: str(data, "description") || t.expenseTypes[type],
-        amount,
-        vatAmount: num(data, "vatAmount") ?? 0,
-        vendorName: str(data, "vendorName") || null,
-        reference: str(data, "reference") || null,
-        userId: user.id,
-      });
-      await saveDataUrl(db, { entity: "expenses", entityId: e.id, kind: type === "diesel" ? "fuel_receipt" : "expense_receipt", dataUrl: photo(data), userId: user.id });
+      const e = await createDriverExpense(db, driver, input);
+      await saveReceipt(e.id, input.kind, photo(data), user.id);
     });
   } catch (err) {
     return { error: errorMessage(err) };
   }
-  revalidatePath("/driver/expenses");
-  revalidatePath("/driver/balance");
+  refreshExpenses(input.waybillId);
   return { ok: t.saved };
+}
+
+export async function editExpenseAction(id: number, _: FormState, data: FormData): Promise<FormState> {
+  const { user, driver, t } = await requireDriver();
+  let input: DriverExpenseInput;
+  try {
+    input = readExpense(data, t, user.id);
+    await updateDriverExpense(db, driver as DriverProfile, id, input);
+    // صورة جديدة تُضاف بجانب القديمة ولا تحل محلها
+    await saveReceipt(id, input.kind, photo(data), user.id);
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+  refreshExpenses(input.waybillId);
+  return { ok: t.saved };
+}
+
+export async function voidExpenseAction(id: number, _: FormState, data: FormData): Promise<FormState> {
+  const { driver, t } = await requireDriver();
+  try {
+    await voidDriverExpense(db, driver.id, id, str(data, "reason") || null);
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+  refreshExpenses(Number(str(data, "waybillId")) || null);
+  return { ok: t.x.voided };
 }
 
 export async function breakdownAction(_: FormState, data: FormData): Promise<FormState> {
   const { user, driver, t } = await requireDriver();
   try {
     const p = str(data, "priority");
+    const maintenanceTypeId = Number(str(data, "maintenanceTypeId")) || null;
+    if (!maintenanceTypeId) throw new Error(t.x.maintenanceType);
+    if (!photo(data)) throw new Error(t.x.photoMissing);
     await onceForOp(db, op(data), async () => {
-      await reportBreakdown(db, driver, {
+      const r = await reportBreakdown(db, driver, {
         date: todayRiyadh(),
-        description: str(data, "description"),
+        description: str(data, "description") || null,
+        maintenanceTypeId,
         priority: p === "urgent" || p === "low" ? p : "normal",
         userId: user.id,
       });
+      await saveDataUrl(db, { entity: "breakdown_requests", entityId: r.id, kind: "other", dataUrl: photo(data), userId: user.id });
     });
   } catch (err) {
     return { error: errorMessage(err) };
   }
   revalidatePath("/driver/breakdown");
+  revalidatePath("/maintenance/requests");
   return { ok: t.saved };
 }
 
@@ -191,7 +253,8 @@ export async function advanceAction(_: FormState, data: FormData): Promise<FormS
   try {
     const amount = num(data, "amount");
     if (!amount) throw new Error("المبلغ إلزامي");
-    await requestCommissionAdvance(db, { driverId: driver.id, amount, notes: str(data, "notes") || null, today: todayRiyadh() });
+    const source = str(data, "source") === "custody" ? "custody" : "cash";
+    await requestCommissionAdvance(db, { driverId: driver.id, amount, source, notes: str(data, "notes") || null, today: todayRiyadh() });
   } catch (err) {
     return { error: errorMessage(err) };
   }

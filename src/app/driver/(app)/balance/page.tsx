@@ -1,6 +1,7 @@
 import { db } from "@/db";
 import { getDriverContext } from "@/lib/driver-auth";
-import { driverBalances } from "@/lib/driver-app";
+import Link from "next/link";
+import { driverBalances, tripCustodySummary } from "@/lib/driver-app";
 import { todayRiyadh } from "@/lib/dates";
 import { DRIVER_LANGS, LANG_NAMES } from "@/data/driver-i18n";
 import { Icon } from "@/components/icons";
@@ -15,7 +16,14 @@ export default async function DriverBalance() {
   const { driver, t, lang } = await getDriverContext();
   if (!driver) return null;
   const today = todayRiyadh();
-  const [b, w, requests] = await Promise.all([driverBalances(db, driver, today), advanceWindow(db, driver.id, today), driverAdvanceRequests(db, driver.id)]);
+  const [b, w, requests, trips] = await Promise.all([
+    driverBalances(db, driver, today),
+    advanceWindow(db, driver.id, today),
+    driverAdvanceRequests(db, driver.id),
+    tripCustodySummary(db, driver.id),
+  ]);
+  const open = trips.filter((x) => !["approved", "invoiced"].includes(x.status));
+  const sum = (k: "custody" | "approved" | "pending" | "remaining") => open.reduce((a, x) => a + x[k], 0);
   const fill = (text: string) => text.replace("{open}", String(w.openDay)).replace("{close}", String(w.closeDay));
 
   return (
@@ -46,6 +54,34 @@ export default async function DriverBalance() {
         </p>
       )}
 
+      {trips.length > 0 && (
+        <Section title={t.x.tripsCustody}>
+          {open.length > 0 && (
+            <div className="mb-3 grid grid-cols-4 gap-1 rounded-xl bg-asphalt-900 px-2 py-2 text-center text-white">
+              {(["custody", "approved", "pending", "remaining"] as const).map((k) => (
+                <div key={k}>
+                  <div className="text-[10px] text-white/60">{t.x.box[k]}</div>
+                  <div className={`ltr-nums text-sm font-bold ${k === "remaining" && sum(k) < 0 ? "text-red-300" : "text-brand-500"}`}>{fmt(sum(k))}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          <ul className="divide-y divide-gray-100">
+            {trips.map((x) => (
+              <li key={x.id}>
+                <Link href={`/driver/expenses?trip=${x.id}`} className="flex items-center justify-between gap-2 py-2 active:bg-gray-50">
+                  <span className="ltr-nums text-sm font-medium">{x.number}</span>
+                  <span className="ltr-nums text-xs text-gray-500">
+                    {fmt(x.custody)} − {fmt(x.approved + x.pending)} ={" "}
+                    <b className={x.remaining < 0 ? "text-red-600" : "text-asphalt-900"}>{fmt(x.remaining)}</b>
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
+
       <Section title={t.advanceTitle}>
         <p className="mb-3 text-sm text-gray-500">{fill(t.advanceHint)}</p>
         <div className="mb-3 flex items-center justify-between rounded-xl bg-gray-50 px-3 py-2 text-sm">
@@ -54,8 +90,9 @@ export default async function DriverBalance() {
             {fmt(w.remaining)} <span className="text-xs font-normal text-gray-400">/ {fmt(w.cap)}</span>
           </b>
         </div>
-        {w.open && w.remaining > 0 ? (
+        {w.open && w.remaining > 0 && (
           <ActionForm action={advanceAction} className="flex flex-col gap-3">
+            <input type="hidden" name="source" value="cash" />
             <DField label={t.advanceAmount}>
               <DInput name="amount" type="number" inputMode="decimal" step="0.01" min={1} max={w.remaining} required />
             </DField>
@@ -66,15 +103,34 @@ export default async function DriverBalance() {
               {t.advanceSend}
             </SubmitButton>
           </ActionForm>
-        ) : (
-          !w.open && <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">{fill(t.advanceClosed)}</p>
         )}
+        {!w.open && <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">{fill(t.advanceClosed)}</p>}
+        <details className="mt-3 rounded-xl border border-gray-200 px-3 py-2 [&_summary::-webkit-details-marker]:hidden">
+          <summary className="cursor-pointer text-sm font-semibold text-brand-700">💵 {t.x.advanceSources.custody}</summary>
+          <ActionForm action={advanceAction} className="mt-3 flex flex-col gap-3">
+            <input type="hidden" name="source" value="custody" />
+            <p className="text-sm text-gray-500">{t.x.advanceCustodyHint}</p>
+            <DField label={t.advanceAmount}>
+              <DInput name="amount" type="number" inputMode="decimal" step="0.01" min={1} required />
+            </DField>
+            <DField label={t.advanceNote}>
+              <DInput name="notes" />
+            </DField>
+            <SubmitButton pendingLabel={t.saving} className="w-full py-3 text-base">
+              {t.advanceSend}
+            </SubmitButton>
+          </ActionForm>
+        </details>
         {requests.length > 0 && (
           <ul className="mt-3 divide-y divide-gray-100">
             {requests.map((r) => (
               <li key={r.id} className="flex items-center justify-between gap-2 py-2">
-                <span className="ltr-nums text-xs text-gray-400">
-                  {r.requestDate} · {r.number}
+                <span className="text-xs text-gray-400">
+                  <span className="ltr-nums">
+                    {r.requestDate} · {r.number}
+                  </span>
+                  <span className="block">{t.x.advanceSources[r.source === "custody" ? "custody" : "cash"]}</span>
+                  {r.status === "rejected" && r.rejectReason && <span className="block text-red-600">{r.rejectReason}</span>}
                 </span>
                 <span className="flex items-center gap-2">
                   <b className="ltr-nums text-sm">{fmt(r.amount)}</b>

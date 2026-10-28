@@ -7,6 +7,7 @@ import { createJournalEntryTx, deleteEntryTx, nextDocumentNumber, type LineInput
 import { createAdvance, payAdvance } from "@/lib/payroll";
 import { monthRange } from "@/data/payroll";
 import { annualEntitlement, computeEvaluation, inclusiveDays } from "@/data/hr";
+import { notifyDriver } from "@/lib/driver-notify";
 
 // الموارد البشرية: العُهد، والإنذارات والجزاءات والحوافز، والإجازات والحضور، والتقييم والترقية، ومقدم العمولة.
 // كل ما يمس الراتب يدخل المسير بعد اعتماده؛ والعهدة النقدية وحدها لها قيد، والعينية سجل رقابي.
@@ -869,7 +870,14 @@ export async function advanceWindow(db: Db | Tx, driverId: number, today: string
   const [used] = await db
     .select({ v: sql<string>`coalesce(sum(${s.commissionAdvanceRequests.amount}), 0)` })
     .from(s.commissionAdvanceRequests)
-    .where(and(eq(s.commissionAdvanceRequests.driverId, driverId), inArray(s.commissionAdvanceRequests.status, ["pending", "approved"]), sql`${s.commissionAdvanceRequests.requestDate} between ${start} and ${end}`));
+    .where(
+      and(
+        eq(s.commissionAdvanceRequests.driverId, driverId),
+        eq(s.commissionAdvanceRequests.source, "cash"),
+        inArray(s.commissionAdvanceRequests.status, ["pending", "approved"]),
+        sql`${s.commissionAdvanceRequests.requestDate} between ${start} and ${end}`,
+      ),
+    );
   const day = Number(today.slice(8, 10));
   return {
     open: day >= settings.advanceOpenDay && day <= settings.advanceCloseDay,
@@ -882,18 +890,25 @@ export async function advanceWindow(db: Db | Tx, driverId: number, today: string
   };
 }
 
-export async function requestCommissionAdvance(db: Db, input: { driverId: number; amount: number; notes?: string | null; today: string }) {
+/**
+ * طلب السائق: مقدم عمولة نقداً (في أيام الطلب وبسقف فئته)، أو سلفة يأخذها من العهدة التي معه
+ * (تُقيد على عهدته وتُستقطع من راتبه بعد اعتماد المكتب، ولا يحكمها سقف مقدم العمولة).
+ */
+export async function requestCommissionAdvance(db: Db, input: { driverId: number; amount: number; source?: "cash" | "custody"; notes?: string | null; today: string }) {
   if (!(input.amount > 0)) throw new Error("المبلغ إلزامي");
+  const source = input.source ?? "cash";
   return db.transaction(async (tx) => {
     // قفل السائق يمنع طلبين متزامنين يتجاوزان السقف
     await tx.select({ id: s.drivers.id }).from(s.drivers).where(eq(s.drivers.id, input.driverId)).for("update");
-    const w = await advanceWindow(tx, input.driverId, input.today);
-    if (!w.open) throw new Error(`الطلبات مفتوحة من يوم ${w.openDay} إلى يوم ${w.closeDay} من كل شهر`);
-    if (input.amount > w.remaining) throw new Error(`المتاح لك هذا الشهر ${w.remaining} من سقف ${w.cap}`);
+    if (source === "cash") {
+      const w = await advanceWindow(tx, input.driverId, input.today);
+      if (!w.open) throw new Error(`الطلبات مفتوحة من يوم ${w.openDay} إلى يوم ${w.closeDay} من كل شهر`);
+      if (input.amount > w.remaining) throw new Error(`المتاح لك هذا الشهر ${w.remaining} من سقف ${w.cap}`);
+    }
     const number = await nextDocumentNumber(tx, "commission_advance", "CAR", Number(input.today.slice(0, 4)));
     const [row] = await tx
       .insert(s.commissionAdvanceRequests)
-      .values({ number, driverId: input.driverId, requestDate: input.today, amount: String(r2(input.amount)), notes: input.notes?.trim() || null })
+      .values({ number, driverId: input.driverId, requestDate: input.today, amount: String(r2(input.amount)), source, notes: input.notes?.trim() || null })
       .returning();
     return row;
   });
@@ -923,15 +938,27 @@ export async function listAdvanceRequests(db: Db | Tx, f: { status?: string; q?:
 }
 
 /** الاعتماد: سلفة بقسط يساوي المبلغ (تُستقطع كاملة من مسير الشهر)، وتُصرف فوراً إن اختير الصندوق. */
-export async function approveAdvanceRequest(db: Db, id: number, opts: { cashAccountId?: number | null; userId?: number }) {
+export async function approveAdvanceRequest(db: Db, id: number, opts: { cashAccountId?: number | null; installment?: number | null; userId?: number }) {
   return db.transaction(async (tx) => {
     const [r] = await tx.select().from(s.commissionAdvanceRequests).where(eq(s.commissionAdvanceRequests.id, id)).for("update");
     if (!r) throw new Error("الطلب غير موجود");
     if (r.status !== "pending") throw new Error(`الطلب ${r.number} تمت معالجته`);
     const [d] = await tx.select({ employeeId: s.drivers.employeeId }).from(s.drivers).where(eq(s.drivers.id, r.driverId));
-    const adv = await createAdvance(tx, { employeeId: d.employeeId, advanceDate: r.requestDate, amount: num(r.amount), installment: num(r.amount), notes: `مقدم عمولة – طلب ${r.number}`, userId: opts.userId });
-    if (opts.cashAccountId) await payAdvance(tx, adv.id, { cashAccountId: opts.cashAccountId, userId: opts.userId });
+    const fromCustody = r.source === "custody";
+    // سلفة العهدة تُقسّط على الرواتب حسب ما يحدده المعتمد، ومقدم العمولة يُستقطع كاملاً
+    const installment = fromCustody && opts.installment ? Math.min(opts.installment, num(r.amount)) : num(r.amount);
+    const adv = await createAdvance(tx, {
+      employeeId: d.employeeId,
+      advanceDate: r.requestDate,
+      amount: num(r.amount),
+      installment,
+      notes: `${fromCustody ? "سلفة من العهدة" : "مقدم عمولة"} – طلب ${r.number}`,
+      userId: opts.userId,
+    });
+    if (fromCustody) await payAdvance(tx, adv.id, { fromCustodyOf: r.driverId, userId: opts.userId });
+    else if (opts.cashAccountId) await payAdvance(tx, adv.id, { cashAccountId: opts.cashAccountId, userId: opts.userId });
     await tx.update(s.commissionAdvanceRequests).set({ status: "approved", advanceId: adv.id, decidedBy: opts.userId ?? null }).where(eq(s.commissionAdvanceRequests.id, id));
+    await notifyDriver(tx, r.driverId, { kind: "advance_approved", body: `${r.number} · ${num(r.amount)}`, href: "/driver/balance" });
     return adv;
   });
 }
@@ -944,6 +971,7 @@ export async function rejectAdvanceRequest(db: Db, id: number, opts: { reason: s
     .where(and(eq(s.commissionAdvanceRequests.id, id), eq(s.commissionAdvanceRequests.status, "pending")))
     .returning();
   if (!row) throw new Error("الطلب تمت معالجته");
+  await notifyDriver(db, row.driverId, { kind: "advance_rejected", body: `${row.number}: ${opts.reason.trim()}`, href: "/driver/balance" });
 }
 
 // ───────────── لوحة الموارد البشرية وتقاريرها ─────────────

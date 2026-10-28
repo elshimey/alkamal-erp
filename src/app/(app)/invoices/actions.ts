@@ -29,6 +29,7 @@ import type { PanelResult } from "@/components/record-panel";
 import type { SheetChange, DocSheetResult } from "@/components/doc-sheet";
 import type { FormState } from "@/components/action-form";
 import { autoSubmit, submitDocument } from "@/lib/zatca/service";
+import { bulkTrips, invoiceTripIds } from "@/lib/trip-dispatch";
 
 const refresh = (id?: number) => {
   revalidatePath("/invoices");
@@ -208,6 +209,28 @@ export async function removeFromMenu(id: number, back: string, fd: FormData): Pr
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 const toNum = (v: unknown) => Number(String(v ?? "").replace(/[,\s]/g, "")) || 0;
 
+function requiredId(fd: FormData, key: string, message: string) {
+  const v = Number(str(fd, key));
+  if (!v) throw new Error(message);
+  return v;
+}
+
+/** رحلة السائق في الفاتورة المباشرة: «1» = برحلة، «0» = بلا رحلة، غير موجودة = بلا تغيير. */
+function readTrip(fd: FormData): ManualInvoiceInput["trip"] {
+  const on = str(fd, "tripOn");
+  if (on !== "1") return on === "0" ? null : undefined;
+  const custody = toNum(str(fd, "tripCustody"));
+  if (custody < 0) throw new Error("عهدة الرحلة لا تكون سالبة");
+  return {
+    routeId: requiredId(fd, "tripRouteId", "رحلة السائق: اختر المسار"),
+    vehicleId: requiredId(fd, "tripVehicleId", "رحلة السائق: اختر المركبة"),
+    driverId: Number(str(fd, "tripDriverId")) || null,
+    shipper: str(fd, "tripShipper"),
+    consignee: str(fd, "tripConsignee"),
+    tripCustody: custody,
+  };
+}
+
 async function readInvoiceForm(fd: FormData): Promise<ManualInvoiceInput> {
   const rows = (JSON.parse(str(fd, "lines") || "[]") as Record<string, string>[]).filter((l) => (l.description ?? "").trim() || toNum(l.price));
   const taxes = await db.select({ id: s.taxCodes.id, code: s.taxCodes.code }).from(s.taxCodes).where(inArray(s.taxCodes.code, ["VAT15-OUT", "ZERO"]));
@@ -219,6 +242,7 @@ async function readInvoiceForm(fd: FormData): Promise<ManualInvoiceInput> {
     currencyCode: str(fd, "currencyCode") || "SAR",
     reference: str(fd, "reference") || null,
     notes: str(fd, "notes") || null,
+    trip: readTrip(fd),
     lines: rows.map((l, i) => {
       const description = (l.description ?? "").trim();
       if (!description) throw new Error(`البند ${i + 1}: اكتب الوصف`);
@@ -264,6 +288,7 @@ export async function bulkInvoiceOps(_: FormState, fd: FormData): Promise<FormSt
   const ids = [...new Set(fd.getAll("ids").map(Number).filter((x) => Number.isInteger(x) && x > 0))];
   if (!ids.length) return { error: "حدد فاتورة واحدة على الأقل من الجدول" };
   if (op === "issue") return issueMany(undefined, fd);
+  if (op === "send_driver" || op === "unsend_driver") return dispatchInvoices(ids, op === "send_driver" ? "send" : "unsend", fd);
   if (op === "merge") {
     const user = await requirePermission("sales_invoices", "update");
     try {
@@ -295,4 +320,24 @@ export async function bulkInvoiceOps(_: FormState, fd: FormData): Promise<FormSt
   const msg = done.length ? `${verb} ${done.length} فاتورة: ${done.join("، ")}` : "";
   if (!done.length) return { error: errors.join("\n") };
   return errors.length ? { error: `${msg}\nولم يُنفذ:\n${errors.join("\n")}` } : { ok: msg };
+}
+
+/** إرسال رحلات الفواتير للسائقين أو إلغاء إرسالها (رحلة الفاتورة المباشرة والشحنات التي فيها). */
+async function dispatchInvoices(invoiceIds: number[], op: "send" | "unsend", fd?: FormData): Promise<FormState> {
+  const user = await requirePermission("waybills", "update");
+  const trips = await invoiceTripIds(db, invoiceIds);
+  if (!trips.length) return { error: "لا توجد رحلة سائق في الفواتير المحددة؛ أضف «رحلة السائق» من تعديل الفاتورة المباشرة أولاً" };
+  const res = await bulkTrips(db, trips, op, { cashAccountId: fd ? Number(str(fd, "cashAccountId")) || null : null, userId: user.id });
+  refresh();
+  const what = op === "send" ? `أُرسلت ${res.done.length} رحلة للسائق (${res.done.join("، ")})` : `أُلغي إرسال ${res.done.length} رحلة وسُحبت من تطبيق السائق`;
+  if (!res.done.length) return { error: res.skipped.join("\n") };
+  return res.skipped.length ? { error: `${what}، ولم يُنفذ:\n${res.skipped.join("\n")}` } : { ok: what };
+}
+
+export async function sendInvoiceToDriver(id: number, fd: FormData): Promise<FormState> {
+  return dispatchInvoices([id], "send", fd);
+}
+
+export async function unsendInvoiceFromDriver(id: number): Promise<FormState> {
+  return dispatchInvoices([id], "unsend");
 }

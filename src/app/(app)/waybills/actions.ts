@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
 import { requirePermission, type CurrentUser } from "@/lib/auth";
@@ -28,13 +28,13 @@ import {
   rejectWaybill,
   revertWaybill,
   saveTransportDoc,
-  sendTransportDocToDriver,
   updateWaybill,
 } from "@/lib/waybills";
 import { EXPENSE_BILL_TO, EXPENSE_PAYERS, FUEL_SOURCES, TRIP_STAGES, WAYBILL_FLOW, WAYBILL_STATUS, type WaybillFlowStatus } from "@/data/waybills";
 import { parseTransport } from "@/lib/transport-draft";
 import type { PanelResult } from "@/components/record-panel";
 import { removeWaybillsFromDrafts } from "@/lib/invoices";
+import { bulkTrips, sendTrip, unsendTrip } from "@/lib/trip-dispatch";
 import { autoSubmit } from "@/lib/zatca/service";
 import type { FormState } from "@/components/action-form";
 import type { DocSheetResult, SheetChange } from "@/components/doc-sheet";
@@ -310,6 +310,7 @@ function readWaybillForm(fd: FormData, prices: boolean) {
     // من لا يرى الأسعار لا يُدخلها؛ الفارغ يُحسب من العقد
     amount: prices ? numOrNull(fd, "amount", "المبلغ") : undefined,
     driverCommission: carrier ? null : numOrNull(fd, "commission", "العمولة"),
+    tripCustody: carrier ? 0 : (numOrNull(fd, "tripCustody", "عهدة الرحلة") ?? 0),
     weightTons: numOrNull(fd, "weight", "الوزن"),
     containerNumber: str(fd, "container"),
     deliveryNoteNumber: str(fd, "deliveryNote"),
@@ -361,13 +362,28 @@ export async function saveTransportPanel(id: number, fd: FormData): Promise<Pane
   }
 }
 
-/** إرسال وثيقة النقل لتطبيق السائق. */
-export async function sendToDriverAction(id: number): Promise<FormState> {
-  await guard("update", id);
+/** إرسال الشحنة لتطبيق السائق مع صرف عهدة رحلتها. */
+export async function sendToDriverAction(id: number, fd?: FormData): Promise<FormState> {
+  const user = await guard("update", id);
   try {
-    const r = await sendTransportDocToDriver(db, id);
+    const r = await sendTrip(db, id, { cashAccountId: fd ? optId(str(fd, "cashAccountId")) : null, userId: user.id });
     refresh(id);
-    return { ok: `أُرسلت الشحنة إلى ${r.driver ?? "السائق"}؛ تظهر الآن في تطبيقه ليستلمها` };
+    revalidatePath("/invoices");
+    const custody = r.custody > 0 ? `، وصُرفت له عهدة الرحلة ${r.custody.toLocaleString("en")} بالسند ${r.paymentNumber}` : "";
+    return { ok: `أُرسلت الشحنة ${r.number} إلى ${r.driver ?? "السائق"}${custody}` };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+}
+
+/** إلغاء الإرسال: تُسحب من تطبيق السائق وتُعكس عهدتها. */
+export async function unsendFromDriverAction(id: number): Promise<FormState> {
+  const user = await guard("update", id);
+  try {
+    const r = await unsendTrip(db, id, user.id);
+    refresh(id);
+    revalidatePath("/invoices");
+    return { ok: `أُلغي إرسال ${r.number}؛ سُحبت من تطبيق السائق وعُكست عهدتها، ويمكن تعديلها الآن` };
   } catch (err) {
     return { error: errorMessage(err) };
   }
@@ -517,32 +533,15 @@ export async function bulkWaybillOps(_: FormState, fd: FormData): Promise<FormSt
       return { error: errorMessage(err) };
     }
   }
-  if (op === "send_driver") {
-    await guard("update");
-    let sent = 0;
-    const failed: string[] = [];
-    const already = new Set(
-      (await db.select({ id: s.waybills.id, number: s.waybills.number, at: s.waybills.sentToDriverAt }).from(s.waybills).where(inArray(s.waybills.id, ids)))
-        .filter((w) => w.at)
-        .map((w) => {
-          failed.push(`${w.number}: أُرسلت للسائق من قبل (لإعادة الإرسال افتح عملياتها)`);
-          return w.id;
-        }),
-    );
-    for (const id of ids) {
-      if (already.has(id)) continue;
-      try {
-        await guard("update", id);
-        await sendTransportDocToDriver(db, id);
-        sent++;
-      } catch (err) {
-        failed.push(errorMessage(err));
-      }
-    }
+  if (op === "send_driver" || op === "unsend_driver") {
+    const user = await guard("update");
+    for (const id of ids) await guard("update", id);
+    const res = await bulkTrips(db, ids, op === "send_driver" ? "send" : "unsend", { cashAccountId: optId(str(fd, "cashAccountId")), userId: user.id });
     refresh();
-    const what = `أُرسلت ${sent} شحنة للسائقين؛ تظهر في تطبيقاتهم ليستلموها`;
-    if (!sent) return { error: failed.join("\n") };
-    return failed.length ? { error: `${what}، ولم تُرسل ${failed.length}:\n${failed.join("\n")}` } : { ok: what };
+    revalidatePath("/invoices");
+    const what = op === "send_driver" ? `أُرسلت ${res.done.length} شحنة للسائقين؛ تظهر في تطبيقاتهم` : `أُلغي إرسال ${res.done.length} شحنة وسُحبت من تطبيق السائق`;
+    if (!res.done.length) return { error: res.skipped.join("\n") };
+    return res.skipped.length ? { error: `${what}، ولم يُنفذ على ${res.skipped.length}:\n${res.skipped.join("\n")}` } : { ok: what };
   }
   if (!isFlow(op)) return { error: "اختر العملية" };
   const user = await guard(op === "approved" ? "approve" : "update");

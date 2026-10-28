@@ -763,6 +763,11 @@ export const waybills = pgTable(
     logistiNumber: varchar("logisti_number", { length: 40 }),
     logistiStatus: varchar("logisti_status", { length: 12 }).notNull().default("none"),
     sentToDriverAt: timestamp("sent_to_driver_at", { withTimezone: true }),
+    // عهدة الرحلة: تُصرف للسائق عند الإرسال بسند عهدة، وتُعكس عند إلغاء الإرسال
+    tripCustody: money("trip_custody").notNull().default("0"),
+    custodyPaymentId: ref("custody_payment_id").references((): AnyPgColumn => payments.id),
+    // رحلة أنشأتها فاتورة مباشرة: إيرادها في تلك الفاتورة فلا تدخل قائمة «بانتظار الفوترة»
+    sourceInvoiceId: ref("source_invoice_id").references((): AnyPgColumn => salesInvoices.id, { onDelete: "set null" }),
     driverAcceptedAt: timestamp("driver_accepted_at", { withTimezone: true }),
     status: waybillStatus("status").notNull().default("draft"),
     rejectionReason: text("rejection_reason"),
@@ -788,6 +793,7 @@ export const waybills = pgTable(
       end`,
     ),
     check("waybills_amounts", sql`${t.amount} >= 0 and ${t.driverCommission} >= 0 and ${t.salesRepCommission} >= 0 and coalesce(${t.carrierCost}, 0) >= 0`),
+    check("waybills_trip_custody", sql`${t.tripCustody} >= 0`),
     check("waybills_odometer", sql`${t.odometerEnd} is null or ${t.odometerStart} is null or ${t.odometerEnd} >= ${t.odometerStart}`),
   ],
 );
@@ -1160,7 +1166,7 @@ export const adjustmentNoteLines = pgTable(
 );
 
 export const directExpensePayer = pgEnum("direct_expense_payer", ["driver_custody", "cash"]);
-export const expenseStatus = pgEnum("expense_status", ["pending", "approved", "rejected"]);
+export const expenseStatus = pgEnum("expense_status", ["pending", "approved", "rejected", "voided"]);
 
 // المصروف المباشر: من عهدة سائق أو من صندوق/بنك، ويُقيد عند الاعتماد
 export const expenses = pgTable(
@@ -1186,6 +1192,11 @@ export const expenses = pgTable(
     reference: varchar("reference", { length: 60 }),
     status: expenseStatus("status").notNull().default("pending"),
     rejectReason: text("reject_reason"),
+    // ما رفعه السائق من التطبيق: نوعه، ومن قال إنه دفع، ونوع الصيانة، وسبب إلغائه «رُفع بالخطأ»
+    driverKind: varchar("driver_kind", { length: 20 }),
+    reportedPayer: varchar("reported_payer", { length: 10 }),
+    maintenanceTypeId: ref("maintenance_type_id").references((): AnyPgColumn => maintenanceTypes.id),
+    voidReason: text("void_reason"),
     journalEntryId: ref("journal_entry_id").references(() => journalEntries.id),
     approvedBy: ref("approved_by").references(() => users.id),
     createdBy: ref("created_by").references(() => users.id),
@@ -1287,6 +1298,7 @@ export const breakdownRequests = pgTable(
     reportDate: date("report_date").notNull(),
     description: text("description").notNull(),
     priority: breakdownPriority("priority").notNull().default("normal"),
+    maintenanceTypeId: ref("maintenance_type_id").references((): AnyPgColumn => maintenanceTypes.id),
     estimatedCost: money("estimated_cost"),
     status: breakdownStatus("status").notNull().default("pending_supervisor"),
     rejectReason: text("reject_reason"),
@@ -2025,6 +2037,8 @@ export const commissionAdvanceRequests = pgTable(
     notes: text("notes"),
     status: commissionAdvanceStatus("status").notNull().default("pending"),
     advanceId: ref("advance_id").references(() => employeeAdvances.id),
+    // cash = تُصرف من الصندوق، custody = يأخذها من العهدة التي معه
+    source: varchar("source", { length: 10 }).notNull().default("cash"),
     rejectReason: text("reject_reason"),
     decidedBy: ref("decided_by").references(() => users.id),
     createdAt: createdAt(),
@@ -2220,4 +2234,32 @@ export const fuelCardLines = pgTable(
     journalEntryId: ref("journal_entry_id").references(() => journalEntries.id),
   },
   (t) => [index("fuel_card_lines_statement_idx").on(t.statementId), uniqueIndex("fuel_card_lines_fuel_uq").on(t.fuelId).where(sql`${t.fuelId} is not null`)],
+);
+
+// ───────────── أنواع الصيانة (لمصاريف السائق وطلبات الصيانة) ─────────────
+
+export const maintenanceTypes = pgTable("maintenance_types", {
+  id: id(),
+  nameAr: text("name_ar").notNull(),
+  nameEn: text("name_en"),
+  isActive: boolean("is_active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: createdAt(),
+});
+
+// ───────────── إشعارات تطبيق السائق ─────────────
+
+export const driverNotifications = pgTable(
+  "driver_notifications",
+  {
+    id: id(),
+    driverId: ref("driver_id").notNull().references(() => drivers.id, { onDelete: "cascade" }),
+    kind: varchar("kind", { length: 30 }).notNull(),
+    title: text("title").notNull(),
+    body: text("body"),
+    href: text("href"),
+    readAt: timestamp("read_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("driver_notifications_driver_idx").on(t.driverId, t.createdAt)],
 );

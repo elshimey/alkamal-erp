@@ -7,7 +7,7 @@ import { can } from "@/lib/permissions";
 import { errorMessage } from "@/lib/errors";
 import { todayRiyadh } from "@/lib/dates";
 import { cell, saveSheetRows, type SheetRow } from "@/lib/sheet-server";
-import { approveExpense, createExpense, deleteExpense, rejectExpense, revertExpense } from "@/lib/purchases";
+import { approveExpense, approveExpenseWith, createExpense, deleteExpense, rejectExpense, revertExpense } from "@/lib/purchases";
 import type { FormState } from "@/components/action-form";
 
 const refresh = () => {
@@ -55,6 +55,27 @@ export async function approve(id: number): Promise<FormState> {
   }
 }
 
+/** اعتماد مصروف السائق بعد مراجعته: الدافع الفعلي والحساب والضريبة والمورد. */
+export async function approveReviewed(id: number, _: FormState, fd: FormData): Promise<FormState> {
+  const user = await requirePermission("expenses", "approve");
+  try {
+    const vat = String(fd.get("vat") ?? "").replace(/,/g, "").trim();
+    const entry = await approveExpenseWith(db, id, {
+      payer: fd.get("payer") === "cash" ? "cash" : "driver_custody",
+      cashAccountId: Number(fd.get("cashAccountId")) || null,
+      accountId: Number(fd.get("accountId")) || null,
+      vatAmount: vat ? Number(vat) : 0,
+      vendorName: String(fd.get("vendor") ?? ""),
+      userId: user.id,
+    });
+    refresh();
+    revalidatePath("/driver/expenses");
+    return { ok: `اعتُمد ورُحّل القيد ${entry.number}` };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+}
+
 export async function approveMany(ids: number[]): Promise<FormState> {
   const user = await requirePermission("expenses", "approve");
   const errors: string[] = [];
@@ -76,6 +97,7 @@ export async function reject(id: number, _: FormState, fd: FormData): Promise<Fo
   try {
     await rejectExpense(db, id, String(fd.get("reason") || ""));
     refresh();
+    revalidatePath("/driver/expenses");
     return { ok: "رُفض المصروف" };
   } catch (err) {
     return { error: errorMessage(err) };

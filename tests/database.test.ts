@@ -25,6 +25,7 @@ import { addSubAccount } from "@/lib/accounts";
 import { activeContract, createContract, createLocation, createParty, createRoute, priceTrip, setContractStatus } from "@/lib/operations";
 import {
   createDirectInvoice,
+  currentTrip,
   createInvoice,
   createReceipt,
   deleteInvoice,
@@ -40,14 +41,15 @@ import {
   updateDraftInvoice,
 } from "@/lib/invoices";
 import { parseDocFilter } from "@/lib/doc-filters";
-import { createExpense, approveExpense, createPayment, createPurchaseInvoice, custodyBalances, deletePurchaseInvoice, listPurchaseInvoices, postPurchaseInvoice, updateDraftPurchase, rejectExpense, revertExpense, revertPayment, revertPurchaseInvoice, supplierBalances } from "@/lib/purchases";
+import { createExpense, approveExpense, approveExpenseWith, createPayment, createPurchaseInvoice, custodyBalances, deletePurchaseInvoice, listPurchaseInvoices, postPurchaseInvoice, updateDraftPurchase, rejectExpense, revertExpense, revertPayment, revertPurchaseInvoice, supplierBalances } from "@/lib/purchases";
 import { addMaintenanceLines, approveBreakdownRequest, approveMaintenanceOrder, completeMaintenanceOrder, createBreakdownRequest, createMaintenanceOrder, deleteMaintenanceOrder, planSchedule, rejectBreakdownRequest, revertMaintenanceOrder, reviewBreakdownRequest, savePlan, listOrders, orderDoc, updateDraftOrder, createOrdersFrom, listRequests, requestDoc } from "@/lib/maintenance";
 import { adjustPayrollLines, approvePayrollRun, bankTransferRows, createAdvance, createEmployee, createPayrollRun, payAdvance, payPayrollRun, refreshPayrollRun, revertAdvance, revertPayrollPayment, revertPayrollRun, updateEmployee } from "@/lib/payroll";
 import { createViolation, deleteViolation, listViolations, payViolations, revertViolationPayment, violationSummary } from "@/lib/violations";
 import { computePayrollLine } from "@/data/payroll";
 import { accountLedger, balanceSheet, costCenterProfit, incomeStatement, previousRange, trialBalance, vatReturn } from "@/lib/reports";
 import { alertCounts, cashFlow, financials, operations, periodRange, receivablesAging, vehicleProfit } from "@/lib/dashboard";
-import { acceptTrip, createDriverExpense, createDriverLogin, linkUserToDriver, removeDriverLogin, resetDriverPassword, driverBalances, driverBreakdowns, driverForUser, driverTrips, isDriverOnly, nextStages, recordDriverStage, reportBreakdown, startTrip, tripDetail } from "@/lib/driver-app";
+import { acceptTrip, createDriverExpense, createDriverLogin, linkUserToDriver, removeDriverLogin, resetDriverPassword, driverBalances, driverBreakdowns, driverForUser, driverTrips, isDriverOnly, nextStages, recordDriverStage, reportBreakdown, startTrip, tripDetail, tripCustodySummary, undoDriverStage, updateDriverExpense, voidDriverExpense, driverExpenses } from "@/lib/driver-app";
+import { driverNotifications, unreadCount, markNotificationsRead } from "@/lib/driver-notify";
 import { runImport } from "@/lib/importers";
 import { applyAdvance, customerCredit, postReceipt } from "@/lib/receipts";
 import { createNote, postNote, revertNote } from "@/lib/notes";
@@ -71,7 +73,8 @@ import { IMPORT_SPECS } from "@/data/import-specs";
 import * as hr from "@/lib/hr";
 import * as platform from "@/lib/platform";
 import { runInTenant, tenantClient } from "@/db/tenant";
-import { addExpense, addFuel, approvalIssues, approveWaybill, createWaybill, deleteWaybill, invoiceSelectedWaybills, invoiceWaybillsNow, listWaybills, parseWaybillFilter, patchWaybill, recordStage, rejectWaybill, revertWaybill, saveTransportDoc, sendTransportDocToDriver, setWaybillStatus, updateWaybill, waybillDoc } from "@/lib/waybills";
+import { addExpense, addFuel, approvalIssues, approveWaybill, createWaybill, deleteWaybill, invoiceSelectedWaybills, invoiceWaybillsNow, listWaybills, parseWaybillFilter, patchWaybill, recordStage, rejectWaybill, revertWaybill, saveTransportDoc, setWaybillStatus, updateWaybill, waybillDoc } from "@/lib/waybills";
+import { sendTrip, unsendTrip, bulkTrips, invoiceTripIds } from "@/lib/trip-dispatch";
 import { parseTransport } from "@/lib/transport-draft";
 
 const url = process.env.TEST_DATABASE_URL;
@@ -1209,11 +1212,11 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       await expect(saveTransportDoc(db, w.id, { paymentMethod: "bitcoin" })).rejects.toThrow("طريقة الدفع");
 
       // الإرسال للسائق: يظهر في رحلته، والناقل الخارجي لا سائق له في التطبيق
-      const sent = await sendTransportDocToDriver(db, w.id);
+      const sent = await sendTrip(db, w.id);
       expect(sent.number).toBe(w.number);
       expect((await waybillDoc(db, w.id))!.w.sentToDriverAt).not.toBeNull();
       const ext = await createWaybill(db, { waybillDate: `${YEAR}-12-11`, customerId, routeId, shipper: "أ", consignee: "ب", carrierId, carrierCost: 300 });
-      await expect(sendTransportDocToDriver(db, ext.id)).rejects.toThrow("ناقل خارجي");
+      await expect(sendTrip(db, ext.id)).rejects.toThrow("ناقل خارجي");
 
       // الوثيقة تبقى قابلة للتعديل بعد الاعتماد (لا تمس القيد)
       await setWaybillStatus(db, w.id, "approved", { canOverride: true, overrideReason: "اختبار" });
@@ -1281,7 +1284,7 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       const w = await createWaybill(db, { waybillDate: D, customerId, routeId, shipper: "مصنع", consignee: "مستودع", vehicleId: me.vehicle!.id, driverId: me.id, userId });
       const open = async () => (await driverTrips(db, me.id, { open: true })).map((x) => x.id);
       expect(await open()).not.toContain(w.id); // لم تُرسل بعد
-      await sendTransportDocToDriver(db, w.id);
+      await sendTrip(db, w.id);
       expect(await open()).toContain(w.id);
       await acceptTrip(db, me.id, w.id);
       let d = await tripDetail(db, me.id, w.id);
@@ -1297,14 +1300,16 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     });
 
     it("مصروف السائق ينتظر الاعتماد ثم يُخصم من عهدته، والرصيد يجمع العمولة والمستحق", async () => {
-      const e = await createDriverExpense(db, me, { date: D, type: "road", description: "وجبة وموقف", amount: 100, vatAmount: 15, userId });
+      const e = await createDriverExpense(db, me, { date: D, kind: "road", amount: 115, reportedPayer: "custody", userId });
+      expect(e.description).toBe("مصاريف طريق ورسوم");
       expect(e.status).toBe("pending");
       let b = await driverBalances(db, me, D);
       expect(b.pendingExpenses).toBe(115);
       expect(b.custody).toBe(0);
       expect(b.monthCommission).toBe(120);
       expect(b.payable).toBe(120);
-      await approveExpense(db, e.id);
+      // المعتمد يفصل الضريبة من الإجمالي الذي أدخله السائق
+      await approveExpenseWith(db, e.id, { payer: "driver_custody", vatAmount: 15 });
       b = await driverBalances(db, me, D);
       expect(b.custody).toBe(-115);
       expect(b.pendingCount).toBe(0);
@@ -1312,6 +1317,147 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       const r = await reportBreakdown(db, me, { date: D, description: "صوت في الفرامل", priority: "urgent", userId });
       expect(r.vehicleId).toBe(me.vehicle!.id);
       expect((await driverBreakdowns(db, me.id))[0].r.status).toBe("pending_supervisor");
+    });
+
+    it("عهدة الرحلة: تُقيد على السائق عند الإرسال، وتُقفل بعده، ويُعكس قيدها بإلغاء الإرسال ما لم يسجّل السائق شيئاً", async () => {
+      const [box] = await db.select().from(s.accounts).where(eq(s.accounts.code, "110101"));
+      const w = await createWaybill(db, { waybillDate: D, customerId, routeId, shipper: "مصنع", consignee: "مستودع", vehicleId: me.vehicle!.id, driverId: me.id, tripCustody: 750, userId });
+      expect(Number(w.tripCustody)).toBe(750);
+      const before = (await driverBalances(db, me, D)).custody;
+      await expect(sendTrip(db, w.id)).rejects.toThrow("اختر الصندوق");
+      const r = await sendTrip(db, w.id, { cashAccountId: box.id, date: D, userId });
+      expect(r.paymentNumber).toMatch(/^PV-/);
+      expect((await driverBalances(db, me, D)).custody).toBe(before + 750);
+      expect((await tripDetail(db, me.id, w.id)).trip.tripCustody).toBe("750.000");
+      // بعد الإرسال: لا تغيير للعهدة أو السائق، ولا حذف، ولا إرسال مكرر
+      await expect(patchWaybill(db, w.id, { tripCustody: 900 })).rejects.toThrow("ألغِ الإرسال");
+      await expect(patchWaybill(db, w.id, { driverId: otherDriverId })).rejects.toThrow("ألغِ الإرسال");
+      await expect(deleteWaybill(db, w.id, { reason: "x" })).rejects.toThrow("ألغِ الإرسال");
+      await expect(sendTrip(db, w.id, { cashAccountId: box.id })).rejects.toThrow("من قبل");
+      await patchWaybill(db, w.id, { consignee: "مستودع 2" }); // غير ذلك يُعدّل عادي
+      // إلغاء الإرسال يعكس العهدة ويحذف سندها
+      await unsendTrip(db, w.id, userId);
+      expect((await driverBalances(db, me, D)).custody).toBe(before);
+      expect(await db.select().from(s.payments).where(eq(s.payments.number, r.paymentNumber!))).toHaveLength(0);
+      await patchWaybill(db, w.id, { tripCustody: 900 });
+      // بعد أن يسجّل السائق التحميل لا يُلغى الإرسال
+      await sendTrip(db, w.id, { cashAccountId: box.id, date: D });
+      await recordDriverStage(db, me.id, w.id, "loading", { userId });
+      await expect(unsendTrip(db, w.id)).rejects.toThrow("تحميل");
+      const bulk = await bulkTrips(db, [w.id], "unsend");
+      expect([bulk.done.length, bulk.skipped.length]).toEqual([0, 1]);
+      expect((await driverBalances(db, me, D)).custody).toBe(before + 900);
+    });
+
+    it("الفاتورة المباشرة برحلة سائق: شحنة مرتبطة لا تدخل الفوترة، تُرسل من الفاتورة، ولا تُحذف الفاتورة وهي مرسلة", async () => {
+      const [box] = await db.select().from(s.accounts).where(eq(s.accounts.code, "110101"));
+      const [rev] = await db.select().from(s.accounts).where(eq(s.accounts.code, "4101"));
+      const line = { description: "نقل خاص", quantity: 1, unitPrice: 2000, discountPercent: 0, amount: 2000, vatRate: 15, vatAmount: 300, taxCodeId: null, accountId: rev.id, costCenterId: null };
+      const head = { customerId, invoiceDate: D, dueDate: D, currencyCode: "SAR", lines: [line], userId };
+      const trip = { routeId, vehicleId: me.vehicle!.id, shipper: "مصنع", consignee: "مستلم", tripCustody: 300 };
+      const inv = await createDirectInvoice(db, { ...head, trip });
+      const t1 = (await currentTrip(db, inv.id))!;
+      expect([t1.driverId, t1.tripCustody, t1.sentToDriverAt]).toEqual([me.id, 300, null]);
+      const [wb] = await db.select().from(s.waybills).where(eq(s.waybills.id, t1.id));
+      expect([Number(wb.amount), wb.sourceInvoiceId]).toEqual([2000, inv.id]);
+      expect(await invoiceTripIds(db, [inv.id])).toEqual([t1.id]);
+      // تعديل البنود يحدّث مبلغ الرحلة، وتبقى خارج «بانتظار الفوترة» حتى بعد اعتمادها
+      await updateDirectInvoice(db, inv.id, { ...head, lines: [{ ...line, unitPrice: 2500, amount: 2500, vatAmount: 375 }] });
+      expect(Number((await db.select().from(s.waybills).where(eq(s.waybills.id, t1.id)))[0].amount)).toBe(2500);
+      await sendTrip(db, t1.id, { cashAccountId: box.id, date: D });
+      await expect(deleteInvoice(db, inv.id, { reason: "x" })).rejects.toThrow("ألغِ الإرسال");
+      await expect(updateDirectInvoice(db, inv.id, { ...head, trip: { ...trip, tripCustody: 500 } })).rejects.toThrow("ألغِ الإرسال");
+      await unsendTrip(db, t1.id);
+      const queued = async () => (await invoicingQueue(db)).find((x) => x.customerId === customerId)?.count ?? 0;
+      const q0 = await queued();
+      await setWaybillStatus(db, t1.id, "approved", { canOverride: true, overrideReason: "اختبار" });
+      expect(await queued()).toBe(q0);
+      await expect(invoiceSelectedWaybills(db, [t1.id], { invoiceDate: D })).resolves.toMatchObject({ created: [] });
+      // إزالة الرحلة من الفاتورة بعد اعتمادها تُرفض، وقبل الاعتماد تُحذف الشحنة المرتبطة
+      await expect(updateDirectInvoice(db, inv.id, { ...head, trip: null })).rejects.toThrow("أرجعها");
+      await setWaybillStatus(db, t1.id, "draft", {});
+      await updateDirectInvoice(db, inv.id, { ...head, trip: null });
+      expect(await currentTrip(db, inv.id)).toBeNull();
+    });
+
+    it("مصاريف السائق الجديدة: لرحلة أو عامة، تعديل وإلغاء «رُفع بالخطأ»، والمعتمد يحدد الدافع ويفصل الضريبة، والإشعارات", async () => {
+      const [box] = await db.select().from(s.accounts).where(eq(s.accounts.code, "110101"));
+      const [mt] = await db.select().from(s.maintenanceTypes).orderBy(s.maintenanceTypes.sortOrder).limit(1);
+      const w = await createWaybill(db, { waybillDate: D, customerId, routeId, shipper: "مصنع", consignee: "مستودع", vehicleId: me.vehicle!.id, driverId: me.id, tripCustody: 1000, userId });
+      await markNotificationsRead(db, me.id);
+      await sendTrip(db, w.id, { cashAccountId: box.id, date: D, userId });
+      expect((await driverNotifications(db, me.id))[0]).toMatchObject({ kind: "trip_sent", href: `/driver/trips/${w.id}` });
+      expect(await unreadCount(db, me.id)).toBe(1);
+      const before = (await driverBalances(db, me, D)).custody;
+      // ديزل من العهدة، وصيانة قال السائق إن الشركة دفعتها
+      const diesel = await createDriverExpense(db, me, { date: D, kind: "diesel", amount: 230, reportedPayer: "custody", waybillId: w.id, userId });
+      expect(diesel.description).toBe(`ديزل · رحلة ${w.number}`);
+      await expect(createDriverExpense(db, me, { date: D, kind: "maintenance", amount: 50, reportedPayer: "company", waybillId: w.id })).rejects.toThrow("نوع الصيانة");
+      const fix = await createDriverExpense(db, me, { date: D, kind: "maintenance", amount: 400, reportedPayer: "company", waybillId: w.id, maintenanceTypeId: mt.id });
+      let [sum] = await tripCustodySummary(db, me.id, [w.id]);
+      // ما دفعته الشركة لا ينتظر من العهدة
+      expect(sum).toMatchObject({ custody: 1000, approved: 0, pending: 230, remaining: 770 });
+      // تعديل ما ينتظر الاعتماد، ثم «رُفع بالخطأ» يلغيه ولا يحذفه
+      await updateDriverExpense(db, me, diesel.id, { date: D, kind: "diesel", amount: 345, reportedPayer: "custody", waybillId: w.id });
+      const extra = await createDriverExpense(db, me, { date: D, kind: "road", amount: 20, reportedPayer: "custody", waybillId: w.id });
+      await voidDriverExpense(db, me.id, extra.id, null);
+      const voided = (await driverExpenses(db, me.id, w.id)).find((x) => x.e.id === extra.id)!;
+      expect([voided.e.status, voided.e.voidReason]).toEqual(["voided", "رُفع بالخطأ"]);
+      await expect(voidDriverExpense(db, me.id, extra.id)).rejects.toThrow("ينتظر الاعتماد");
+      await expect(approveExpense(db, extra.id)).rejects.toThrow("ألغاه السائق");
+      // الاعتماد الجماعي لا يخصم ما قالت الشركة إنها دفعته من العهدة
+      await expect(approveExpense(db, fix.id)).rejects.toThrow("اعتمده منفرداً");
+      await expect(approveExpenseWith(db, fix.id, { payer: "cash" })).rejects.toThrow("الصندوق");
+      await expect(approveExpenseWith(db, fix.id, { payer: "cash", cashAccountId: box.id, vatAmount: 100 })).rejects.toThrow("15%");
+      await approveExpenseWith(db, fix.id, { payer: "cash", cashAccountId: box.id, vatAmount: 52.17, vendorName: "ورشة النور" });
+      const [fixed] = await db.select().from(s.expenses).where(eq(s.expenses.id, fix.id));
+      expect([Number(fixed.amount), Number(fixed.vatAmount), fixed.payer, fixed.vendorName]).toEqual([347.83, 52.17, "cash", "ورشة النور"]);
+      await approveExpenseWith(db, diesel.id, { payer: "driver_custody", vatAmount: 45 });
+      expect((await driverBalances(db, me, D)).custody).toBe(before - 345);
+      [sum] = await tripCustodySummary(db, me.id, [w.id]);
+      expect(sum).toMatchObject({ approved: 345, pending: 0, remaining: 655 });
+      // المصروف المعتمد يمنع إلغاء الإرسال، والرفض يصل للسائق بسببه
+      await expect(unsendTrip(db, w.id)).rejects.toThrow("مصروف");
+      const mine = (await driverNotifications(db, me.id)).filter((n) => n.kind === "expense_approved" && [fix.number, diesel.number].some((x) => n.body?.startsWith(x)));
+      expect(mine).toHaveLength(2);
+      const bad = await createDriverExpense(db, me, { date: D, kind: "tires", amount: 90, reportedPayer: "custody" });
+      await rejectExpense(db, bad.id, "الإيصال غير واضح");
+      expect((await driverNotifications(db, me.id))[0]).toMatchObject({ kind: "expense_rejected", body: `${bad.number}: الإيصال غير واضح` });
+      await expect(updateDriverExpense(db, me, bad.id, { date: D, kind: "tires", amount: 80, reportedPayer: "custody" })).rejects.toThrow("ينتظر الاعتماد");
+    });
+
+    it("مراحل الرحلة: التراجع عن آخر مرحلة يعيد الحالة، ولا تراجع بعد إغلاق الرحلة", async () => {
+      const w = await createWaybill(db, { waybillDate: D, customerId, routeId, shipper: "مصنع", consignee: "مستودع", vehicleId: me.vehicle!.id, driverId: me.id, userId });
+      await expect(undoDriverStage(db, me.id, w.id)).rejects.toThrow("لا توجد مرحلة");
+      await recordDriverStage(db, me.id, w.id, "loading", { odometer: 1000, userId });
+      await recordDriverStage(db, me.id, w.id, "delivery", { userId });
+      expect((await tripDetail(db, me.id, w.id)).trip.status).toBe("delivered");
+      expect(await undoDriverStage(db, me.id, w.id)).toBe("delivery");
+      let d = await tripDetail(db, me.id, w.id);
+      expect([d.trip.status, d.next]).toEqual(["in_transit", ["delivery"]]);
+      await undoDriverStage(db, me.id, w.id);
+      d = await tripDetail(db, me.id, w.id);
+      expect([d.trip.status, d.next]).toEqual(["draft", ["loading"]]);
+      await expect(undoDriverStage(db, otherDriverId, w.id)).rejects.toThrow("ليست لك");
+      await recordDriverStage(db, me.id, w.id, "loading", { userId });
+      await setWaybillStatus(db, w.id, "approved", { canOverride: true, overrideReason: "اختبار" });
+      d = await tripDetail(db, me.id, w.id);
+      expect(d.next).toEqual([]);
+      await expect(undoDriverStage(db, me.id, w.id)).rejects.toThrow("مغلقة");
+    });
+
+    it("طلب الصيانة بنوعه، والسلفة من العهدة تُقيد على عهدة السائق وتُقسط وتصل للسائق", async () => {
+      const [mt] = await db.select().from(s.maintenanceTypes).orderBy(s.maintenanceTypes.sortOrder).limit(1);
+      const r = await reportBreakdown(db, me, { date: D, maintenanceTypeId: mt.id, description: "تسريب", priority: "normal", userId });
+      expect([r.description, r.maintenanceTypeId]).toEqual([`${mt.nameAr} – تسريب`, mt.id]);
+      const before = (await driverBalances(db, me, D)).custody;
+      const req = await hr.requestCommissionAdvance(db, { driverId: me.id, amount: 600, source: "custody", today: D });
+      expect(req.source).toBe("custody");
+      const adv = await hr.approveAdvanceRequest(db, req.id, { installment: 200, userId });
+      expect([Number(adv.installment), Number(adv.amount)]).toEqual([200, 600]);
+      // مدين سلف الموظفين، دائن عهدة السائق
+      expect((await driverBalances(db, me, D)).custody).toBe(before - 600);
+      expect((await driverNotifications(db, me.id))[0]).toMatchObject({ kind: "advance_approved" });
     });
   });
 

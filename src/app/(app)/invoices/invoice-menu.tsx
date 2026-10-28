@@ -1,6 +1,8 @@
 import type { MenuItem } from "@/components/actions-menu";
 import { hasOfficialNumber, mergedParts, type salesInvoiceDoc } from "@/lib/invoices";
-import { removeFromMenu, revertFromMenu, unmerge } from "./actions";
+import type { ReactNode } from "react";
+import { fmt } from "@/lib/format";
+import { removeFromMenu, revertFromMenu, sendInvoiceToDriver, unmerge, unsendInvoiceFromDriver } from "./actions";
 
 type InvoiceRow = NonNullable<Awaited<ReturnType<typeof salesInvoiceDoc>>>;
 
@@ -9,7 +11,7 @@ export function invoiceActions(
   i: InvoiceRow["i"],
   lines: InvoiceRow["lines"],
   back: string,
-  p: { canUpdate: boolean; canRevert: boolean; canDelete: boolean; editHref: string },
+  p: { canUpdate: boolean; canRevert: boolean; canDelete: boolean; canSend?: boolean; editHref: string; trips?: InvoiceRow["trips"]; cashField?: ReactNode },
 ): MenuItem[] {
   const items: MenuItem[] = [];
   const draft = i.status === "draft";
@@ -37,6 +39,37 @@ export function invoiceActions(
       action: revertFromMenu.bind(null, i.id),
       confirm: { title: `إرجاع الفاتورة ${i.number} إلى مسودة`, text: "يُلغى قيد الإيراد والضريبة وتعود الفاتورة مسودة لتعديلها، وتحتفظ برقمها الرسمي نفسه.", submit: "إرجاع" },
     });
+  const trips = p.trips ?? [];
+  const sendable = trips.filter((w) => !w.sentAt && ["draft", "in_transit", "delivered"].includes(w.status));
+  const sent = trips.filter((w) => w.sentAt);
+  if (p.canSend && sendable.length) {
+    const custody = sendable.reduce((t, w) => t + Number(w.custody), 0);
+    items.push({
+      label: "إرسال للسائق",
+      icon: "truck",
+      hint: custody > 0 ? `مع عهدة رحلة ${fmt(custody)}` : "تظهر رحلتها في تطبيق السائق",
+      divider: items.length > 0,
+      action: sendInvoiceToDriver.bind(null, i.id),
+      confirm: {
+        title: `إرسال رحلة الفاتورة ${i.number} للسائق`,
+        text: `تظهر الرحلة (${sendable.map((w) => w.number).join("، ")}) في تطبيق السائق${custody > 0 ? `، وتُقيد عليه عهدة الرحلة ${fmt(custody)} بسند صرف عهدة` : ""}.`,
+        submit: "إرسال",
+        fields: custody > 0 ? p.cashField : undefined,
+      },
+    });
+  }
+  if (p.canSend && sent.length)
+    items.push({
+      label: "إلغاء الإرسال للسائق",
+      icon: "undo",
+      hint: "تُسحب من تطبيقه وتُعكس عهدتها",
+      action: unsendInvoiceFromDriver.bind(null, i.id),
+      confirm: {
+        title: `إلغاء إرسال رحلة الفاتورة ${i.number}`,
+        text: "تُسحب الرحلة من تطبيق السائق ويُعكس سند عهدتها، فتصبح الفاتورة ورحلتها قابلتين للتعديل والحذف. لا يتم إن كان السائق سجّل عليها تحميلاً أو تسليماً أو مصروفاً.",
+        submit: "إلغاء الإرسال",
+      },
+    });
   items.push({ label: "طباعة", icon: "printer", href: `/invoices/${i.id}?print=1`, newTab: true, divider: items.length > 0 });
   if (draft && p.canDelete)
     items.push({
@@ -44,7 +77,7 @@ export function invoiceActions(
       icon: "trash",
       danger: true,
       divider: true,
-      disabled: hasOfficialNumber(i) && "أُصدرت سابقاً برقم رسمي؛ لا تُحذف حفاظاً على تسلسل الفواتير",
+      disabled: (hasOfficialNumber(i) && "أُصدرت سابقاً برقم رسمي؛ لا تُحذف حفاظاً على تسلسل الفواتير") || (trips.some((w) => w.linked && w.sentAt) && "رحلتها مرسلة للسائق؛ ألغِ الإرسال أولاً"),
       action: removeFromMenu.bind(null, i.id, back),
       confirm: {
         title: `حذف الفاتورة المسودة ${i.number}`,

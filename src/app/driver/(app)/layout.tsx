@@ -7,11 +7,13 @@ import { TabBar } from "../tab-bar";
 import { driverLogout } from "../actions";
 import { OfflineSync } from "../offline";
 import { Icon } from "@/components/icons";
+import { db } from "@/db";
+import { unreadCount } from "@/lib/driver-notify";
 
 export default async function DriverLayout({ children }: { children: React.ReactNode }) {
   const { user, driver, lang, t } = await getDriverContext();
   const office = user.roles.some((r) => r.key !== "driver");
-  const brand = await getBrand(true);
+  const [brand, unread] = await Promise.all([getBrand(true), driver ? unreadCount(db, driver.id) : 0]);
   return (
     <div dir={isRtl(lang) ? "rtl" : "ltr"} lang={lang} className="min-h-screen bg-concrete pb-24">
       <header className="relative overflow-hidden bg-asphalt-900 px-4 pt-[calc(env(safe-area-inset-top)+0.75rem)] pb-4 text-white">
@@ -22,6 +24,15 @@ export default async function DriverLayout({ children }: { children: React.React
             <div className="truncate text-[11px] text-white/55">{brand.known ? brand.name : t.appName}</div>
             <div className="truncate font-display text-base font-semibold">{driver ? <>{t.hello} <bdi>{driver.name}</bdi></> : t.appName}</div>
           </div>
+          {driver && (
+            <Link href="/driver/notifications" aria-label={t.x.notifications} title={t.x.notifications} className="relative flex flex-col items-center gap-0.5 rounded-lg px-1.5 py-1 text-white/80 active:bg-white/10">
+              <Icon name="bell" className="size-5" />
+              <span className="text-[10px] leading-none">{t.x.notifications}</span>
+              {unread > 0 && (
+                <span className="ltr-nums absolute -top-1 end-0 min-w-5 rounded-full bg-red-600 px-1 text-center text-[11px] leading-5 font-bold text-white ring-2 ring-asphalt-900">{unread > 99 ? "99+" : unread}</span>
+              )}
+            </Link>
+          )}
           {driver && (
             <form action={driverLogout}>
               <button aria-label={t.logout} title={t.logout} className="flex flex-col items-center gap-0.5 rounded-lg px-1.5 py-1 text-white/80 active:bg-white/10">

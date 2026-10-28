@@ -9,6 +9,7 @@ import { cityNames, contactCards, customerOptions, driverOptions, locationOption
 import { emptyTransport, toTransportDraft } from "@/lib/transport-draft";
 import { getCompany, getInvoiceTemplate } from "@/lib/company";
 import { todayRiyadh } from "@/lib/dates";
+import { cashAccounts } from "@/lib/invoices";
 import { listHref, type DocListParams } from "@/lib/doc-filters";
 import { fmt } from "@/lib/format";
 import { EDITABLE, listWaybills, parseWaybillFilter, waybillDoc } from "@/lib/waybills";
@@ -21,6 +22,8 @@ import { ClickRow } from "@/components/click-row";
 import { DateInput } from "@/components/date-input";
 import { DocSheet, type DocSheetRow } from "@/components/doc-sheet";
 import { DocToolbar } from "@/components/doc-toolbar";
+import { DriverSentTag } from "@/components/driver-sent";
+import { CashAccountField } from "@/components/cash-account-field";
 import { Icon } from "@/components/icons";
 import { RowCheck, SelectAll, SelectionGate, SelectionTotal } from "@/components/row-selection";
 import { SendDocument } from "@/components/send-document";
@@ -28,7 +31,7 @@ import { SheetEditor } from "@/components/sheet-editor";
 import { AddModeBar } from "@/components/list-actions";
 import { Badge, Card, EmptyRow, LimitRow, PageHeader, Table, Td } from "@/components/ui";
 import { WaybillDocument } from "@/components/waybill-document";
-import { bulkWaybillOps, copyWaybill, invoiceOne, issueOne, unmergeOne, removeWaybillAction, saveTransportPanel, saveWaybillPanel, saveWaybills, saveWaybillSheet, sendToDriverAction, waybillToStatus } from "./actions";
+import { bulkWaybillOps, copyWaybill, invoiceOne, issueOne, unmergeOne, removeWaybillAction, saveTransportPanel, saveWaybillPanel, saveWaybills, saveWaybillSheet, sendToDriverAction, unsendFromDriverAction, waybillToStatus } from "./actions";
 import { TransportPanel } from "./transport-panel";
 import { WaybillEditor, type RouteOption, type WaybillDraft } from "./waybill-editor";
 
@@ -58,6 +61,8 @@ const SHEET_TONE: Record<WaybillStatus, "gray" | "green" | "blue" | "amber" | "r
 
 /** حالة الشحنة كما تُعرض: المعتمدة بانتظار الفوترة، أو مدمجة في مسودة، أو مفوترة. */
 function waybillState(status: WaybillStatus, invoiceId: number | null, invoiceWaybills: number) {
+  // رحلة فاتورة مباشرة: إيرادها في فاتورتها (invoiceWaybills = -1 من القائمة)
+  if (invoiceWaybills < 0) return status === "approved" ? { label: "معتمدة", tone: "green" as const, sub: "رحلة فاتورة مباشرة" } : { label: WAYBILL_STATUS[status].label, tone: WAYBILL_STATUS[status].tone, sub: "رحلة فاتورة مباشرة" };
   if (status === "approved" && !invoiceId) return { label: "معتمدة", tone: "amber" as const, sub: "بانتظار الفوترة" };
   if (status === "approved") return invoiceWaybills > 1 ? { label: "مدمجة", tone: "blue" as const } : { label: "في مسودة فاتورة", tone: "blue" as const };
   return { label: WAYBILL_STATUS[status].label, tone: WAYBILL_STATUS[status].tone };
@@ -108,6 +113,8 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
     getCompany(db),
     getInvoiceTemplate(db),
   ]);
+  const cashOpts = canUpdate ? await cashAccounts(db) : [];
+  const cashField = <CashAccountField options={cashOpts} />;
   const transportOpen = !!transportDoc && transportDoc.w.status !== "rejected";
   const editing = !!editRow && EDITABLE.includes(editRow.status);
   const needOptions = view === "sheet" || creating || editing || bulkAdding;
@@ -179,7 +186,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
           fields: dateField,
         },
       });
-    if (st === "approved" && canIssueInvoice)
+    if (st === "approved" && canIssueInvoice && !w.sourceInvoiceId)
       items.push({
         label: invoiceId ? `فوترة (إصدار ${invoice ?? "الفاتورة"})` : "فوترة الشحنة",
         icon: "check",
@@ -193,7 +200,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
           fields: invoiceId ? undefined : dateField,
         },
       });
-    if (st === "approved" && invoiceId && can(user.perms, "sales_invoices", "update"))
+    if (st === "approved" && invoiceId && !w.sourceInvoiceId && can(user.perms, "sales_invoices", "update"))
       items.push({
         label: "فك الدمج",
         icon: "undo",
@@ -218,13 +225,32 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
     if (canUpdate && st === "rejected") items.push({ label: "إعادة إلى مسودة للتصحيح", icon: "undo", action: to("draft") });
     if (canUpdate && st !== "rejected") {
       items.push({ label: "بيانات وثيقة النقل", icon: "pencil", hint: "المرسل والمستلم والبضاعة ورقم لوجستي", href: withParam(listUrl({ open: String(w.id) }), "transport", String(w.id)), divider: true });
-      if (w.execution === "fleet")
+      if (w.execution === "fleet" && !w.sentToDriverAt && (st === "draft" || st === "in_transit" || st === "delivered")) {
+        const custody = Number(w.tripCustody);
         items.push({
-          label: w.sentToDriverAt ? "إعادة الإرسال للسائق" : "إرسال للسائق",
+          label: "إرسال للسائق",
           icon: "truck",
-          hint: "تظهر الرحلة في تطبيقه ليستلمها ويسجل التحميل والتسليم",
+          hint: custody > 0 ? `مع عهدة رحلة ${fmt(custody)}` : "تظهر الرحلة في تطبيقه ليسجل التحميل والتسليم",
           action: sendToDriverAction.bind(null, w.id),
-          confirm: w.sentToDriverAt ? { title: `إعادة إرسال وثيقة ${w.number}`, text: "أُرسلت من قبل؛ ستظهر للسائق بآخر بياناتها.", submit: "إرسال" } : undefined,
+          confirm: {
+            title: `إرسال الشحنة ${w.number} للسائق`,
+            text: custody > 0 ? `تظهر في تطبيق السائق، وتُقيد عليه عهدة الرحلة ${fmt(custody)} بسند صرف عهدة.` : "تظهر الرحلة في تطبيق السائق ليستلمها ويسجل التحميل والتسليم. لا توجد عهدة رحلة عليها.",
+            submit: "إرسال",
+            fields: custody > 0 ? cashField : undefined,
+          },
+        });
+      }
+      if (w.sentToDriverAt)
+        items.push({
+          label: "إلغاء الإرسال للسائق",
+          icon: "undo",
+          hint: "تُسحب من تطبيقه وتُعكس عهدتها؛ لتعديلها أو حذفها",
+          action: unsendFromDriverAction.bind(null, w.id),
+          confirm: {
+            title: `إلغاء إرسال ${w.number}`,
+            text: "تُسحب الرحلة من تطبيق السائق ويُعكس سند عهدتها. لا يتم إن كان السائق سجّل عليها تحميلاً أو تسليماً أو مصروفاً.",
+            submit: "إلغاء الإرسال",
+          },
         });
       if (w.sentToDriverAt && driverMobile)
         items.push({ label: "تنبيه السائق عبر واتساب", icon: "send", href: whatsappLink(driverMobile, `وثيقة النقل للشحنة ${w.number} جاهزة في تطبيق السائق: ${appUrl}/driver/trips/${w.id}`), newTab: true });
@@ -290,6 +316,8 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
         consignee: w.consignee,
         amount: showPrices ? String(Number(w.amount)) : "",
         commission: String(Number(w.driverCommission)),
+        tripCustody: Number(w.tripCustody) ? String(Number(w.tripCustody)) : "",
+        sent: !!w.sentToDriverAt,
         weight: w.weightTons != null ? String(Number(w.weightTons)) : "",
         container: str(w.containerNumber),
         deliveryNote: str(w.deliveryNoteNumber),
@@ -300,7 +328,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
       };
     }
     if (creating)
-      return { date: today, customerId: "", routeId: "", execution: "fleet", vehicleId: "", trailerId: "", driverId: "", carrierId: "", carrierCost: "", carrierPlate: "", carrierDriverName: "", shipper: "", consignee: "", amount: "", commission: "", weight: "", container: "", deliveryNote: "", customs: "", notes: "", transport: emptyTransport() };
+      return { date: today, customerId: "", routeId: "", execution: "fleet", vehicleId: "", trailerId: "", driverId: "", carrierId: "", carrierCost: "", carrierPlate: "", carrierDriverName: "", shipper: "", consignee: "", amount: "", commission: "", tripCustody: "", weight: "", container: "", deliveryNote: "", customs: "", notes: "", transport: emptyTransport() };
     return null;
   };
   const initial = draft();
@@ -540,7 +568,12 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
                           {l}
                         </Link>
                       ))}
-                      {openDoc.w.sentToDriverAt && <Badge tone={openDoc.w.driverAcceptedAt ? "green" : "blue"}>{openDoc.w.driverAcceptedAt ? "✓ أُرسلت للسائق واستلمها" : "✓ أُرسلت للسائق"}</Badge>}
+                      {openDoc.w.execution === "fleet" && (
+                        <Badge tone={openDoc.w.sentToDriverAt ? (openDoc.w.driverAcceptedAt ? "green" : "blue") : "gray"}>
+                          {openDoc.w.sentToDriverAt ? (openDoc.w.driverAcceptedAt ? "✓ أُرسلت للسائق واستلمها" : "✓ أُرسلت للسائق") : "لم تُرسل للسائق"}
+                        </Badge>
+                      )}
+                      {Number(openDoc.w.tripCustody) > 0 && <Badge tone="amber">عهدة الرحلة {fmt(openDoc.w.tripCustody)}</Badge>}
                       {openDoc.w.logistiNumber && <Badge tone="gray">لوجستي {openDoc.w.logistiNumber}</Badge>}
                     </div>
                     <WaybillDocument company={company} doc={openDoc} template={template} compact variant={docVariant} />
@@ -568,9 +601,16 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
                       <SelectionTotal form={BULK_FORM} noun="شحنة" />
                       <span className="mx-1 h-6 w-px bg-gray-200" aria-hidden />
                       {canUpdate && (
-                        <SubmitButton op="send_driver" variant="secondary" pendingLabel="جارٍ الإرسال…" className="!py-1.5">
+                        <ConfirmSubmit
+                          op="send_driver"
+                          className="!py-1.5"
+                          title="إرسال الشحنات المحددة للسائقين"
+                          text="تظهر كل رحلة في تطبيق سائقها، وما عليه عهدة رحلة تُصرف له بسند عهدة من الحساب المختار. ما أُرسل من قبل لا يُعاد إرساله."
+                          submit="إرسال"
+                          fields={cashField}
+                        >
                           إرسال للسائق
-                        </SubmitButton>
+                        </ConfirmSubmit>
                       )}
                       {canApprove && (
                         <SubmitButton op="approved" pendingLabel="جارٍ الاعتماد…" className="!py-1.5">
@@ -610,6 +650,15 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
                                 {op === "draft" ? "إرجاع إلى مسودة" : `إلى «${WAYBILL_STATUS[op].label}»`}
                               </SubmitButton>
                             ))}
+                            <ConfirmSubmit
+                              op="unsend_driver"
+                              className="!justify-start !border-0 !text-start !shadow-none"
+                              title="إلغاء إرسال الشحنات المحددة"
+                              text="تُسحب كل رحلة من تطبيق سائقها ويُعكس سند عهدتها، فتصبح قابلة للتعديل والحذف. ما سجّل عليه السائق تحميلاً أو تسليماً أو مصروفاً لا يُلغى."
+                              submit="إلغاء الإرسال"
+                            >
+                              إلغاء الإرسال للسائق
+                            </ConfirmSubmit>
                             {can(user.perms, "sales_invoices", "update") && (
                               <ConfirmSubmit
                                 op="unmerge"
@@ -664,9 +713,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
                         <Badge tone={st.tone}>{st.label}</Badge>
                         {"sub" in st && <span className="mt-0.5 block text-xs whitespace-nowrap text-amber-700">{st.sub}</span>}
                         {w.status === "rejected" && w.rejectionReason && <span className="block max-w-48 truncate text-xs text-red-600">{w.rejectionReason}</span>}
-                        {w.sentToDriverAt && (
-                          <span className={`mt-0.5 block text-xs whitespace-nowrap ${w.driverAcceptedAt ? "text-green-700" : "text-sky-700"}`}>{w.driverAcceptedAt ? "✓ أُرسلت للسائق واستلمها" : "✓ أُرسلت للسائق"}</span>
-                        )}
+                        <DriverSentTag sentAt={w.sentToDriverAt} acceptedAt={w.driverAcceptedAt} fleet={w.execution === "fleet"} />
                       </Td>
                       <Td className="ltr-nums whitespace-nowrap">
                         {r.invoiceId ? (

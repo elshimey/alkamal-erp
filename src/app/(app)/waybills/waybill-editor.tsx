@@ -31,6 +31,9 @@ export interface WaybillDraft {
   consignee: string;
   amount: string;
   commission: string;
+  // عهدة الرحلة تُصرف للسائق عند الإرسال؛ تُقفل بعد الإرسال
+  tripCustody: string;
+  sent?: boolean;
   weight: string;
   container: string;
   deliveryNote: string;
@@ -219,6 +222,9 @@ export function WaybillEditor({
                 </PanelField>
                 <PanelField label="عمولة السائق" hint="فارغ = من المسار">
                   <input name="commission" value={d.commission} onChange={onField} inputMode="decimal" className={`${field} ltr-nums`} placeholder="من المسار" />
+                </PanelField>
+                <PanelField label="عهدة الرحلة" hint={d.sent ? "أُرسلت للسائق؛ ألغِ الإرسال لتعديلها" : "تُصرف للسائق عند الإرسال"}>
+                  <input name="tripCustody" value={d.tripCustody} onChange={onField} readOnly={d.sent} inputMode="decimal" className={`${field} ltr-nums ${d.sent ? "bg-gray-50 text-gray-500" : ""}`} placeholder="0" />
                 </PanelField>
               </>
             ) : (
