@@ -47,6 +47,7 @@ export interface DocListParams {
   sort?: string;
   view?: string;
   open?: string;
+  page?: string;
 }
 
 const pick = <T extends string>(v: string | undefined, keys: Record<T, unknown>, fallback: T) => (v && v in keys ? (v as T) : fallback);

@@ -2,7 +2,8 @@ import Link from "next/link";
 import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
-import { entryDoc, listEntries, type EntryFilter } from "@/lib/journal";
+import { countEntries, entryDoc, listEntries, type EntryFilter } from "@/lib/journal";
+import { PAGE_SIZE, pageOf } from "@/lib/paging";
 import { getCompany, getInvoiceTemplate } from "@/lib/company";
 import { listHref, parseDocFilter, type DocListParams } from "@/lib/doc-filters";
 import { todayRiyadh } from "@/lib/dates";
@@ -13,7 +14,7 @@ import { DocToolbar } from "@/components/doc-toolbar";
 import { Icon } from "@/components/icons";
 import { ImportLink } from "@/components/import-link";
 import { JournalVoucher } from "@/components/journal-voucher";
-import { Badge, EmptyRow, LimitRow, PageHeader, Table, Td } from "@/components/ui";
+import { Badge, EmptyRow, PageHeader, Pager, Table, Td } from "@/components/ui";
 import { DocSheet, type DocSheetRow } from "@/components/doc-sheet";
 import { post, remove, revert, saveEntrySheet } from "./actions";
 import { fmt } from "@/lib/format";
@@ -28,8 +29,11 @@ export default async function JournalPage({ searchParams }: { searchParams: Prom
   const f = parseDocFilter(sp, Object.keys(ENTRY_KINDS), todayRiyadh());
   const view = sp.view === "sheet" ? "sheet" : "table";
   const openId = view === "table" ? Number(sp.open) || null : null;
-  const [list, openDoc, company, template] = await Promise.all([
-    listEntries(db, { q: f.q, from: f.from, to: f.to, kind: f.status as EntryFilter["kind"], sort: f.sort in SORTS ? (f.sort as keyof typeof SORTS) : undefined }),
+  const { page, offset } = pageOf(sp.page);
+  const ef: EntryFilter = { q: f.q, from: f.from, to: f.to, kind: f.status as EntryFilter["kind"], sort: f.sort in SORTS ? (f.sort as keyof typeof SORTS) : undefined };
+  const [list, count, openDoc, company, template] = await Promise.all([
+    listEntries(db, ef, PAGE_SIZE, offset),
+    countEntries(db, ef),
     openId ? entryDoc(db, openId) : Promise.resolve(null),
     getCompany(db),
     getInvoiceTemplate(db),
@@ -59,7 +63,7 @@ export default async function JournalPage({ searchParams }: { searchParams: Prom
         )}
       </PageHeader>
 
-      <DocToolbar base={BASE} params={sp} statuses={ENTRY_KINDS} allStatuses="كل القيود" pay={false} sorts={SORTS} noun="قيد" exportName="القيود-اليومية" count={list.length} placeholder="ابحث بالرقم أو الوصف أو الحساب" />
+      <DocToolbar base={BASE} params={sp} statuses={ENTRY_KINDS} allStatuses="كل القيود" pay={false} sorts={SORTS} noun="قيد" exportName="القيود-اليومية" count={count} placeholder="ابحث بالرقم أو الوصف أو الحساب" />
 
       {view === "sheet" ? (
         <>
@@ -93,6 +97,7 @@ export default async function JournalPage({ searchParams }: { searchParams: Prom
               badges: { status: { label: ENTRY_STATUS[e.status].label, tone: ENTRY_STATUS[e.status].tone } },
             }))}
           />
+          <Pager page={page} size={PAGE_SIZE} total={count} hrefFor={(p) => listHref(BASE, sp, { page: p > 1 ? String(p) : undefined, open: undefined })} />
         </>
       ) : openDoc ? (
         <div className="grid items-start gap-4 lg:grid-cols-[minmax(17rem,22rem)_1fr]">
@@ -167,7 +172,6 @@ export default async function JournalPage({ searchParams }: { searchParams: Prom
           </div>
           <Table head={["التاريخ", "الرقم", "الوصف", "المصدر", "المرجع", "السطور", "المبلغ", "الحالة"]}>
             {list.length === 0 && <EmptyRow cols={8}>{f.q || f.status || f.from ? "لا توجد قيود بهذه الشروط" : "لا توجد قيود بعد"}</EmptyRow>}
-            <LimitRow cols={8} shown={list.length} limit={500} />
             {list.map(({ e, total, lines }) => {
               const open = listHref(BASE, sp, { open: String(e.id) });
               return (
@@ -194,6 +198,7 @@ export default async function JournalPage({ searchParams }: { searchParams: Prom
               );
             })}
           </Table>
+          <Pager page={page} size={PAGE_SIZE} total={count} hrefFor={(p) => listHref(BASE, sp, { page: p > 1 ? String(p) : undefined, open: undefined })} />
         </>
       )}
     </>

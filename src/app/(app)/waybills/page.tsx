@@ -11,6 +11,7 @@ import { getCompany, getInvoiceTemplate } from "@/lib/company";
 import { todayRiyadh } from "@/lib/dates";
 import { fundingAccounts } from "@/lib/invoices";
 import { listHref, type DocListParams } from "@/lib/doc-filters";
+import { PAGE_SIZE, pageOf } from "@/lib/paging";
 import { fmt } from "@/lib/format";
 import { EDITABLE, listWaybills, parseWaybillFilter, waybillDoc } from "@/lib/waybills";
 import { WAYBILL_SORTS, WAYBILL_STATUS, type WaybillStatus } from "@/data/waybills";
@@ -29,7 +30,7 @@ import { RowCheck, SelectAll, SelectionGate, SelectionTotal } from "@/components
 import { SendDocument } from "@/components/send-document";
 import { SheetEditor } from "@/components/sheet-editor";
 import { AddModeBar } from "@/components/list-actions";
-import { Badge, Card, EmptyRow, LimitRow, PageHeader, Table, Td } from "@/components/ui";
+import { Badge, Card, EmptyRow, PageHeader, Pager, Table, Td } from "@/components/ui";
 import { WaybillDocument } from "@/components/waybill-document";
 import { bulkWaybillOps, copyWaybill, invoiceOne, issueOne, unmergeOne, removeWaybillAction, saveTransportPanel, saveWaybillPanel, saveWaybills, saveWaybillSheet, sendToDriverAction, unsendFromDriverAction, waybillToStatus } from "./actions";
 import { TransportPanel } from "./transport-panel";
@@ -37,7 +38,6 @@ import { WaybillEditor, type RouteOption, type WaybillDraft } from "./waybill-ed
 
 const BASE = "/waybills";
 const BULK_FORM = "waybill-bulk";
-const LIMIT = 500;
 
 const TABS: { key: string; label: string }[] = [
   { key: "", label: "الكل" },
@@ -92,7 +92,8 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
   const canIssueInvoice = can(user.perms, "sales_invoices", "approve");
   const canOverride = hasSpecial(user.perms, "override_controls");
   const view = sp.view === "sheet" ? "sheet" : "table";
-  const lp: DocListParams = { q: sp.q, status: sp.status, period: sp.period, sort: sp.sort, view: sp.view };
+  const lp: DocListParams = { q: sp.q, status: sp.status, period: sp.period, sort: sp.sort, view: sp.view, page: sp.page };
+  const { page, offset } = pageOf(sp.page);
   const bulkAdding = sp.add === "1" && canCreate;
   const creating = sp.new === "1" && canCreate;
   const openId = view === "table" ? Number(sp.open) || null : null;
@@ -104,8 +105,8 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
   const appUrl = `${h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https")}://${host}`;
   const filter = { ...parseWaybillFilter(sp, today), driverUserId: scopeFor(user.perms, "waybills", "view") === "own" ? user.id : undefined };
 
-  const [{ rows, counts }, openDoc, editRow, editGoods, transportDoc, company, template] = await Promise.all([
-    listWaybills(db, filter, LIMIT),
+  const [{ rows, counts, total: listTotal }, openDoc, editRow, editGoods, transportDoc, company, template] = await Promise.all([
+    listWaybills(db, filter, PAGE_SIZE, offset),
     openId ? waybillDoc(db, openId) : Promise.resolve(null),
     editId ? db.select().from(s.waybills).where(eq(s.waybills.id, editId)).then((r) => r[0] ?? null) : Promise.resolve(null),
     editId ? db.select().from(s.waybillGoods).where(eq(s.waybillGoods.waybillId, editId)).orderBy(s.waybillGoods.lineNo) : Promise.resolve([]),
@@ -332,8 +333,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
     return null;
   };
   const initial = draft();
-  const returnTo = view === "sheet" ? listUrl() : listUrl({ open: "{id}" }).replace("%7Bid%7D", "{id}");
-  const total = rows.reduce((t, r) => t + Number(r.w.amount), 0);
+  const returnTo = view === "sheet" ? listUrl() : listUrl({ open: "{id}", page: creating ? undefined : lp.page }).replace("%7Bid%7D", "{id}");
   const filtered = !!(filter.q || filter.tab || filter.from);
   const openRow = openDoc ? rows.find((r) => r.w.id === openDoc.w.id) : undefined;
   const openInvoiceId = openRow?.invoiceId ?? null;
@@ -390,7 +390,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
               return (
                 <Link
                   key={t.key || "all"}
-                  href={listUrl({ status: t.key || undefined, open: undefined })}
+                  href={listUrl({ status: t.key || undefined, open: undefined, page: undefined })}
                   scroll={false}
                   className={`flex items-center gap-2 rounded-full px-3.5 py-1.5 transition ${active ? "bg-asphalt-900 font-semibold text-brand-500" : "bg-white text-gray-600 shadow-sm hover:bg-brand-50"} ${t.key === "pending_invoice" && n > 0 && !active ? "ring-1 ring-brand-500" : ""}`}
                 >
@@ -406,7 +406,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
             params={lp}
             statuses={{}}
             exportName="الشحنات"
-            count={rows.length}
+            count={listTotal.n}
             noun="شحنة"
             pay={false}
             sorts={WAYBILL_SORTS}
@@ -416,6 +416,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
           />
 
           {view === "sheet" ? (
+            <>
             <DocSheet
               action={saveWaybillSheet}
               emptyText={filtered ? "لا توجد شحنات بهذه الشروط" : "لا توجد شحنات بعد"}
@@ -466,6 +467,8 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
                 };
               })}
             />
+            <Pager page={page} size={PAGE_SIZE} total={listTotal.n} hrefFor={(p) => listUrl({ page: p > 1 ? String(p) : undefined })} />
+            </>
           ) : openDoc ? (
             <div className="grid items-start gap-4 lg:grid-cols-[minmax(17rem,22rem)_1fr]">
               <ul className="hidden max-h-[calc(100vh-9rem)] divide-y divide-gray-100 overflow-y-auto rounded-2xl border border-black/[0.06] bg-white shadow-sm lg:sticky lg:top-4 lg:block print:hidden">
@@ -683,7 +686,6 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
               )}
               <Table head={[(canUpdate || canApprove || canInvoice) && rows.length ? <SelectAll key="all" form={BULK_FORM} /> : "", "الرقم", "التاريخ", "العميل", "المسار", "نوع الشحن", "المنفّذ", "السائق", ...(showPrices ? ["المبلغ"] : []), "الحالة", "الفاتورة", ""]}>
                 {rows.length === 0 && <EmptyRow cols={showPrices ? 12 : 11}>{filtered ? "لا توجد شحنات بهذه الشروط" : "لا توجد شحنات بعد؛ اضغط «إنشاء»"}</EmptyRow>}
-                <LimitRow cols={showPrices ? 12 : 11} shown={rows.length} limit={LIMIT} />
                 {rows.map((r) => {
                   const { w } = r;
                   const open = listUrl({ open: String(w.id) });
@@ -733,9 +735,10 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
                   );
                 })}
               </Table>
-              {rows.length > 0 && showPrices && (
+              <Pager page={page} size={PAGE_SIZE} total={listTotal.n} hrefFor={(p) => listUrl({ page: p > 1 ? String(p) : undefined, open: undefined })} />
+              {listTotal.n > 0 && showPrices && (
                 <p className="mt-3 text-xs text-gray-500">
-                  إجمالي المعروض قبل الضريبة <span className="ltr-nums font-semibold text-gray-700">{fmt(total)}</span>
+                  إجمالي الشحنات بهذه الشروط قبل الضريبة <span className="ltr-nums font-semibold text-gray-700">{fmt(listTotal.amount)}</span>
                 </p>
               )}
             </>

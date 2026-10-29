@@ -153,8 +153,7 @@ export interface EntryFilter extends Pick<DocFilter, "q" | "from" | "to"> {
   sort?: "date_desc" | "date_asc" | "amount_desc" | "amount_asc";
 }
 
-export async function listEntries(db: Db | Tx, f: EntryFilter, limit = 500) {
-  const total = sql<string>`(select coalesce(sum(l.debit_base), 0) from journal_lines l where l.entry_id = journal_entries.id)`;
+function entryWhere(f: EntryFilter) {
   const where: (SQL | undefined)[] = [];
   if (f.q) {
     const q = `%${f.q.replace(/[%_\\]/g, "\\$&")}%`;
@@ -172,20 +171,32 @@ export async function listEntries(db: Db | Tx, f: EntryFilter, limit = 500) {
   if (f.kind === "draft") where.push(sql`${s.journalEntries.status} <> 'posted'`);
   if (f.from) where.push(gte(s.journalEntries.entryDate, f.from));
   if (f.to) where.push(lte(s.journalEntries.entryDate, f.to));
+  return and(...where);
+}
+
+export async function listEntries(db: Db | Tx, f: EntryFilter, limit = 500, offset = 0) {
+  const total = sql<string>`(select coalesce(sum(l.debit_base), 0) from journal_lines l where l.entry_id = journal_entries.id)`;
   const order =
     f.sort === "date_asc"
       ? [asc(s.journalEntries.entryDate), asc(s.journalEntries.id)]
       : f.sort === "amount_desc"
-        ? [desc(total)]
+        ? [desc(total), desc(s.journalEntries.id)]
         : f.sort === "amount_asc"
-          ? [asc(total)]
+          ? [asc(total), asc(s.journalEntries.id)]
           : [desc(s.journalEntries.entryDate), desc(s.journalEntries.id)];
   return db
     .select({ e: s.journalEntries, total, lines: sql<number>`(select count(*) from journal_lines l where l.entry_id = journal_entries.id)::int` })
     .from(s.journalEntries)
-    .where(and(...where))
+    .where(entryWhere(f))
     .orderBy(...order)
-    .limit(limit);
+    .limit(limit)
+    .offset(offset);
+}
+
+/** عدد القيود بشروط القائمة، لعدد الصفحات. */
+export async function countEntries(db: Db | Tx, f: EntryFilter) {
+  const [r] = await db.select({ n: sql<number>`count(*)::int` }).from(s.journalEntries).where(entryWhere(f));
+  return r.n;
 }
 
 export async function entryDoc(db: Db | Tx, id: number) {
