@@ -1386,7 +1386,10 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       // تعديل البنود يحدّث مبلغ الرحلة، وتبقى خارج «بانتظار الفوترة» حتى بعد اعتمادها
       await updateDirectInvoice(db, inv.id, { ...head, lines: [{ ...line, unitPrice: 2500, amount: 2500, vatAmount: 375 }] });
       expect(Number((await db.select().from(s.waybills).where(eq(s.waybills.id, t1.id)))[0].amount)).toBe(2500);
+      const listed = async () => (await listSalesInvoices(db, parseDocFilter({}, ["draft", "issued"], D))).find((r) => r.i.id === inv.id)!;
+      expect([(await listed()).trips, (await listed()).tripsSent]).toEqual([1, 0]);
       await sendTrip(db, t1.id, { cashAccountId: box.id, date: D });
+      expect([(await listed()).trips, (await listed()).tripsSent]).toEqual([1, 1]);
       await expect(deleteInvoice(db, inv.id, { reason: "x" })).rejects.toThrow("ألغِ الإرسال");
       await expect(updateDirectInvoice(db, inv.id, { ...head, trip: { ...trip, tripCustody: 500 } })).rejects.toThrow("ألغِ الإرسال");
       await unsendTrip(db, t1.id);
@@ -1400,6 +1403,18 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       await setWaybillStatus(db, t1.id, "draft", {});
       await updateDirectInvoice(db, inv.id, { ...head, trip: null });
       expect(await currentTrip(db, inv.id)).toBeNull();
+    });
+
+    it("عدّ رحلات الفواتير في القائمة يطابق التعريف الأصلي (رحلة الفاتورة المباشرة أو شحنة مفوترة فيها)", async () => {
+      const rows = await listSalesInvoices(db, parseDocFilter({}, ["draft", "issued"], D), 2000);
+      const ref = await db.execute<{ id: string; trips: number; sent: number }>(sql`
+        select i.id,
+          (select count(*) from waybills w where w.execution = 'fleet' and (w.source_invoice_id = i.id or w.id in (select waybill_id from sales_invoice_lines where invoice_id = i.id and kind = 'waybill')))::int trips,
+          (select count(*) from waybills w where w.execution = 'fleet' and w.sent_to_driver_at is not null and (w.source_invoice_id = i.id or w.id in (select waybill_id from sales_invoice_lines where invoice_id = i.id and kind = 'waybill')))::int sent
+        from sales_invoices i`);
+      const want = new Map(ref.map((r) => [Number(r.id), [r.trips, r.sent]]));
+      expect(rows.some((r) => r.trips > 0)).toBe(true);
+      for (const r of rows) expect([r.trips, r.tripsSent]).toEqual(want.get(r.i.id));
     });
 
     it("مصاريف السائق الجديدة: لرحلة أو عامة، تعديل وإلغاء «رُفع بالخطأ»، والمعتمد يحدد الدافع ويفصل الضريبة، والإشعارات", async () => {
