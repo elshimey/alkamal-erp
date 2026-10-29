@@ -9,7 +9,11 @@ import { acceptTripAction, breakdownAction, documentAction, expenseAction, fuelA
 // كل عملية تحمل معرّفاً (_op) فلا تتكرر في الخادم إن أُرسلت مرتين.
 const ACTIONS = { accept: acceptTripAction, stage: stageAction, fuel: fuelAction, tripExpense: tripExpenseAction, expense: expenseAction, breakdown: breakdownAction, document: documentAction } as const;
 export type OfflineActionKey = keyof typeof ACTIONS;
-type Queued = { id: string; key: OfflineActionKey; fields: [string, string][]; at: number };
+// owner = الشركة والسائق صاحب العملية؛ لا تُرسل إلا وهو الداخل، فلا تُسجَّل على سائق آخر يستخدم الجوال نفسه
+type Queued = { id: string; key: OfflineActionKey; fields: [string, string][]; at: number; owner?: string };
+const PAGE_CACHE = "driver-v1";
+const session: { owner?: string } = {};
+const belongsTo = (owner: string) => (q: Queued) => !q.owner || q.owner === owner;
 
 const DB = "driver-offline";
 const STORE = "queue";
@@ -52,7 +56,7 @@ export function DriverForm({ actionKey, children, className = "", savedOffline }
   const form = useRef<HTMLFormElement>(null);
 
   const queue = async (fields: [string, string][]) => {
-    await queuePut({ id: uid(), key: actionKey, fields, at: Date.now() });
+    await queuePut({ id: uid(), key: actionKey, fields, at: Date.now(), owner: session.owner });
     window.dispatchEvent(new Event(EVENT));
     form.current?.reset();
     setState({ ok: savedOffline });
@@ -96,21 +100,24 @@ export function DriverForm({ actionKey, children, className = "", savedOffline }
 }
 
 /** شريط العمليات المحفوظة في الجوال، ويرسلها تلقائياً عند عودة الشبكة. */
-export function OfflineSync({ labels }: { labels: { offline: string; pending: string; sending: string; retry: string; failed: string } }) {
+export function OfflineSync({ owner, labels }: { owner: string; labels: { offline: string; pending: string; sending: string; retry: string; failed: string } }) {
   const router = useRouter();
+  useEffect(() => {
+    session.owner = owner;
+  }, [owner]);
   const [count, setCount] = useState(0);
   const [online, setOnline] = useState(true);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string>();
   const running = useRef(false);
 
-  const refresh = useCallback(async () => setCount((await queueAll().catch(() => [])).length), []);
+  const refresh = useCallback(async () => setCount((await queueAll().catch(() => [])).filter(belongsTo(owner)).length), [owner]);
   const flush = useCallback(async () => {
     if (running.current || !navigator.onLine) return;
     running.current = true;
     setBusy(true);
     try {
-      const items = (await queueAll()).sort((a, b) => a.at - b.at);
+      const items = (await queueAll()).filter(belongsTo(owner)).sort((a, b) => a.at - b.at);
       let sent = 0;
       for (const q of items) {
         try {
@@ -131,7 +138,7 @@ export function OfflineSync({ labels }: { labels: { offline: string; pending: st
       setBusy(false);
       void refresh();
     }
-  }, [refresh, router]);
+  }, [owner, refresh, router]);
 
   useEffect(() => {
     const update = () => {
@@ -184,6 +191,14 @@ export function OfflineSync({ labels }: { labels: { offline: string; pending: st
       )}
     </div>
   );
+}
+
+/** في صفحة الدخول (بعد الخروج): تُمسح صفحات السائق السابق المحفوظة للعمل دون شبكة، فلا يراها غيره على الجوال نفسه. */
+export function ClearDriverPages() {
+  useEffect(() => {
+    if ("caches" in window) void caches.delete(PAGE_CACHE).catch(() => {});
+  }, []);
+  return null;
 }
 
 /** التقاط صورة بكاميرا الجوال وضغطها قبل الإرسال (تُحفظ كنص في حقل مخفي). */

@@ -50,22 +50,3 @@ export function AddModeBar({ backHref, backLabel, title }: { backHref: string; b
     </nav>
   );
 }
-
-/** تبديل «جدول / ورقة» في قوائم المستندات؛ الورقة تعدّل المسودات بطريقة Excel. */
-export function ViewToggle({ base, params, view }: { base: string; params: Record<string, string | undefined>; view: "table" | "sheet" }) {
-  const href = (v: "table" | "sheet") => {
-    const q = new URLSearchParams(Object.entries({ ...params, view: v === "sheet" ? "sheet" : undefined }).filter(([, x]) => x) as [string, string][]);
-    return q.size ? `${base}?${q}` : base;
-  };
-  const tab = (v: "table" | "sheet", label: string) => (
-    <Link href={href(v)} scroll={false} className={`rounded-md px-3 py-1 transition ${view === v ? "bg-white font-semibold text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-800"}`}>
-      {label}
-    </Link>
-  );
-  return (
-    <div className="flex rounded-lg border border-gray-200 bg-gray-50 p-0.5 text-sm shadow-sm print:hidden">
-      {tab("table", "جدول")}
-      {tab("sheet", "ورقة")}
-    </div>
-  );
-}

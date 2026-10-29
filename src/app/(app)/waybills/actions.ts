@@ -1,5 +1,6 @@
 "use server";
 
+import { localPath } from "@/lib/safe-path";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
@@ -415,7 +416,7 @@ export async function removeWaybillAction(id: number, back: string, fd: FormData
     return { error: errorMessage(err) };
   }
   refresh();
-  redirect(back);
+  redirect(localPath(back, "/waybills"));
 }
 
 /** نسخ الشحنة: شحنة جديدة مسودة بتاريخ اليوم وبنفس العميل والمسار والتنفيذ، والسعر من العقد. */
@@ -449,7 +450,8 @@ export async function copyWaybill(id: number, back: string): Promise<FormState> 
     return { error: errorMessage(err) };
   }
   refresh();
-  redirect(`${back}${back.includes("?") ? "&" : "?"}edit=${newId}`);
+  const to = localPath(back, "/waybills");
+  redirect(`${to}${to.includes("?") ? "&" : "?"}edit=${newId}`);
 }
 
 const idsOf = (fd: FormData) => [...new Set(fd.getAll("ids").map(Number).filter((x) => Number.isInteger(x) && x > 0))];

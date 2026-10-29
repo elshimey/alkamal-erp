@@ -4,6 +4,7 @@ import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
 import { createJournalEntryTx, deleteEntryTx, nextDocumentNumber } from "@/lib/ledger";
 import { driverOnDate } from "@/lib/fleet";
+import { cashAccountFor } from "@/lib/banks";
 
 // المخالفة تُسجل على المركبة، والسائق يُعرف من سجل الإسناد في تاريخها.
 // على السائق: مدين ذمة راتبه (2107) / دائن مخالفات مستحقة (2108)، وتُخصم في مسير الرواتب.
@@ -19,11 +20,7 @@ async function accountIdByCode(db: Db | Tx, code: string) {
   return row.id;
 }
 
-async function cashAccount(tx: Tx, id: number | null | undefined) {
-  const [cash] = id ? await tx.select().from(s.accounts).where(eq(s.accounts.id, id)) : [];
-  if (!cash || !cash.isPostable || !/^110[12]/.test(cash.code)) throw new Error("اختر الصندوق أو البنك الذي سُددت منه المخالفات");
-  return cash;
-}
+const cashAccount = (tx: Tx, id: number | null | undefined) => cashAccountFor(tx, id, "اختر الصندوق أو البنك الذي سُددت منه المخالفات");
 
 export interface ViolationInput {
   violationDate: string;

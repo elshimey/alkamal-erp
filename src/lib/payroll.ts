@@ -4,6 +4,7 @@ import * as s from "@/db/schema";
 import { addSubAccountTx } from "@/lib/accounts";
 import { createJournalEntryTx, deleteEntryTx, nextDocumentNumber, type LineInput } from "@/lib/ledger";
 import { computePayrollLine, monthLabel, monthRange, PAYROLL_ACCOUNTS } from "@/data/payroll";
+import { cashAccountFor } from "@/lib/banks";
 
 // الرواتب: الموظف ← السلفة ← مسير الشهر (قيد الاستحقاق عند الاعتماد) ← الصرف من البنك بالصافي.
 // العمولات قُيدت لحساب راتب السائق عند اعتماد الشحنات، فالمسير يعرضها ويصرفها ولا يقيدها مرة ثانية.
@@ -17,11 +18,7 @@ async function accountIdByCode(db: Db | Tx, code: string) {
   return row.id;
 }
 
-async function cashAccount(tx: Tx, id: number | null | undefined, what: string) {
-  const [cash] = id ? await tx.select().from(s.accounts).where(eq(s.accounts.id, id)) : [];
-  if (!cash || !cash.isPostable || !/^110[12]/.test(cash.code)) throw new Error(`اختر ${what}`);
-  return cash;
-}
+const cashAccount = (tx: Tx, id: number | null | undefined, what: string) => cashAccountFor(tx, id, `اختر ${what}`);
 
 // ───────────── الموظفون ─────────────
 

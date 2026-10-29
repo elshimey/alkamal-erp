@@ -10,6 +10,7 @@ import { rateOn } from "@/lib/waybills";
 import { PURCHASE_ACCOUNTS } from "@/data/purchases";
 import { BREAKDOWN_APPROVAL_LIMIT, maintenanceAccountCode, type MaintenanceType } from "@/data/maintenance";
 import { notifyDriver } from "@/lib/driver-notify";
+import { cashAccountFor } from "@/lib/banks";
 
 // الصيانة: طلب العطل ← أمر الصيانة ببنوده ← قيد على مركز تكلفة المركبة عند الاعتماد.
 // القطع تُشترى على الأمر (دائنة للورشة الخارجية أو للصندوق)، أو تُصرف من المستودع بمتوسط التكلفة.
@@ -279,8 +280,7 @@ export async function approveMaintenanceOrder(db: Db | Tx, orderId: number, opts
     } else if (o.provider === "external") {
       creditAccountId = await payableAccountFor(tx, o.supplierId!);
     } else {
-      const [cash] = cashAccountId ? await tx.select().from(s.accounts).where(eq(s.accounts.id, cashAccountId)) : [];
-      if (!cash || !cash.isPostable || !/^110[12]/.test(cash.code)) throw new Error("اختر الصندوق أو البنك الذي اشتُريت منه القطع");
+      const cash = await cashAccountFor(tx, cashAccountId, "اختر الصندوق أو البنك الذي اشتُريت منه القطع");
       creditAccountId = cash.id;
     }
     const costAccountId = await accountIdByCode(tx, maintenanceAccountCode(o.type));

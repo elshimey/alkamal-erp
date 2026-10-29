@@ -1,5 +1,6 @@
 "use server";
 
+import { localPath } from "@/lib/safe-path";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { eq, inArray } from "drizzle-orm";
@@ -203,7 +204,7 @@ export async function removeFromMenu(id: number, back: string, fd: FormData): Pr
     return { error: errorMessage(err) };
   }
   refresh();
-  redirect(back);
+  redirect(localPath(back, "/invoices"));
 }
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();

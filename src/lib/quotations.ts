@@ -211,11 +211,6 @@ export async function updateQuotationFromSheet(db: Db, id: number, patch: QuoteS
   });
 }
 
-/** تعديل رأس عرض المسودة من الورقة: التاريخ والصلاحية والملاحظات والشروط. */
-export async function updateDraftQuotation(db: Db, id: number, patch: { date?: string; validUntil?: string; notes?: string; terms?: string }) {
-  return updateQuotationFromSheet(db, id, { header: patch, lines: {} });
-}
-
 export async function setQuotationStatus(db: Db, id: number, status: QuoteStatus) {
   if (!(status in QUOTE_STATUS)) throw new Error("حالة غير معروفة");
   await db.transaction(async (tx) => {

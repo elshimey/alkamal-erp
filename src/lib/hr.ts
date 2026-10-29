@@ -8,6 +8,7 @@ import { createAdvance, payAdvance } from "@/lib/payroll";
 import { monthRange } from "@/data/payroll";
 import { annualEntitlement, computeEvaluation, inclusiveDays } from "@/data/hr";
 import { notifyDriver } from "@/lib/driver-notify";
+import { cashAccountFor } from "@/lib/banks";
 
 // الموارد البشرية: العُهد، والإنذارات والجزاءات والحوافز، والإجازات والحضور، والتقييم والترقية، ومقدم العمولة.
 // كل ما يمس الراتب يدخل المسير بعد اعتماده؛ والعهدة النقدية وحدها لها قيد، والعينية سجل رقابي.
@@ -177,11 +178,7 @@ async function custodyAccountFor(tx: Tx, employeeId: number) {
   return acc.id;
 }
 
-async function cashAccountTx(tx: Tx, id: number | null | undefined, what: string) {
-  const [cash] = id ? await tx.select().from(s.accounts).where(eq(s.accounts.id, id)) : [];
-  if (!cash || !cash.isPostable || !/^110[12]/.test(cash.code)) throw new Error(`اختر ${what}`);
-  return cash;
-}
+const cashAccountTx = (tx: Tx, id: number | null | undefined, what: string) => cashAccountFor(tx, id, `اختر ${what}`);
 
 export async function approveCustody(db: Db, id: number, userId?: number) {
   return db.transaction(async (tx) => {

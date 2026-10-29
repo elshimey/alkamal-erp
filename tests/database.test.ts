@@ -55,7 +55,7 @@ import { applyAdvance, customerCredit, postReceipt } from "@/lib/receipts";
 import { createNote, postNote, revertNote } from "@/lib/notes";
 import { listCustomers } from "@/lib/customers";
 import { createManualEntry, deleteManualEntry, listEntries, postManualEntry, reclassCandidates, reclassify, revertManualEntry, updateManualEntry } from "@/lib/journal";
-import { createCashAccount, listCashAccounts, normalizeIban } from "@/lib/banks";
+import { cashAccountFor, createCashAccount, listCashAccounts, normalizeIban } from "@/lib/banks";
 import { exportAllData } from "@/lib/export";
 import { createTransfer, deleteTransfer } from "@/lib/transfers";
 import { DEFAULT_ECL_RATES, deleteEcl, eclAging, eclCompute, postEcl, provisionBalance } from "@/lib/ecl";
@@ -1776,6 +1776,19 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
   describe("المحاسبة: القيود والبنوك والأصول", () => {
     const linesOf = (entryId: number) => db.select().from(s.journalLines).where(eq(s.journalLines.entryId, entryId));
 
+    it("الصرف والقبض من صندوق أو بنك نشط فقط", async () => {
+      expect((await cashAccountFor(db, acc["110101"], "اختر")).code).toBe("110101");
+      await expect(cashAccountFor(db, acc["1101"], "اختر صندوقاً")).rejects.toThrow("اختر صندوقاً");
+      await expect(cashAccountFor(db, acc["3104"], "اختر صندوقاً")).rejects.toThrow("اختر صندوقاً");
+      await expect(cashAccountFor(db, null, "اختر صندوقاً")).rejects.toThrow("اختر صندوقاً");
+      await db.update(s.accounts).set({ isActive: false }).where(eq(s.accounts.id, acc["110101"]));
+      try {
+        await expect(cashAccountFor(db, acc["110101"], "اختر")).rejects.toThrow("موقوف");
+      } finally {
+        await db.update(s.accounts).set({ isActive: true }).where(eq(s.accounts.id, acc["110101"]));
+      }
+    });
+
     it("القيد اليدوي: مسودة تُعدّل ثم تُرحّل وتُرجع وتُحذف مع سجل الحذف", async () => {
       await expect(createManualEntry(db, { entryDate: `${YEAR}-07-01`, description: "غير متوازن", lines: [{ accountId: acc["110101"], debit: 100 }, { accountId: acc["3104"], credit: 90 }] })).rejects.toThrow();
       await expect(createManualEntry(db, { entryDate: `${YEAR}-07-01`, description: "بلا مركز", lines: [{ accountId: acc["5110"], debit: 100 }, { accountId: acc["110101"], credit: 100 }], post: true })).rejects.toThrow("مركز");
@@ -2289,7 +2302,11 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     expect((await pr.resetTarget(client, resetToken))?.login).toBe("admin");
     await expect(pr.completePasswordReset(client, resetToken, "short")).rejects.toThrow("أحرف");
     const [before] = await client`select password_hash from public.users where login = 'admin'`;
+    // المحاولات الخاطئة السابقة (باسم «رمز الشركة:اسم الدخول») تُمسح مع الاسترجاع فيدخل فوراً
+    for (let i = 0; i < 10; i++) await platform.recordLoginFailure(client, "home:Admin");
+    expect(await platform.loginThrottled(client, "home:admin")).toBe(true);
     await pr.completePasswordReset(client, resetToken, "brand-new-pass");
+    expect(await platform.loginThrottled(client, "home:admin")).toBe(false);
     const [after] = await client`select password_hash from public.users where login = 'admin'`;
     expect(await verifyPassword("brand-new-pass", after.password_hash)).toBe(true);
     await expect(pr.completePasswordReset(client, resetToken, "another-pass")).rejects.toThrow("غير صالح");

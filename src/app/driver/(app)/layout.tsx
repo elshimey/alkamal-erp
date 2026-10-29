@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getDriverContext } from "@/lib/driver-auth";
+import { getTenant } from "@/lib/auth";
 import { isRtl } from "@/data/driver-i18n";
 import { BrandMark } from "@/components/logo";
 import { getBrand } from "@/lib/brand";
@@ -13,7 +14,7 @@ import { unreadCount } from "@/lib/driver-notify";
 export default async function DriverLayout({ children }: { children: React.ReactNode }) {
   const { user, driver, lang, t } = await getDriverContext();
   const office = user.roles.some((r) => r.key !== "driver");
-  const [brand, unread] = await Promise.all([getBrand(true), driver ? unreadCount(db, driver.id) : 0]);
+  const [brand, unread, tenant] = await Promise.all([getBrand(true), driver ? unreadCount(db, driver.id) : 0, getTenant()]);
   return (
     <div dir={isRtl(lang) ? "rtl" : "ltr"} lang={lang} className="min-h-screen bg-concrete pb-24">
       <header className="relative overflow-hidden bg-asphalt-900 px-4 pt-[calc(env(safe-area-inset-top)+0.75rem)] pb-4 text-white">
@@ -50,7 +51,7 @@ export default async function DriverLayout({ children }: { children: React.React
         </div>
       </header>
       <main className="mx-auto max-w-md px-4 pt-4">
-        {driver && <OfflineSync labels={{ offline: t.offline, pending: t.pendingSync, sending: t.sending, retry: t.sendNow, failed: t.syncFailed }} />}
+        {driver && <OfflineSync owner={`${tenant.schema}:${user.id}`} labels={{ offline: t.offline, pending: t.pendingSync, sending: t.sending, retry: t.sendNow, failed: t.syncFailed }} />}
         {driver ? (
           children
         ) : (

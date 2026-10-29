@@ -75,6 +75,14 @@ export async function createCashAccount(db: Db, input: BankInput) {
   });
 }
 
+/** الصندوق أو البنك الذي يُصرف منه أو يُقبض فيه: حساب تفصيلي نشط تحت 1101 أو 1102. */
+export async function cashAccountFor(db: Db | Tx, id: number | null | undefined, message: string) {
+  const [cash] = id ? await db.select().from(s.accounts).where(eq(s.accounts.id, id)) : [];
+  if (!cash || !cash.isPostable || !/^110[12]/.test(cash.code)) throw new Error(message);
+  if (!cash.isActive) throw new Error(`الحساب ${cash.code} ${cash.nameAr} موقوف؛ اختر صندوقاً أو بنكاً نشطاً`);
+  return cash;
+}
+
 export async function updateBankDetails(db: Db, accountId: number, input: Omit<BankInput, "kind" | "openingBalance" | "openingDate" | "currencyCode">) {
   return db.transaction(async (tx) => {
     const [a] = await tx.select().from(s.accounts).where(eq(s.accounts.id, accountId));

@@ -8,7 +8,7 @@ import { productOptions, vehicleOptions } from "@/lib/lookups";
 import { todayRiyadh } from "@/lib/dates";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { LinesEditor } from "@/components/lines-editor";
-import { Badge, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
+import { Badge, EmptyRow, Field, Input, PageHeader, Table, Td } from "@/components/ui";
 import { removeRequest, requestDecision, saveRequest } from "./actions";
 
 export default async function PurchaseRequestsPage() {
