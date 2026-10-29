@@ -1,4 +1,4 @@
-import { and, eq, inArray, notInArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
 import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
 import { createPayment, deletePayment, revertPayment } from "@/lib/purchases";
@@ -51,31 +51,48 @@ export async function sendTrip(db: Db, id: number, opts: SendOptions = {}) {
   const custody = Number(t.tripCustody);
   let paymentId: number | null = null;
   let paymentNumber: string | null = null;
+  let acc: { code: string } | undefined;
   if (custody > 0) {
     if (!opts.cashAccountId) throw new Error(`${t.number}: اختر الصندوق أو البنك الذي تُصرف منه عهدة الرحلة`);
-    const [acc] = await db.select({ code: s.accounts.code }).from(s.accounts).where(eq(s.accounts.id, opts.cashAccountId));
+    [acc] = await db.select({ code: s.accounts.code }).from(s.accounts).where(eq(s.accounts.id, opts.cashAccountId));
     const [own] = await db.select({ custody: s.drivers.custodyAccountId }).from(s.drivers).where(eq(s.drivers.id, t.driverId));
     if (own?.custody === opts.cashAccountId) throw new Error(`${t.number}: لا تُصرف عهدة السائق من حساب عهدته نفسه؛ اختر صندوقاً أو حساباً آخر`);
-    const p = await createPayment(db, {
-      paymentDate: opts.date ?? todayRiyadh(),
-      kind: "custody",
-      driverId: t.driverId,
-      amount: custody,
-      method: acc?.code.startsWith("1102") ? "transfer" : "cash",
-      cashAccountId: opts.cashAccountId,
-      reference: t.number,
-      notes: `عهدة رحلة الشحنة ${t.number}`,
-      post: true,
-      userId: opts.userId,
-    });
+  }
+  // حجز الإرسال أولاً: إن ضغط موظفان «إرسال» معاً ينجح واحد فقط، فلا يُصرف سند عهدة مرتين
+  const [claimed] = await db
+    .update(s.waybills)
+    .set({ sentToDriverAt: new Date(), driverAcceptedAt: null, updatedAt: new Date() })
+    .where(and(eq(s.waybills.id, id), isNull(s.waybills.sentToDriverAt)))
+    .returning({ id: s.waybills.id });
+  if (!claimed) throw new Error(`${t.number}: أُرسلت للسائق من قبل`);
+  if (custody > 0) {
+    let p: Awaited<ReturnType<typeof createPayment>>;
+    try {
+      p = await createPayment(db, {
+        paymentDate: opts.date ?? todayRiyadh(),
+        kind: "custody",
+        driverId: t.driverId,
+        amount: custody,
+        method: acc?.code.startsWith("1102") ? "transfer" : "cash",
+        cashAccountId: opts.cashAccountId!,
+        reference: t.number,
+        notes: `عهدة رحلة الشحنة ${t.number}`,
+        post: true,
+        userId: opts.userId,
+      });
+    } catch (err) {
+      await db.update(s.waybills).set({ sentToDriverAt: null, updatedAt: new Date() }).where(eq(s.waybills.id, id));
+      throw err;
+    }
     paymentId = p.id;
     paymentNumber = p.number;
-  }
-  try {
-    await db.update(s.waybills).set({ sentToDriverAt: new Date(), driverAcceptedAt: null, custodyPaymentId: paymentId, updatedAt: new Date() }).where(eq(s.waybills.id, id));
-  } catch (err) {
-    if (paymentId) await dropPayment(db, paymentId, "تعذّر إرسال الرحلة");
-    throw err;
+    try {
+      await db.update(s.waybills).set({ custodyPaymentId: paymentId }).where(eq(s.waybills.id, id));
+    } catch (err) {
+      await dropPayment(db, paymentId, "تعذّر إرسال الرحلة");
+      await db.update(s.waybills).set({ sentToDriverAt: null, updatedAt: new Date() }).where(eq(s.waybills.id, id));
+      throw err;
+    }
   }
   await notifyDriver(db, t.driverId, { kind: "trip_sent", body: custody > 0 ? `${t.number} · ${custody}` : t.number, href: `/driver/trips/${id}` });
   return { number: t.number, driver: w.driver, mobile: w.mobile, custody, paymentNumber };
@@ -96,7 +113,13 @@ export async function unsendTrip(db: Db, id: number, userId?: number) {
   const acts = await driverActivity(db, id);
   if (acts.length)
     throw new Error(`${t.number}: سجّل السائق عليها (${acts.join("، ")})؛ لا يُلغى الإرسال حتى يتراجع عنها السائق أو تُرفض مصاريفه`);
-  await db.update(s.waybills).set({ sentToDriverAt: null, driverAcceptedAt: null, custodyPaymentId: null, updatedAt: new Date() }).where(eq(s.waybills.id, id));
+  // شرط الحالة نفسها التي قُرئت: إلغاءان متزامنان لا يعكسان السند مرتين
+  const [released] = await db
+    .update(s.waybills)
+    .set({ sentToDriverAt: null, driverAcceptedAt: null, custodyPaymentId: null, updatedAt: new Date() })
+    .where(and(eq(s.waybills.id, id), isNotNull(s.waybills.sentToDriverAt)))
+    .returning({ id: s.waybills.id });
+  if (!released) throw new Error(`${t.number}: تغيّر إرسالها للتو؛ حدّث الصفحة`);
   if (t.custodyPaymentId) await dropPayment(db, t.custodyPaymentId, `إلغاء إرسال الرحلة ${t.number}`, userId);
   await notifyDriver(db, t.driverId, { kind: "trip_unsent", body: t.number, href: "/driver" });
   return { number: t.number };

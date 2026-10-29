@@ -246,6 +246,13 @@
       "when": 1793170000000,
       "tag": "0034_driver_submissions",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1793180000000,
+      "tag": "0035_client_op_results",
+      "breakpoints": true
     }
   ]
 }

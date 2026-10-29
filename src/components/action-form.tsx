@@ -1,11 +1,15 @@
 "use client";
 
 import { Truck } from "./icons";
+import { newOpId } from "@/lib/op-id";
 import { createContext, startTransition, useActionState, useContext, useEffect, useRef, type ReactNode } from "react";
 
 export type FormState = { error?: string; ok?: string } | undefined;
 
 export const PendingContext = createContext(false);
+
+/** رسالة انقطاع الاتصال أثناء الإرسال: إعادة الضغط آمنة لأن معرّف الإرسال لا يتغير. */
+export const RETRY_MESSAGE = "تعذّر الاتصال بالخادم؛ اضغط مرة أخرى، ولن تتكرر العملية إن كانت حُفظت";
 
 export function SubmitButton({
   children,
@@ -67,10 +71,20 @@ export function ActionForm({
   /** لربط حقول خارج النموذج به عبر الخاصية form (مثل مربعات الاختيار في جدول) */
   id?: string;
 }) {
-  const [state, formAction, pending] = useActionState(action, undefined);
+  // انقطاع الاتصال لا يُسقط الصفحة: يظهر تنبيه ويبقى ما كُتب لإعادة الإرسال
+  const [state, formAction, pending] = useActionState(async (prev: FormState, data: FormData): Promise<FormState> => {
+    try {
+      return await action(prev, data);
+    } catch {
+      return { error: RETRY_MESSAGE };
+    }
+  }, undefined);
   const formRef = useRef<HTMLFormElement>(null);
+  // معرّف الإرسال (_op): يبقى نفسه إن انقطع الرد فلا تُسجَّل العملية مرتين عند إعادة الضغط، ويتجدد بعد كل رد
+  const op = useRef("");
   // الإرسال يدوياً حتى لا تُمسح الحقول عند الخطأ؛ تُمسح فقط عند النجاح
   useEffect(() => {
+    if (state?.error !== RETRY_MESSAGE) op.current = "";
     if (resetOnSuccess && state?.ok) formRef.current?.reset();
   }, [state, resetOnSuccess]);
   return (
@@ -82,6 +96,8 @@ export function ActionForm({
         onSubmit={(e) => {
           e.preventDefault();
           const data = new FormData(e.currentTarget);
+          op.current ||= newOpId();
+          data.set("_op", op.current);
           startTransition(() => formAction(data));
         }}
       >

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import type { ReceiptKind } from "@/lib/receipts";
 import { PAYMENT_METHODS } from "@/data/sales";
 import { Icon, Truck } from "@/components/icons";
@@ -9,6 +9,8 @@ import { ComboBox } from "@/components/combo-box";
 import { customerOpenItems, saveReceipt } from "../actions";
 import { fmt } from "@/lib/format";
 import { DateInput } from "@/components/date-input";
+import { newOpId } from "@/lib/op-id";
+import { RETRY_MESSAGE } from "@/components/action-form";
 
 type Option = { value: string; label: string };
 type OpenInvoice = Awaited<ReturnType<typeof customerOpenItems>>["invoices"][number];
@@ -78,6 +80,8 @@ export function ReceiptForm({
   const [adjustments, setAdjustments] = useState<{ accountId: string; description: string; amount: string }[]>([]);
   const [error, setError] = useState("");
   const [saving, start] = useTransition();
+  // معرّف الإرسال: إن انقطع الرد وأُعيد الضغط لا يُسجَّل السند مرتين
+  const op = useRef("");
   const forPayment = kind === "invoice_payment";
 
   // فواتير العميل المفتوحة بعملة الدفع ورصيده الدائن
@@ -133,8 +137,10 @@ export function ReceiptForm({
 
   const submit = () => {
     setError("");
+    op.current ||= newOpId();
     start(async () => {
       const res = await saveReceipt({
+        op: op.current,
         kind,
         customerId: Number(customerId),
         cashAccountId: Number(cashId),
@@ -147,7 +153,9 @@ export function ReceiptForm({
         collector,
         allocations: forPayment ? picked.map((p) => ({ invoiceId: p.id, amount: toNum(p.amount) })).filter((a) => a.amount > 0) : [],
         adjustments: forPayment ? adjustments.map((a) => ({ accountId: Number(a.accountId), amount: toNum(a.amount), description: a.description })).filter((a) => a.accountId && a.amount > 0) : [],
-      });
+      }).catch(() => null);
+      if (!res) return setError(RETRY_MESSAGE);
+      op.current = "";
       if (res.error) setError(res.error);
       else router.push(`/receipts?open=${res.id}`);
     });

@@ -147,8 +147,9 @@ export async function averageCost(db: Db | Tx, productId: number) {
   return num(p?.price);
 }
 
+/** يقفل سطر الصنف حتى نهاية المعاملة: صرفان متزامنان من آخر الكمية لا يمران معاً، ولا يُحسب المتوسط على رصيد يتغيّر. */
 async function stockProduct(tx: Tx, productId: number) {
-  const [p] = await tx.select().from(s.products).where(eq(s.products.id, productId));
+  const [p] = await tx.select().from(s.products).where(eq(s.products.id, productId)).for("update");
   if (!p) throw new Error("الصنف غير موجود");
   if (p.kind !== "stock") throw new Error(`${p.nameAr} خدمة وليست صنفاً مخزنياً`);
   return p;

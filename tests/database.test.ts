@@ -64,7 +64,8 @@ import { createPurchaseOrder, createPurchaseRequest, decideRequest, orderToInvoi
 import { createQuotation, deleteQuotation, duplicateQuotation, listQuotations, parseQuoteFilter, quotationLinesFor, quotationToInvoice, setQuotationStatus, updateQuotationFromSheet } from "@/lib/quotations";
 import { setupSteps } from "@/lib/setup";
 import ExcelJS from "exceljs";
-import { getAttachment, listAttachments, onceForOp, saveDataUrl } from "@/lib/attachments";
+import { getAttachment, listAttachments, saveDataUrl } from "@/lib/attachments";
+import { once, onceForOp } from "@/lib/once";
 import * as rec from "@/lib/reconciliation";
 import { accrualPreview, postRevenueAccrual, undoRevenueAccrual } from "@/lib/accruals";
 import { averageCost, createProduct, createStockDoc, createWarehouse, listProducts, onHand, postStockDoc, productCard, revertStockDoc, saveCount, stockDoc } from "@/lib/inventory";
@@ -1355,6 +1356,21 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect((await driverBalances(db, me, D)).custody).toBe(before + 900);
     });
 
+    it("ضغطتان متزامنتان على «إرسال للسائق» تصرفان سند عهدة واحداً، وإلغاءان متزامنان يعكسانه مرة واحدة", async () => {
+      const [box] = await db.select().from(s.accounts).where(eq(s.accounts.code, "110101"));
+      const w = await createWaybill(db, { waybillDate: D, customerId, routeId, shipper: "مصنع", consignee: "مستودع", vehicleId: me.vehicle!.id, driverId: me.id, tripCustody: 400, userId });
+      const before = (await driverBalances(db, me, D)).custody;
+      const sends = await Promise.allSettled([sendTrip(db, w.id, { cashAccountId: box.id, date: D }), sendTrip(db, w.id, { cashAccountId: box.id, date: D })]);
+      expect(sends.map((r) => r.status).sort()).toEqual(["fulfilled", "rejected"]);
+      expect(String((sends.find((r) => r.status === "rejected") as PromiseRejectedResult).reason)).toContain("من قبل");
+      expect(await db.select().from(s.payments).where(eq(s.payments.reference, w.number))).toHaveLength(1);
+      expect((await driverBalances(db, me, D)).custody).toBe(before + 400);
+      const unsends = await Promise.allSettled([unsendTrip(db, w.id), unsendTrip(db, w.id)]);
+      expect(unsends.map((r) => r.status).sort()).toEqual(["fulfilled", "rejected"]);
+      expect(await db.select().from(s.payments).where(eq(s.payments.reference, w.number))).toHaveLength(0);
+      expect((await driverBalances(db, me, D)).custody).toBe(before);
+    });
+
     it("الفاتورة المباشرة برحلة سائق: شحنة مرتبطة لا تدخل الفوترة، تُرسل من الفاتورة، ولا تُحذف الفاتورة وهي مرسلة", async () => {
       const [box] = await db.select().from(s.accounts).where(eq(s.accounts.code, "110101"));
       const [rev] = await db.select().from(s.accounts).where(eq(s.accounts.code, "4101"));
@@ -2005,6 +2021,21 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(await onHand(db, tyre.id, wh1)).toBe(4);
       expect(await averageCost(db, tyre.id)).toBe(900);
     });
+
+    it("صرفان متزامنان من آخر الكمية: يمر واحد ويُرفض الآخر، فلا يصبح الرصيد سالباً", async () => {
+      const filter = await createProduct(db, { code: "FLT-RACE", nameAr: "فلتر زيت", kind: "stock", unit: "حبة", purchasePrice: 40 });
+      const pi = await createPurchaseInvoice(db, { supplierId: sup, supplierInvoiceNo: "RACE-1", invoiceDate: `${YEAR}-08-01`, lines: [{ productId: filter.id, warehouseId: wh1, quantity: 3, description: "", amount: 120, vatRate: 15 }] });
+      await postPurchaseInvoice(db, pi.id);
+      // مستندان من نوعين مختلفين (لا يتشاركان تسلسل الترقيم) يصرفان الكمية نفسها في اللحظة نفسها
+      const results = await Promise.allSettled([
+        createStockDoc(db, { kind: "adjustment", docDate: `${YEAR}-08-11`, warehouseId: wh1, reason: "تالف", lines: [{ productId: filter.id, quantity: -3 }], post: true }),
+        createStockDoc(db, { kind: "transfer", docDate: `${YEAR}-08-11`, warehouseId: wh1, toWarehouseId: wh2, lines: [{ productId: filter.id, quantity: 3 }], post: true }),
+      ]);
+      expect(results.map((r) => r.status).sort()).toEqual(["fulfilled", "rejected"]);
+      expect(String((results.find((r) => r.status === "rejected") as PromiseRejectedResult).reason)).toContain("رصيد");
+      expect(await onHand(db, filter.id, wh1)).toBe(0);
+      expect((await onHand(db, filter.id, wh1)) + (await onHand(db, filter.id, wh2))).toBe(results[0].status === "fulfilled" ? 0 : 3);
+    });
   });
 
   it("التدفق النقدي في اللوحة: يصنّف بالحساب المقابل ويتجاهل التحويل بين الصناديق", async () => {
@@ -2462,6 +2493,15 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     await expect(onceForOp(db, "op-fail-12345678", async () => { throw new Error("x"); })).rejects.toThrow("x");
     await onceForOp(db, "op-fail-12345678", async () => void runs++);
     expect(runs).toBe(2);
+
+    // نماذج المكتب: الإرسال المكرر (حتى متزامناً) ينفذ مرة واحدة ويعيد نتيجة المرة الأولى
+    let made = 0;
+    const make = () => once(db, "op-office-1234567", async () => ({ id: ++made }));
+    const [a, b] = await Promise.allSettled([make(), make()]);
+    expect(made).toBe(1);
+    expect([a, b].filter((r) => r.status === "fulfilled").map((r) => (r as PromiseFulfilledResult<{ id: number }>).value)).toContainEqual({ id: 1 });
+    expect(await make()).toEqual({ id: 1 });
+    expect(made).toBe(1);
   });
 
   it("يصدّر كل البيانات إلى Excel بأسماء عربية ويستبدل المعرّفات بالأسماء، ويحسب خطوات الإعداد", async () => {

@@ -1,11 +1,13 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition, type ClipboardEvent } from "react";
+import { useRef, useState, useTransition, type ClipboardEvent } from "react";
 import { Icon, Truck } from "@/components/icons";
 import { saveEntry } from "./actions";
 import { fmt } from "@/lib/format";
 import { DateInput } from "@/components/date-input";
+import { newOpId } from "@/lib/op-id";
+import { RETRY_MESSAGE } from "@/components/action-form";
 
 type Option = { value: string; label: string; code?: string; cc?: boolean };
 export type EntryLine = { accountId: string; description: string; costCenterId: string; partyId: string; debit: string; credit: string };
@@ -74,11 +76,15 @@ export function EntryForm({ accounts, centers, parties, initial, entryId, canPos
     setLines(next);
   };
 
-  const submit = (post: boolean) =>
+  // معرّف الإرسال: إن انقطع الرد وأُعيد الضغط لا يُنشأ القيد مرتين
+  const op = useRef("");
+  const submit = (post: boolean) => {
+    op.current ||= newOpId();
     start(async () => {
       setError("");
       const res = await saveEntry(
         {
+          op: op.current,
           entryDate: date,
           description,
           reference,
@@ -86,10 +92,13 @@ export function EntryForm({ accounts, centers, parties, initial, entryId, canPos
           lines: used.map((l) => ({ accountId: Number(l.accountId), description: l.description, debit: toNum(l.debit), credit: toNum(l.credit), costCenterId: l.costCenterId ? Number(l.costCenterId) : null, partyId: l.partyId ? Number(l.partyId) : null })),
         },
         entryId,
-      );
+      ).catch(() => null);
+      if (!res) return setError(RETRY_MESSAGE);
+      op.current = "";
       if (res.error) setError(res.error);
       else router.push(`/journal?open=${res.id}`);
     });
+  };
 
   return (
     <div className="mx-auto max-w-6xl">

@@ -2067,9 +2067,11 @@ export const attachments = pgTable(
   (t) => [index("attachments_entity_idx").on(t.entity, t.entityId)],
 );
 
-// عمليات تطبيق السائق المرسلة (لمنع تكرار ما حُفظ دون إنترنت ثم أُعيد إرساله)
+// معرّفات الإرسال (تطبيق السائق ونماذج المكتب) لمنع تسجيل العملية مرتين عند إعادة الإرسال.
+// result فارغ = العملية قيد التنفيذ؛ بعد نجاحها تُحفظ نتيجتها { v } لتُعاد لأي إرسال مكرر.
 export const clientOps = pgTable("client_ops", {
   opId: varchar("op_id", { length: 40 }).primaryKey(),
+  result: jsonb("result").$type<{ v?: unknown }>(),
   createdAt: createdAt(),
 });
 
