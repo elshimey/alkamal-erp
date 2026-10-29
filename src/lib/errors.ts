@@ -7,7 +7,21 @@ export function errorMessage(err: unknown): string {
   if (pg?.code === "23514" && pg.message && /[؀-ۿ]/.test(pg.message)) return pg.message;
   if (err instanceof Error && /[؀-ۿ]/.test(err.message)) return err.message;
   console.error(err);
+  report(err);
   return "حدث خطأ غير متوقع";
+}
+
+/** يسجّل الخطأ غير المتوقع وينبّه مالك المنصة (src/lib/error-log.ts)؛ بعد انتهاء الطلب حتى لا يبطئه. */
+function report(err: unknown) {
+  void (async () => {
+    const { recordError } = await import("@/lib/error-log");
+    try {
+      const { after } = await import("next/server");
+      after(() => recordError(err));
+    } catch {
+      await recordError(err); // خارج طلب ويب
+    }
+  })().catch(() => {});
 }
 
 export function findPgError(err: unknown): { code?: string; message?: string } | undefined {

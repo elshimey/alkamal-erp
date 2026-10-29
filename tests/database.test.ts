@@ -73,6 +73,7 @@ import { createAsset, deleteAsset, disposeAsset, listAssets, runDepreciation, un
 import { IMPORT_SPECS } from "@/data/import-specs";
 import * as hr from "@/lib/hr";
 import * as platform from "@/lib/platform";
+import { recentErrors, recordError } from "@/lib/error-log";
 import { runInTenant, tenantClient } from "@/db/tenant";
 import { addExpense, addFuel, approvalIssues, approveWaybill, createWaybill, deleteWaybill, invoiceSelectedWaybills, invoiceWaybillsNow, listWaybills, parseWaybillFilter, patchWaybill, recordStage, rejectWaybill, revertWaybill, saveTransportDoc, setWaybillStatus, updateWaybill, waybillDoc } from "@/lib/waybills";
 import { sendTrip, unsendTrip, bulkTrips, invoiceTripIds } from "@/lib/trip-dispatch";
@@ -2313,6 +2314,14 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     const tdb = drizzle(tenantClient(client), { schema: s }) as unknown as Db;
     await platform.ensurePlatform(client);
     await platform.ensurePlatform(client); // التكرار آمن
+    // سجل الأخطاء: الخطأ نفسه (ولو اختلفت أرقامه) سطر واحد في اليوم مع عدد تكراره
+    for (const n of [12, 34]) await recordError(new Error(`تعذّر حساب ${n}`), { path: "/invoices", sql: client });
+    await recordError(new Error("خطأ آخر"), { sql: client });
+    const errorsLogged = await recentErrors(10, client);
+    expect(errorsLogged.map((e) => [e.message, e.count, e.path])).toEqual([
+      ["خطأ آخر", 1, null],
+      ["تعذّر حساب 12", 2, "/invoices"],
+    ]);
     // قفل الدخول: 10 محاولات خاطئة في 15 دقيقة توقف الاسم مؤقتاً، بلا فرق بين الحروف، والدخول الناجح يمسح العدّاد
     for (let i = 0; i < platform.LOGIN_MAX_FAILURES - 1; i++) await platform.recordLoginFailure(client, "Guess_Me");
     expect(await platform.loginThrottled(client, "guess_me")).toBe(false);
