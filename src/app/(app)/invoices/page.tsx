@@ -5,7 +5,8 @@ import { db } from "@/db";
 import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
-import { fundingAccounts, currentTrip, invoicingQueue, listSalesInvoices, salesInvoiceDoc } from "@/lib/invoices";
+import { fundingAccounts, currentTrip, invoicingQueue, listSalesInvoices, salesInvoiceDoc, summarizeSalesInvoices } from "@/lib/invoices";
+import { PAGE_SIZE, pageOf } from "@/lib/paging";
 import { driverOptions, routeOptions, vehicleOptions } from "@/lib/lookups";
 import { getCompany, getInvoiceTemplate, invoiceReadiness } from "@/lib/company";
 import { invoiceQrSvg } from "@/lib/zatca-qr";
@@ -27,7 +28,7 @@ import { DriverSentTag } from "@/components/driver-sent";
 import { InvoiceEditor, type InvoiceDraft } from "./invoice-editor";
 import { invoiceActions } from "./invoice-menu";
 import { TaxInvoiceDocument } from "@/components/tax-invoice";
-import { Badge, EmptyRow, LimitRow, Input, PageHeader, Table, Td } from "@/components/ui";
+import { Badge, EmptyRow, Input, Pager, PageHeader, Table, Td } from "@/components/ui";
 import { ListActions } from "@/components/list-actions";
 import { bulkInvoiceOps, invoiceAll, invoiceCustomer, issue, saveInvoicePanel, saveInvoiceSheet, sendToZatca } from "./actions";
 import { ActionsMenu, type MenuItem } from "@/components/actions-menu";
@@ -52,15 +53,17 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
   const canUpdate = can(user.perms, "sales_invoices", "update");
   const canRevert = can(user.perms, "sales_invoices", "revert");
   const canDelete = can(user.perms, "sales_invoices", "delete");
-  const lp: DocListParams = { q: sp.q, status: sp.status, period: sp.period, sort: sp.sort, view: sp.view, pay: sp.pay };
+  const lp: DocListParams = { q: sp.q, status: sp.status, period: sp.period, sort: sp.sort, view: sp.view, pay: sp.pay, page: sp.page };
+  const { page, offset } = pageOf(sp.page);
   const canReceive = can(user.perms, "receipts", "create");
   const today = todayRiyadh();
   const filter = parseDocFilter(sp, Object.keys(STATUSES), today);
   const view = sp.view === "sheet" ? "sheet" : "table";
   const openId = view === "table" ? Number(sp.open) || null : null;
-  const [queue, invoices, openDoc, company, template] = await Promise.all([
+  const [queue, invoices, summary, openDoc, company, template] = await Promise.all([
     canCreate ? invoicingQueue(db) : Promise.resolve([]),
-    listSalesInvoices(db, filter),
+    listSalesInvoices(db, filter, PAGE_SIZE, offset),
+    summarizeSalesInvoices(db, filter),
     openId ? salesInvoiceDoc(db, openId) : Promise.resolve(null),
     getCompany(db),
     getInvoiceTemplate(db),
@@ -145,7 +148,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
   };
   const initial = editorInitial();
   const editorBack = listUrl(openId ? { open: String(openId) } : {});
-  const returnTo = listUrl({ open: "{id}" }).replace("%7Bid%7D", "{id}");
+  const returnTo = listUrl({ open: "{id}", page: creating ? undefined : lp.page }).replace("%7Bid%7D", "{id}");
   const domestic = revenue.find((a) => a.code === "4101");
 
   const state = (i: (typeof invoices)[number]["i"]) => {
@@ -155,7 +158,6 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
     const pay = paymentState(total, paid);
     return { total, paid, overdue, pay: i.status === "issued" ? (overdue ? { label: "متأخرة", tone: "red" as const } : pay) : null };
   };
-  const totals = invoices.reduce((a, { i }) => ({ total: a.total + Number(i.total) * Number(i.exchangeRate), due: a.due + (Number(i.total) - Number(i.paidAmount)) * Number(i.exchangeRate) }), { total: 0, due: 0 });
 
   return (
     <>
@@ -207,12 +209,13 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
         </details>
       )}
 
-      <DocToolbar base={BASE} params={sp} statuses={STATUSES} exportName="فواتير-المبيعات" count={invoices.length} />
+      <DocToolbar base={BASE} params={sp} statuses={STATUSES} exportName="فواتير-المبيعات" count={summary.n} />
       <div className="mb-2 flex justify-end">
         <BulkPdfButton kind="invoices" ids={invoices.map((x) => x.i.id)} />
       </div>
 
       {view === "sheet" ? (
+        <>
         <DocSheet
           action={saveInvoiceSheet}
           emptyText="لا توجد فواتير بهذه الشروط"
@@ -259,6 +262,8 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
             };
           })}
         />
+          <Pager page={page} size={PAGE_SIZE} total={summary.n} hrefFor={(p) => listUrl({ page: p > 1 ? String(p) : undefined })} />
+        </>
       ) : openDoc ? (
         <div className="grid items-start gap-4 lg:grid-cols-[minmax(17rem,22rem)_1fr]">
           {/* القائمة المختصرة بجانب المعاينة */}
@@ -469,7 +474,6 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
             ]}
           >
             {invoices.length === 0 && <EmptyRow cols={10}>{filter.q || filter.status || filter.pay || filter.from ? "لا توجد فواتير بهذه الشروط" : "لا توجد فواتير بعد"}</EmptyRow>}
-            <LimitRow cols={10} shown={invoices.length} limit={500} />
             {invoices.map(({ i, customer, waybills, parts, trips, tripsSent }) => {
               const st = state(i);
               const open = listUrl({ open: String(i.id) });
@@ -507,10 +511,11 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
               );
             })}
           </Table>
-          {invoices.length > 0 && (
+          <Pager page={page} size={PAGE_SIZE} total={summary.n} hrefFor={(p) => listUrl({ page: p > 1 ? String(p) : undefined, open: undefined })} />
+          {summary.n > 0 && (
             <p className="mt-3 text-xs text-gray-500">
-              إجمالي المعروض <span className="ltr-nums font-semibold text-gray-700">{fmt(totals.total)}</span> ريال، والمتبقي منه{" "}
-              <span className="ltr-nums font-semibold text-gray-700">{fmt(totals.due)}</span> ريال.
+              إجمالي الفواتير بهذه الشروط <span className="ltr-nums font-semibold text-gray-700">{fmt(summary.total)}</span> ريال، والمتبقي منه{" "}
+              <span className="ltr-nums font-semibold text-gray-700">{fmt(summary.due)}</span> ريال.
             </p>
           )}
         </>

@@ -48,7 +48,7 @@ export function DocToolbar({
   const [pending, start] = useTransition();
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const go = (patch: Partial<Record<keyof DocListParams, string | undefined>>) =>
-    start(() => router.replace(listHref(base, params, { ...patch, open: patch.open ?? (patch.view ? undefined : params.open) }), { scroll: false }));
+    start(() => router.replace(listHref(base, params, { ...patch, page: undefined, open: patch.open ?? (patch.view ? undefined : params.open) }), { scroll: false }));
   const view = params.view === "sheet" ? "sheet" : "table";
   const filtered = !!(params.q || params.status || params.pay || (params.period && params.period !== "all"));
 

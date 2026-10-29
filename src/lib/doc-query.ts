@@ -45,7 +45,7 @@ export function docOrder(c: DocColumns & { id: AnyColumn }, sort: DocFilter["sor
     case "due_asc":
       return [asc(c.due), asc(c.id)];
     case "party_asc":
-      return [asc(c.party), desc(c.date)];
+      return [asc(c.party), desc(c.date), desc(c.id)];
     default:
       return [desc(c.date), desc(c.id)];
   }

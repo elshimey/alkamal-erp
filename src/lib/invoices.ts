@@ -657,7 +657,7 @@ const tripCount = (cond: SQL) =>
     + (select count(*) from sales_invoice_lines l join waybills w on w.id = l.waybill_id
        where l.invoice_id = ${s.salesInvoices.id} and l.kind = 'waybill' and w.execution = 'fleet' and w.source_invoice_id is distinct from ${s.salesInvoices.id} and ${cond})`;
 
-export async function listSalesInvoices(db: Db | Tx, f: DocFilter, limit = 500) {
+export async function listSalesInvoices(db: Db | Tx, f: DocFilter, limit = 500, offset = 0) {
   return db
     .select({
       i: s.salesInvoices,
@@ -674,7 +674,22 @@ export async function listSalesInvoices(db: Db | Tx, f: DocFilter, limit = 500) 
     .innerJoin(s.parties, eq(s.parties.id, s.salesInvoices.customerId))
     .where(docWhere(salesCols, f, "issued"))
     .orderBy(...docOrder(salesCols, f.sort))
-    .limit(limit);
+    .limit(limit)
+    .offset(offset);
+}
+
+/** عدد الفواتير بشروط القائمة وإجماليها والمتبقي منها بالريال، لكل الصفحات لا للمعروضة فقط. */
+export async function summarizeSalesInvoices(db: Db | Tx, f: DocFilter) {
+  const [r] = await db
+    .select({
+      n: sql<number>`count(*)::int`,
+      total: sql<string>`coalesce(sum(${s.salesInvoices.total} * ${s.salesInvoices.exchangeRate}), 0)`,
+      due: sql<string>`coalesce(sum((${s.salesInvoices.total} - ${s.salesInvoices.paidAmount}) * ${s.salesInvoices.exchangeRate}), 0)`,
+    })
+    .from(s.salesInvoices)
+    .innerJoin(s.parties, eq(s.parties.id, s.salesInvoices.customerId))
+    .where(docWhere(salesCols, f, "issued"));
+  return { n: r.n, total: Number(r.total), due: Number(r.due) };
 }
 
 /** الفاتورة بعميلها وسطورها، لعرضها ضريبيةً في المعاينة والصفحة والطباعة. */

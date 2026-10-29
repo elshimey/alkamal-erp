@@ -32,6 +32,7 @@ import {
   invoicingQueue,
   issueInvoice,
   listSalesInvoices,
+  summarizeSalesInvoices,
   mergeInvoices,
   removeWaybillsFromDrafts,
   revertInvoice,
@@ -54,7 +55,7 @@ import { runImport } from "@/lib/importers";
 import { applyAdvance, customerCredit, postReceipt } from "@/lib/receipts";
 import { createNote, postNote, revertNote } from "@/lib/notes";
 import { listCustomers } from "@/lib/customers";
-import { createManualEntry, deleteManualEntry, listEntries, postManualEntry, reclassCandidates, reclassify, revertManualEntry, updateManualEntry } from "@/lib/journal";
+import { countEntries, createManualEntry, deleteManualEntry, listEntries, postManualEntry, reclassCandidates, reclassify, revertManualEntry, updateManualEntry } from "@/lib/journal";
 import { cashAccountFor, createCashAccount, listCashAccounts, normalizeIban } from "@/lib/banks";
 import { exportAllData } from "@/lib/export";
 import { createTransfer, deleteTransfer } from "@/lib/transfers";
@@ -66,6 +67,7 @@ import { setupSteps } from "@/lib/setup";
 import ExcelJS from "exceljs";
 import { getAttachment, listAttachments, saveDataUrl } from "@/lib/attachments";
 import { once, onceForOp } from "@/lib/once";
+import { PAGE_SIZE, pageOf } from "@/lib/paging";
 import * as rec from "@/lib/reconciliation";
 import { accrualPreview, postRevenueAccrual, undoRevenueAccrual } from "@/lib/accruals";
 import { averageCost, createProduct, createStockDoc, createWarehouse, listProducts, onHand, postStockDoc, productCard, revertStockDoc, saveCount, stockDoc } from "@/lib/inventory";
@@ -1416,6 +1418,33 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       const want = new Map(ref.map((r) => [Number(r.id), [r.trips, r.sent]]));
       expect(rows.some((r) => r.trips > 0)).toBe(true);
       for (const r of rows) expect([r.trips, r.tripsSent]).toEqual(want.get(r.i.id));
+    });
+
+    it("صفحات القوائم: الصفحات متتالية بلا تكرار ولا نقص، والعدد والإجماليات لكل الصفحات", async () => {
+      const f = parseDocFilter({}, ["draft", "issued"], D);
+      const all = await listSalesInvoices(db, f, 2000);
+      const sum = await summarizeSalesInvoices(db, f);
+      expect(sum.n).toBe(all.length);
+      expect(sum.total).toBeCloseTo(all.reduce((a, { i }) => a + Number(i.total) * Number(i.exchangeRate), 0), 2);
+      expect(sum.due).toBeCloseTo(all.reduce((a, { i }) => a + (Number(i.total) - Number(i.paidAmount)) * Number(i.exchangeRate), 0), 2);
+      const size = 3;
+      const paged: number[] = [];
+      for (let off = 0; off < all.length + size; off += size) paged.push(...(await listSalesInvoices(db, f, size, off)).map((r) => r.i.id));
+      expect(paged).toEqual(all.map((r) => r.i.id));
+
+      const entries = await listEntries(db, {}, 5000);
+      expect(await countEntries(db, {})).toBe(entries.length);
+      const second = await listEntries(db, {}, 2, 2);
+      expect(second.map((x) => x.e.id)).toEqual(entries.slice(2, 4).map((x) => x.e.id));
+
+      const wf = parseWaybillFilter({ period: "all" }, D);
+      const wb = await listWaybills(db, wf, 5000);
+      expect(wb.total.n).toBe(wb.rows.length);
+      expect(wb.total.amount).toBeCloseTo(wb.rows.reduce((a, r) => a + Number(r.w.amount), 0), 2);
+      expect((await listWaybills(db, wf, 2, 1)).rows.map((r) => r.w.id)).toEqual(wb.rows.slice(1, 3).map((r) => r.w.id));
+      expect(pageOf("3")).toEqual({ page: 3, offset: 2 * PAGE_SIZE });
+      expect(pageOf("x").page).toBe(1);
+      expect(pageOf("-2").page).toBe(1);
     });
 
     it("مصاريف السائق الجديدة: لرحلة أو عامة، تعديل وإلغاء «رُفع بالخطأ»، والمعتمد يحدد الدافع ويفصل الضريبة، والإشعارات", async () => {

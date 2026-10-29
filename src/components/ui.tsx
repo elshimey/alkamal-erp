@@ -1,4 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
+import Link from "next/link";
 import { DateInput } from "@/components/date-input";
 
 export function PageHeader({ title, description, children }: { title: string; description?: string; children?: ReactNode }) {
@@ -118,6 +119,36 @@ export function LimitRow({ cols, shown, limit }: { cols: number; shown: number; 
         يظهر أحدث {limit} سجل فقط؛ استخدم البحث أو التاريخ للوصول إلى الأقدم
       </td>
     </tr>
+  );
+}
+
+/** تنقل بين صفحات قائمة طويلة: «السابق / التالي» مع موضع المعروض من الكل. */
+export function Pager({ page, size, total, hrefFor }: { page: number; size: number; total: number; hrefFor: (page: number) => string }) {
+  const pages = Math.max(1, Math.ceil(total / size));
+  if (pages <= 1 && page <= 1) return null;
+  const from = Math.min(total, (page - 1) * size + 1);
+  const to = Math.min(total, page * size);
+  const link = "rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 shadow-sm transition hover:bg-gray-50";
+  const off = "rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-300";
+  return (
+    <nav className="mt-3 flex flex-wrap items-center justify-between gap-2 print:hidden" aria-label="الصفحات">
+      <span className="text-xs text-gray-500">
+        {total ? (
+          <>
+            المعروض <span className="ltr-nums">{from.toLocaleString("en")}–{to.toLocaleString("en")}</span> من <span className="ltr-nums">{total.toLocaleString("en")}</span>
+          </>
+        ) : (
+          "لا شيء في هذه الصفحة"
+        )}
+      </span>
+      <div className="flex items-center gap-2">
+        {page > 1 ? <Link href={hrefFor(Math.min(page - 1, pages))} className={link}>→ السابق</Link> : <span className={off}>→ السابق</span>}
+        <span className="text-sm text-gray-600">
+          صفحة <span className="ltr-nums">{page}</span> من <span className="ltr-nums">{pages}</span>
+        </span>
+        {page < pages ? <Link href={hrefFor(page + 1)} className={link}>التالي ←</Link> : <span className={off}>التالي ←</span>}
+      </div>
+    </nav>
   );
 }
 

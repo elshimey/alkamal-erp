@@ -868,14 +868,14 @@ function waybillWhere(f: WaybillFilter, opts: { tab: boolean }) {
   return where.length ? and(...where) : undefined;
 }
 
-export async function listWaybills(db: Db | Tx, f: WaybillFilter = {}, limit = 500) {
+export async function listWaybills(db: Db | Tx, f: WaybillFilter = {}, limit = 500, offset = 0) {
   const order = {
     date_desc: [desc(s.waybills.waybillDate), desc(s.waybills.id)],
     date_asc: [asc(s.waybills.waybillDate), asc(s.waybills.id)],
     amount_desc: [desc(s.waybills.amount), desc(s.waybills.id)],
     amount_asc: [asc(s.waybills.amount), asc(s.waybills.id)],
     number_desc: [desc(s.waybills.number)],
-    party_asc: [asc(s.parties.nameAr), desc(s.waybills.waybillDate)],
+    party_asc: [asc(s.parties.nameAr), desc(s.waybills.waybillDate), desc(s.waybills.id)],
   }[f.sort ?? "date_desc"];
   const base = () =>
     db
@@ -900,11 +900,12 @@ export async function listWaybills(db: Db | Tx, f: WaybillFilter = {}, limit = 5
       .innerJoin(s.routes, eq(s.routes.id, s.waybills.routeId))
       .innerJoin(fromLoc, eq(fromLoc.id, s.routes.fromLocationId))
       .innerJoin(toLoc, eq(toLoc.id, s.routes.toLocationId));
-  const [rows, counts] = await Promise.all([
+  const [rows, counts, [sum]] = await Promise.all([
     base()
       .where(waybillWhere(f, { tab: true }))
       .orderBy(...order)
-      .limit(limit),
+      .limit(limit)
+      .offset(offset),
     // عدد كل تبويب بنفس البحث والفترة
     db
       .select({
@@ -920,6 +921,16 @@ export async function listWaybills(db: Db | Tx, f: WaybillFilter = {}, limit = 5
       .leftJoin(s.employees, eq(s.employees.id, s.drivers.employeeId))
       .where(waybillWhere(f, { tab: false }))
       .groupBy(s.waybills.status, sql`2`),
+    // عدد التبويب الحالي وإجمالي مبالغه لكل الصفحات
+    db
+      .select({ n: sql<number>`count(*)::int`, amount: sql<string>`coalesce(sum(${s.waybills.amount}), 0)` })
+      .from(s.waybills)
+      .innerJoin(s.parties, eq(s.parties.id, s.waybills.customerId))
+      .leftJoin(s.vehicles, eq(s.vehicles.id, s.waybills.vehicleId))
+      .leftJoin(carrier, eq(carrier.id, s.waybills.carrierId))
+      .leftJoin(s.drivers, eq(s.drivers.id, s.waybills.driverId))
+      .leftJoin(s.employees, eq(s.employees.id, s.drivers.employeeId))
+      .where(waybillWhere(f, { tab: true })),
   ]);
   const tabCounts: Record<string, number> = { all: 0, pending_invoice: 0, merged: 0 };
   for (const c of counts) {
@@ -928,7 +939,7 @@ export async function listWaybills(db: Db | Tx, f: WaybillFilter = {}, limit = 5
     if (c.pending) tabCounts.pending_invoice += c.n;
     else if (c.status === "approved") tabCounts.merged += c.n;
   }
-  return { rows, counts: tabCounts };
+  return { rows, counts: tabCounts, total: { n: sum.n, amount: Number(sum.amount) } };
 }
 
 // ───────────── دمج المحدد وفوترته ─────────────
