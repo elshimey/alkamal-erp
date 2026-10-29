@@ -9,6 +9,7 @@ import type { DocFilter } from "@/lib/doc-filters";
 import { docOrder, docWhere } from "@/lib/doc-query";
 import { PAYABLE_BY_ROLE, PURCHASE_ACCOUNTS, SUPPLIER_ROLES, isExpenseAccount } from "@/data/purchases";
 import { notifyDriver } from "@/lib/driver-notify";
+import { cashAccountFor } from "@/lib/banks";
 
 // المشتريات والمصروفات وسندات الصرف. كل مستند يُرحّل قيده عند الاعتماد، وكل مدين يقابله دائن
 // بالمبلغ نفسه فيبقى القيد متوازناً بالريال مع أي سعر صرف.
@@ -362,8 +363,7 @@ export async function createExpense(db: Db, input: ExpenseInput) {
     }
     if (input.payer === "driver_custody" && !driverId) throw new Error("اختر السائق صاحب العهدة");
     if (input.payer === "cash") {
-      const [cash] = await tx.select().from(s.accounts).where(eq(s.accounts.id, input.cashAccountId ?? 0));
-      if (!cash || !cash.isPostable || !/^110[12]/.test(cash.code)) throw new Error("اختر صندوقاً أو حساب بنك تفصيلياً");
+      await cashAccountFor(tx, input.cashAccountId, "اختر صندوقاً أو حساب بنك تفصيلياً");
     }
     const costCenterId = await vehicleCostCenter(tx, vehicleId);
     if (account.requiresCostCenter && !costCenterId) throw new Error(`الحساب ${account.nameAr} يتطلب المركبة`);
@@ -465,8 +465,7 @@ export async function approveExpenseWith(db: Db, id: number, r: ExpenseReview) {
     if (account.requiresCostCenter && !e.costCenterId) throw new Error(`الحساب ${account.nameAr} يتطلب المركبة`);
     let cashAccountId: number | null = null;
     if (r.payer === "cash") {
-      const [cash] = await tx.select().from(s.accounts).where(eq(s.accounts.id, r.cashAccountId ?? 0));
-      if (!cash || !cash.isPostable || !/^110[12]/.test(cash.code)) throw new Error("اختر الصندوق أو البنك الذي دفعت منه الشركة");
+      const cash = await cashAccountFor(tx, r.cashAccountId, "اختر الصندوق أو البنك الذي دفعت منه الشركة");
       cashAccountId = cash.id;
     } else if (!e.driverId) throw new Error("لا يوجد سائق لهذا المصروف؛ اختر صندوقاً أو بنكاً");
     await tx

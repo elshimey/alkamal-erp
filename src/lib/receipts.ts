@@ -6,6 +6,7 @@ import { round2 } from "@/lib/invoice-posting";
 import { rateOn } from "@/lib/waybills";
 import { SALES_ACCOUNTS } from "@/data/sales";
 import type { DocFilter } from "@/lib/doc-filters";
+import { cashAccountFor } from "@/lib/banks";
 
 // سندات القبض على طريقة وافق:
 // - دفعة عن فواتير: مدين الصندوق (والتعديلات كالخصم المسموح والرسوم البنكية) / دائن العملاء،
@@ -48,8 +49,7 @@ export async function createReceipt(db: Db | Tx, input: ReceiptInput) {
   return db.transaction(async (tx) => {
     const kind = input.kind ?? "invoice_payment";
     if (!(input.amount > 0)) throw new Error("المبلغ المستلم مطلوب");
-    const [cash] = await tx.select().from(s.accounts).where(eq(s.accounts.id, input.cashAccountId));
-    if (!cash || !cash.isPostable || !/^110[12]/.test(cash.code)) throw new Error("اختر صندوقاً أو حساب بنك تفصيلياً");
+    const cash = await cashAccountFor(tx, input.cashAccountId, "اختر صندوقاً أو حساب بنك تفصيلياً");
     const currency = input.currencyCode ?? "SAR";
     if (cash.currencyCode && cash.currencyCode !== currency) throw new Error(`الحساب ${cash.nameAr} بعملة ${cash.currencyCode}`);
     const allocations = (input.allocations ?? []).filter((a) => a.amount > 0);

@@ -105,7 +105,9 @@ export async function completePasswordReset(sql: Sql, token: string, password: s
     await tx.unsafe(`update "${target.schema}".users set password_hash = $1, updated_at = now() where id = $2`, [passwordHash, target.userId]);
     await tx.unsafe(`delete from "${target.schema}".sessions where user_id = $1`, [target.userId]);
     await tx`update platform.password_resets set used_at = now() where schema_name = ${target.schema} and user_id = ${target.userId} and used_at is null`;
-    await tx`delete from platform.login_failures where login = lower(${target.login})`;
+    // المحاولات الخاطئة مسجلة باسم «رمز الشركة:اسم الدخول» (sign-in.ts)
+    await tx`delete from platform.login_failures where login in (
+      select lower(t.slug || ':' || ${target.login}) from platform.tenants t where t.schema_name = ${target.schema})`;
   });
   return target;
 }

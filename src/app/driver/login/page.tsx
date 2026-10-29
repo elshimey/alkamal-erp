@@ -9,6 +9,7 @@ import { BrandMark } from "@/components/logo";
 import { Truck } from "@/components/icons";
 import { chooseLanguage, driverLogin } from "./actions";
 import { lastCompanyCode } from "../../login/company-code";
+import { ClearDriverPages } from "../offline";
 
 export const viewport = { themeColor: "#1b2126" };
 
@@ -24,6 +25,7 @@ export default async function DriverLoginPage() {
 
   return (
     <main dir={isRtl(lang) ? "rtl" : "ltr"} lang={lang} className="flex min-h-screen flex-col bg-concrete">
+      <ClearDriverPages />
       <header className="relative overflow-hidden bg-asphalt-900 px-5 pt-[calc(env(safe-area-inset-top)+1.5rem)] pb-16 text-white">
         <div className="absolute -top-24 -end-24 size-72 rounded-full bg-brand-600/15 blur-3xl" />
         <div className="relative mx-auto flex max-w-md items-center gap-3">

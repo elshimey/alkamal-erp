@@ -1,5 +1,6 @@
 "use server";
 
+import { localPath } from "@/lib/safe-path";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
@@ -101,7 +102,8 @@ export async function copyQuotation(id: number, back: string): Promise<FormState
     return { error: errorMessage(err) };
   }
   done();
-  redirect(`${back}${back.includes("?") ? "&" : "?"}edit=${newId}`);
+  const to = localPath(back, "/quotations");
+  redirect(`${to}${to.includes("?") ? "&" : "?"}edit=${newId}`);
 }
 
 export async function removeQuotation(id: number, back: string): Promise<FormState> {
@@ -112,7 +114,7 @@ export async function removeQuotation(id: number, back: string): Promise<FormSta
     return { error: errorMessage(err) };
   }
   done();
-  redirect(back);
+  redirect(localPath(back, "/quotations"));
 }
 
 const idsOf = (fd: FormData) => [...new Set(fd.getAll("ids").map(Number).filter((n) => Number.isInteger(n) && n > 0))];
