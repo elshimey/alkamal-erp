@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { errorMessage } from "@/lib/errors";
+import { once } from "@/lib/once";
 import { createManualEntry, deleteManualEntry, postManualEntry, reclassCandidates, reclassify, revertManualEntry, updateManualEntry, updateManualEntryHeader, type ManualLine } from "@/lib/journal";
 import type { FormState } from "@/components/action-form";
 import type { DocSheetResult, SheetChange } from "@/components/doc-sheet";
@@ -22,6 +23,8 @@ export interface EntryPayload {
   reference: string;
   lines: ManualLine[];
   post: boolean;
+  /** معرّف الإرسال من النموذج لمنع إنشاء القيد مرتين */
+  op?: string;
 }
 
 export async function saveEntry(p: EntryPayload, id?: number): Promise<{ id?: number; error?: string }> {
@@ -39,7 +42,7 @@ export async function saveEntry(p: EntryPayload, id?: number): Promise<{ id?: nu
     };
     let entryId = id;
     if (id) await updateManualEntry(db, id, input);
-    else entryId = (await createManualEntry(db, input)).id;
+    else entryId = await once(db, p.op, async () => (await createManualEntry(db, input)).id);
     refresh();
     return { id: entryId };
   } catch (err) {

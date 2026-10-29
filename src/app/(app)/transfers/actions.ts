@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
+import { once } from "@/lib/once";
 import { createTransfer, deleteTransfer } from "@/lib/transfers";
 import type { FormState } from "@/components/action-form";
 
@@ -16,16 +17,20 @@ const num = (fd: FormData, k: string) => {
 export async function saveTransfer(_: FormState, fd: FormData): Promise<FormState> {
   const user = await requirePermission("payments", "create");
   try {
-    const t = await createTransfer(db, {
-      date: str(fd, "date"),
-      fromAccountId: Number(str(fd, "fromAccountId")),
-      toAccountId: Number(str(fd, "toAccountId")),
-      amount: num(fd, "amount") ?? 0,
-      receivedAmount: num(fd, "receivedAmount"),
-      fee: num(fd, "fee") ?? 0,
-      reference: str(fd, "reference"),
-      notes: str(fd, "notes"),
-      userId: user.id,
+    // يُحفظ الرقمان فقط ليعيدهما أي إرسال مكرر للنموذج نفسه
+    const t = await once(db, str(fd, "_op"), async () => {
+      const r = await createTransfer(db, {
+        date: str(fd, "date"),
+        fromAccountId: Number(str(fd, "fromAccountId")),
+        toAccountId: Number(str(fd, "toAccountId")),
+        amount: num(fd, "amount") ?? 0,
+        receivedAmount: num(fd, "receivedAmount"),
+        fee: num(fd, "fee") ?? 0,
+        reference: str(fd, "reference"),
+        notes: str(fd, "notes"),
+        userId: user.id,
+      });
+      return { number: r.number, entryNumber: r.entryNumber };
     });
     revalidatePath("/transfers");
     revalidatePath("/bank-accounts");

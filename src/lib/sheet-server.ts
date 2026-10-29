@@ -1,17 +1,23 @@
 import "server-only";
+import { db } from "@/db";
 import { errorMessage } from "@/lib/errors";
+import { once } from "@/lib/once";
 import type { SheetResult } from "@/lib/sheet";
 
 export type SheetRow = Record<string, string>;
 
-/** يحفظ صفوف الشيت صفاً صفاً، ويجمع سبب رفض كل صف بدل إيقاف الحفظ كله. */
+/**
+ * يحفظ صفوف الشيت صفاً صفاً، ويجمع سبب رفض كل صف بدل إيقاف الحفظ كله.
+ * كل صف يحمل _op من الشيت: إعادة حفظ الشيت نفسه بعد انقطاع الرد لا تسجّل الصف مرتين.
+ */
 export async function saveSheetRows(rows: SheetRow[], save: (row: SheetRow) => Promise<unknown>): Promise<SheetResult> {
   if (!Array.isArray(rows) || rows.length > 2000) return { saved: 0, error: "عدد الصفوف أكبر من المسموح (2000)" };
   let saved = 0;
   const rowErrors: Record<number, string> = {};
   for (let i = 0; i < rows.length; i++) {
     try {
-      await save(rows[i]);
+      const { _op, ...row } = rows[i];
+      await once(db, _op, async () => void (await save(row)));
       saved++;
     } catch (err) {
       rowErrors[i] = errorMessage(err);

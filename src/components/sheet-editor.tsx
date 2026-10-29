@@ -7,6 +7,7 @@ import { useRef, useState, useTransition } from "react";
 import { Truck } from "./icons";
 import { DataGrid, emptyGridRow, GRID_HINT, isEmptyGridRow, normalizeCell, useGridHistory, type GridColumn } from "./data-grid";
 import { parseDelimited, toCsv, type SheetResult } from "@/lib/sheet";
+import { newOpId, rowOpId } from "@/lib/op-id";
 import { useUnsavedGuard } from "./unsaved-guard";
 
 export type SheetColumn = GridColumn;
@@ -35,6 +36,8 @@ export function SheetEditor({
   const [message, setMessage] = useState<{ ok?: string; error?: string }>({});
   const [pending, startTransition] = useTransition();
   const fileRef = useRef<HTMLInputElement>(null);
+  // جلسة الحفظ: تبقى كما هي إن انقطع الرد، فإعادة الحفظ لا تكرر صفاً حُفظ؛ وتتجدد بعد كل رد من الخادم
+  const session = useRef("");
   // صفوف مكتوبة لم تُحفظ: سؤال قبل مغادرة الصفحة
   useUnsavedGuard(rows.some((r) => !isEmpty(r)));
 
@@ -72,8 +75,17 @@ export function SheetEditor({
       setMessage({ error: "الشيت فارغ" });
       return;
     }
+    session.current ||= newOpId();
+    const sent = filled.map((f, k) => ({ ...f.row, _op: rowOpId(session.current, k, f.row) }));
     startTransition(async () => {
-      const result = await action(filled.map((f) => f.row));
+      let result: SheetResult;
+      try {
+        result = await action(sent);
+      } catch {
+        setMessage({ error: "تعذّر الاتصال بالخادم؛ اضغط «حفظ الكل» مرة أخرى، ولن يتكرر ما حُفظ" });
+        return;
+      }
+      session.current = "";
       const failed = new Set(Object.keys(result.rowErrors ?? {}).map(Number));
       const keep = filled.filter((_, k) => failed.has(k));
       const nextErrors: Record<number, string> = {};

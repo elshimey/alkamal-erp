@@ -47,12 +47,3 @@ export async function getAttachment(db: Db | Tx, id: number) {
   const [row] = await db.select().from(s.attachments).where(eq(s.attachments.id, id));
   return row ?? null;
 }
-
-/** ينفذ العملية مرة واحدة لكل معرّف من تطبيق السائق؛ الإرسال المكرر (بعد انقطاع الشبكة) يُتجاهل. */
-export async function onceForOp(db: Db, opId: string | null | undefined, fn: () => Promise<void>) {
-  if (!opId || !/^[A-Za-z0-9-]{8,40}$/.test(opId)) return fn();
-  const [done] = await db.select().from(s.clientOps).where(eq(s.clientOps.opId, opId));
-  if (done) return;
-  await fn();
-  await db.insert(s.clientOps).values({ opId }).onConflictDoNothing();
-}

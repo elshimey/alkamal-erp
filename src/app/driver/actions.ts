@@ -11,7 +11,8 @@ import { submitRenewal } from "@/lib/documents";
 import { addExpense, addFuel, deleteWaybillItem } from "@/lib/waybills";
 import { todayRiyadh } from "@/lib/dates";
 import { errorMessage } from "@/lib/errors";
-import { onceForOp, saveDataUrl } from "@/lib/attachments";
+import { saveDataUrl } from "@/lib/attachments";
+import { onceForOp } from "@/lib/once";
 import { DRIVER_EXPENSE_ACCOUNTS, DRIVER_LANGS, type DriverDict, type DriverExpenseType, type DriverLang } from "@/data/driver-i18n";
 import type { FormState } from "@/components/action-form";
 
