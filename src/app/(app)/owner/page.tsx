@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { baseSql } from "@/db";
 import { getTenant, isPlatformOwner, requireAdmin } from "@/lib/auth";
 import { listTenants } from "@/lib/platform";
+import { recentErrors } from "@/lib/error-log";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Badge, Card, Input, PageHeader, Table, Td } from "@/components/ui";
 import { activateAction, codeAction, deleteAction, extendAction, resetAdminAction, suspendAction, tenantWelcome } from "./actions";
@@ -17,7 +18,7 @@ export default async function OwnerPage() {
   const user = await requireAdmin();
   if (!(await getTenant()).isHome) redirect("/?denied=1");
   const canDelete = await isPlatformOwner(user);
-  const tenants = await listTenants(baseSql);
+  const [tenants, errors] = await Promise.all([listTenants(baseSql), recentErrors()]);
   const others = tenants.filter((t) => t.schema_name !== "public");
   const welcome = new Map(await Promise.all(others.filter((t) => t.admin_login).map(async (t) => [t.id, await tenantWelcome(t.name, t.slug, t.admin_name ?? "", t.admin_login!)] as const)));
 
@@ -122,6 +123,40 @@ export default async function OwnerPage() {
         })}
       </Table>
       {others.length === 0 && <p className="mt-4 text-sm text-gray-500">لا توجد شركات مشتركة بعد؛ أضف أول شركة من النموذج أعلاه.</p>}
+
+      <Card title="أخطاء البرنامج" className="mt-8">
+        <p className="mb-3 text-sm text-gray-500">
+          كل خطأ غير متوقع يُسجَّل هنا مع عدد مرات تكراره في اليوم، ويصلك بريد تنبيه أول مرة يظهر فيها. أرسل لقطة منه للدعم الفني إن تكرر.
+        </p>
+        {errors.length === 0 ? (
+          <p className="text-sm text-green-700">لا أخطاء مسجلة. ✓</p>
+        ) : (
+          <Table head={["آخر مرة", "الشركة", "الصفحة", "الخطأ", "التكرار"]}>
+            {errors.map((e) => (
+              <tr key={e.id}>
+                <Td className="ltr-nums whitespace-nowrap text-xs">
+                  <span dir="ltr">{new Date(e.last_at).toLocaleString("en-GB", { timeZone: "Asia/Riyadh", dateStyle: "short", timeStyle: "short" })}</span>
+                </Td>
+                <Td className="text-xs">{tenants.find((t) => t.schema_name === e.schema_name)?.name ?? e.schema_name ?? "—"}</Td>
+                <Td className="ltr-nums text-xs">
+                  <span dir="ltr">{e.path ?? "—"}</span>
+                </Td>
+                <Td>
+                  <details className="max-w-xl">
+                    <summary className="cursor-pointer text-sm break-all text-gray-800">{e.message}</summary>
+                    {e.stack && (
+                      <pre className="mt-2 max-h-48 overflow-auto rounded bg-gray-50 p-2 text-start text-[11px] whitespace-pre-wrap break-all text-gray-600" dir="ltr">
+                        {e.stack}
+                      </pre>
+                    )}
+                  </details>
+                </Td>
+                <Td className="ltr-nums">{e.count}</Td>
+              </tr>
+            ))}
+          </Table>
+        )}
+      </Card>
     </>
   );
 }

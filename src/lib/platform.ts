@@ -91,6 +91,20 @@ export async function ensurePlatform(sql: Sql, homeName = "الكمال للنق
     );
     create index if not exists password_resets_user_idx on platform.password_resets (schema_name, user_id, created_at);
     create index if not exists access_requests_open_idx on platform.access_requests (schema_name) where resolved_at is null;
+    -- أخطاء البرنامج غير المتوقعة: سطر لكل خطأ في كل يوم مع عدد مرات تكراره
+    create table if not exists platform.error_log (
+      id bigserial primary key,
+      fingerprint varchar(40) not null,
+      day date not null default current_date,
+      schema_name text,
+      path text,
+      message text not null,
+      stack text,
+      count integer not null default 1,
+      first_at timestamptz not null default now(),
+      last_at timestamptz not null default now(),
+      unique (fingerprint, day)
+    );
     create or replace function platform.sync_login() returns trigger language plpgsql as $$
     begin
       if tg_op in ('UPDATE', 'DELETE') then

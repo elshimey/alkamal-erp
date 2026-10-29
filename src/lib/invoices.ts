@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, lte, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lte, sql, type SQL } from "drizzle-orm";
 import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
 import { createJournalEntryTx, deleteEntryTx, nextDocumentNumber } from "@/lib/ledger";
@@ -652,6 +652,11 @@ const salesCols = {
   search: [s.salesInvoices.notes],
 };
 
+const tripCount = (cond: SQL) =>
+  sql`(select count(*) from waybills w where w.execution = 'fleet' and w.source_invoice_id = ${s.salesInvoices.id} and ${cond})
+    + (select count(*) from sales_invoice_lines l join waybills w on w.id = l.waybill_id
+       where l.invoice_id = ${s.salesInvoices.id} and l.kind = 'waybill' and w.execution = 'fleet' and w.source_invoice_id is distinct from ${s.salesInvoices.id} and ${cond})`;
+
 export async function listSalesInvoices(db: Db | Tx, f: DocFilter, limit = 500) {
   return db
     .select({
@@ -660,8 +665,9 @@ export async function listSalesInvoices(db: Db | Tx, f: DocFilter, limit = 500) 
       waybills: sql<number>`(select count(*) from sales_invoice_lines l where l.invoice_id = ${s.salesInvoices.id} and l.kind = 'waybill')::int`,
       // أجزاء الدمج (كل شحنة، وكل فاتورة دُمجت ببنودها)؛ أكثر من جزء = مدمجة
       // رحلات السائقين في الفاتورة وكم منها أُرسل
-      trips: sql<number>`(select count(*) from waybills w where w.execution = 'fleet' and (w.source_invoice_id = ${s.salesInvoices.id} or w.id in (select waybill_id from sales_invoice_lines where invoice_id = ${s.salesInvoices.id} and kind = 'waybill')))::int`,
-      tripsSent: sql<number>`(select count(*) from waybills w where w.execution = 'fleet' and w.sent_to_driver_at is not null and (w.source_invoice_id = ${s.salesInvoices.id} or w.id in (select waybill_id from sales_invoice_lines where invoice_id = ${s.salesInvoices.id} and kind = 'waybill')))::int`,
+      // جزآن بفهرسين بدل «أو» التي تمسح جدول الشحنات كاملاً لكل فاتورة: رحلة الفاتورة المباشرة + الشحنات المفوترة فيها
+      trips: sql<number>`(${tripCount(sql`true`)})::int`,
+      tripsSent: sql<number>`(${tripCount(sql`w.sent_to_driver_at is not null`)})::int`,
       parts: sql<number>`(select count(distinct coalesce('w' || l.waybill_id, 'm' || coalesce(l.group_key::text, 'own'))) from sales_invoice_lines l where l.invoice_id = ${s.salesInvoices.id})::int`,
     })
     .from(s.salesInvoices)
