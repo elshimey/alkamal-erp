@@ -6,19 +6,21 @@ import { cashAccounts } from "@/lib/invoices";
 import { productOptions } from "@/lib/inventory";
 import { supplierOptions } from "@/lib/purchases";
 import { todayRiyadh } from "@/lib/dates";
-import { LINE_KINDS, MAINTENANCE_TYPES } from "@/data/maintenance";
+import { LINE_KINDS } from "@/data/maintenance";
+import { customListOptions } from "@/lib/custom-lists";
 import { FormCombo } from "@/components/form-combo";
 import { LinesEditor } from "@/components/lines-editor";
 import { PanelField, PanelSection } from "@/components/panel-ui";
 import { RecordPanel } from "@/components/record-panel";
-import { Input, Select } from "@/components/ui";
+import { Input } from "@/components/ui";
 import { OrderProviderFields } from "./order-provider-fields";
 import { saveOrderPanelAction } from "./actions";
 
 /** نافذة أمر صيانة جديد: الرأس والبنود معاً، وبعد الحفظ تُفتح معاينته للاعتماد. يُربط بطلب عطل أو خطة دورية إن جاء منهما. */
 export async function OrderPanel({ closeHref, savedHref, vehicle, request, plan, type }: { closeHref: string; savedHref: string; vehicle?: string; request?: string; plan?: string; type?: string }) {
-  const [vehicles, suppliers, cashes, products, warehouses, source] = await Promise.all([
+  const [vehicles, kinds, suppliers, cashes, products, warehouses, source] = await Promise.all([
     vehicleOptions(),
+    customListOptions(db, "maintenance_kind"),
     supplierOptions(db),
     cashAccounts(db),
     productOptions(db),
@@ -49,14 +51,8 @@ export async function OrderPanel({ closeHref, savedHref, vehicle, request, plan,
         <PanelField label="التاريخ" required>
           <Input type="date" name="orderDate" defaultValue={todayRiyadh()} required className="w-full" />
         </PanelField>
-        <PanelField label="نوع الصيانة" required>
-          <Select name="type" defaultValue={type && type in MAINTENANCE_TYPES ? type : "mechanical"} className="w-full">
-            {Object.entries(MAINTENANCE_TYPES).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v}
-              </option>
-            ))}
-          </Select>
+        <PanelField label="نوع الصيانة" required hint="أو أضف نوعاً جديداً من القائمة">
+          <FormCombo name="type" options={kinds} create="maintenance_kind" defaultValue={type && kinds.some((k) => k.value === type) ? type : "mechanical"} required placeholder="اختر أو أضف نوعاً…" />
         </PanelField>
         <OrderProviderFields suppliers={suppliers} cashes={cashes} />
       </PanelSection>

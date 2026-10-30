@@ -396,6 +396,7 @@ export async function alertCounts(db: Db, today: string, docKinds?: OwnerKind[])
           (select max(rate_date) from exchange_rates where currency_code = 'KWD') as kwd_rate_date,
           (select count(*) from vehicles where status = 'active' and not exists (select 1 from vehicle_assignments va where va.vehicle_id = vehicles.id and va.to_date is null))::int as unassigned,
           (select count(*) from expenses where status = 'pending')::int as pending_expenses,
+          (select count(*) from expenses where status = 'pending' and driver_kind in ('maintenance', 'tires'))::int as pending_driver_maintenance,
           (select count(*) from purchase_invoices where status = 'draft')::int as draft_purchases,
           (select count(*) from purchase_invoices where status = 'posted' and paid_amount < total and due_date < ${today})::int as overdue_purchases,
           (select coalesce(sum((total - paid_amount) * exchange_rate), 0) from purchase_invoices
@@ -430,6 +431,7 @@ export async function alertCounts(db: Db, today: string, docKinds?: OwnerKind[])
     kwdRateDate: (r.kwd_rate_date as string | null) ?? null,
     unassigned: n(r.unassigned),
     pendingExpenses: n(r.pending_expenses),
+    pendingDriverMaintenance: n(r.pending_driver_maintenance),
     draftPurchases: n(r.draft_purchases),
     overduePurchases: n(r.overdue_purchases),
     dueWeek: n(r.due_week),

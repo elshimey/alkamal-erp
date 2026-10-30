@@ -454,7 +454,7 @@ export interface ExpenseReview {
  * اعتماد مصروف السائق بعد مراجعته: يحدد المعتمد من دفع فعلاً (عهدة السائق أو صندوق / بنك الشركة)،
  * ونوع المصروف، ويفصل الضريبة من المبلغ الإجمالي الذي أدخله السائق، والمورد إن أراد.
  */
-export async function approveExpenseWith(db: Db, id: number, r: ExpenseReview) {
+export async function approveExpenseWith(db: Db | Tx, id: number, r: ExpenseReview) {
   return db.transaction(async (tx) => {
     const e = await lockExpense(tx, id);
     if (e.status !== "pending") throw new Error(`المصروف ${e.number} ليس بانتظار الاعتماد`);
@@ -501,8 +501,17 @@ export async function revertExpense(db: Db, id: number) {
     const e = await lockExpense(tx, id);
     if (e.status === "pending") throw new Error("المصروف معلّق أصلاً");
     if (e.status === "voided") throw new Error("ألغاه السائق لأنه رُفع بالخطأ");
-    await tx.update(s.expenses).set({ status: "pending", rejectReason: null, journalEntryId: null, approvedBy: null }).where(eq(s.expenses.id, id));
+    await tx.update(s.expenses).set({ status: "pending", rejectReason: null, journalEntryId: null, maintenanceOrderId: null, approvedBy: null }).where(eq(s.expenses.id, id));
     if (e.journalEntryId) await deleteEntryTx(tx, e.journalEntryId);
+    // طلب صيانة اعتُمد ديناً على ورشة: يُحذف أمر الصيانة الذي أُنشئ له وقيده
+    if (e.maintenanceOrderId) {
+      const [o] = await tx.select().from(s.maintenanceOrders).where(eq(s.maintenanceOrders.id, e.maintenanceOrderId)).for("update");
+      if (o) {
+        await tx.insert(s.deletionLog).values({ entity: "maintenance_order", entityId: String(o.id), snapshot: { order: o }, reason: `إرجاع طلب السائق ${e.number}` });
+        await tx.delete(s.maintenanceOrders).where(eq(s.maintenanceOrders.id, o.id));
+        if (o.journalEntryId) await deleteEntryTx(tx, o.journalEntryId);
+      }
+    }
   });
 }
 

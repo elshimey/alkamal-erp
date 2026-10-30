@@ -63,6 +63,7 @@ export function quickPerm(kind: QuickKind): Entity {
   if (kind === "city" || kind === "route") return "routes";
   if (kind === "account") return "accounts";
   if (kind === "violation_type") return "violations";
+  if (kind === "maintenance_kind") return "maintenance";
   if (kind === "vehicle" || kind === "vehicle_type" || isCustomList(kind)) return "vehicles";
   if (kind === "driver") return "drivers";
   if (kind === "product") return "inventory";

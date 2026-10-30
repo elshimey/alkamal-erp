@@ -30,6 +30,7 @@ export default async function MaintenanceOrderPage({ params }: { params: Promise
       request: s.breakdownRequests,
       plan: s.maintenancePlans.title,
       entry: s.journalEntries.number,
+      typeLabel: s.lookupValues.label,
     })
     .from(s.maintenanceOrders)
     .innerJoin(s.vehicles, eq(s.vehicles.id, s.maintenanceOrders.vehicleId))
@@ -38,6 +39,7 @@ export default async function MaintenanceOrderPage({ params }: { params: Promise
     .leftJoin(s.breakdownRequests, eq(s.breakdownRequests.id, s.maintenanceOrders.breakdownRequestId))
     .leftJoin(s.maintenancePlans, eq(s.maintenancePlans.id, s.maintenanceOrders.planId))
     .leftJoin(s.journalEntries, eq(s.journalEntries.id, s.maintenanceOrders.journalEntryId))
+    .leftJoin(s.lookupValues, eq(s.lookupValues.id, s.maintenanceOrders.typeClassId))
     .where(eq(s.maintenanceOrders.id, id));
   if (!row) notFound();
   const { o } = row;
@@ -54,7 +56,7 @@ export default async function MaintenanceOrderPage({ params }: { params: Promise
     <>
       <PageHeader
         title={`أمر الصيانة ${o.number}`}
-        description={`${row.plate} · ${MAINTENANCE_TYPES[o.type]} · ${row.supplier ?? MAINTENANCE_PROVIDERS.internal} · ${o.orderDate}${o.supplierInvoiceNo ? ` · فاتورة ${o.supplierInvoiceNo}` : ""}`}
+        description={`${row.plate} · ${row.typeLabel ?? MAINTENANCE_TYPES[o.type]} · ${row.supplier ?? MAINTENANCE_PROVIDERS.internal} · ${o.orderDate}${o.supplierInvoiceNo ? ` · فاتورة ${o.supplierInvoiceNo}` : ""}`}
       >
         <div className="flex flex-wrap items-center gap-3">
           <Badge tone={MAINTENANCE_STATUS[o.status].tone}>{MAINTENANCE_STATUS[o.status].label}</Badge>
@@ -153,7 +155,7 @@ export default async function MaintenanceOrderPage({ params }: { params: Promise
         {draft && can(user.perms, "maintenance", "approve") && (
           <Card title="الاعتماد وترحيل القيد">
             <ActionForm action={approveOrder.bind(null, id)} resetOnSuccess={false} className="flex flex-wrap items-end gap-3">
-              {o.provider === "internal" && (
+              {o.provider === "internal" && !o.supplierId && (
                 <Field label="القطع اشتُريت من">
                   <Select name="cashAccountId" defaultValue={o.cashAccountId ?? ""}>
                     <option value="">اختر الصندوق</option>

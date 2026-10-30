@@ -20,6 +20,7 @@ import { db } from "@/db";
 import { logout } from "../login/actions";
 import { LogoutButton } from "@/components/logout-button";
 import { WelcomeToast } from "@/components/welcome-toast";
+import { NotificationBell } from "@/components/notification-bell";
 import { WELCOME_COOKIE, welcomeMessage } from "@/lib/welcome";
 
 // الدعم الفني (واتساب واتصال)
@@ -81,6 +82,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </Link>
           <GlobalSearch pages={pages} />
           <div className="ms-auto flex items-center gap-2 text-sm md:gap-4">
+            <NotificationBell />
             <Link href="/account" className="flex items-center gap-2 text-gray-700 hover:text-brand-700">
               <span className="flex size-9 items-center justify-center rounded-full bg-asphalt-900 font-display font-semibold text-brand-500 ring-2 ring-brand-600/40">{user.name.trim()[0]}</span>
               <span className="hidden sm:inline">

@@ -7,9 +7,11 @@ import { requirePermission } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
 import { todayRiyadh } from "@/lib/dates";
 import { cell, saveSheetRows, type SheetRow } from "@/lib/sheet-server";
+import { rejectExpense, revertExpense } from "@/lib/purchases";
 import {
   addMaintenanceLines,
   approveBreakdownRequest,
+  approveDriverMaintenance,
   approveMaintenanceOrder,
   completeMaintenanceOrder,
   createBreakdownRequest,
@@ -26,6 +28,7 @@ import {
 } from "@/lib/maintenance";
 import type { DocSheetResult, SheetChange } from "@/components/doc-sheet";
 import { MAINTENANCE_TYPES, PRIORITIES, type MaintenanceType } from "@/data/maintenance";
+import { splitCustom } from "@/data/custom-lists";
 import type { FormState } from "@/components/action-form";
 import type { PanelResult } from "@/components/record-panel";
 
@@ -44,6 +47,11 @@ const typeOf = (v: unknown) => {
   if (!(t in MAINTENANCE_TYPES)) throw new Error("اختر نوع الصيانة");
   return t as MaintenanceType;
 };
+/** نوع الصيانة من القائمة: الأساسي، أو «الأساسي~رقم» لنوع أضافه المستخدم */
+const kindOf = (v: unknown) => {
+  const { base, classId } = splitCustom(v);
+  return { type: typeOf(base), typeClassId: classId };
+};
 
 // ───────────── أوامر الصيانة ─────────────
 
@@ -56,7 +64,7 @@ export async function createOrder(_: FormState, fd: FormData): Promise<FormState
       await createMaintenanceOrder(db, {
         vehicleId: Number(fd.get("vehicleId")) || 0,
         orderDate: String(fd.get("orderDate") || todayRiyadh()),
-        type: typeOf(fd.get("type")),
+        ...kindOf(fd.get("type")),
         provider,
         supplierId: optNum(fd.get("supplierId")),
         supplierInvoiceNo: String(fd.get("supplierInvoiceNo") || "") || null,
@@ -84,6 +92,8 @@ export async function saveOrderPanelAction(data: FormData): Promise<PanelResult>
   try {
     if (!get("vehicleId")) throw new Error("اختر المركبة");
     const provider = get("provider") === "internal" ? "internal" : "external";
+    const onCredit = provider === "internal" && get("partsFrom") === "supplier";
+    if (onCredit && !get("supplierId")) throw new Error("اختر المورد الآجل للقطع");
     const raw = JSON.parse(get("lines") || "[]") as PanelLine[];
     const lines = raw
       .filter((r) => ["productId", "description", "unitPrice"].some((k) => (r[k] ?? "").trim()))
@@ -115,11 +125,12 @@ export async function saveOrderPanelAction(data: FormData): Promise<PanelResult>
       const o = await createMaintenanceOrder(tx, {
         vehicleId: Number(get("vehicleId")),
         orderDate: get("orderDate") || todayRiyadh(),
-        type: typeOf(get("type")),
+        ...kindOf(get("type")),
         provider,
-        supplierId: provider === "external" ? optNum(get("supplierId")) : null,
-        supplierInvoiceNo: provider === "external" ? get("supplierInvoiceNo") || null : null,
-        cashAccountId: provider === "internal" ? optNum(get("cashAccountId")) : null,
+        // الورشة الداخلية: القطع المشتراة من الصندوق أو ديناً على مورد آجل
+        supplierId: provider === "external" || onCredit ? optNum(get("supplierId")) : null,
+        supplierInvoiceNo: provider === "external" || onCredit ? get("supplierInvoiceNo") || null : null,
+        cashAccountId: provider === "internal" && !onCredit ? optNum(get("cashAccountId")) : null,
         odometer: optNum(get("odometer")),
         breakdownRequestId: optNum(get("breakdownRequestId")),
         planId: optNum(get("planId")),
@@ -298,7 +309,7 @@ export async function savePlans(rows: SheetRow[]) {
     if (!interval) throw new Error("المدة بالأيام إلزامية");
     await savePlan(db, {
       vehicleId: Number(cell.required(r.vehicleId, "المركبة")),
-      type: typeOf(r.type),
+      ...kindOf(r.type),
       title: cell.required(r.title, "اسم الصيانة"),
       intervalDays: Math.round(interval),
       lastDoneDate: cell.date(r.lastDone, "آخر تنفيذ"),
@@ -316,7 +327,7 @@ export async function savePlanAction(id: number | null, data: FormData): Promise
     if (!get("vehicleId")) throw new Error("اختر المركبة");
     const interval = Number(get("intervalDays"));
     if (!Number.isInteger(interval) || interval < 1 || interval > 3650) throw new Error("المدة بالأيام بين 1 و 3650");
-    const input = { vehicleId: Number(get("vehicleId")), type: typeOf(get("type")), title: get("title"), intervalDays: interval, lastDoneDate: get("lastDone") || null };
+    const input = { vehicleId: Number(get("vehicleId")), ...kindOf(get("type")), title: get("title"), intervalDays: interval, lastDoneDate: get("lastDone") || null };
     const plan = id ? await updatePlan(db, id, { ...input, isActive: data.get("isActive") === "on" }) : await savePlan(db, input);
     refresh();
     return { ok: `حُفظت الخطة «${plan.title}»`, id: plan.id, label: plan.title };
@@ -404,4 +415,57 @@ export async function bulkPlanOrders(_: FormState, fd: FormData): Promise<FormSt
   const user = await requirePermission("maintenance", "create");
   const date = String(fd.get("date") || todayRiyadh());
   return each(ids(fd), "الخطط", "أُنشئ أمر صيانة لـ", (id) => createOrdersFrom(db, { plans: [id] }, { orderDate: date, userId: user.id }));
+}
+
+// ───────────── طلبات صيانة السائقين ─────────────
+
+const refreshDriverRequests = () => {
+  refresh();
+  revalidatePath("/maintenance/driver-requests");
+  revalidatePath("/expenses");
+  revalidatePath("/driver/expenses");
+};
+
+export async function approveDriverRequest(id: number, _: FormState, fd: FormData): Promise<FormState> {
+  const user = await requirePermission("maintenance", "approve");
+  try {
+    const payer = String(fd.get("payer") ?? "");
+    if (payer !== "custody" && payer !== "cash" && payer !== "supplier") throw new Error("اختر من دفع");
+    const vat = String(fd.get("vat") ?? "").replace(/,/g, "").trim();
+    const entry = await approveDriverMaintenance(db, id, {
+      payer,
+      ...kindOf(fd.get("type")),
+      cashAccountId: optNum(fd.get("cashAccountId")),
+      supplierId: optNum(fd.get("supplierId")),
+      supplierInvoiceNo: String(fd.get("supplierInvoiceNo") ?? "").trim() || null,
+      vatAmount: vat ? Number(vat) : 0,
+      userId: user.id,
+    });
+    refreshDriverRequests();
+    return { ok: `اعتُمد الطلب ورُحّل القيد ${entry.number}` };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+}
+
+export async function rejectDriverRequest(id: number, _: FormState, fd: FormData): Promise<FormState> {
+  await requirePermission("maintenance", "approve");
+  try {
+    await rejectExpense(db, id, String(fd.get("reason") ?? ""));
+    refreshDriverRequests();
+    return { ok: "رُفض الطلب وأُبلغ السائق" };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+}
+
+export async function revertDriverRequest(id: number): Promise<FormState> {
+  await requirePermission("maintenance", "approve");
+  try {
+    await revertExpense(db, id);
+    refreshDriverRequests();
+    return { ok: "أُعيد الطلب إلى «بانتظار الاعتماد»" };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
 }

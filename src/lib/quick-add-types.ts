@@ -20,6 +20,7 @@ export const QUICK_KINDS = [
   "ownership",
   "plate_type",
   "violation_type",
+  "maintenance_kind",
 ] as const;
 export type QuickKind = (typeof QUICK_KINDS)[number];
 

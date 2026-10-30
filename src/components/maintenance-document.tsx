@@ -88,8 +88,8 @@ export function MaintenanceOrderDocument({ company, doc, template = DEFAULT_TEMP
       <Facts
         rows={[
           ["المركبة", doc.plate],
-          ["نوع الصيانة", MAINTENANCE_TYPES[o.type]],
-          ["الجهة", doc.supplier ?? MAINTENANCE_PROVIDERS.internal],
+          ["نوع الصيانة", doc.typeLabel ?? MAINTENANCE_TYPES[o.type]],
+          ["الجهة", o.provider === "internal" ? (doc.supplier ? `${MAINTENANCE_PROVIDERS.internal} · القطع من ${doc.supplier}` : MAINTENANCE_PROVIDERS.internal) : doc.supplier],
           ["فاتورة الورشة", o.supplierInvoiceNo],
           ["الدفع من", doc.cash],
           ["قراءة العداد", o.odometer != null ? `${o.odometer.toLocaleString("en")} كم` : null],

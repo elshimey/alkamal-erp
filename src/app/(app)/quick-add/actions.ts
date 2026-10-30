@@ -20,6 +20,7 @@ const LIST: Record<string, string> = {
   parties: "/parties",
   accounts: "/accounts",
   violations: "/violations",
+  maintenance: "/maintenance",
 };
 
 export async function quickAddFormAction(

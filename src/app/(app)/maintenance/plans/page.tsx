@@ -6,6 +6,8 @@ import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { vehicleOptions } from "@/lib/lookups";
 import { planSchedule } from "@/lib/maintenance";
+import { customListOptions } from "@/lib/custom-lists";
+import { joinCustom } from "@/data/custom-lists";
 import { listHref, type DocListParams } from "@/lib/doc-filters";
 import { todayRiyadh } from "@/lib/dates";
 import { MAINTENANCE_STATUS, MAINTENANCE_TYPES, PLAN_ALERT_DAYS } from "@/data/maintenance";
@@ -30,8 +32,9 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
   const user = await requirePermission("maintenance", "view");
   const sp = await searchParams;
   const today = todayRiyadh();
-  const [vehicles, all, openOrders] = await Promise.all([
+  const [vehicles, kinds, all, openOrders] = await Promise.all([
     vehicleOptions(),
+    customListOptions(db, "maintenance_kind"),
     planSchedule(db, today),
     // الأوامر غير المكتملة المرتبطة بالخطط: لا يُنشأ للخطة أمر ثانٍ
     db
@@ -47,7 +50,7 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
       (!sp.status || state(p.days) === sp.status) &&
       (!Number(sp.vehicle) || p.vehicleId === Number(sp.vehicle)) &&
       (!sp.type || p.type === sp.type) &&
-      (!q || `${p.plate} ${p.title} ${MAINTENANCE_TYPES[p.type]}`.toLowerCase().includes(q)),
+      (!q || `${p.plate} ${p.title} ${(p.typeLabel ?? MAINTENANCE_TYPES[p.type])}`.toLowerCase().includes(q)),
   );
   const openId = Number(sp.open) || null;
   const openPlan = openId ? all.find((p) => p.id === openId) : null;
@@ -80,7 +83,7 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
             initialRows={4}
             columns={[
               { key: "vehicleId", label: "المركبة", type: "select", required: true, options: vehicles, width: "9rem", create: "vehicle" },
-              { key: "type", label: "النوع", type: "select", required: true, options: Object.entries(MAINTENANCE_TYPES).map(([value, label]) => ({ value, label })), width: "11rem" },
+              { key: "type", label: "النوع", type: "select", required: true, options: kinds, create: "maintenance_kind", width: "11rem" },
               { key: "title", label: "اسم الصيانة", required: true, width: "14rem", placeholder: "تغيير زيت" },
               { key: "intervalDays", label: "كل (يوم)", type: "number", required: true, width: "6rem", placeholder: "30" },
               { key: "lastDone", label: "آخر تنفيذ", type: "date" },
@@ -149,7 +152,7 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
               {openPlan.title} · {openPlan.plate}
             </span>
             <span className="text-xs text-gray-500">
-              {MAINTENANCE_TYPES[openPlan.type]} · كل {openPlan.intervalDays} يوم · الاستحقاق <span className="ltr-nums">{openPlan.due}</span>
+              {(openPlan.typeLabel ?? MAINTENANCE_TYPES[openPlan.type])} · كل {openPlan.intervalDays} يوم · الاستحقاق <span className="ltr-nums">{openPlan.due}</span>
             </span>
             {canUpdate && (
               <Link href={listHref(BASE, { ...listParams, edit: String(openPlan.id) } as Params, {})} scroll={false} className="ms-auto rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
@@ -157,7 +160,7 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
               </Link>
             )}
             {canCreate && !openByPlan.has(openPlan.id) && (
-              <Link href={`/maintenance?new=1&vehicle=${openPlan.vehicleId}&plan=${openPlan.id}&type=${openPlan.type}`} className={`${canUpdate ? "" : "ms-auto "}rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-brand-900 hover:bg-brand-500`}>
+              <Link href={`/maintenance?new=1&vehicle=${openPlan.vehicleId}&plan=${openPlan.id}&type=${encodeURIComponent(joinCustom(openPlan.type, openPlan.typeClassId))}`} className={`${canUpdate ? "" : "ms-auto "}rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-brand-900 hover:bg-brand-500`}>
                 إنشاء أمر صيانة
               </Link>
             )}
@@ -209,7 +212,7 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
                   {p.title}
                 </Link>
               </Td>
-              <Td>{MAINTENANCE_TYPES[p.type]}</Td>
+              <Td>{(p.typeLabel ?? MAINTENANCE_TYPES[p.type])}</Td>
               <Td className="ltr-nums">{p.intervalDays} يوم</Td>
               <Td className="ltr-nums">{p.lastDoneDate ?? "—"}</Td>
               <Td className={`ltr-nums ${p.days < 0 ? "font-semibold text-red-600" : ""}`}>{p.due}</Td>

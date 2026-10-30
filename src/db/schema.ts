@@ -1218,6 +1218,8 @@ export const expenses = pgTable(
     maintenanceTypeId: ref("maintenance_type_id").references((): AnyPgColumn => maintenanceTypes.id),
     voidReason: text("void_reason"),
     journalEntryId: ref("journal_entry_id").references(() => journalEntries.id),
+    // طلب صيانة السائق المعتمد ديناً على ورشة: قيده في أمر الصيانة لا في المصروف
+    maintenanceOrderId: ref("maintenance_order_id").references((): AnyPgColumn => maintenanceOrders.id),
     approvedBy: ref("approved_by").references(() => users.id),
     createdBy: ref("created_by").references(() => users.id),
     createdAt: createdAt(),
@@ -1295,6 +1297,8 @@ export const maintenancePlans = pgTable(
     id: id(),
     vehicleId: ref("vehicle_id").notNull().references(() => vehicles.id, { onDelete: "cascade" }),
     type: maintenanceType("type").notNull(),
+    // نوع أضافه المستخدم ويتصرف مثل type (انظر src/data/custom-lists.ts)
+    typeClassId: ref("type_class_id").references((): AnyPgColumn => lookupValues.id),
     title: text("title").notNull(),
     intervalDays: integer("interval_days").notNull(),
     lastDoneDate: date("last_done_date"),
@@ -1338,8 +1342,9 @@ export const maintenanceOrders = pgTable(
     vehicleId: ref("vehicle_id").notNull().references(() => vehicles.id),
     orderDate: date("order_date").notNull(),
     type: maintenanceType("type").notNull(),
+    typeClassId: ref("type_class_id").references((): AnyPgColumn => lookupValues.id),
     provider: maintenanceProvider("provider").notNull(),
-    // الورشة الخارجية (دائنة)، أو الصندوق الذي تُشترى منه القطع للورشة الداخلية
+    // الورشة الخارجية (دائنة)، أو مورد القطع الآجل للورشة الداخلية، أو الصندوق الذي تُشترى منه القطع نقداً
     supplierId: ref("supplier_id").references(() => parties.id),
     supplierInvoiceNo: varchar("supplier_invoice_no", { length: 60 }),
     cashAccountId: ref("cash_account_id").references(() => accounts.id),
@@ -1365,7 +1370,7 @@ export const maintenanceOrders = pgTable(
     uniqueIndex("maintenance_orders_supplier_no_uq").on(t.supplierId, t.supplierInvoiceNo).where(sql`${t.supplierInvoiceNo} is not null`),
     check(
       "maintenance_orders_provider_refs",
-      sql`case ${t.provider} when 'external' then ${t.supplierId} is not null when 'internal' then ${t.supplierId} is null end`,
+      sql`${t.provider} = 'internal' or ${t.supplierId} is not null`,
     ),
     check("maintenance_orders_completed", sql`${t.completedDate} is null or ${t.completedDate} >= ${t.orderDate}`),
   ],
@@ -2268,6 +2273,20 @@ export const maintenanceTypes = pgTable("maintenance_types", {
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: createdAt(),
 });
+
+// ───────────── جرس التنبيهات: ما قرأه المستخدم ─────────────
+
+// التنبيه محسوب (عدد ما ينتظر)؛ sig نصه وقت القراءة، فإن تغيّر العدد عاد غير مقروء
+export const userAlertReads = pgTable(
+  "user_alert_reads",
+  {
+    userId: ref("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    key: varchar("key", { length: 60 }).notNull(),
+    sig: text("sig").notNull(),
+    readAt: timestamp("read_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.key] })],
+);
 
 // ───────────── إشعارات تطبيق السائق ─────────────
 
