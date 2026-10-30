@@ -1,0 +1,43 @@
+name: Nightly database backup
+
+# نسخة احتياطية كاملة من قاعدة البيانات (كل الشركات) كل ليلة، تُحفظ 30 يوماً.
+# Neon المجاني يسمح بالرجوع لآخر 6 ساعات فقط؛ هذه النسخ تغطي ما بعدها.
+# تحتاج سر المستودع BACKUP_DATABASE_URL (رابط قاعدة الإنتاج).
+# الاسترجاع: نزّل الملف من صفحة التشغيل ثم
+#   gunzip -c backup.sql.gz | psql "<رابط قاعدة جديدة أو فرع Neon>"
+
+on:
+  schedule:
+    - cron: "0 23 * * *" # 02:00 بتوقيت الرياض
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Dump database
+        env:
+          DB_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: |
+          if [ -z "$DB_URL" ]; then echo "::error::BACKUP_DATABASE_URL secret is not set"; exit 1; fi
+          # pg_dump needs a direct connection, not Neon's pooler
+          DIRECT_URL="${DB_URL/-pooler./.}"
+          mkdir -p out
+          docker run --rm -e DIRECT_URL="$DIRECT_URL" -v "$PWD/out:/out" postgres:18 \
+            sh -c 'pg_dump --no-owner --no-privileges "$DIRECT_URL" | gzip -9 > /out/backup.sql.gz'
+          size=$(stat -c %s out/backup.sql.gz)
+          echo "Backup size: $size bytes"
+          # a dump with no tables is a failure, not a backup
+          if [ "$size" -lt 2000 ] || ! gunzip -c out/backup.sql.gz | grep -q "CREATE TABLE platform.tenants"; then
+            echo "::error::Backup looks empty or incomplete"; exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: db-backup-${{ github.run_number }}
+          path: out/backup.sql.gz
+          retention-days: 30
+          compression-level: 0
