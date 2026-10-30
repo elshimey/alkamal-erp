@@ -389,6 +389,21 @@ export const vehicleTypes = pgTable("vehicle_types", {
   nameAr: text("name_ar").notNull().unique(),
 });
 
+// قيم يضيفها المستخدم لقوائم ثابتة (نوع الأصل، الحالة، الملكية، نوع اللوحة، نوع المخالفة).
+// base: القيمة الأساسية التي «يتصرف مثلها» العنصر الجديد، فيبقى منطق البرنامج كما هو.
+export const lookupValues = pgTable(
+  "lookup_values",
+  {
+    id: id(),
+    list: varchar("list", { length: 30 }).notNull(),
+    label: text("label").notNull(),
+    base: varchar("base", { length: 30 }),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("lookup_values_list_label_uq").on(t.list, t.label)],
+);
+
 export const vehicleOwnership = pgEnum("vehicle_ownership", ["owned", "leased"]);
 export const vehicleStatus = pgEnum("vehicle_status", ["active", "maintenance", "stopped", "sold"]);
 // الرأس (الشاحنة) أو المقطورة (السطحة) التي تتبدّل بين الرؤوس
@@ -397,7 +412,7 @@ export const vehicleAssetKind = pgEnum("vehicle_asset_kind", ["head", "trailer"]
 export const vehicles = pgTable("vehicles", {
   id: id(),
   plate: varchar("plate", { length: 30 }).notNull().unique(),
-  chassis: varchar("chassis", { length: 40 }).notNull().unique(),
+  chassis: varchar("chassis", { length: 40 }).unique(),
   serialNumber: varchar("serial_number", { length: 40 }),
   vehicleTypeId: ref("vehicle_type_id").references(() => vehicleTypes.id),
   make: text("make"),
@@ -413,6 +428,11 @@ export const vehicles = pgTable("vehicles", {
   odometer: integer("odometer").notNull().default(0),
   status: vehicleStatus("status").notNull().default("active"),
   assetKind: vehicleAssetKind("asset_kind").notNull().default("head"),
+  // العنصر الذي أضافه المستخدم لكل قائمة (اسمه يظهر بدل القيمة الأساسية)
+  assetClassId: ref("asset_class_id").references(() => lookupValues.id),
+  statusClassId: ref("status_class_id").references(() => lookupValues.id),
+  ownershipClassId: ref("ownership_class_id").references(() => lookupValues.id),
+  plateTypeClassId: ref("plate_type_class_id").references(() => lookupValues.id),
   // حساب الأصل في الشجرة (الشاحنات، المقطورات، السيارات الخفيفة)
   assetAccountId: ref("asset_account_id").references(() => accounts.id),
   // القرار 8: كل مركبة لها مركز تكلفة واحد يُنشأ تلقائياً عند إضافتها
@@ -506,7 +526,7 @@ export const vehicleAssignments = pgTable(
 
 // ───────────── سجل الوثائق ─────────────
 
-export const documentOwnerKind = pgEnum("document_owner_kind", ["vehicle", "trailer", "driver", "employee", "company", "customer"]);
+export const documentOwnerKind = pgEnum("document_owner_kind", ["vehicle", "trailer", "driver", "employee", "company", "customer", "supplier"]);
 // مانعة دائماً، أو مانعة للرحلات الدولية فقط، أو تنبيه فقط
 export const documentBlocking = pgEnum("document_blocking", ["block", "international", "alert"]);
 

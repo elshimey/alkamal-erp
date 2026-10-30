@@ -16,6 +16,7 @@ import { MAINTENANCE_TYPES, type MaintenanceType } from "@/data/maintenance";
 import { lineVat, round2 } from "@/lib/invoice-posting";
 import { errorMessage } from "@/lib/errors";
 import { todayRiyadh } from "@/lib/dates";
+import { plateKey } from "@/lib/plates";
 import { normText, type ImportIssue, type ImportReport } from "@/lib/import-match";
 import type { TemplateList } from "@/lib/xlsx";
 
@@ -110,8 +111,10 @@ async function lookups(tx: Tx) {
     currencies: new Index<string>(),
     taxCodes: new Index<(typeof taxCodes)[number]>(),
     costCenters: new Index<number>(),
-    plates: new Set(vehicles.map((x) => normText(x.plate))),
-    chassis: new Set(vehicles.map((x) => normText(x.chassis))),
+    plates: new Set(vehicles.map((x) => plateKey(x.plate))),
+    // اللوحات التي أُضيفت من الملف نفسه (لتمييز «مكررة في الملف» عن «مسجلة مسبقاً»)
+    filePlates: new Set<string>(),
+    chassis: new Set(vehicles.flatMap((x) => (x.chassis ? [normText(x.chassis)] : []))),
     vehicleTypes: new Index<number>(),
     vehicles: new Index<number>(),
   };
@@ -290,9 +293,11 @@ async function importWaybill(tx: Tx, [r]: ImportRow[], ctx: Ctx, userId?: number
 
 async function importVehicle(tx: Tx, [r]: ImportRow[], ctx: Ctx) {
   const plate = required(r, "plate", "اللوحة");
-  const chassis = required(r, "chassis", "رقم الشاسيه");
-  if (ctx.idx.plates.has(normText(plate))) throw new Error(`اللوحة ${plate} مسجلة مسبقاً`);
-  if (ctx.idx.chassis.has(normText(chassis))) throw new Error(`رقم الشاسيه ${chassis} مسجل مسبقاً`);
+  const chassis = v(r, "chassis") || null;
+  // تُكتشف المكررة مع المسجلة مسبقاً ومع صفوف الملف نفسه
+  if (ctx.idx.filePlates.has(plateKey(plate))) throw new Error(`اللوحة ${plate} مكررة في الملف`);
+  if (ctx.idx.plates.has(plateKey(plate))) throw new Error(`اللوحة ${plate} مسجلة مسبقاً`);
+  if (chassis && ctx.idx.chassis.has(normText(chassis))) throw new Error(`رقم الشاسيه ${chassis} مسجل مسبقاً`);
   const accRaw = required(r, "assetAccount", "حساب الأصل");
   const account = resolve(ctx.idx.accounts.find(accRaw), accRaw, "account", "حساب الأصل");
   if (account.type !== "asset") throw new Error(`الحساب ${account.code} ${account.nameAr} ليس حساب أصل`);
@@ -312,8 +317,8 @@ async function importVehicle(tx: Tx, [r]: ImportRow[], ctx: Ctx) {
     ownership: /مستاجر|leased|ايجار/.test(own) ? "leased" : "owned",
     odometer: v(r, "odometer") ? Math.trunc(toNumber(v(r, "odometer"), "العداد", { min: 0 })) : 0,
   });
-  ctx.idx.plates.add(normText(plate));
-  ctx.idx.chassis.add(normText(chassis));
+  ctx.idx.filePlates.add(plateKey(plate));
+  if (chassis) ctx.idx.chassis.add(normText(chassis));
   return vehicle.plate;
 }
 

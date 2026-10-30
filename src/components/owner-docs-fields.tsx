@@ -42,7 +42,8 @@ export function OwnerDocsFields({ groups, switchName }: { groups: { when?: strin
     if (!form) return;
     const read = () => {
       const el = form.elements.namedItem(switchName) as HTMLSelectElement | RadioNodeList | null;
-      if (el?.value) setWhen(el.value);
+      // «head~5»: عنصر مضاف يتصرف مثل الرأس
+      if (el?.value) setWhen(el.value.split("~")[0]);
     };
     read();
     form.addEventListener("change", read);

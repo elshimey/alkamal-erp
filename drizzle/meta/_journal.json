@@ -253,6 +253,13 @@
       "when": 1793180000000,
       "tag": "0035_client_op_results",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1793190000000,
+      "tag": "0036_custom_lists",
+      "breakpoints": true
     }
   ]
 }

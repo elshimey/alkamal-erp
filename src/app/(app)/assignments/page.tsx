@@ -10,17 +10,17 @@ import { ListActions } from "@/components/list-actions";
 import { PanelField, PanelSection } from "@/components/panel-ui";
 import { RecordPanel } from "@/components/record-panel";
 import { AssignmentFields } from "./assignment-fields";
-import { endAssignmentAction, startAssignmentAction } from "./actions";
+import { endAssignmentAction, handoverAssignmentAction, startAssignmentAction } from "./actions";
 
 const baseQuery = () =>
   db
-    .select({ a: s.vehicleAssignments, plate: s.vehicles.plate, driver: s.employees.nameAr })
+    .select({ a: s.vehicleAssignments, plate: s.vehicles.plate, odometer: s.vehicles.odometer, driver: s.employees.nameAr })
     .from(s.vehicleAssignments)
     .innerJoin(s.vehicles, eq(s.vehicles.id, s.vehicleAssignments.vehicleId))
     .innerJoin(s.drivers, eq(s.drivers.id, s.vehicleAssignments.driverId))
     .innerJoin(s.employees, eq(s.employees.id, s.drivers.employeeId));
 
-export default async function AssignmentsPage({ searchParams }: { searchParams: Promise<{ new?: string; release?: string }> }) {
+export default async function AssignmentsPage({ searchParams }: { searchParams: Promise<{ new?: string; release?: string; handover?: string }> }) {
   const user = await requirePermission("vehicles", "view");
   const canEdit = can(user.perms, "vehicles", "update");
   const today = todayRiyadh();
@@ -49,6 +49,8 @@ export default async function AssignmentsPage({ searchParams }: { searchParams: 
   const sp = await searchParams;
   const creating = sp.new === "1" && canEdit;
   const releasing = canEdit ? open.find((o) => o.a.id === Number(sp.release)) : undefined;
+  const handing = canEdit ? open.find((o) => o.a.id === Number(sp.handover)) : undefined;
+  const driverOpts = freeDrivers.map((d) => ({ value: String(d.id), label: d.name }));
   const notesField = (
     <PanelSection title="ملاحظات الحالة" optional hint="حالة المركبة عند الاستلام أو التسليم">
       <PanelField label="ملاحظات">
@@ -73,9 +75,14 @@ export default async function AssignmentsPage({ searchParams }: { searchParams: 
             <Td className="ltr-nums">{a.odometerStart?.toLocaleString("en") ?? "—"}</Td>
             <Td>
               {canEdit && (
-                <Link href={`/assignments?release=${a.id}`} scroll={false} prefetch={false} className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
-                  تسليم
-                </Link>
+                <span className="flex flex-wrap gap-2">
+                  <Link href={`/assignments?release=${a.id}`} scroll={false} prefetch={false} className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
+                    تسليم للشركة
+                  </Link>
+                  <Link href={`/assignments?handover=${a.id}`} scroll={false} prefetch={false} className="rounded-lg border border-brand-300 bg-brand-50 px-3 py-1.5 text-sm font-medium text-brand-900 shadow-sm hover:bg-brand-100">
+                    تسليم لسائق آخر
+                  </Link>
+                </span>
               )}
             </Td>
           </tr>
@@ -103,7 +110,7 @@ export default async function AssignmentsPage({ searchParams }: { searchParams: 
           <PanelSection title="الاستلام">
             <AssignmentFields
               vehicles={freeVehicles.map((v) => ({ value: String(v.id), label: v.plate }))}
-              drivers={freeDrivers.map((d) => ({ value: String(d.id), label: d.name }))}
+              drivers={driverOpts}
               odometers={Object.fromEntries(freeVehicles.map((v) => [String(v.id), v.odometer]))}
               today={today}
               canOverride={hasSpecial(user.perms, "override_controls")}
@@ -112,8 +119,29 @@ export default async function AssignmentsPage({ searchParams }: { searchParams: 
           {notesField}
         </RecordPanel>
       )}
+      {handing && (
+        <RecordPanel
+          title={`تسليم ${handing.plate} لسائق آخر`}
+          subtitle={`من ${handing.driver} · منذ ${handing.a.fromDate}. يُسجَّل التسليم والاستلام معاً بالتاريخ والعداد نفسيهما`}
+          closeHref="/assignments"
+          action={handoverAssignmentAction.bind(null, handing.a.id)}
+          creating={false}
+        >
+          <PanelSection title="التسليم والاستلام">
+            <AssignmentFields
+              vehicles={[]}
+              drivers={driverOpts}
+              odometers={{ [String(handing.a.vehicleId)]: Math.max(handing.a.odometerStart ?? 0, handing.odometer ?? 0) }}
+              today={today}
+              canOverride={hasSpecial(user.perms, "override_controls")}
+              handover={{ vehicleId: handing.a.vehicleId, minDate: handing.a.fromDate }}
+            />
+          </PanelSection>
+          {notesField}
+        </RecordPanel>
+      )}
       {releasing && (
-        <RecordPanel title={`تسليم ${releasing.plate}`} subtitle={`${releasing.driver} · منذ ${releasing.a.fromDate}`} closeHref="/assignments" action={endAssignmentAction.bind(null, releasing.a.id)} creating={false}>
+        <RecordPanel title={`تسليم ${releasing.plate} للشركة`} subtitle={`${releasing.driver} · منذ ${releasing.a.fromDate}`} closeHref="/assignments" action={endAssignmentAction.bind(null, releasing.a.id)} creating={false}>
           <PanelSection title="التسليم">
             <PanelField label="تاريخ التسليم" required>
               <Input type="date" name="toDate" defaultValue={today} min={releasing.a.fromDate} required className="w-full" />

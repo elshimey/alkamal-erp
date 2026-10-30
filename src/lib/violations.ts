@@ -4,7 +4,7 @@ import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
 import { createJournalEntryTx, deleteEntryTx, nextDocumentNumber } from "@/lib/ledger";
 import { driverOnDate } from "@/lib/fleet";
-import { cashAccountFor } from "@/lib/banks";
+import { customListOptions } from "@/lib/custom-lists";
 
 // المخالفة تُسجل على المركبة، والسائق يُعرف من سجل الإسناد في تاريخها.
 // على السائق: مدين ذمة راتبه (2107) / دائن مخالفات مستحقة (2108)، وتُخصم في مسير الرواتب.
@@ -20,7 +20,17 @@ async function accountIdByCode(db: Db | Tx, code: string) {
   return row.id;
 }
 
-const cashAccount = (tx: Tx, id: number | null | undefined) => cashAccountFor(tx, id, "اختر الصندوق أو البنك الذي سُددت منه المخالفات");
+/**
+ * حساب السداد: الصندوق أو البنك عادةً، ويُقبل أي حساب أصول أو التزامات قابل للترحيل (عهدة موظف،
+ * أو مكتب تعقيب دائن مثلاً)، عدا حساب المخالفات المستحقة نفسه. الموقوف مرفوض.
+ */
+async function cashAccount(tx: Tx, id: number | null | undefined) {
+  const message = "اختر الحساب الذي سُددت منه المخالفات";
+  const [acc] = id ? await tx.select().from(s.accounts).where(eq(s.accounts.id, id)) : [];
+  if (!acc || !acc.isPostable || !/^[12]/.test(acc.code) || acc.code === VIOLATION_ACCOUNTS.payable) throw new Error(message);
+  if (!acc.isActive) throw new Error(`الحساب ${acc.code} ${acc.nameAr} موقوف؛ اختر حساباً نشطاً`);
+  return acc;
+}
 
 export interface ViolationInput {
   violationDate: string;
@@ -252,4 +262,19 @@ export async function violationDoc(db: Db | Tx, id: number) {
     .leftJoin(s.payrollRuns, eq(s.payrollRuns.id, s.trafficViolations.payrollRunId))
     .where(eq(s.trafficViolations.id, id));
   return row ?? null;
+}
+
+/** أنواع المخالفات: ما أضافه المستخدم للقائمة، ثم ما سُجّل سابقاً (الأكثر تكراراً أولاً). */
+export async function violationTypeOptions(db: Db | Tx) {
+  const [added, used] = await Promise.all([
+    customListOptions(db, "violation_type"),
+    db
+      .select({ t: s.trafficViolations.violationType })
+      .from(s.trafficViolations)
+      .groupBy(s.trafficViolations.violationType)
+      .orderBy(sql`count(*) desc`)
+      .limit(50),
+  ]);
+  const seen = new Set(added.map((o) => o.value));
+  return [...added, ...used.filter((r) => !seen.has(r.t)).map((r) => ({ value: r.t, label: r.t }))];
 }

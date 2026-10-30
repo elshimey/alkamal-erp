@@ -3,7 +3,7 @@ import { asc } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
 import { errorMessage, findPgError } from "@/lib/errors";
-import { deleteRecord, loadRecord, RECORDS, resolveOptions, saveRecord, type FieldDef, type RecordKind } from "@/lib/records";
+import { deleteRecord, loadRecord, RECORDS, resolveOptions, saveRecord, withCustom, type FieldDef, type RecordKind } from "@/lib/records";
 import type { GridColumn } from "@/components/data-grid";
 
 // التعديل الجماعي لأي كيان معرّف في RECORDS: شيت بكل السجلات، والحفظ يمر على قواعد صفحة التعديل نفسها.
@@ -16,6 +16,8 @@ export interface BulkChange {
 export interface BulkResult {
   saved: number;
   deleted: number;
+  /** الصفوف الجديدة التي أُضيفت: رقمها المؤقت (سالب) ← رقم السجل */
+  created?: Record<number, number>;
   errors: Record<number, string>;
   error?: string;
 }
@@ -33,7 +35,7 @@ const gridFields = (kind: RecordKind) => RECORDS[kind].fields.filter((f) => f.ty
 export async function bulkColumns(kind: RecordKind): Promise<GridColumn[]> {
   return Promise.all(
     gridFields(kind).map(async (f): Promise<GridColumn> => {
-      const base = { key: f.key, label: f.label, required: f.required, ltr: f.ltr };
+      const base = { key: f.key, label: f.label, required: f.required, ltr: f.ltr, create: f.create, scope: f.scope, defaultValue: f.defaultValue };
       if (f.readOnly) return { ...base, readOnly: true, width: "11rem" };
       if (f.type === "bool") return { ...base, type: "select", options: YES_NO, width: "6rem" };
       if (f.type === "select") {
@@ -73,7 +75,7 @@ export async function bulkRows(kind: RecordKind) {
   return Promise.all(
     rows.map(async (r) => {
       const id = Number(r.id);
-      const full: Row = { ...r, ...(extra?.get(id) ?? {}) };
+      const full: Row = withCustom(def, { ...r, ...(extra?.get(id) ?? {}) });
       if (def.loadAll && !extra?.has(id)) for (const f of fields) if (f.type === "multi") full[f.key] = [];
       return { id, values: Object.fromEntries(await Promise.all(fields.map(async (f) => [f.key, await toCell(f, full[f.key], opts)] as const))) as Record<string, string> };
     }),
@@ -116,19 +118,34 @@ async function parseCell(f: FieldDef, raw: string): Promise<unknown> {
 }
 
 /** يحفظ الصفوف المعدّلة ويحذف المحددة؛ كل صف مستقل، والمرفوض يعود بسببه. */
-export async function saveBulk(kind: RecordKind, changes: BulkChange[], deletes: number[]): Promise<BulkResult> {
-  if (!Array.isArray(changes) || !Array.isArray(deletes) || changes.length + deletes.length > 2000) return { saved: 0, deleted: 0, errors: {}, error: "عدد التغييرات أكبر من المسموح (2000)" };
+export const canBulkCreate = (kind: RecordKind) => !!RECORDS[kind].create;
+
+export async function saveBulk(kind: RecordKind, changes: BulkChange[], deletes: number[], creates: BulkChange[] = []): Promise<BulkResult> {
+  if (!Array.isArray(changes) || !Array.isArray(deletes) || !Array.isArray(creates) || changes.length + deletes.length + creates.length > 2000) return { saved: 0, deleted: 0, errors: {}, error: "عدد التغييرات أكبر من المسموح (2000)" };
   const def = RECORDS[kind];
   const fields = new Map(gridFields(kind).map((f) => [f.key, f]));
   const errors: Record<number, string> = {};
+  const created: Record<number, number> = {};
   let saved = 0;
   let deleted = 0;
+  for (const c of creates) {
+    const key = Number(c.id);
+    try {
+      if (!def.create) throw new Error("الإضافة غير متاحة هنا");
+      const values: Row = {};
+      for (const f of fields.values()) if (!f.readOnly) values[f.key] = await parseCell(f, String(c.values?.[f.key] ?? ""));
+      created[key] = await def.create(values);
+      saved++;
+    } catch (err) {
+      errors[key] = findPgError(err)?.code === "23505" ? "مسجل مسبقاً بالبيانات نفسها" : errorMessage(err);
+    }
+  }
   for (const c of changes) {
     const id = Number(c.id);
     try {
       const current = await loadRecord(kind, id);
       if (!current) throw new Error(`${def.noun} غير موجود`);
-      const values: Row = { ...current };
+      const values: Row = withCustom(def, current);
       for (const [key, raw] of Object.entries(c.values ?? {})) {
         const f = fields.get(key);
         if (f && !f.readOnly) values[key] = await parseCell(f, String(raw ?? ""));
@@ -148,5 +165,5 @@ export async function saveBulk(kind: RecordKind, changes: BulkChange[], deletes:
       errors[id] = findPgError(err)?.code === "23503" ? `لا يمكن الحذف لوجود حركات مرتبطة.${def.instead ? ` ${def.instead}.` : ""}` : errorMessage(err);
     }
   }
-  return { saved, deleted, errors };
+  return { saved, deleted, errors, created };
 }

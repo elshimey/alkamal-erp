@@ -128,8 +128,8 @@ export const IMPORT_SPECS: Record<string, ImportSpec> = {
     backHref: "/vehicles",
     intro: "كل صف مركبة. لكل مركبة يُنشأ مركز تكلفتها تلقائياً، ويجب ربطها بحساب الأصل في شجرة الحسابات.",
     fields: [
-      { key: "plate", label: "اللوحة", en: "Plate", required: true, rule: "لا تتكرر", aliases: ["رقم اللوحة"], width: 14 },
-      { key: "chassis", label: "رقم الشاسيه", en: "Chassis", required: true, rule: "لا يتكرر", aliases: ["الشاسيه", "vin"], width: 20 },
+      { key: "plate", label: "اللوحة", en: "Plate", required: true, rule: "لا تتكرر (تُكتشف المسجلة مسبقاً والمكررة في الملف)", aliases: ["رقم اللوحة"], width: 14 },
+      { key: "chassis", label: "رقم الشاسيه", en: "Chassis", rule: "اختياري، ولا يتكرر", aliases: ["الشاسيه", "vin"], width: 20 },
       { key: "assetAccount", label: "حساب الأصل", en: "Asset account", required: true, rule: "رقم أو اسم حساب الأصل، مثل 120101 الشاحنات (الرؤوس)", aliases: ["الحساب", "account"], width: 24 },
       { key: "vehicleType", label: "النوع", en: "Type", rule: MUST_MATCH, aliases: ["نوع المركبة"], width: 14 },
       { key: "make", label: "الماركة", en: "Make", width: 12 },

@@ -7,8 +7,9 @@ import { PanelLink, RecordPanel } from "@/components/record-panel";
 import { DocumentFields } from "./document-form";
 import { saveDocumentAction } from "./actions";
 
-const ownerOf = (d: typeof s.fleetDocuments.$inferSelect, assetKind: string | null): { kind: OwnerKind; id: number } =>
-  d.vehicleId ? { kind: assetKind === "trailer" ? "trailer" : "vehicle", id: d.vehicleId } : d.driverId ? { kind: "driver", id: d.driverId } : d.employeeId ? { kind: "employee", id: d.employeeId } : d.partyId ? { kind: "customer", id: d.partyId } : { kind: "company", id: 0 };
+// الجهة (عميل أو مورد) تُعرف من نوع الوثيقة، فالجهة نفسها قد تكون الاثنين
+const ownerOf = (d: typeof s.fleetDocuments.$inferSelect, assetKind: string | null, typeKind: OwnerKind): { kind: OwnerKind; id: number } =>
+  d.vehicleId ? { kind: assetKind === "trailer" ? "trailer" : "vehicle", id: d.vehicleId } : d.driverId ? { kind: "driver", id: d.driverId } : d.employeeId ? { kind: "employee", id: d.employeeId } : d.partyId ? { kind: typeKind === "supplier" ? "supplier" : "customer", id: d.partyId } : { kind: "company", id: 0 };
 
 /**
  * نافذة وثيقة واحدة: إضافة (owner/type اختياريان لملء الصاحب والنوع مسبقاً) أو تعديل وثيقة محفوظة.
@@ -18,13 +19,13 @@ export async function DocumentPanel({ id, closeHref, owner, type }: { id: number
   const types = (await listDocumentTypes(db, { activeOnly: !id })).map((t) => ({ id: t.id, nameAr: t.nameAr, ownerKind: t.ownerKind, authority: t.authority }));
   if (id) {
     const [row] = await db
-      .select({ doc: s.fleetDocuments, assetKind: s.vehicles.assetKind, typeName: s.documentTypes.nameAr })
+      .select({ doc: s.fleetDocuments, assetKind: s.vehicles.assetKind, typeName: s.documentTypes.nameAr, typeKind: s.documentTypes.ownerKind })
       .from(s.fleetDocuments)
       .innerJoin(s.documentTypes, eq(s.documentTypes.id, s.fleetDocuments.documentTypeId))
       .leftJoin(s.vehicles, eq(s.vehicles.id, s.fleetDocuments.vehicleId))
       .where(eq(s.fleetDocuments.id, id));
     if (!row) notFound();
-    const o = ownerOf(row.doc, row.assetKind);
+    const o = ownerOf(row.doc, row.assetKind, row.typeKind);
     const label = (await ownerLabel(db, o.kind, o.id))?.label ?? OWNER_KINDS[o.kind].label;
     const [att] = await db
       .select({ id: s.attachments.id })

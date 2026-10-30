@@ -1,8 +1,7 @@
 import "server-only";
-import { and, asc, eq, inArray, like, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { PgTable } from "drizzle-orm/pg-core";
-import { PLATE_TYPES } from "@/data/waybills";
 import { db, type Tx } from "@/db";
 import * as s from "@/db/schema";
 import type { Entity } from "@/lib/permissions";
@@ -11,16 +10,23 @@ import { normalizeIban } from "@/lib/banks";
 import { PARTY_ROLES } from "@/data/operations";
 import { deleteDriver, updateDriver } from "@/lib/fleet";
 import { OWNER_KINDS } from "@/lib/documents";
+import { accountOptions } from "@/lib/lookups";
+import { assertPlateFree, createVehicle } from "@/lib/fleet";
+import { checkCustomValue, customListOptions } from "@/lib/custom-lists";
+import { joinCustom, splitCustom, type CustomList } from "@/data/custom-lists";
+import type { QuickKind } from "@/lib/quick-add-types";
 
 // صفحة تعديل وحذف موحّدة للبيانات الأساسية: كل كيان يُعرَّف هنا بحقوله وقواعده،
 // وصفحة /records/[kind]/[id] تعرض نموذج التعديل والحذف الآمن وسجل التعديلات.
 
-export type Opt = { value: string; label: string };
+export type Opt = { value: string; label: string; group?: string; hint?: string };
 export interface FieldDef {
   key: string;
   label: string;
   type?: "text" | "number" | "date" | "select" | "bool" | "textarea" | "multi" | "password";
   options?: Opt[] | (() => Promise<Opt[]>);
+  /** القيمة المبدئية للصفوف الجديدة في الإضافة الجماعية */
+  defaultValue?: string;
   /** قيمة الاختيار رقم (معرّف سجل) */
   numeric?: boolean;
   required?: boolean;
@@ -30,6 +36,11 @@ export interface FieldDef {
   virtual?: boolean;
   /** للعرض فقط (صاحب الوثيقة مثلاً): لا يُعدَّل ولا يُحفظ، وقيمته من load/loadAll */
   readOnly?: boolean;
+  /** «+ إضافة» في القائمة من هذا النوع، ونطاقها (رمز الحساب الأب مثلاً) */
+  create?: QuickKind;
+  scope?: string;
+  /** قائمة يضيف لها المستخدم: القيمة الأساسية في الحقل، والعنصر المضاف في classKey */
+  custom?: { list: CustomList; classKey: string };
 }
 
 type Row = Record<string, unknown>;
@@ -59,6 +70,8 @@ export interface RecordDef {
   /** حفظ وحذف بدالة الكيان نفسها بدل التعديل المباشر للجدول (السائق: موظفه وحساباته) */
   save?: (id: number, values: Row) => Promise<void>;
   del?: (id: number) => Promise<void>;
+  /** إضافة سجل جديد من شيت التعديل الجماعي (يعيد رقمه) */
+  create?: (values: Row) => Promise<number>;
 }
 
 /** اسم صاحب كل وثيقة (اللوحة أو الاسم أو «الشركة») للعرض في التعديل الجماعي. */
@@ -117,41 +130,27 @@ export const RECORDS: Record<string, RecordDef> = {
     heading: (r) => `المركبة ${r.plate}`,
     fields: [
       { key: "plate", label: "اللوحة", required: true },
-      { key: "chassis", label: "رقم الشاسيه", required: true, ltr: true },
+      { key: "chassis", label: "رقم الشاسيه", ltr: true, hint: "اختياري" },
       { key: "serialNumber", label: "الرقم التسلسلي", ltr: true },
-      { key: "vehicleTypeId", label: "النوع", type: "select", numeric: true, options: async () => (await db.select().from(s.vehicleTypes).orderBy(asc(s.vehicleTypes.nameAr))).map((t) => ({ value: String(t.id), label: t.nameAr })) },
-      {
-        key: "assetAccountId",
-        label: "حساب الأصل",
-        type: "select",
-        numeric: true,
-        options: async () =>
-          (await db.select().from(s.accounts).where(and(like(s.accounts.code, "1201%"), eq(s.accounts.isPostable, true))).orderBy(asc(s.accounts.code))).map((a) => ({ value: String(a.id), label: `${a.code} ${a.nameAr}` })),
-      },
+      { key: "vehicleTypeId", label: "النوع", type: "select", numeric: true, create: "vehicle_type", options: async () => (await db.select().from(s.vehicleTypes).orderBy(asc(s.vehicleTypes.nameAr))).map((t) => ({ value: String(t.id), label: t.nameAr })) },
+      { key: "assetAccountId", label: "حساب الأصل", type: "select", numeric: true, create: "account", scope: "1201", options: () => accountOptions("1201") },
       { key: "make", label: "الماركة" },
       { key: "model", label: "الطراز" },
       { key: "year", label: "سنة الصنع", type: "number" },
       { key: "color", label: "اللون" },
-      { key: "plateType", label: "نوع اللوحة", type: "select", options: Object.entries(PLATE_TYPES).map(([value, label]) => ({ value, label })), hint: "يظهر في وثيقة النقل" },
+      { key: "plateType", label: "نوع اللوحة", type: "select", custom: { list: "plate_type", classKey: "plateTypeClassId" }, create: "plate_type", options: () => customListOptions(db, "plate_type"), hint: "يظهر في وثيقة النقل" },
       { key: "registrationType", label: "نوع التسجيل" },
-      { key: "ownership", label: "الملكية", type: "select", options: [{ value: "owned", label: "مملوكة" }, { value: "leased", label: "مستأجرة" }] },
+      { key: "ownership", label: "الملكية", type: "select", custom: { list: "ownership", classKey: "ownershipClassId" }, create: "ownership", options: () => customListOptions(db, "ownership") },
       { key: "ownershipDate", label: "تاريخ التملك", type: "date" },
       { key: "customsDocument", label: "البيان الجمركي" },
       { key: "odometer", label: "العداد (كم)", type: "number" },
-      { key: "assetKind", label: "نوع الأصل", type: "select", required: true, options: [{ value: "head", label: "رأس (شاحنة)" }, { value: "trailer", label: "مقطورة (سطحة)" }], hint: "المقطورة تُختار في حقل «المقطورة» بالشحنة ولها وثائقها" },
-      {
-        key: "status",
-        label: "الحالة",
-        type: "select",
-        options: [
-          { value: "active", label: "تعمل" },
-          { value: "maintenance", label: "في الصيانة" },
-          { value: "stopped", label: "متوقفة" },
-          { value: "sold", label: "مباعة" },
-        ],
-      },
+      { key: "assetKind", label: "نوع الأصل", type: "select", required: true, defaultValue: "head", custom: { list: "asset_kind", classKey: "assetClassId" }, create: "asset_kind", options: () => customListOptions(db, "asset_kind"), hint: "المقطورة تُختار في حقل «المقطورة» بالشحنة ولها وثائقها" },
+      { key: "status", label: "الحالة", type: "select", custom: { list: "vehicle_status", classKey: "statusClassId" }, create: "vehicle_status", options: () => customListOptions(db, "vehicle_status") },
     ],
+    create: (v) => db.transaction((tx) => insertVehicle(tx, v)),
     after: async (tx, id, v, before) => {
+      await assertPlateFree(tx, String(v.plate), id);
+      for (const f of RECORDS.vehicles.fields) if (f.custom) await checkCustomValue(tx, f.custom.list, v[f.key] as string | null, v[f.custom.classKey] as number | null);
       if (v.assetKind !== before.assetKind) {
         const [doc] = await tx
           .select({ id: s.fleetDocuments.id })
@@ -311,7 +310,7 @@ export const RECORDS: Record<string, RecordDef> = {
         .leftJoin(s.vehicles, eq(s.vehicles.id, s.fleetDocuments.vehicleId))
         .where(eq(s.fleetDocuments.id, id));
       const d = row.doc;
-      const owner = d.vehicleId ? (row.asset === "trailer" ? "trailer" : "vehicle") : d.driverId ? "driver" : d.employeeId ? "employee" : d.partyId ? "customer" : "company";
+      const owner = d.vehicleId ? (row.asset === "trailer" ? "trailer" : "vehicle") : d.driverId ? "driver" : d.employeeId ? "employee" : d.partyId ? (row.kind === "supplier" ? "supplier" : "customer") : "company";
       if (row.kind !== owner) throw new Error(`هذا النوع وثيقة ${OWNER_KINDS[row.kind].label}، وصاحب الوثيقة ${OWNER_KINDS[owner].label}`);
       if (v.issueDate && v.expiryDate && String(v.issueDate) > String(v.expiryDate)) throw new Error("تاريخ الإصدار بعد تاريخ الانتهاء");
     },
@@ -617,6 +616,62 @@ export type RecordKind = keyof typeof RECORDS;
 export const isRecordKind = (k: string): k is RecordKind => Object.hasOwn(RECORDS, k);
 export const recordHref = (kind: RecordKind, id: number) => `/records/${kind}/${id}`;
 
+/** إضافة مركبة بكل حقولها (من النافذة أو الشيت)، مع القوائم المضافة؛ يعيد رقمها. */
+export async function insertVehicle(tx: Tx, v: Row) {
+  if (!v.assetAccountId) throw new Error("حساب الأصل: إلزامي");
+  if (v.year != null && ((v.year as number) < 1980 || (v.year as number) > 2100)) throw new Error("سنة الصنع غير صالحة");
+  const c = normalizeCustom(RECORDS.vehicles, v);
+  for (const f of RECORDS.vehicles.fields) if (f.custom) await checkCustomValue(tx, f.custom.list, c[f.key] as string | null, c[f.custom.classKey] as number | null);
+  const row = await createVehicle(tx, {
+    plate: String(c.plate),
+    chassis: (c.chassis as string | null) ?? null,
+    assetAccountId: c.assetAccountId as number,
+    vehicleTypeId: (c.vehicleTypeId as number | null) ?? null,
+    assetKind: c.assetKind === "trailer" ? "trailer" : "head",
+    ownership: c.ownership === "leased" ? "leased" : "owned",
+    odometer: (c.odometer as number | null) ?? 0,
+  });
+  await tx
+    .update(s.vehicles)
+    .set({
+      serialNumber: c.serialNumber as string | null,
+      make: c.make as string | null,
+      model: c.model as string | null,
+      year: c.year as number | null,
+      color: c.color as string | null,
+      plateType: c.plateType as string | null,
+      registrationType: c.registrationType as string | null,
+      ownershipDate: c.ownershipDate as string | null,
+      customsDocument: c.customsDocument as string | null,
+      status: ((c.status as string | null) ?? "active") as "active",
+      assetClassId: c.assetClassId as number | null,
+      statusClassId: c.statusClassId as number | null,
+      ownershipClassId: c.ownershipClassId as number | null,
+      plateTypeClassId: c.plateTypeClassId as number | null,
+    })
+    .where(eq(s.vehicles.id, row.id));
+  return row.id;
+}
+
+/** قيم القوائم المضافة: «head~12» في النموذج → head في الحقل و12 في عمود العنصر. */
+export function normalizeCustom(def: RecordDef, values: Row): Row {
+  const out = { ...values };
+  for (const f of def.fields) {
+    if (!f.custom || !(f.key in out)) continue;
+    const { base, classId } = splitCustom(out[f.key]);
+    out[f.key] = base;
+    out[f.custom.classKey] = classId;
+  }
+  return out;
+}
+
+/** عكس normalizeCustom: قيم السجل كما تُعرض في النموذج والشيت. */
+export function withCustom(def: RecordDef, row: Row): Row {
+  const out = { ...row };
+  for (const f of def.fields) if (f.custom) out[f.key] = joinCustom(row[f.key], row[f.custom.classKey]) || null;
+  return out;
+}
+
 export async function resolveOptions(f: FieldDef): Promise<Opt[]> {
   return typeof f.options === "function" ? f.options() : (f.options ?? []);
 }
@@ -669,6 +724,7 @@ export async function saveRecord(kind: RecordKind, id: number, values: Row, extr
   const def = RECORDS[kind];
   if (def.save) return def.save(id, values);
   const t = def.table as unknown as typeof s.vehicles;
+  values = normalizeCustom(def, values);
   await db.transaction(async (tx) => {
     const [before] = (await tx.select().from(t).where(eq(t.id, id)).for("update")) as Row[];
     if (!before) throw new Error(`${def.noun} غير موجود`);
@@ -677,6 +733,7 @@ export async function saveRecord(kind: RecordKind, id: number, values: Row, extr
       if (f.virtual || f.readOnly) continue;
       const v = values[f.key];
       set[f.key] = MONEY_KEYS.has(f.key) && v != null ? String(v) : v;
+      if (f.custom) set[f.custom.classKey] = values[f.custom.classKey] ?? null;
     }
     if ("updatedAt" in before) set.updatedAt = new Date();
     if (Object.keys(set).length) await tx.update(t).set(set as never).where(eq(t.id, id));

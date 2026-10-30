@@ -42,12 +42,13 @@ export async function deleteRecordAction(kind: string, id: number, _: FormState,
   redirect(`${def.listHref}?deleted=1`);
 }
 
-export async function saveBulkAction(kind: string, changes: BulkChange[], deletes: number[]): Promise<BulkResult> {
+export async function saveBulkAction(kind: string, changes: BulkChange[], deletes: number[], creates: BulkChange[] = []): Promise<BulkResult> {
   if (!isRecordKind(kind) || !canBulkEdit(kind)) return { saved: 0, deleted: 0, errors: {}, error: "نوع غير معروف" };
   const def = RECORDS[kind];
-  const me = await requirePermission(def.perm, "update");
+  const me = await requirePermission(def.perm, changes.length || deletes.length ? "update" : "create");
   if (deletes.length && !can(me.perms, def.perm, "delete")) return { saved: 0, deleted: 0, errors: {}, error: "ليست لديك صلاحية الحذف" };
-  const result = await saveBulk(kind, changes, deletes);
+  if (creates.length && !can(me.perms, def.perm, "create")) return { saved: 0, deleted: 0, errors: {}, error: "ليست لديك صلاحية الإضافة" };
+  const result = await saveBulk(kind, changes, deletes, creates);
   revalidatePath(def.listHref);
   return result;
 }

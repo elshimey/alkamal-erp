@@ -12,12 +12,24 @@ export const QUICK_KINDS = [
   "fuel_station",
   "customs_broker",
   "product",
+  "vehicle_type",
+  "account",
+  // القوائم التي يضيف لها المستخدم (src/data/custom-lists.ts)
+  "asset_kind",
+  "vehicle_status",
+  "ownership",
+  "plate_type",
+  "violation_type",
 ] as const;
 export type QuickKind = (typeof QUICK_KINDS)[number];
 
 export interface QuickOption {
   value: string;
   label: string;
+  /** عنوان المجموعة في القائمة (الحساب الأب مثلاً) */
+  group?: string;
+  /** وصف صغير بجانب الخيار */
+  hint?: string;
   fill?: Record<string, string>;
 }
 

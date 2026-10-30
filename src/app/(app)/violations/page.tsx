@@ -3,8 +3,9 @@ import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { driverOptions, vehicleOptions } from "@/lib/lookups";
-import { cashAccounts } from "@/lib/invoices";
-import { listViolations, violationSummary, type ViolationFilter } from "@/lib/violations";
+import { fundingAccounts } from "@/lib/invoices";
+import { CashAccountField } from "@/components/cash-account-field";
+import { listViolations, violationSummary, violationTypeOptions, type ViolationFilter } from "@/lib/violations";
 import { todayRiyadh } from "@/lib/dates";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { SheetEditor } from "@/components/sheet-editor";
@@ -45,15 +46,16 @@ export default async function ViolationsPage({ searchParams }: { searchParams: P
   };
   const today = todayRiyadh();
   const openId = Number(sp.open) || null;
-  const [vehicles, drivers, cashes, list, sum, openDoc, company, template] = await Promise.all([
+  const [vehicles, drivers, cashes, list, sum, openDoc, company, template, violationTypes] = await Promise.all([
     vehicleOptions(),
     driverOptions(),
-    cashAccounts(db),
+    fundingAccounts(db),
     listViolations(db, filter),
     violationSummary(db),
     openId ? violationDoc(db, openId) : Promise.resolve(null),
     getCompany(db),
     getInvoiceTemplate(db),
+    violationTypeOptions(db),
   ]);
   const [photo] = openId ? await listAttachments(db, "traffic_violations", [openId]) : [];
   const canPay = can(user.perms, "violations", "approve");
@@ -105,7 +107,7 @@ export default async function ViolationsPage({ searchParams }: { searchParams: P
               { key: "date", label: "تاريخ المخالفة", type: "date", placeholder: today },
               { key: "vehicleId", label: "المركبة", type: "select", required: true, options: vehicles, width: "8rem", create: "vehicle" },
               { key: "reference", label: "رقم المخالفة", ltr: true, width: "8rem" },
-              { key: "type", label: "نوع المخالفة", required: true, width: "11rem", placeholder: "سرعة، وقوف، حمولة…" },
+              { key: "type", label: "نوع المخالفة", type: "select", required: true, width: "11rem", placeholder: "سرعة، وقوف، حمولة…", options: violationTypes, create: "violation_type" },
               { key: "location", label: "الموقع", width: "9rem" },
               { key: "amount", label: "المبلغ", type: "number", required: true, width: "6rem" },
               {
@@ -119,7 +121,7 @@ export default async function ViolationsPage({ searchParams }: { searchParams: P
                   { value: "company", label: "الشركة" },
                 ],
               },
-              { key: "driverId", label: "السائق (اختياري)", type: "select", options: drivers, width: "9rem" },
+              { key: "driverId", label: "السائق (اختياري)", type: "select", options: drivers, width: "9rem", create: "driver" },
               { key: "notes", label: "ملاحظات", width: "9rem" },
             ]}
           />
@@ -197,18 +199,9 @@ export default async function ViolationsPage({ searchParams }: { searchParams: P
             <Field label="تاريخ السداد">
               <Input type="date" name="paymentDate" defaultValue={today} className="w-40" />
             </Field>
-            <Field label="من">
-              <Select name="cashAccountId" required defaultValue="" className="w-48">
-                <option value="" disabled>
-                  الصندوق أو البنك
-                </option>
-                {cashes.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.nameAr}
-                  </option>
-                ))}
-              </Select>
-            </Field>
+            <div className="w-full max-w-md basis-full">
+              <CashAccountField options={cashes.filter((a) => a.code !== "2108")} label="تُسدد من حساب" />
+            </div>
             <SubmitButton>سداد المحدد</SubmitButton>
           </ActionForm>
           <p className="mt-2 text-xs text-gray-500">حدد المخالفات من الجدول أدناه؛ يُنشأ قيد سداد واحد لها كلها.</p>

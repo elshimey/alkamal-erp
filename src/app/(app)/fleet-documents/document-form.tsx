@@ -48,6 +48,8 @@ export function DocumentFields({
   const kind = owner.split(":")[0];
   const options = types.filter((t) => t.ownerKind === kind);
   const type = types.find((t) => String(t.id) === typeId);
+  // فُتحت من سطر نوع محدد (السجل التجاري مثلاً) أو لتعديل وثيقة: النوع ثابت لا يتغير
+  const lockType = !!type && (!!doc || (!!defaultType && !!fixedOwner));
 
   return (
     <>
@@ -58,7 +60,7 @@ export function DocumentFields({
             <span className="font-medium text-gray-900">{fixedOwner}</span>
           </PanelField>
         ) : (
-          <PanelField label="صاحب الوثيقة" required hint="المركبة أو السائق أو الموظف أو العميل أو الشركة">
+          <PanelField label="صاحب الوثيقة" required hint="المركبة أو السائق أو الموظف أو العميل أو المورد أو الشركة">
             <FormCombo
               name="owner"
               options={owners}
@@ -72,6 +74,12 @@ export function DocumentFields({
             />
           </PanelField>
         )}
+        {lockType ? (
+          <PanelField label="نوع الوثيقة">
+            <input type="hidden" name="documentTypeId" value={typeId} />
+            <span className="font-medium text-gray-900">{type!.nameAr}</span>
+          </PanelField>
+        ) : (
         <PanelField label="نوع الوثيقة" required>
           <Select name="documentTypeId" required value={typeId} onChange={(e) => setTypeId(e.target.value)} disabled={!owner} className="w-full">
             <option value="" disabled>
@@ -84,6 +92,7 @@ export function DocumentFields({
             ))}
           </Select>
         </PanelField>
+        )}
         <PanelField label="رقم الوثيقة">
           <Input name="number" dir="ltr" defaultValue={doc?.number ?? ""} className="w-full" />
         </PanelField>

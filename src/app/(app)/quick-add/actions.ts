@@ -18,21 +18,25 @@ const LIST: Record<string, string> = {
   drivers: "/drivers",
   inventory: "/products",
   parties: "/parties",
+  accounts: "/accounts",
+  violations: "/violations",
 };
 
 export async function quickAddFormAction(
   kind: QuickKind,
+  scope?: string,
 ): Promise<QuickForm | { error: string }> {
   if (!QUICK_KINDS.includes(kind)) return { error: "نوع غير معروف" };
   const user = await requireUser();
   if (!can(user.perms, quickPerm(kind), "create"))
     return { error: "ليست لديك صلاحية الإضافة هنا؛ اطلبها من مدير النظام" };
-  return quickForm(kind, user.perms);
+  return quickForm(kind, user.perms, scope);
 }
 
 export async function quickAddAction(
   kind: QuickKind,
   values: Record<string, string>,
+  scope?: string,
 ): Promise<QuickResult> {
   if (!QUICK_KINDS.includes(kind)) return { error: "نوع غير معروف" };
   const user = await requireUser();
@@ -40,8 +44,8 @@ export async function quickAddAction(
   if (!can(user.perms, perm, "create"))
     return { error: "ليست لديك صلاحية الإضافة هنا" };
   try {
-    const res = await quickCreate(kind, values, user.perms);
-    revalidatePath(LIST[perm]);
+    const res = await quickCreate(kind, values, user.perms, scope);
+    if (LIST[perm]) revalidatePath(LIST[perm]);
     if (values.withContract) revalidatePath("/contracts");
     return res;
   } catch (err) {

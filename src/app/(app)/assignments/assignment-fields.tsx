@@ -7,21 +7,26 @@ import { PanelField } from "@/components/panel-ui";
 import { Input } from "@/components/ui";
 import { assignmentWarnings } from "./actions";
 
-/** حقول الاستلام: المركبة والسائق والتاريخ، مع تحذير فوري إن كانت لهما وثيقة مانعة منتهية. */
+/**
+ * حقول الاستلام: المركبة والسائق والتاريخ، مع تحذير فوري إن كانت لهما وثيقة مانعة منتهية.
+ * handover: تسليم المركبة لسائق آخر؛ المركبة ثابتة، والتاريخ والعداد للتسليم والاستلام معاً.
+ */
 export function AssignmentFields({
   vehicles,
   drivers,
   odometers,
   today,
   canOverride,
+  handover,
 }: {
   vehicles: QuickOption[];
   drivers: QuickOption[];
   odometers: Record<string, number>;
   today: string;
   canOverride: boolean;
+  handover?: { vehicleId: number; minDate: string };
 }) {
-  const [vehicle, setVehicle] = useState("");
+  const [vehicle, setVehicle] = useState(handover ? String(handover.vehicleId) : "");
   const [driver, setDriver] = useState("");
   const [date, setDate] = useState(today);
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -39,16 +44,18 @@ export function AssignmentFields({
   const shown = vehicle || driver ? warnings : [];
   return (
     <div className="flex flex-col gap-3">
-      <PanelField label="المركبة" required hint="الرؤوس غير المسندة فقط">
-        <FormCombo name="vehicleId" options={vehicles} required onChange={setVehicle} placeholder="اكتب اللوحة…" />
+      {!handover && (
+        <PanelField label="المركبة" required hint="الرؤوس غير المسندة فقط، أو أضف مركبة جديدة من القائمة">
+          <FormCombo name="vehicleId" options={vehicles} create="vehicle" required onChange={setVehicle} placeholder="اكتب اللوحة…" />
+        </PanelField>
+      )}
+      <PanelField label={handover ? "السائق الجديد" : "السائق"} required hint="السائقون الذين ليست معهم مركبة، أو أضف سائقاً جديداً من القائمة">
+        <FormCombo name="driverId" options={drivers} create="driver" required onChange={setDriver} placeholder="اكتب اسم السائق…" />
       </PanelField>
-      <PanelField label="السائق" required hint="السائقون غير المسندين فقط">
-        <FormCombo name="driverId" options={drivers} required onChange={setDriver} placeholder="اكتب اسم السائق…" />
+      <PanelField label={handover ? "تاريخ التسليم والاستلام" : "تاريخ الاستلام"} required>
+        <Input type="date" name="fromDate" defaultValue={today} min={handover?.minDate} required className="w-full" onChange={(e) => setDate(e.target.value)} />
       </PanelField>
-      <PanelField label="تاريخ الاستلام" required>
-        <Input type="date" name="fromDate" defaultValue={today} required className="w-full" onChange={(e) => setDate(e.target.value)} />
-      </PanelField>
-      <PanelField label="قراءة العداد" hint={odo != null ? `آخر قراءة مسجلة ${odo.toLocaleString("en")}` : "فارغ = آخر قراءة مسجلة"}>
+      <PanelField label={handover ? "قراءة العداد عند التسليم" : "قراءة العداد"} hint={odo != null ? `آخر قراءة مسجلة ${odo.toLocaleString("en")}` : "فارغ = آخر قراءة مسجلة"}>
         <Input name="odometerStart" type="number" min={odo ?? 0} dir="ltr" placeholder={odo != null ? String(odo) : ""} className="w-full" />
       </PanelField>
       {shown.length > 0 && (
