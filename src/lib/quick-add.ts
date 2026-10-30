@@ -21,6 +21,9 @@ import {
 } from "@/lib/lookups";
 import { PARTY_ROLES, PRICING_METHODS } from "@/data/operations";
 import { todayRiyadh } from "@/lib/dates";
+import { addSubAccount } from "@/lib/accounts";
+import { addCustomValue } from "@/lib/custom-lists";
+import { CUSTOM_LISTS, isCustomList } from "@/data/custom-lists";
 import type { QuickForm, QuickKind, QuickOption } from "@/lib/quick-add-types";
 
 // «الإضافة السريعة» من داخل المستندات: نافذة صغيرة تضيف مدينة أو مساراً أو مركبة أو جهة أو سائقاً أو صنفاً
@@ -58,10 +61,23 @@ const isPartyKind = (k: QuickKind): k is (typeof PARTY_KINDS)[number] =>
 
 export function quickPerm(kind: QuickKind): Entity {
   if (kind === "city" || kind === "route") return "routes";
-  if (kind === "vehicle") return "vehicles";
+  if (kind === "account") return "accounts";
+  if (kind === "violation_type") return "violations";
+  if (kind === "vehicle" || kind === "vehicle_type" || isCustomList(kind)) return "vehicles";
   if (kind === "driver") return "drivers";
   if (kind === "product") return "inventory";
   return "parties";
+}
+
+/** الحسابات التي يمكن أن يُضاف تحتها حساب (المستوى 3 فأقل)، داخل النطاق إن حُدد. */
+async function accountParents(scope?: string) {
+  const prefix = scope && /^\d{1,8}$/.test(scope) ? scope : "";
+  const rows = await db
+    .select({ id: s.accounts.id, code: s.accounts.code, nameAr: s.accounts.nameAr })
+    .from(s.accounts)
+    .where(and(eq(s.accounts.isActive, true), sql`${s.accounts.level} < 4`, prefix ? sql`${s.accounts.code} like ${`${prefix}%`}` : undefined))
+    .orderBy(asc(s.accounts.code));
+  return rows.map((r) => ({ value: String(r.id), label: `${r.code} ${r.nameAr}` }));
 }
 
 const keepField = (what: string) => ({
@@ -75,7 +91,46 @@ const keepField = (what: string) => ({
 export async function quickForm(
   kind: QuickKind,
   perms: PermissionSet,
+  scope?: string,
 ): Promise<QuickForm> {
+  if (isCustomList(kind)) {
+    const def = CUSTOM_LISTS[kind];
+    return {
+      title: `إضافة ${def.label}`,
+      primary: "label",
+      fields: [
+        { key: "label", label: "الاسم", required: true },
+        ...(def.base
+          ? [
+              {
+                key: "base",
+                label: "يتصرف مثل",
+                type: "select" as const,
+                required: true,
+                options: Object.entries(def.base).map(([value, label]) => ({ value, label })),
+                default: Object.keys(def.base)[0],
+                hint: def.hint || "يعامله البرنامج معاملة هذه القيمة في القيود والتقارير",
+              },
+            ]
+          : []),
+      ],
+    };
+  }
+  if (kind === "vehicle_type") {
+    return { title: "إضافة نوع مركبة", primary: "nameAr", fields: [{ key: "nameAr", label: "اسم النوع", required: true, hint: "مثل: تريلا، دينا، لوري، سطحة" }] };
+  }
+  if (kind === "account") {
+    const parents = await accountParents(scope);
+    return {
+      title: "حساب جديد في شجرة الحسابات",
+      primary: "nameAr",
+      fields: [
+        { key: "nameAr", label: "اسم الحساب", required: true },
+        { key: "parentId", label: "تحت الحساب", type: "select", required: true, options: parents, default: parents.length === 1 ? parents[0].value : "", hint: "يأخذ الحساب الجديد رمزاً تلقائياً تحت الحساب الأب، ونوعه وطبيعته منه" },
+      ],
+      note: "الحساب الأب يصبح تجميعياً؛ يُرفض إن كانت عليه قيود.",
+    };
+  }
   if (kind === "city") {
     const countries = await countryOptions();
     const sa =
@@ -162,7 +217,7 @@ export async function quickForm(
       primary: "plate",
       fields: [
         { key: "plate", label: "رقم اللوحة", required: true },
-        { key: "chassis", label: "رقم الشاسيه", required: true, ltr: true },
+        { key: "chassis", label: "رقم الشاسيه", ltr: true, hint: "اختياري" },
         {
           key: "vehicleTypeId",
           label: "نوع المركبة",
@@ -387,7 +442,21 @@ export async function quickCreate(
   kind: QuickKind,
   v: Values,
   perms: PermissionSet,
+  scope?: string,
 ): Promise<{ option: QuickOption; message?: string }> {
+  if (isCustomList(kind)) return { option: await addCustomValue(db, kind, req(v.label, "الاسم"), txt(v.base)) };
+  if (kind === "vehicle_type") {
+    const name = req(v.nameAr, "اسم النوع");
+    const [row] = await db.insert(s.vehicleTypes).values({ nameAr: name }).onConflictDoUpdate({ target: s.vehicleTypes.nameAr, set: { nameAr: name } }).returning();
+    return { option: { value: String(row.id), label: row.nameAr } };
+  }
+  if (kind === "account") {
+    const parentId = Number(req(v.parentId, "الحساب الأب"));
+    // الأب من النطاق المسموح لهذه الخانة فقط (حسابات الأصول للمركبة مثلاً)
+    if (!(await accountParents(scope)).some((p) => p.value === String(parentId))) throw new Error("اختر الحساب الأب من القائمة");
+    const a = await addSubAccount(db, parentId, req(v.nameAr, "اسم الحساب"));
+    return { option: { value: String(a.id), label: `${a.code} ${a.nameAr}` }, message: `أُضيف الحساب ${a.code} ${a.nameAr} لشجرة الحسابات` };
+  }
   if (kind === "city") {
     const countryId = Number(req(v.countryId, "الدولة"));
     const [country] = await db
@@ -496,7 +565,7 @@ export async function quickCreate(
     const row = await createVehicle(db, {
       assetAccountId: Number(req(v.assetAccountId, "حساب الأصل")),
       plate: req(v.plate, "رقم اللوحة"),
-      chassis: req(v.chassis, "رقم الشاسيه"),
+      chassis: txt(v.chassis),
       vehicleTypeId: v.vehicleTypeId ? Number(v.vehicleTypeId) : null,
       make: txt(v.make),
       model: txt(v.model),

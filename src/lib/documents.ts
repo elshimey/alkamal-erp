@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
 import { daysBetween } from "@/lib/dates";
@@ -21,7 +21,11 @@ export const OWNER_KINDS: Record<OwnerKind, { label: string; plural: string }> =
   employee: { label: "موظف", plural: "الموظفون" },
   company: { label: "الشركة", plural: "الشركة" },
   customer: { label: "عميل", plural: "العملاء" },
+  supplier: { label: "مورد", plural: "الموردون" },
 };
+
+/** أدوار الجهة التي تُعدّ «مورداً» في سجل الوثائق (مورد، ناقل، ورشة، محطة، مخلص). */
+export const SUPPLIER_ROLES = ["supplier", "carrier", "workshop", "fuel_station", "customs_broker"] as const;
 
 export const BLOCKING: Record<Blocking, string> = {
   block: "تمنع",
@@ -72,7 +76,7 @@ export function ownerColumns(kind: OwnerKind, id: number) {
     vehicleId: kind === "vehicle" || kind === "trailer" ? id : null,
     driverId: kind === "driver" ? id : null,
     employeeId: kind === "employee" ? id : null,
-    partyId: kind === "customer" ? id : null,
+    partyId: kind === "customer" || kind === "supplier" ? id : null,
   };
 }
 
@@ -80,7 +84,7 @@ function ownerIdOf(kind: OwnerKind, d: { vehicleId: number | null; driverId: num
   if (kind === "vehicle" || kind === "trailer") return d.vehicleId;
   if (kind === "driver") return d.driverId;
   if (kind === "employee") return d.employeeId;
-  if (kind === "customer") return d.partyId;
+  if (kind === "customer" || kind === "supplier") return d.partyId;
   return 0;
 }
 
@@ -148,6 +152,15 @@ export async function listOwners(db: Db | Tx, kinds: OwnerKind[] = Object.keys(O
       .where(eq(s.parties.isActive, true))
       .orderBy(asc(s.parties.nameAr));
     out.push(...rows.map((r) => ({ kind: "customer" as const, id: r.id, label: r.name, href: `/customers?open=${r.id}` })));
+  }
+  if (want.has("supplier")) {
+    const rows = await db
+      .selectDistinct({ id: s.parties.id, name: s.parties.nameAr })
+      .from(s.parties)
+      .innerJoin(s.partyRoles, and(eq(s.partyRoles.partyId, s.parties.id), inArray(s.partyRoles.role, [...SUPPLIER_ROLES])))
+      .where(eq(s.parties.isActive, true))
+      .orderBy(asc(s.parties.nameAr));
+    out.push(...rows.map((r) => ({ kind: "supplier" as const, id: r.id, label: r.name, href: `/parties?open=${r.id}` })));
   }
   return out;
 }
@@ -475,10 +488,10 @@ export async function blockingDocumentIssues(
   return issues;
 }
 
-/** أصحاب الوثائق الذين ينبَّه المستخدم بوثائقهم: الأسطول والعملاء للتشغيل، والموظفون للموارد البشرية، والشركة للإدارة. */
+/** أصحاب الوثائق الذين ينبَّه المستخدم بوثائقهم: الأسطول والعملاء والموردون للتشغيل، والموظفون للموارد البشرية، والشركة للإدارة. */
 export function alertKindsFor(perms: PermissionSet): OwnerKind[] {
   const kinds: OwnerKind[] = [];
-  if (can(perms, "fleet_documents", "view")) kinds.push("vehicle", "trailer", "driver", "customer");
+  if (can(perms, "fleet_documents", "view")) kinds.push("vehicle", "trailer", "driver", "customer", "supplier");
   if (can(perms, "fleet_documents", "view") && can(perms, "employees", "view")) kinds.push("employee");
   if (can(perms, "fleet_documents", "view") && (perms.isAdmin || can(perms, "settings", "update"))) kinds.push("company");
   return kinds;
@@ -605,7 +618,7 @@ export async function dailySummary(db: Db | Tx, today: string, kinds?: OwnerKind
 
 /** نص الملخص لرسالة واتساب (مختصر: أهم 10 بنود من كل قسم). */
 export function summaryText(sum: Awaited<ReturnType<typeof dailySummary>>, company: string) {
-  const line = (r: (typeof sum.expired)[number]) => `• ${r.owner}: ${r.type.nameAr} (${r.doc.expiryDate})`;
+  const line = (r: (typeof sum.expired)[number]) => `• ${OWNER_KINDS[r.ownerKind].label} ${r.owner}: ${r.type.nameAr} (${r.doc.expiryDate})`;
   const part = (title: string, list: typeof sum.expired) => (list.length ? [`*${title} (${list.length})*`, ...list.slice(0, 10).map(line), ...(list.length > 10 ? [`… و${list.length - 10} أخرى`] : []), ""] : []);
   return [
     `ملخص الوثائق اليومي – ${company}`,
@@ -615,6 +628,7 @@ export function summaryText(sum: Awaited<ReturnType<typeof dailySummary>>, compa
     ...part("منتهية لم تُجدَّد", sum.expired),
     ...part("تنتهي اليوم", sum.dueToday),
     ...part("دخلت مرحلة تنبيه اليوم", sum.newStage),
+    ...part("كل ما يقترب من الانتهاء", sum.soon),
     `وثائق إلزامية ناقصة: ${sum.missing}`,
     ...(sum.pending ? [`طلبات تجديد من السائقين بانتظار الاعتماد: ${sum.pending}`] : []),
   ].join("\n");
@@ -695,4 +709,37 @@ export async function ownerDocumentFields(db: Db | Tx, kind: OwnerKind, id: numb
     stateLabel: id ? STATE_LABEL[state] : type.required ? "إلزامية" : "اختيارية",
     current: current ? { id: current.doc.id, number: current.doc.number, issueDate: current.doc.issueDate, expiryDate: current.doc.expiryDate, attachmentId: current.attachmentId ?? null } : undefined,
   }));
+}
+
+// ───────────── جدول سجل الوثائق الموحد ─────────────
+
+export interface DocumentRow {
+  key: string;
+  ownerKind: OwnerKind;
+  ownerId: number;
+  owner: string;
+  type: DocumentType;
+  doc: typeof s.fleetDocuments.$inferSelect | null;
+  attachmentId: number | null;
+  state: "valid" | "soon" | "expired" | "missing";
+}
+
+/**
+ * كل الوثائق الحالية لكل الجهات في جدول واحد، ومعها الإلزامية الناقصة كسطور «ناقصة»،
+ * لتُفلتر بالجهة والحالة (المربعات العلوية تفتح هذا الجدول مفلتراً).
+ */
+export async function documentRows(db: Db | Tx, today: string): Promise<DocumentRow[]> {
+  const [current, missing] = await Promise.all([currentDocuments(db), missingDocuments(db)]);
+  const rows: DocumentRow[] = current.map((r) => ({
+    key: `d${r.doc.id}`,
+    ownerKind: r.ownerKind,
+    ownerId: r.ownerId,
+    owner: r.owner,
+    type: r.type,
+    doc: r.doc,
+    attachmentId: r.attachmentId ?? null,
+    state: stateOf(r.doc.expiryDate, today, alertWindow(r.type.alertDays)),
+  }));
+  for (const m of missing) rows.push({ key: `m${m.owner.kind}${m.owner.id}-${m.type.id}`, ownerKind: m.owner.kind, ownerId: m.owner.id, owner: m.owner.label, type: m.type, doc: null, attachmentId: null, state: "missing" });
+  return rows;
 }

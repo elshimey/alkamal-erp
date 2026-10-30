@@ -62,6 +62,7 @@ export async function saveDocumentsSheet(rows: SheetRow[]) {
   const result = await saveSheetRows(rows, async (r) => {
     const owner = parseOwnerKey(cell.required(r.owner, "صاحب الوثيقة"));
     if (!owner) throw new Error("صاحب الوثيقة غير معروف");
+    if (r.kind && r.kind !== owner.kind) throw new Error("صاحب الوثيقة لا يتبع الجهة المختارة");
     await addDocument(db, {
       documentTypeId: Number(cell.required(r.documentTypeId, "نوع الوثيقة")),
       owner,

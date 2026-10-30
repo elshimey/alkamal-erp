@@ -21,11 +21,11 @@ const NEW_KINDS = [
 const groupOf = (code: string) => GROUPS.find((g) => code.startsWith(g.prefix));
 
 /**
- * اختيار الحساب الذي تُصرف منه عهدة الرحلة عند الإرسال للسائق.
+ * اختيار الحساب الذي يُصرف منه المبلغ (عهدة الرحلة، سداد المخالفات…).
  * قائمة مقسمة بعناوين واضحة (الاسم كبير والرقم بجانبه)، مع بحث، و«+ حساب جديد» يضيف الحساب للدليل ويختاره فوراً.
  * لا تستخدم نوافذ عائمة لأنها تعمل داخل نافذة التأكيد.
  */
-export function CashAccountField({ options }: { options: Account[] }) {
+export function CashAccountField({ options, name: fieldName = "cashAccountId", label = "تُصرف عهدة الرحلة من" }: { options: Account[]; name?: string; label?: string }) {
   const [added, setAdded] = useState<Account[]>([]);
   const all = useMemo(() => [...options, ...added.filter((a) => !options.some((o) => o.id === a.id))], [options, added]);
   const first = all.find((a) => a.code.startsWith("1101")) ?? all[0];
@@ -87,9 +87,9 @@ export function CashAccountField({ options }: { options: Account[] }) {
 
   return (
     <div className="text-sm">
-      <input ref={hidden} type="hidden" name="cashAccountId" value={value} />
+      <input ref={hidden} type="hidden" name={fieldName} value={value} />
       <div className="mb-1.5 flex items-center justify-between gap-2">
-        <span className="font-medium text-gray-700">تُصرف عهدة الرحلة من</span>
+        <span className="font-medium text-gray-700">{label}</span>
         {!adding && (
           <button type="button" onClick={() => setAdding(true)} className="rounded-lg px-2 py-1 text-xs font-semibold text-brand-800 transition hover:bg-brand-50">
             + حساب جديد

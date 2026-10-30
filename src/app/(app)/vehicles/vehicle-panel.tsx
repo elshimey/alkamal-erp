@@ -2,10 +2,11 @@ import { notFound } from "next/navigation";
 import { db } from "@/db";
 import { todayRiyadh } from "@/lib/dates";
 import { ownerDocumentFields } from "@/lib/documents";
-import { loadRecord, RECORDS } from "@/lib/records";
+import { loadRecord, RECORDS, withCustom } from "@/lib/records";
+import { PlateInput } from "@/components/plate-input";
 import { FieldInput } from "@/components/record-field";
 import { OwnerDocsFields } from "@/components/owner-docs-fields";
-import { PanelSection } from "@/components/panel-ui";
+import { PanelField, PanelSection } from "@/components/panel-ui";
 import { PanelLink, RecordPanel } from "@/components/record-panel";
 import { saveVehicleAction } from "./actions";
 
@@ -16,16 +17,17 @@ const DEFAULTS: Record<string, unknown> = { assetKind: "head", ownership: "owned
 /** نافذة إضافة مركبة أو تعديلها: بياناتها ثم وثائقها (الرأس أو المقطورة حسب نوع الأصل). */
 export async function VehiclePanel({ id, embed, initial }: { id: number | null; embed?: boolean; initial?: string }) {
   const def = RECORDS.vehicles;
-  const row = id ? await loadRecord("vehicles", id) : null;
+  const loaded = id ? await loadRecord("vehicles", id) : null;
+  const row = loaded && withCustom(def, loaded);
   if (id && !row) notFound();
   const today = todayRiyadh();
   const [head, trailer] = await Promise.all([
-    ownerDocumentFields(db, "vehicle", row?.assetKind === "head" ? id : null, today),
-    ownerDocumentFields(db, "trailer", row?.assetKind === "trailer" ? id : null, today),
+    ownerDocumentFields(db, "vehicle", loaded?.assetKind === "head" ? id : null, today),
+    ownerDocumentFields(db, "trailer", loaded?.assetKind === "trailer" ? id : null, today),
   ]);
   const field = (key: string) => {
     const f = def.fields.find((x) => x.key === key)!;
-    return key === "assetAccountId" ? { ...f, required: true, hint: "حساب الأصل في شجرة الحسابات (1201)" } : f;
+    return key === "assetAccountId" ? { ...f, required: true, hint: "حساب الأصل في شجرة الحسابات (1201)، أو أضف حساباً جديداً من القائمة" } : f;
   };
   const value = (key: string) => (row ? row[key] : key === "plate" ? initial : DEFAULTS[key]);
 
@@ -40,9 +42,15 @@ export async function VehiclePanel({ id, embed, initial }: { id: number | null; 
       footer={id && !embed ? <PanelLink href={`/records/vehicles/${id}`}>سجل التعديلات وحذف المركبة</PanelLink> : undefined}
     >
       <PanelSection title="البيانات الأساسية" hint="مركز التكلفة يُنشأ تلقائياً باسم اللوحة">
-        {BASIC.map((k) => (
-          <FieldInput key={k} f={field(k)} value={value(k)} row />
-        ))}
+        {BASIC.map((k) =>
+          k === "plate" ? (
+            <PanelField key={k} label="اللوحة" required hint="الأحرف في خانة والأرقام في خانة">
+              <PlateInput defaultValue={value(k) as string | undefined} />
+            </PanelField>
+          ) : (
+            <FieldInput key={k} f={field(k)} value={value(k)} row />
+          ),
+        )}
       </PanelSection>
       <PanelSection title="تفاصيل المركبة" optional open={!!id}>
         {[...DETAILS, ...(id ? ["status"] : [])].map((k) => (

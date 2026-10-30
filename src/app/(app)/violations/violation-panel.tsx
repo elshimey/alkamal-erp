@@ -1,6 +1,5 @@
-import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import * as s from "@/db/schema";
+import { violationTypeOptions } from "@/lib/violations";
 import { driverOptions, vehicleOptions } from "@/lib/lookups";
 import { todayRiyadh } from "@/lib/dates";
 import { DocumentFileInput } from "@/components/document-file-input";
@@ -12,16 +11,7 @@ import { saveViolationAction } from "./actions";
 
 /** نافذة تسجيل مخالفة واحدة: المركبة والتاريخ والمبلغ وعلى من، والسائق يُعرف من سجل الإسناد إن تُرك فارغاً. */
 export async function ViolationPanel({ closeHref }: { closeHref: string }) {
-  const [vehicles, drivers, types] = await Promise.all([
-    vehicleOptions(),
-    driverOptions(),
-    db
-      .select({ t: s.trafficViolations.violationType })
-      .from(s.trafficViolations)
-      .groupBy(s.trafficViolations.violationType)
-      .orderBy(sql`count(*) desc`)
-      .limit(30),
-  ]);
+  const [vehicles, drivers, types] = await Promise.all([vehicleOptions(), driverOptions(), violationTypeOptions(db)]);
   const radio = "flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm has-[:checked]:border-brand-600 has-[:checked]:bg-brand-50";
   return (
     <RecordPanel title="تسجيل مخالفة" subtitle="يُنشأ قيد المخالفة فور الحفظ" closeHref={closeHref} action={saveViolationAction} creating>
@@ -32,13 +22,8 @@ export async function ViolationPanel({ closeHref }: { closeHref: string }) {
         <PanelField label="المركبة" required>
           <FormCombo name="vehicleId" options={vehicles} create="vehicle" required placeholder="اكتب اللوحة…" />
         </PanelField>
-        <PanelField label="نوع المخالفة" required hint="سرعة، وقوف، حمولة…">
-          <Input name="type" required list="violation-types" className="w-full" />
-          <datalist id="violation-types">
-            {types.map((r) => (
-              <option key={r.t} value={r.t} />
-            ))}
-          </datalist>
+        <PanelField label="نوع المخالفة" required hint="سرعة، وقوف، حمولة… أو أضف نوعاً جديداً من القائمة">
+          <FormCombo name="type" options={types} create="violation_type" required placeholder="اختر أو أضف…" />
         </PanelField>
         <PanelField label="المبلغ" required>
           <Input name="amount" type="number" min={0.01} step="0.01" required dir="ltr" className="w-full" />
@@ -56,7 +41,7 @@ export async function ViolationPanel({ closeHref }: { closeHref: string }) {
           </span>
         </PanelField>
         <PanelField label="السائق" hint="فارغ = من سجل الإسناد في تاريخ المخالفة">
-          <FormCombo name="driverId" options={drivers} placeholder="تلقائي من الإسناد…" />
+          <FormCombo name="driverId" options={drivers} create="driver" placeholder="تلقائي من الإسناد…" />
         </PanelField>
       </PanelSection>
       <PanelSection title="تفاصيل أخرى" optional open>

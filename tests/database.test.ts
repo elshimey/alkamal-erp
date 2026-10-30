@@ -19,8 +19,11 @@ import { ensureAdminUser, seedReferenceData } from "@/lib/seed";
 import { verifyPassword } from "@/lib/password";
 import { createJournalEntry } from "@/lib/ledger";
 import { getCompany, getInvoiceTemplate, invoiceReadiness, saveCompany, saveInvoiceTemplate } from "@/lib/company";
-import { assignVehicle, createDriver, deleteDriver, updateDriver, createVehicle, driverOnDate, releaseAssignment } from "@/lib/fleet";
-import { addDocument, saveOwnerDocumentFields, approveSubmission, blockingDocumentIssues, dailySummary, documentRegister, expiringDocuments, listSubmissions, ownerDocuments, rejectSubmission, submitRenewal, summaryText } from "@/lib/documents";
+import { assertPlateFree, assignVehicle, createDriver, deleteDriver, updateDriver, createVehicle, driverOnDate, handoverVehicle, releaseAssignment } from "@/lib/fleet";
+import { addCustomValue, checkCustomValue, customListOptions } from "@/lib/custom-lists";
+import { splitCustom } from "@/data/custom-lists";
+import { joinPlate, splitPlate } from "@/lib/plates";
+import { addDocument, documentRows, saveOwnerDocumentFields, approveSubmission, blockingDocumentIssues, dailySummary, documentRegister, expiringDocuments, listSubmissions, ownerDocuments, rejectSubmission, submitRenewal, summaryText } from "@/lib/documents";
 import { addSubAccount } from "@/lib/accounts";
 import { activeContract, createContract, createLocation, createParty, createRoute, priceTrip, setContractStatus } from "@/lib/operations";
 import {
@@ -1637,6 +1640,76 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(computePayrollLine({ ...base, violations: 400 }).net).toBe(computePayrollLine(base).net - 400);
     });
   });
+
+  describe("تحسينات الأسطول: القوائم المضافة والتسليم والوثائق", () => {
+    it("قائمة يضيف لها المستخدم: العنصر يتصرف مثل قيمته الأساسية", async () => {
+      const added = await addCustomValue(db, "asset_kind", "معدة ثقيلة", "head");
+      expect(added.value).toMatch(/^head~\d+$/);
+      // الاسم نفسه لا يتكرر، واسم القيمة الأساسية يعيدها هي
+      expect((await addCustomValue(db, "asset_kind", "معدة ثقيلة", "head")).value).toBe(added.value);
+      expect((await addCustomValue(db, "asset_kind", "مقطورة (سطحة)", "trailer")).value).toBe("trailer");
+      await expect(addCustomValue(db, "vehicle_status", "في الحجز", "x")).rejects.toThrow("يتصرف مثل");
+      const opts = await customListOptions(db, "asset_kind");
+      expect(opts.map((o) => o.value)).toEqual(["head", "trailer", added.value]);
+      expect(splitCustom(added.value)).toEqual({ base: "head", classId: Number(added.value.split("~")[1]) });
+      expect(splitCustom("owned")).toEqual({ base: "owned", classId: null });
+      const free = await addCustomValue(db, "violation_type", "عدم ربط الحمولة");
+      expect(free).toEqual({ value: "عدم ربط الحمولة", label: "عدم ربط الحمولة" });
+      await expect(checkCustomValue(db, "vehicle_status", "head", splitCustom(added.value).classId)).rejects.toThrow("غير موجود");
+    });
+
+    it("اللوحة لا تتكرر ولو اختلفت الكتابة، والشاسيه اختياري", async () => {
+      expect(joinPlate("ابج", "١٢٣٤")).toBe("ا ب ج 1234");
+      expect(splitPlate("أ ب ج 1234")).toEqual({ letters: "أ ب ج", numbers: "1234" });
+      const v = await createVehicle(db, { plate: "ق ل م 4321" });
+      expect(v.chassis).toBeNull();
+      await createVehicle(db, { plate: "ق ل م 4322" });
+      await expect(createVehicle(db, { plate: "قلم4321" })).rejects.toThrow("مسجلة مسبقاً");
+      await expect(assertPlateFree(db, "ق ل م  4321", v.id)).resolves.toBeUndefined();
+    });
+
+    it("تسليم المركبة لسائق آخر: تسليم واستلام بخطوة واحدة", async () => {
+      const v = await createVehicle(db, { plate: "ه ن د 55", odometer: 1000 });
+      const d1 = await createDriver(db, { nameAr: "سائق التسليم الأول" });
+      const d2 = await createDriver(db, { nameAr: "سائق التسليم الثاني" });
+      const a = await assignVehicle(db, { vehicleId: v.id, driverId: d1.id, fromDate: `${YEAR}-11-01` });
+      await expect(handoverVehicle(db, { assignmentId: a.id, driverId: d1.id, date: `${YEAR}-11-10` })).rejects.toThrow("غير السائق الحالي");
+      const b = await handoverVehicle(db, { assignmentId: a.id, driverId: d2.id, date: `${YEAR}-11-10`, odometer: 1500, notes: "سليمة" });
+      const [old] = await db.select().from(s.vehicleAssignments).where(eq(s.vehicleAssignments.id, a.id));
+      expect(old).toMatchObject({ toDate: `${YEAR}-11-10`, odometerEnd: 1500 });
+      expect(b).toMatchObject({ vehicleId: v.id, driverId: d2.id, fromDate: `${YEAR}-11-10`, odometerStart: 1500, toDate: null });
+      expect(b.notes).toContain("سائق التسليم الأول");
+      // فشل الاستلام (عداد أقل) يلغي التسليم أيضاً
+      const d3 = await createDriver(db, { nameAr: "سائق التسليم الثالث" });
+      await expect(handoverVehicle(db, { assignmentId: b.id, driverId: d3.id, date: `${YEAR}-11-20`, odometer: 1200 })).rejects.toThrow();
+      const [still] = await db.select().from(s.vehicleAssignments).where(eq(s.vehicleAssignments.id, b.id));
+      expect(still.toDate).toBeNull();
+    });
+
+    it("وثائق الموردين، والجدول الموحد بالحالات والناقصة", async () => {
+      const sup = await createParty(db, { nameAr: "مورد الوثائق", roles: ["supplier"] });
+      const [type] = await db.insert(s.documentTypes).values({ code: "s_cr_test", nameAr: "سجل تجاري للمورد", ownerKind: "supplier", required: true, alertDays: "60,30,7" }).returning();
+      let rows = await documentRows(db, `${YEAR}-06-01`);
+      expect(rows.find((r) => r.ownerKind === "supplier" && r.ownerId === sup.id && r.type.id === type.id)?.state).toBe("missing");
+      await addDocument(db, { documentTypeId: type.id, owner: { kind: "supplier", id: sup.id }, number: "CR-9", expiryDate: `${YEAR}-06-20` });
+      await expect(addDocument(db, { documentTypeId: type.id, owner: { kind: "customer", id: sup.id } })).rejects.toThrow("وثيقة مورد");
+      rows = await documentRows(db, `${YEAR}-06-01`);
+      const mine = rows.filter((r) => r.ownerKind === "supplier" && r.ownerId === sup.id);
+      expect(mine).toHaveLength(1);
+      expect(mine[0]).toMatchObject({ owner: "مورد الوثائق", state: "soon" });
+      expect((await documentRows(db, `${YEAR}-07-01`)).find((r) => r.key === mine[0].key)?.state).toBe("expired");
+    });
+
+    it("سداد المخالفات من أي حساب أصول أو التزامات نشط، لا من حساب المخالفات نفسه", async () => {
+      const v = await createVehicle(db, { plate: "س د ا 31" });
+      const x = await createViolation(db, { violationDate: `${YEAR}-12-05`, vehicleId: v.id, violationType: "وقوف", amount: 150, chargeTo: "company" });
+      await expect(payViolations(db, [x.id], { paymentDate: `${YEAR}-12-06`, cashAccountId: acc["2108"] })).rejects.toThrow("اختر الحساب");
+      await expect(payViolations(db, [x.id], { paymentDate: `${YEAR}-12-06`, cashAccountId: acc["5113"] })).rejects.toThrow("اختر الحساب");
+      const [custody] = await db.select().from(s.accounts).where(sql`${s.accounts.code} like '1105%' and ${s.accounts.isPostable}`).limit(1);
+      const pay = await payViolations(db, [x.id], { paymentDate: `${YEAR}-12-06`, cashAccountId: custody.id });
+      expect(pay.id).toBeGreaterThan(0);
+    });
+  });
   describe("الاستيراد من Excel", () => {
     const rowsOf = (list: Record<string, string>[]) => list.map((values, i) => ({ row: i + 5, values }));
     const line = (o: Record<string, string>) => ({ customer: "مؤسسة الاستيراد", currency: "SAR", invoiceDate: `${YEAR}-11-03`, description: "نقل", quantity: "1", unitPrice: "1000", account: "4101", ...o });
@@ -1712,7 +1785,7 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(report.issues.map((i) => i.message)).toEqual([
         "حساب الأصل مطلوب",
         expect.stringContaining("ليس حساب أصل"),
-        "اللوحة ط ي ك 1 مسجلة مسبقاً",
+        "اللوحة ط ي ك 1 مكررة في الملف",
         "سنة الصنع: الحد الأدنى 1980",
       ]);
       const [v] = await db.select().from(s.vehicles).where(eq(s.vehicles.plate, "ط ي ك 1"));

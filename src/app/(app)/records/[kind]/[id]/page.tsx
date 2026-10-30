@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
-import { isRecordKind, loadRecord, RECORDS, TABLE_NAME } from "@/lib/records";
+import { isRecordKind, loadRecord, RECORDS, TABLE_NAME, withCustom } from "@/lib/records";
 import { FieldInput } from "@/components/record-field";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { RecordHistory } from "@/components/record-history";
@@ -18,7 +18,8 @@ export default async function RecordPage({ params }: { params: Promise<{ kind: s
   if (!Number.isInteger(id)) notFound();
   const other = await def.redirect?.(id);
   if (other) redirect(other);
-  const row = await loadRecord(kind, id);
+  const loaded = await loadRecord(kind, id);
+  const row = loaded && withCustom(RECORDS[kind], loaded);
   if (!row) notFound();
   const canEdit = can(user.perms, def.perm, "update");
   const canDelete = can(user.perms, def.perm, "delete");

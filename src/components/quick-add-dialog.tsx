@@ -35,6 +35,7 @@ const input =
 
 type DialogProps = {
   kind: QuickKind;
+  scope?: string;
   initial?: string;
   onClose: () => void;
   onDone: (o: QuickOption) => void;
@@ -69,7 +70,7 @@ function PanelFrame({ base, initial, onClose, onDone }: DialogProps & { base: st
   );
 }
 
-function QuickAddForm({ kind, initial, onClose, onDone }: DialogProps) {
+function QuickAddForm({ kind, scope, initial, onClose, onDone }: DialogProps) {
   const [form, setForm] = useState<QuickForm | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [error, setError] = useState<string>();
@@ -77,7 +78,7 @@ function QuickAddForm({ kind, initial, onClose, onDone }: DialogProps) {
 
   useEffect(() => {
     let live = true;
-    quickAddFormAction(kind).then((f) => {
+    quickAddFormAction(kind, scope).then((f) => {
       if (!live) return;
       if ("error" in f) return setError(f.error);
       setForm(f);
@@ -95,7 +96,7 @@ function QuickAddForm({ kind, initial, onClose, onDone }: DialogProps) {
     return () => {
       live = false;
     };
-  }, [kind, initial]);
+  }, [kind, scope, initial]);
 
   useEffect(() => {
     const esc = (e: globalThis.KeyboardEvent) =>
@@ -120,7 +121,7 @@ function QuickAddForm({ kind, initial, onClose, onDone }: DialogProps) {
     if (missing) return setError(`${missing.label} إلزامي`);
     setError(undefined);
     start(async () => {
-      const res = await quickAddAction(kind, values);
+      const res = await quickAddAction(kind, values, scope);
       if ("error" in res) return setError(res.error);
       onDone(res.option);
       if (res.message) toast(res.message);

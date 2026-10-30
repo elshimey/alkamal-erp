@@ -4,6 +4,7 @@
 // تُستخدم في خلايا الشيت وسطور المستندات وحقول النماذج.
 
 import {
+  Fragment,
   useEffect,
   useId,
   useLayoutEffect,
@@ -77,6 +78,8 @@ export function ComboBox({
   disabled,
   allowEmpty = true,
   autoOpen = false,
+  scope,
+  createPrefix = "",
 }: {
   value: string;
   options: QuickOption[];
@@ -95,6 +98,10 @@ export function ComboBox({
   allowEmpty?: boolean;
   /** تفتح القائمة فور ظهور الخانة (خلية شيت نُقر عليها) */
   autoOpen?: boolean;
+  /** نطاق الإضافة السريعة (رمز الحساب الأب لحساب جديد مثلاً) */
+  scope?: string;
+  /** بادئة تُضاف لقيمة ما أُنشئ («vehicle:» في صاحب الوثيقة) */
+  createPrefix?: string;
 }) {
   const withCreated = useCreatedOptions();
   const all = withCreated(create, options);
@@ -114,6 +121,13 @@ export function ComboBox({
   // في الخانة الحرة لا يُختار اقتراح بـ Enter إلا إذا تنقّل المستخدم إليه بالأسهم
   const [moved, setMoved] = useState(false);
   const [dialog, setDialog] = useState<string | null>(null);
+  // نص كُتب ولا يطابق أي خيار: تنبيه «غير موجود» مع زر الإضافة
+  const [missing, setMissing] = useState<string | null>(null);
+  useEffect(() => {
+    if (missing == null) return;
+    const t = setTimeout(() => setMissing(null), 8000);
+    return () => clearTimeout(t);
+  }, [missing]);
   const [pos, setPos] = useState<{
     top: number;
     left: number;
@@ -158,24 +172,28 @@ export function ComboBox({
   }, [active]);
 
   const pick = (o: QuickOption) => {
+    setMissing(null);
     onChange(o.value, o);
     setQuery(null);
     setOpen(false);
   };
-  const startCreate = () => {
+  const startCreate = (text = q) => {
     setOpen(false);
-    setDialog(q);
+    setMissing(null);
+    setDialog(text);
   };
 
   /** عند مغادرة الخانة: النص المكتوب يُطابق خياراً أو يُلغى */
   const commit = () => {
-    if (query == null) return;
+    // فتح نافذة الإضافة ينقل التركيز منها، فلا يُعد النص «غير موجود»
+    if (query == null || dialog != null) return;
     if (free) onChange(query.trim());
     else if (!q) {
       if (allowEmpty) onChange("");
     } else {
       const hit = exact ?? (shown.length === 1 ? shown[0] : undefined);
       if (hit) onChange(hit.value, hit);
+      else setMissing(q);
     }
     setQuery(null);
     setOpen(false);
@@ -216,8 +234,10 @@ export function ComboBox({
     onKeyDownClosed?.(e);
   };
 
+  // سهم يوضح أن الخانة قائمة اختيار (عدا الخانة الحرة)
+  const arrow = !free;
   return (
-    <>
+    <span className="relative block">
       <input
         {...inputProps}
         ref={inputRef}
@@ -230,7 +250,9 @@ export function ComboBox({
         value={text}
         placeholder={placeholder}
         className={className}
+        style={arrow ? { paddingInlineEnd: "1.6rem" } : undefined}
         onChange={(e) => {
+          setMissing(null);
           setQuery(e.target.value);
           setOpen(true);
           setActive(0);
@@ -254,6 +276,24 @@ export function ComboBox({
           setOpen(false);
         }}
       />
+      {arrow && (
+        <span aria-hidden className={`pointer-events-none absolute end-2 top-1/2 -translate-y-1/2 text-[10px] transition ${open ? "rotate-180 text-brand-700" : "text-gray-400"}`}>
+          ▼
+        </span>
+      )}
+      {missing != null && !open && (
+        <span role="alert" className="absolute start-0 top-full z-[60] mt-1 flex items-center gap-2 whitespace-nowrap rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs text-amber-900 shadow-md">
+          «{missing}» غير موجود في القائمة
+          {create && (
+            <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => startCreate(missing)} className="font-semibold text-brand-800 underline">
+              + أضفه
+            </button>
+          )}
+          <button type="button" aria-label="إغلاق" onClick={() => setMissing(null)} className="text-amber-700">
+            ×
+          </button>
+        </span>
+      )}
       {open &&
         pos &&
         total > 0 &&
@@ -275,17 +315,24 @@ export function ComboBox({
             className="z-[90] max-h-64 overflow-y-auto rounded-xl border border-gray-200 bg-white py-1 text-sm shadow-xl"
           >
             {shown.map((o, i) => (
-              <li
-                key={o.value}
-                data-i={i}
-                role="option"
-                aria-selected={i === active}
-                onMouseEnter={() => setActive(i)}
-                onClick={() => pick(o)}
-                className={`cursor-pointer px-3 py-1.5 ${i === active ? "bg-brand-50 text-brand-900" : ""} ${o.value === value ? "font-semibold" : ""}`}
-              >
-                {o.label}
-              </li>
+              <Fragment key={o.value}>
+                {!q && o.group && o.group !== shown[i - 1]?.group && (
+                  <li role="presentation" className="sticky top-0 z-[1] border-y border-gray-100 bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-600 first:border-t-0">
+                    {o.group}
+                  </li>
+                )}
+                <li
+                  data-i={i}
+                  role="option"
+                  aria-selected={i === active}
+                  onMouseEnter={() => setActive(i)}
+                  onClick={() => pick(o)}
+                  className={`flex cursor-pointer items-center justify-between gap-3 px-3 py-1.5 ${i === active ? "bg-brand-50 text-brand-900" : ""} ${o.value === value ? "font-semibold" : ""} ${!q && o.group ? "ps-5" : ""}`}
+                >
+                  <span>{o.label}</span>
+                  {(q ? o.group : o.hint) && <span className="shrink-0 text-[11px] font-normal text-gray-400">{q ? o.group : o.hint}</span>}
+                </li>
+              </Fragment>
             ))}
             {createItem > 0 && (
               <li
@@ -293,7 +340,7 @@ export function ComboBox({
                 role="option"
                 aria-selected={active === shown.length}
                 onMouseEnter={() => setActive(shown.length)}
-                onClick={startCreate}
+                onClick={() => startCreate()}
                 className={`cursor-pointer border-t border-gray-100 px-3 py-2 font-semibold text-brand-800 ${active === shown.length ? "bg-brand-50" : ""}`}
               >
                 + إضافة {q ? `«${q}»` : "جديد"}
@@ -305,20 +352,23 @@ export function ComboBox({
       {dialog != null && create && (
         <QuickAddDialog
           kind={create}
+          scope={scope}
           initial={dialog}
           onClose={() => {
             setDialog(null);
             setQuery(null);
             setTimeout(() => inputRef.current?.focus());
           }}
-          onDone={(o) => {
+          onDone={(created) => {
+            const o = createPrefix ? { ...created, value: createPrefix + created.value } : created;
             addCreatedOption(create, o);
+            setMissing(null);
             onCreated?.(o);
             onChange(o.value, o);
           }}
         />
       )}
-    </>
+    </span>
   );
 }
 
@@ -354,11 +404,8 @@ export function ComboField({
           onChange?.(v);
         }}
         inputProps={{ required: required && !value, "aria-required": required }}
-        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 pe-8 text-sm shadow-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
       />
-      <span className="pointer-events-none absolute end-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">
-        ▾
-      </span>
     </div>
   );
 }

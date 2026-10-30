@@ -2,6 +2,7 @@ import { resolveOptions, type FieldDef } from "@/lib/records";
 import { PasswordInput } from "@/components/password-input";
 import { Field, Input, Select } from "@/components/ui";
 import { PanelField } from "@/components/panel-ui";
+import { FormCombo } from "@/components/form-combo";
 
 const str = (v: unknown) => (v == null ? "" : v instanceof Date ? v.toISOString().slice(0, 10) : String(v));
 
@@ -32,7 +33,10 @@ export async function FieldInput({ f, value, disabled = false, row = false }: { 
     );
   }
   let input;
-  if (f.type === "select") {
+  if (f.type === "select" && (f.create || f.custom) && !disabled) {
+    // قائمة بحث مع «+ إضافة» (نوع جديد، حساب جديد…)
+    input = <FormCombo name={f.key} options={await resolveOptions(f)} defaultValue={str(value)} create={f.create} scope={f.scope} required={f.required} placeholder="اختر أو أضف…" />;
+  } else if (f.type === "select") {
     const opts = await resolveOptions(f);
     input = (
       <Select name={f.key} defaultValue={str(value)} required={f.required} disabled={disabled}>

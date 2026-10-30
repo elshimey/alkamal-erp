@@ -13,6 +13,7 @@ export function FormCombo({
   options,
   defaultValue = "",
   create,
+  scope,
   required,
   placeholder = "اكتب للبحث…",
   onChange,
@@ -21,6 +22,7 @@ export function FormCombo({
   options: QuickOption[];
   defaultValue?: string;
   create?: QuickKind;
+  scope?: string;
   required?: boolean;
   placeholder?: string;
   onChange?: (value: string) => void;
@@ -45,6 +47,7 @@ export function FormCombo({
         value={value}
         options={options}
         create={create}
+        scope={scope}
         placeholder={placeholder}
         allowEmpty={!required}
         inputProps={{ required, "aria-required": required ? "true" : undefined } as never}

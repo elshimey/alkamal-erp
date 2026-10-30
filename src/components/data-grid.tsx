@@ -12,6 +12,8 @@ import { isoToDmy } from "@/components/date-input";
 
 export interface GridColumn {
   key: string;
+  /** قيمة الصف الجديد (نوع الأصل «رأس» مثلاً) */
+  defaultValue?: string;
   label: string;
   type?: "text" | "number" | "date" | "select";
   options?: { value: string; label: string }[];
@@ -22,6 +24,13 @@ export interface GridColumn {
   readOnly?: boolean;
   /** زر «+ إضافة» في القائمة يفتح نافذة إضافة سريعة من هذا النوع */
   create?: QuickKind;
+  /** نطاق الإضافة السريعة (رمز الحساب الأب مثلاً) */
+  scope?: string;
+  /**
+   * خيارات تتغير حسب خلية أخرى في الصف نفسه (صاحب الوثيقة حسب جهتها)؛ تغيير تلك الخلية يفرّغ هذه.
+   * create وprefix لكل قيمة: نوع الإضافة السريعة، وبادئة تُضاف لقيمة ما أُنشئ («vehicle:»).
+   */
+  dependsOn?: { key: string; options: Record<string, { value: string; label: string }[]>; create?: Record<string, QuickKind>; prefix?: Record<string, string> };
   /** نص حر مع اقتراحات أثناء الكتابة (مثل المرسل والمستلم من جهات الاتصال) */
   suggest?: string[];
 }
@@ -29,7 +38,7 @@ export interface GridColumn {
 export type GridRow = Record<string, string>;
 type Cell = [number, number];
 
-export const emptyGridRow = (columns: GridColumn[]): GridRow => Object.fromEntries(columns.map((c) => [c.key, ""]));
+export const emptyGridRow = (columns: GridColumn[]): GridRow => Object.fromEntries(columns.map((c) => [c.key, c.defaultValue ?? ""]));
 export const isEmptyGridRow = (row: GridRow) => Object.values(row).every((v) => !String(v ?? "").trim());
 
 /** يحوّل النص الملصوق إلى قيمة العمود؛ في القوائم يقبل الاسم الظاهر أو القيمة. */
@@ -213,7 +222,16 @@ export function DataGrid({
     }
   };
 
-  const setCell = (r: number, key: string, value: string) => onChange((prev) => prev.map((row, i) => (i === r ? { ...row, [key]: value } : row)));
+  const setCell = (r: number, key: string, value: string) =>
+    onChange((prev) =>
+      prev.map((row, i) => {
+        if (i !== r) return row;
+        const next = { ...row, [key]: value };
+        // الخلايا التابعة لهذه الخلية تُفرَّغ إن تغيرت قيمتها
+        if (row[key] !== value) for (const c of columns) if (c.dependsOn?.key === key) next[c.key] = "";
+        return next;
+      }),
+    );
 
   return (
     <div className="overflow-x-auto rounded-2xl border border-black/[0.06] bg-white shadow-[0_4px_16px_-8px_rgba(27,33,38,0.08)]">
@@ -275,11 +293,13 @@ export function DataGrid({
                     {col.type === "select" || col.suggest ? (
                       <ComboBox
                         value={row[col.key] ?? ""}
-                        options={col.suggest ? (suggestions.get(col.key) ?? []) : (col.options ?? [])}
+                        options={col.suggest ? (suggestions.get(col.key) ?? []) : col.dependsOn ? (col.dependsOn.options[row[col.dependsOn.key]] ?? []) : (col.options ?? [])}
                         free={!!col.suggest}
-                        create={col.create}
+                        create={col.dependsOn ? col.dependsOn.create?.[row[col.dependsOn.key]] : col.create}
+                        createPrefix={col.dependsOn?.prefix?.[row[col.dependsOn.key]]}
+                        placeholder={col.dependsOn && !row[col.dependsOn.key] ? `اختر ${columns.find((x) => x.key === col.dependsOn!.key)?.label ?? ""} أولاً` : r === 0 ? col.placeholder : undefined}
+                        scope={col.scope}
                         disabled={col.readOnly}
-                        placeholder={r === 0 ? col.placeholder : undefined}
                         onChange={(v) => setCell(r, col.key, v)}
                         onKeyDownClosed={common.onKeyDown}
                         className={common.className}

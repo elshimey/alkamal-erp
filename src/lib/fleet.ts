@@ -4,11 +4,12 @@ import { blockingDocumentIssues } from "@/lib/documents";
 import * as s from "@/db/schema";
 import { addSubAccountTx } from "@/lib/accounts";
 import { findPgError } from "@/lib/errors";
+import { plateKey } from "@/lib/plates";
 
 
 export interface VehicleInput {
   plate: string;
-  chassis: string;
+  chassis?: string | null;
   vehicleTypeId?: number | null;
   make?: string | null;
   model?: string | null;
@@ -19,10 +20,25 @@ export interface VehicleInput {
   assetKind?: "head" | "trailer";
 }
 
+/** يرفض لوحة مسجلة لمركبة أخرى ولو اختلفت الكتابة (المسافات وصور الحروف). */
+export async function assertPlateFree(db: Db | Tx, plate: string, exceptId?: number | null) {
+  const rows = await db.select({ id: s.vehicles.id, plate: s.vehicles.plate }).from(s.vehicles);
+  const key = plateKey(plate);
+  const dup = rows.find((r) => r.id !== exceptId && plateKey(r.plate) === key);
+  if (dup) throw new Error(`اللوحة ${plate} مسجلة مسبقاً${dup.plate !== plate ? ` (${dup.plate})` : ""}`);
+}
+
 /** يضيف المركبة وينشئ مركز تكلفتها في معاملة واحدة (القرار 8). */
 export async function createVehicle(db: Db | Tx, input: VehicleInput) {
-  const plate = input.plate.trim();
+  const plate = input.plate.trim().replace(/\s+/g, " ");
+  if (!plate) throw new Error("اللوحة إلزامية");
   return db.transaction(async (tx) => {
+    await assertPlateFree(tx, plate);
+    const chassis = input.chassis?.trim() || null;
+    if (chassis) {
+      const [dup] = await tx.select({ plate: s.vehicles.plate }).from(s.vehicles).where(eq(s.vehicles.chassis, chassis));
+      if (dup) throw new Error(`رقم الشاسيه ${chassis} مسجل للمركبة ${dup.plate}`);
+    }
     // رمز المركز من اللوحة؛ إن بقي رمز لمركبة سابقة (لوحة غُيّرت مثلاً) يُضاف رقم تمييز
     const taken = new Set((await tx.select({ code: s.costCenters.code }).from(s.costCenters).where(sql`${s.costCenters.code} like ${`V-${plate}%`}`)).map((r) => r.code));
     let code = `V-${plate}`;
@@ -35,7 +51,7 @@ export async function createVehicle(db: Db | Tx, input: VehicleInput) {
       .insert(s.vehicles)
       .values({
         plate,
-        chassis: input.chassis.trim(),
+        chassis,
         vehicleTypeId: input.vehicleTypeId ?? null,
         make: input.make ?? null,
         model: input.model ?? null,
@@ -212,7 +228,7 @@ export async function deleteDriver(db: Db, id: number) {
 // ───────────── الإسناد والتسليم ─────────────
 
 export async function assignVehicle(
-  db: Db,
+  db: Db | Tx,
   input: { vehicleId: number; driverId: number; fromDate: string; odometerStart?: number | null; notes?: string | null; userId?: number },
   opts: { canOverride?: boolean; overrideReason?: string | null } = {},
 ) {
@@ -255,7 +271,7 @@ export async function assignVehicle(
 }
 
 export async function releaseAssignment(
-  db: Db,
+  db: Db | Tx,
   input: { assignmentId: number; toDate: string; odometerEnd?: number | null; notes?: string | null },
 ) {
   return db.transaction(async (tx) => {
@@ -276,6 +292,29 @@ export async function releaseAssignment(
         .set({ odometer: sql`greatest(${s.vehicles.odometer}, ${input.odometerEnd})`, updatedAt: new Date() })
         .where(eq(s.vehicles.id, a.vehicleId));
     }
+  });
+}
+
+/**
+ * تسليم المركبة من سائقها الحالي إلى سائق آخر في خطوة واحدة: يُنهى الإسناد الحالي
+ * بتاريخ وعداد التسليم، ويبدأ إسناد السائق الجديد من التاريخ والعداد نفسيهما.
+ */
+export async function handoverVehicle(
+  db: Db,
+  input: { assignmentId: number; driverId: number; date: string; odometer?: number | null; notes?: string | null; userId?: number },
+  opts: { canOverride?: boolean; overrideReason?: string | null } = {},
+) {
+  return db.transaction(async (tx) => {
+    const [a] = await tx.select().from(s.vehicleAssignments).where(eq(s.vehicleAssignments.id, input.assignmentId));
+    if (!a) throw new Error("الإسناد غير موجود");
+    if (a.driverId === input.driverId) throw new Error("اختر سائقاً غير السائق الحالي");
+    const [current] = await tx.select({ name: s.employees.nameAr }).from(s.drivers).innerJoin(s.employees, eq(s.employees.id, s.drivers.employeeId)).where(eq(s.drivers.id, a.driverId));
+    await releaseAssignment(tx, { assignmentId: a.id, toDate: input.date, odometerEnd: input.odometer ?? null, notes: input.notes ? `سُلّمت لسائق آخر: ${input.notes}` : "سُلّمت لسائق آخر" });
+    return assignVehicle(
+      tx,
+      { vehicleId: a.vehicleId, driverId: input.driverId, fromDate: input.date, odometerStart: input.odometer ?? null, notes: [`استلمها من ${current?.name ?? "السائق السابق"}`, input.notes].filter(Boolean).join(" · "), userId: input.userId },
+      opts,
+    );
   });
 }
 

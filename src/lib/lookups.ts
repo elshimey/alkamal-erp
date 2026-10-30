@@ -2,6 +2,7 @@ import "server-only";
 import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
+import { alias } from "drizzle-orm/pg-core";
 
 // قوائم الاختيار المشتركة في الشيتات. الاسم الظاهر هو ما يُلصق من Excel.
 
@@ -146,4 +147,33 @@ export async function cityNames() {
     .where(and(eq(s.locations.level, "city"), eq(s.locations.isActive, true)))
     .orderBy(asc(s.locations.nameAr));
   return [...new Set(rows.map((r) => r.n))];
+}
+
+const ACCOUNT_TYPE_LABEL: Record<(typeof s.accountType.enumValues)[number], string> = {
+  asset: "أصول",
+  liability: "التزامات",
+  equity: "حقوق ملكية",
+  revenue: "إيراد",
+  cost_of_revenue: "تكلفة إيراد",
+  expense: "مصروف",
+};
+
+/**
+ * الحسابات القابلة للترحيل تحت رمز (أو كل الدليل)، مجمّعة تحت حسابها الأب ليسهل التمييز بينها:
+ * الرمز ثم الاسم، وتحت كل مجموعة عنوانها ونوع الحساب بجانبه.
+ */
+export async function accountOptions(prefix?: string) {
+  const parent = alias(s.accounts, "parent");
+  const rows = await db
+    .select({ id: s.accounts.id, code: s.accounts.code, nameAr: s.accounts.nameAr, type: s.accounts.type, parentCode: parent.code, parentName: parent.nameAr })
+    .from(s.accounts)
+    .leftJoin(parent, eq(parent.id, s.accounts.parentId))
+    .where(and(eq(s.accounts.isPostable, true), eq(s.accounts.isActive, true), prefix ? sql`${s.accounts.code} like ${`${prefix}%`}` : undefined))
+    .orderBy(asc(s.accounts.code));
+  return rows.map((r) => ({
+    value: String(r.id),
+    label: `${r.code} ${r.nameAr}`,
+    group: r.parentCode ? `${r.parentCode} ${r.parentName}` : ACCOUNT_TYPE_LABEL[r.type],
+    hint: ACCOUNT_TYPE_LABEL[r.type],
+  }));
 }

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { fmtDate } from "@/lib/format";
 import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
 import { todayRiyadh } from "@/lib/dates";
@@ -41,7 +42,7 @@ export default async function DailySummaryPage() {
 
   return (
     <>
-      <PageHeader title="الملخص اليومي للوثائق" description={`ما يحتاج انتباهك اليوم ${today}. أرسله لمن يتابع التجديد عبر واتساب بضغطة.`}>
+      <PageHeader title="الملخص اليومي للوثائق" description={`ما يحتاج انتباهك اليوم ${fmtDate(today)} من وثائق كل الجهات (الرؤوس والمقطورات والسائقين والموظفين والشركة والعملاء والموردين). أرسله لمن يتابع التجديد عبر واتساب بضغطة.`}>
         <div className="flex flex-wrap items-center gap-2">
           <a
             href={`https://wa.me/?text=${encodeURIComponent(text)}`}
@@ -65,7 +66,7 @@ export default async function DailySummaryPage() {
       )}
 
       <div className="mb-4 flex flex-wrap gap-3 text-sm">
-        <Link href="/fleet-documents/reports?r=missing" className="rounded-xl bg-white px-4 py-2 shadow-sm hover:bg-brand-50">
+        <Link href="/fleet-documents?state=missing" className="rounded-xl bg-white px-4 py-2 shadow-sm hover:bg-brand-50">
           وثائق إلزامية ناقصة: <b>{sum.missing}</b>
         </Link>
         <Link href="/fleet-documents/submissions" className={`rounded-xl px-4 py-2 shadow-sm ${sum.pending ? "bg-amber-50 text-amber-900" : "bg-white"} hover:bg-brand-50`}>
@@ -73,9 +74,16 @@ export default async function DailySummaryPage() {
         </Link>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-3">
+      <ul className="mb-4 list-disc space-y-1 rounded-xl bg-white px-8 py-3 text-xs text-gray-600 shadow-sm">
+        <li><b>منتهية</b>: انتهى تاريخها ولم تُسجَّل وثيقة أحدث منها.</li>
+        <li><b>تقترب من الانتهاء</b>: باقٍ عليها أقل من أول مرحلة تنبيه لنوعها (60 يوماً افتراضياً).</li>
+        <li><b>دخلت مرحلة تنبيه اليوم</b>: وصلت اليوم بالضبط إلى 60 أو 30 أو 7 أيام؛ هذه هي الجديدة منذ ملخص الأمس.</li>
+      </ul>
+
+      <div className="grid gap-4 lg:grid-cols-2">
         {section("منتهية لم تُجدَّد", sum.expired, "text-red-700")}
         {section("تنتهي اليوم", sum.dueToday, "text-red-700")}
+        {section("تقترب من الانتهاء", sum.soon, "text-amber-800")}
         {section("دخلت مرحلة تنبيه اليوم", sum.newStage, "text-amber-800")}
       </div>
 
