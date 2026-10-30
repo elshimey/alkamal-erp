@@ -260,6 +260,13 @@
       "when": 1793190000000,
       "tag": "0036_custom_lists",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1793200000000,
+      "tag": "0037_maintenance_alerts",
+      "breakpoints": true
     }
   ]
 }

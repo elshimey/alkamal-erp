@@ -151,7 +151,7 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
             { key: "total", label: "الإجمالي", type: "number", width: "7rem" },
             { key: "notes", label: "ملاحظات", editable: true, width: "14rem" },
           ]}
-          rows={list.map(({ o, plate, supplier, lines }): DocSheetRow => ({
+          rows={list.map(({ o, plate, supplier, lines, typeLabel }): DocSheetRow => ({
             id: o.id,
             href: `/maintenance/${o.id}`,
             editable: o.status === "draft" && canUpdate,
@@ -159,7 +159,7 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
               number: o.number,
               orderDate: o.orderDate,
               plate,
-              type: MAINTENANCE_TYPES[o.type],
+              type: (typeLabel ?? MAINTENANCE_TYPES[o.type]),
               provider: supplier ?? MAINTENANCE_PROVIDERS.internal,
               supplierInvoiceNo: o.supplierInvoiceNo,
               odometer: o.odometer != null ? String(o.odometer) : null,
@@ -175,7 +175,7 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
       ) : openDoc ? (
         <div className="grid items-start gap-4 lg:grid-cols-[minmax(17rem,22rem)_1fr]">
           <ul className="hidden max-h-[calc(100vh-9rem)] lg:block divide-y divide-gray-100 overflow-y-auto rounded-2xl border border-black/[0.06] bg-white shadow-sm print:hidden lg:sticky lg:top-4">
-            {list.map(({ o, plate, supplier }) => (
+            {list.map(({ o, plate, supplier, typeLabel }) => (
               <li key={o.id}>
                 <Link
                   href={listHref(BASE, sp, { open: String(o.id) })}
@@ -184,7 +184,7 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
                 >
                   <div className="flex items-start justify-between gap-2">
                     <span className="line-clamp-1 text-sm font-semibold text-gray-800">
-                      {plate} · {MAINTENANCE_TYPES[o.type]}
+                      {plate} · {(typeLabel ?? MAINTENANCE_TYPES[o.type])}
                     </span>
                     <span className="ltr-nums shrink-0 text-sm font-semibold text-brand-900">{fmt(o.total)}</span>
                   </div>
@@ -227,7 +227,7 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
                 </Link>
                 {openDoc.o.status === "draft" && canApprove && openDoc.lines.length > 0 && (
                   <ActionForm action={approveOrder.bind(null, openDoc.o.id)} resetOnSuccess={false} className="flex items-center gap-2">
-                    {openDoc.o.provider === "internal" && openDoc.lines.some(({ l }) => !l.warehouseId) && (
+                    {openDoc.o.provider === "internal" && !openDoc.o.supplierId && openDoc.lines.some(({ l }) => !l.warehouseId) && (
                       <Select name="cashAccountId" defaultValue={openDoc.o.cashAccountId ?? ""} className="w-40">
                         <option value="">القطع من صندوق…</option>
                         {cashes.map((a) => (
@@ -288,7 +288,7 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
           )}
           <Table head={[selectable.length ? <SelectAll key="all" form={BULK_FORM} /> : "", "الرقم", "التاريخ", "المركبة", "النوع", "الجهة", "المصدر", "الإجمالي", "الحالة", ""]}>
             {list.length === 0 && <EmptyRow cols={10}>{filter.q || filter.status || filter.from || filter.vehicleId ? "لا توجد أوامر بهذه الشروط" : "لا توجد أوامر صيانة بعد"}</EmptyRow>}
-            {list.map(({ o, plate, supplier, request, plan, lines }) => {
+            {list.map(({ o, plate, supplier, request, plan, lines, typeLabel }) => {
               const open = listHref(BASE, sp, { open: String(o.id) });
               return (
                 <tr key={o.id} className="transition hover:bg-brand-50/40">
@@ -305,7 +305,7 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
                       {plate}
                     </Link>
                   </Td>
-                  <Td>{MAINTENANCE_TYPES[o.type]}</Td>
+                  <Td>{(typeLabel ?? MAINTENANCE_TYPES[o.type])}</Td>
                   <Td>{supplier ?? MAINTENANCE_PROVIDERS.internal}</Td>
                   <Td className="text-xs">{request ? `عطل ${request}` : plan ? `دورية: ${plan}` : "—"}</Td>
                   <Td className="ltr-nums font-semibold whitespace-nowrap">

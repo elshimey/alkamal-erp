@@ -3,16 +3,17 @@ import { notFound } from "next/navigation";
 import { db } from "@/db";
 import * as s from "@/db/schema";
 import { vehicleOptions } from "@/lib/lookups";
-import { MAINTENANCE_TYPES } from "@/data/maintenance";
+import { joinCustom } from "@/data/custom-lists";
+import { customListOptions } from "@/lib/custom-lists";
 import { FormCombo } from "@/components/form-combo";
 import { PanelField, PanelSection } from "@/components/panel-ui";
 import { RecordPanel } from "@/components/record-panel";
-import { Input, Select } from "@/components/ui";
+import { Input } from "@/components/ui";
 import { savePlanAction } from "./actions";
 
 /** نافذة خطة صيانة دورية: إضافة أو تعديل خطة بعينها (مع إيقافها). */
 export async function PlanPanel({ id, closeHref, savedHref }: { id: number | null; closeHref: string; savedHref: string }) {
-  const [vehicles, plan] = await Promise.all([vehicleOptions(), id ? db.select().from(s.maintenancePlans).where(eq(s.maintenancePlans.id, id)).then((r) => r[0]) : Promise.resolve(undefined)]);
+  const [vehicles, kinds, plan] = await Promise.all([vehicleOptions(), customListOptions(db, "maintenance_kind"), id ? db.select().from(s.maintenancePlans).where(eq(s.maintenancePlans.id, id)).then((r) => r[0]) : Promise.resolve(undefined)]);
   if (id && !plan) notFound();
   return (
     <RecordPanel
@@ -30,14 +31,8 @@ export async function PlanPanel({ id, closeHref, savedHref }: { id: number | nul
         <PanelField label="اسم الصيانة" required hint="تغيير زيت، فحص فرامل…">
           <Input name="title" required defaultValue={plan?.title} className="w-full" />
         </PanelField>
-        <PanelField label="نوع الصيانة" required>
-          <Select name="type" defaultValue={plan?.type ?? "mechanical"} className="w-full">
-            {Object.entries(MAINTENANCE_TYPES).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v}
-              </option>
-            ))}
-          </Select>
+        <PanelField label="نوع الصيانة" required hint="أو أضف نوعاً جديداً من القائمة">
+          <FormCombo name="type" options={kinds} create="maintenance_kind" defaultValue={plan ? joinCustom(plan.type, plan.typeClassId) : "mechanical"} required placeholder="اختر أو أضف نوعاً…" />
         </PanelField>
         <PanelField label="تتكرر كل (يوم)" required>
           <Input name="intervalDays" type="number" min={1} max={3650} step={1} required defaultValue={plan?.intervalDays} dir="ltr" className="w-full" />

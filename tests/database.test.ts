@@ -22,6 +22,7 @@ import { getCompany, getInvoiceTemplate, invoiceReadiness, saveCompany, saveInvo
 import { assertPlateFree, assignVehicle, createDriver, deleteDriver, updateDriver, createVehicle, driverOnDate, handoverVehicle, releaseAssignment } from "@/lib/fleet";
 import { addCustomValue, checkCustomValue, customListOptions } from "@/lib/custom-lists";
 import { splitCustom } from "@/data/custom-lists";
+import { markAlertsRead, withReadState } from "@/lib/alerts";
 import { joinPlate, splitPlate } from "@/lib/plates";
 import { addDocument, documentRows, saveOwnerDocumentFields, approveSubmission, blockingDocumentIssues, dailySummary, documentRegister, expiringDocuments, listSubmissions, ownerDocuments, rejectSubmission, submitRenewal, summaryText } from "@/lib/documents";
 import { addSubAccount } from "@/lib/accounts";
@@ -46,7 +47,7 @@ import {
 } from "@/lib/invoices";
 import { parseDocFilter } from "@/lib/doc-filters";
 import { createExpense, approveExpense, approveExpenseWith, createPayment, createPurchaseInvoice, custodyBalances, deletePurchaseInvoice, listPurchaseInvoices, postPurchaseInvoice, updateDraftPurchase, rejectExpense, revertExpense, revertPayment, revertPurchaseInvoice, supplierBalances } from "@/lib/purchases";
-import { addMaintenanceLines, approveBreakdownRequest, approveMaintenanceOrder, completeMaintenanceOrder, createBreakdownRequest, createMaintenanceOrder, deleteMaintenanceOrder, planSchedule, rejectBreakdownRequest, revertMaintenanceOrder, reviewBreakdownRequest, savePlan, listOrders, orderDoc, updateDraftOrder, createOrdersFrom, listRequests, requestDoc } from "@/lib/maintenance";
+import { addMaintenanceLines, approveBreakdownRequest, approveMaintenanceOrder, completeMaintenanceOrder, createBreakdownRequest, createMaintenanceOrder, deleteMaintenanceOrder, planSchedule, rejectBreakdownRequest, revertMaintenanceOrder, reviewBreakdownRequest, savePlan, listOrders, orderDoc, updateDraftOrder, createOrdersFrom, listRequests, requestDoc, approveDriverMaintenance, driverMaintenanceRequests } from "@/lib/maintenance";
 import { adjustPayrollLines, approvePayrollRun, bankTransferRows, createAdvance, createEmployee, createPayrollRun, payAdvance, payPayrollRun, refreshPayrollRun, revertAdvance, revertPayrollPayment, revertPayrollRun, updateEmployee } from "@/lib/payroll";
 import { createViolation, deleteViolation, listViolations, payViolations, revertViolationPayment, violationSummary } from "@/lib/violations";
 import { computePayrollLine } from "@/data/payroll";
@@ -1708,6 +1709,58 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       const [custody] = await db.select().from(s.accounts).where(sql`${s.accounts.code} like '1105%' and ${s.accounts.isPostable}`).limit(1);
       const pay = await payViolations(db, [x.id], { paymentDate: `${YEAR}-12-06`, cashAccountId: custody.id });
       expect(pay.id).toBeGreaterThan(0);
+    });
+  });
+  describe("دورة الصيانة بمساريها وجرس التنبيهات", () => {
+    it("نوع صيانة جديد يتصرف مثل الأساسي، والورشة الداخلية تشتري القطع آجلاً من مورد", async () => {
+      const v = await createVehicle(db, { plate: "ص ي ن 71" });
+      const kind = await addCustomValue(db, "maintenance_kind", "تبريد", "electrical");
+      const { classId } = splitCustom(kind.value);
+      const shop = await createParty(db, { nameAr: "مورد قطع آجل", roles: ["supplier"] });
+      const o = await createMaintenanceOrder(db, { vehicleId: v.id, orderDate: `${YEAR}-12-10`, type: "electrical", typeClassId: classId, provider: "internal", supplierId: shop.id, supplierInvoiceNo: "P-9" });
+      expect(o).toMatchObject({ provider: "internal", supplierId: shop.id, typeClassId: classId, cashAccountId: null });
+      await expect(createMaintenanceOrder(db, { vehicleId: v.id, orderDate: `${YEAR}-12-10`, type: "tires", typeClassId: classId, provider: "internal" })).rejects.toThrow("غير موجود");
+      await addMaintenanceLines(db, o.id, [{ kind: "part", description: "كمبروسر", unitPrice: 1000, vatRate: 15 }]);
+      const entry = await approveMaintenanceOrder(db, o.id);
+      const lines = await db.select({ code: s.accounts.code, debit: s.journalLines.debit, credit: s.journalLines.credit }).from(s.journalLines).innerJoin(s.accounts, eq(s.accounts.id, s.journalLines.accountId)).where(eq(s.journalLines.entryId, entry.id));
+      expect(lines.find((l) => Number(l.credit) > 0)?.code.startsWith("21")).toBe(true);
+      expect(lines.some((l) => l.code === "5107" && Number(l.debit) === 1000)).toBe(true);
+      expect((await orderDoc(db, o.id))?.typeLabel).toBe("تبريد");
+    });
+
+    it("طلب صيانة السائق: يُعتمد من العهدة، أو ديناً على الورشة بأمر صيانة مكتمل، ويُرجع", async () => {
+      const v = await createVehicle(db, { plate: "ط ر ق 72" });
+      const d = await createDriver(db, { nameAr: "سائق الطريق" });
+      const raise = (amount: number) => createExpense(db, { expenseDate: `${YEAR}-12-11`, payer: "driver_custody", driverId: d.id, accountId: acc["5107"], vehicleId: v.id, description: "صيانة", amount, driverKind: "maintenance", reportedPayer: "custody" });
+      const a = await raise(230);
+      const b = await raise(575);
+      expect((await driverMaintenanceRequests(db, { status: "pending" })).map((x) => x.e.id)).toEqual(expect.arrayContaining([a.id, b.id]));
+      await approveDriverMaintenance(db, a.id, { payer: "custody", type: "tires" });
+      const [ea] = await db.select().from(s.expenses).where(eq(s.expenses.id, a.id));
+      expect([ea.status, ea.accountId, ea.maintenanceOrderId]).toEqual(["approved", acc["5108"], null]);
+
+      const ws = await createParty(db, { nameAr: "ورشة الطريق", roles: ["workshop"] });
+      await expect(approveDriverMaintenance(db, b.id, { payer: "supplier", type: "mechanical" })).rejects.toThrow("الورشة");
+      await approveDriverMaintenance(db, b.id, { payer: "supplier", type: "mechanical", supplierId: ws.id, supplierInvoiceNo: "R-1", vatAmount: 75 });
+      const [eb] = await db.select().from(s.expenses).where(eq(s.expenses.id, b.id));
+      expect(eb).toMatchObject({ status: "approved", journalEntryId: null });
+      const [o] = await db.select().from(s.maintenanceOrders).where(eq(s.maintenanceOrders.id, eb.maintenanceOrderId!));
+      expect(o).toMatchObject({ status: "completed", provider: "external", supplierId: ws.id, vehicleId: v.id });
+      expect([Number(o.subtotal), Number(o.vatTotal), Number(o.total)]).toEqual([500, 75, 575]);
+
+      await revertExpense(db, b.id);
+      const [back] = await db.select().from(s.expenses).where(eq(s.expenses.id, b.id));
+      expect([back.status, back.maintenanceOrderId]).toEqual(["pending", null]);
+      expect(await db.select().from(s.maintenanceOrders).where(eq(s.maintenanceOrders.id, o.id))).toHaveLength(0);
+    });
+
+    it("التنبيه المقروء يعود غير مقروء إذا تغيّر عدده", async () => {
+      const [u] = await db.select().from(s.users).limit(1);
+      const list = [{ key: "pending_expenses", tone: "amber" as const, icon: "fuel" as const, text: "3 مصروف بانتظار الاعتماد", href: "/expenses" }];
+      expect((await withReadState(db, u.id, list))[0].read).toBe(false);
+      await markAlertsRead(db, u.id, list);
+      expect((await withReadState(db, u.id, list))[0].read).toBe(true);
+      expect((await withReadState(db, u.id, [{ ...list[0], text: "4 مصروف بانتظار الاعتماد" }]))[0].read).toBe(false);
     });
   });
   describe("الاستيراد من Excel", () => {

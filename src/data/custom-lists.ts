@@ -1,4 +1,5 @@
 import { PLATE_TYPES } from "@/data/waybills";
+import { MAINTENANCE_TYPES } from "@/data/maintenance";
 
 // القوائم الثابتة التي يضيف لها المستخدم عناصر من القائمة المنسدلة نفسها.
 // كل عنصر جديد يختار «يتصرف مثل» قيمة أساسية، فلا يتغير منطق البرنامج (الوثائق والإسناد والقيود).
@@ -24,6 +25,11 @@ export const CUSTOM_LISTS = {
     label: "نوع اللوحة",
     base: PLATE_TYPES as Record<string, string>,
     hint: "القيمة الأساسية هي ما يُرسل في وثيقة النقل",
+  },
+  maintenance_kind: {
+    label: "نوع الصيانة",
+    base: MAINTENANCE_TYPES as Record<string, string>,
+    hint: "الأساسي يحدد حساب تكلفة الصيانة في القيد",
   },
   // قائمة حرة: القيمة هي الاسم نفسه
   violation_type: { label: "نوع المخالفة", base: null, hint: "" },

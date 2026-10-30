@@ -16,6 +16,7 @@ export const NAV: { title: string; icon: IconName; items: { href: string; label:
       { href: "/violations", label: "المخالفات المرورية", icon: "ticket", entity: "violations" },
       { href: "/maintenance", label: "أوامر الصيانة", icon: "wrench", entity: "maintenance" },
       { href: "/maintenance/requests", label: "طلبات العطل", icon: "alert", entity: "maintenance" },
+      { href: "/maintenance/driver-requests", label: "طلبات صيانة السائقين", icon: "driver", entity: "maintenance" },
       { href: "/maintenance/plans", label: "الصيانة الدورية", icon: "calendar", entity: "maintenance" },
     ],
   },
@@ -107,6 +108,7 @@ export const NAV: { title: string; icon: IconName; items: { href: string; label:
 
 // صفحات لا تظهر في القائمة الجانبية لكن يصل لها البحث الشامل
 export const EXTRA_PAGES: { href: string; label: string; group: string; entity?: Entity; admin?: boolean; keywords?: string }[] = [
+  { href: "/notifications", label: "كل التنبيهات", group: "عام", keywords: "جرس إشعارات" },
   { href: "/waybills", label: "إضافة شحنة جديدة", group: "إنشاء", entity: "waybills", keywords: "بوليصة رحلة" },
   { href: "/invoices", label: "فاتورة مبيعات جديدة", group: "إنشاء", entity: "sales_invoices", keywords: "فوترة" },
   { href: "/receipts/new", label: "سند قبض جديد", group: "إنشاء", entity: "receipts", keywords: "تحصيل" },

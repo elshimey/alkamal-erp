@@ -1,16 +1,17 @@
-import { and, asc, desc, eq, gte, ilike, lte, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, lte, or, sql, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
 import { averageCost, issueForMaintenanceTx, onHand, removeMovesTx } from "@/lib/inventory";
 import { createJournalEntryTx, deleteEntryTx, nextDocumentNumber } from "@/lib/ledger";
 import { lineVat, round2 } from "@/lib/invoice-posting";
-import { payableAccountFor, purchasePostingLines } from "@/lib/purchases";
+import { approveExpenseWith, payableAccountFor, purchasePostingLines } from "@/lib/purchases";
 import { rateOn } from "@/lib/waybills";
 import { PURCHASE_ACCOUNTS } from "@/data/purchases";
 import { BREAKDOWN_APPROVAL_LIMIT, maintenanceAccountCode, type MaintenanceType } from "@/data/maintenance";
 import { notifyDriver } from "@/lib/driver-notify";
 import { cashAccountFor } from "@/lib/banks";
+import { checkCustomValue } from "@/lib/custom-lists";
 
 // الصيانة: طلب العطل ← أمر الصيانة ببنوده ← قيد على مركز تكلفة المركبة عند الاعتماد.
 // القطع تُشترى على الأمر (دائنة للورشة الخارجية أو للصندوق)، أو تُصرف من المستودع بمتوسط التكلفة.
@@ -113,6 +114,8 @@ export interface OrderInput {
   vehicleId: number;
   orderDate: string;
   type: MaintenanceType;
+  /** نوع أضافه المستخدم (يتصرف مثل type) */
+  typeClassId?: number | null;
   provider: "internal" | "external";
   supplierId?: number | null;
   supplierInvoiceNo?: string | null;
@@ -130,7 +133,9 @@ export async function createMaintenanceOrder(db: Db | Tx, input: OrderInput) {
     const [vehicle] = await tx.select().from(s.vehicles).where(eq(s.vehicles.id, input.vehicleId));
     if (!vehicle) throw new Error("المركبة غير موجودة");
     if (input.provider === "external" && !input.supplierId) throw new Error("اختر الورشة الخارجية أو المورد");
-    if (input.provider === "external") await payableAccountFor(tx, input.supplierId!);
+    // الورشة الداخلية قد تشتري القطع من مورد آجل بدل الصندوق
+    if (input.supplierId) await payableAccountFor(tx, input.supplierId);
+    await checkCustomValue(tx, "maintenance_kind", input.type, input.typeClassId ?? null);
     const invoiceNo = input.supplierInvoiceNo?.trim() || null;
     if (invoiceNo && input.supplierId) {
       const [dup] = await tx
@@ -158,10 +163,11 @@ export async function createMaintenanceOrder(db: Db | Tx, input: OrderInput) {
         vehicleId: input.vehicleId,
         orderDate: input.orderDate,
         type: input.type,
+        typeClassId: input.typeClassId ?? null,
         provider: input.provider,
-        supplierId: input.provider === "external" ? input.supplierId! : null,
-        supplierInvoiceNo: input.provider === "external" ? invoiceNo : null,
-        cashAccountId: input.provider === "internal" ? (input.cashAccountId ?? null) : null,
+        supplierId: input.supplierId ?? null,
+        supplierInvoiceNo: input.supplierId ? invoiceNo : null,
+        cashAccountId: input.supplierId ? null : (input.cashAccountId ?? null),
         odometer: input.odometer ?? null,
         breakdownRequestId: input.breakdownRequestId ?? null,
         planId: input.planId ?? null,
@@ -277,8 +283,8 @@ export async function approveMaintenanceOrder(db: Db | Tx, orderId: number, opts
     const cashAccountId = opts.cashAccountId ?? o.cashAccountId;
     if (!bought.length) {
       // كل البنود من المستودع: لا ذمة ولا صندوق
-    } else if (o.provider === "external") {
-      creditAccountId = await payableAccountFor(tx, o.supplierId!);
+    } else if (o.supplierId) {
+      creditAccountId = await payableAccountFor(tx, o.supplierId);
     } else {
       const cash = await cashAccountFor(tx, cashAccountId, "اختر الصندوق أو البنك الذي اشتُريت منه القطع");
       creditAccountId = cash.id;
@@ -313,7 +319,7 @@ export async function approveMaintenanceOrder(db: Db | Tx, orderId: number, opts
     });
     await tx
       .update(s.maintenanceOrders)
-      .set({ status: "approved", journalEntryId: entry.id, approvedBy: opts.userId ?? null, cashAccountId: o.provider === "internal" ? cashAccountId : null })
+      .set({ status: "approved", journalEntryId: entry.id, approvedBy: opts.userId ?? null, cashAccountId: o.supplierId ? null : cashAccountId })
       .where(eq(s.maintenanceOrders.id, orderId));
     if (vehicle.status === "active") await tx.update(s.vehicles).set({ status: "maintenance", updatedAt: new Date() }).where(eq(s.vehicles.id, vehicle.id));
     return entry;
@@ -378,24 +384,26 @@ export async function deleteMaintenanceOrder(db: Db | Tx, orderId: number, opts:
 
 // ───────────── الخطة الدورية ─────────────
 
-export async function savePlan(db: Db | Tx, input: { vehicleId: number; type: MaintenanceType; title: string; intervalDays: number; lastDoneDate?: string | null }) {
+export async function savePlan(db: Db | Tx, input: { vehicleId: number; type: MaintenanceType; typeClassId?: number | null; title: string; intervalDays: number; lastDoneDate?: string | null }) {
   const title = input.title.trim();
+  const typeClassId = await checkCustomValue(db, "maintenance_kind", input.type, input.typeClassId ?? null);
   if (!title) throw new Error("اسم الصيانة إلزامي");
   if (!Number.isInteger(input.intervalDays) || input.intervalDays < 1) throw new Error("المدة بالأيام إلزامية");
   const [row] = await db
     .insert(s.maintenancePlans)
-    .values({ vehicleId: input.vehicleId, type: input.type, title, intervalDays: input.intervalDays, lastDoneDate: input.lastDoneDate ?? null })
+    .values({ vehicleId: input.vehicleId, type: input.type, typeClassId, title, intervalDays: input.intervalDays, lastDoneDate: input.lastDoneDate ?? null })
     .onConflictDoUpdate({
       target: [s.maintenancePlans.vehicleId, s.maintenancePlans.title],
-      set: { type: input.type, intervalDays: input.intervalDays, lastDoneDate: input.lastDoneDate ?? sql`${s.maintenancePlans.lastDoneDate}`, isActive: true },
+      set: { type: input.type, typeClassId, intervalDays: input.intervalDays, lastDoneDate: input.lastDoneDate ?? sql`${s.maintenancePlans.lastDoneDate}`, isActive: true },
     })
     .returning();
   return row;
 }
 
 /** تعديل خطة بعينها (المركبة والاسم قابلان للتغيير)، مع إيقافها أو إعادة تفعيلها. */
-export async function updatePlan(db: Db | Tx, id: number, input: { vehicleId: number; type: MaintenanceType; title: string; intervalDays: number; lastDoneDate?: string | null; isActive: boolean }) {
+export async function updatePlan(db: Db | Tx, id: number, input: { vehicleId: number; type: MaintenanceType; typeClassId?: number | null; title: string; intervalDays: number; lastDoneDate?: string | null; isActive: boolean }) {
   const title = input.title.trim();
+  const typeClassId = await checkCustomValue(db, "maintenance_kind", input.type, input.typeClassId ?? null);
   if (!title) throw new Error("اسم الصيانة إلزامي");
   if (!Number.isInteger(input.intervalDays) || input.intervalDays < 1) throw new Error("المدة بالأيام إلزامية");
   const [clash] = await db
@@ -405,7 +413,7 @@ export async function updatePlan(db: Db | Tx, id: number, input: { vehicleId: nu
   if (clash) throw new Error("للمركبة خطة أخرى بنفس الاسم");
   const [row] = await db
     .update(s.maintenancePlans)
-    .set({ vehicleId: input.vehicleId, type: input.type, title, intervalDays: input.intervalDays, lastDoneDate: input.lastDoneDate ?? null, isActive: input.isActive })
+    .set({ vehicleId: input.vehicleId, type: input.type, typeClassId, title, intervalDays: input.intervalDays, lastDoneDate: input.lastDoneDate ?? null, isActive: input.isActive })
     .where(eq(s.maintenancePlans.id, id))
     .returning();
   if (!row) throw new Error("الخطة غير موجودة");
@@ -420,15 +428,16 @@ export function nextDue(plan: { lastDoneDate: string | null; intervalDays: numbe
 /** الخطط النشطة مع استحقاقها، الأقرب أولاً. */
 export async function planSchedule(db: Db | Tx, today: string) {
   const rows = await db
-    .select({ p: s.maintenancePlans, plate: s.vehicles.plate })
+    .select({ p: s.maintenancePlans, plate: s.vehicles.plate, typeLabel: s.lookupValues.label })
     .from(s.maintenancePlans)
     .innerJoin(s.vehicles, eq(s.vehicles.id, s.maintenancePlans.vehicleId))
+    .leftJoin(s.lookupValues, eq(s.lookupValues.id, s.maintenancePlans.typeClassId))
     .where(and(eq(s.maintenancePlans.isActive, true), sql`${s.vehicles.status} <> 'sold'`));
   return rows
-    .map(({ p, plate }) => {
+    .map(({ p, plate, typeLabel }) => {
       const due = nextDue(p, today);
       const days = Math.round((Date.parse(due) - Date.parse(today)) / 86_400_000);
-      return { ...p, plate, due, days };
+      return { ...p, plate, typeLabel, due, days };
     })
     .sort((a, b) => a.days - b.days);
 }
@@ -487,6 +496,7 @@ export async function listOrders(db: Db | Tx, f: OrderFilter = {}, limit = 300) 
       supplier: s.parties.nameAr,
       request: s.breakdownRequests.number,
       plan: s.maintenancePlans.title,
+      typeLabel: s.lookupValues.label,
       lines: sql<number>`(select count(*)::int from maintenance_lines ml where ml.order_id = maintenance_orders.id)`,
     })
     .from(o)
@@ -494,6 +504,7 @@ export async function listOrders(db: Db | Tx, f: OrderFilter = {}, limit = 300) 
     .leftJoin(s.parties, eq(s.parties.id, o.supplierId))
     .leftJoin(s.breakdownRequests, eq(s.breakdownRequests.id, o.breakdownRequestId))
     .leftJoin(s.maintenancePlans, eq(s.maintenancePlans.id, o.planId))
+    .leftJoin(s.lookupValues, eq(s.lookupValues.id, o.typeClassId))
     .where(where.length ? and(...where) : undefined)
     .orderBy(...order)
     .limit(limit);
@@ -511,6 +522,7 @@ export async function orderDoc(db: Db | Tx, id: number) {
       request: s.breakdownRequests,
       plan: s.maintenancePlans.title,
       entry: s.journalEntries.number,
+      typeLabel: s.lookupValues.label,
     })
     .from(s.maintenanceOrders)
     .innerJoin(s.vehicles, eq(s.vehicles.id, s.maintenanceOrders.vehicleId))
@@ -519,6 +531,7 @@ export async function orderDoc(db: Db | Tx, id: number) {
     .leftJoin(s.breakdownRequests, eq(s.breakdownRequests.id, s.maintenanceOrders.breakdownRequestId))
     .leftJoin(s.maintenancePlans, eq(s.maintenancePlans.id, s.maintenanceOrders.planId))
     .leftJoin(s.journalEntries, eq(s.journalEntries.id, s.maintenanceOrders.journalEntryId))
+    .leftJoin(s.lookupValues, eq(s.lookupValues.id, s.maintenanceOrders.typeClassId))
     .where(eq(s.maintenanceOrders.id, id));
   if (!row) return null;
   const lines = await db
@@ -541,7 +554,7 @@ export async function updateDraftOrder(db: Db | Tx, id: number, patch: { orderDa
       if (!/^\d{4}-\d{2}-\d{2}$/.test(patch.orderDate)) throw new Error("التاريخ غير صحيح");
       set.orderDate = patch.orderDate;
     }
-    if (patch.supplierInvoiceNo !== undefined) set.supplierInvoiceNo = o.provider === "external" ? patch.supplierInvoiceNo.trim() || null : null;
+    if (patch.supplierInvoiceNo !== undefined) set.supplierInvoiceNo = o.supplierId ? patch.supplierInvoiceNo.trim() || null : null;
     if (patch.odometer !== undefined) {
       const n = patch.odometer.trim() ? Number(patch.odometer) : null;
       if (n != null && !(Number.isInteger(n) && n >= 0)) throw new Error("قراءة العداد رقم صحيح");
@@ -627,7 +640,7 @@ export async function createOrdersFrom(db: Db | Tx, source: { requests?: number[
       .from(s.maintenanceOrders)
       .where(and(eq(s.maintenanceOrders.planId, p.id), sql`${s.maintenanceOrders.status} <> 'completed'`));
     if (open) throw new Error(`للخطة «${p.title}» أمر مفتوح ${open.number}`);
-    const o = await createMaintenanceOrder(db, { vehicleId: p.vehicleId, orderDate: opts.orderDate, type: p.type, provider: "internal", planId: p.id, notes: p.title, userId: opts.userId });
+    const o = await createMaintenanceOrder(db, { vehicleId: p.vehicleId, orderDate: opts.orderDate, type: p.type, typeClassId: p.typeClassId, provider: "internal", planId: p.id, notes: p.title, userId: opts.userId });
     created.push(o.number);
   }
   return created;
@@ -646,4 +659,92 @@ export async function saveMaintenanceType(db: Db | Tx, input: { id?: number | nu
   }
   const [row] = await db.insert(s.maintenanceTypes).values(values).returning();
   return row;
+}
+
+// ───────────── طلبات صيانة السائقين (من تطبيق السائق) ─────────────
+
+// ما يرفعه السائق في الطريق: صيانة أو إطارات، بصورة الفاتورة والمبلغ
+const DRIVER_MAINTENANCE_KINDS = ["maintenance", "tires"];
+export type DriverRequestStatus = "pending" | "approved" | "rejected" | "voided";
+
+export async function driverMaintenanceRequests(db: Db | Tx, f: { status?: DriverRequestStatus } = {}, limit = 300) {
+  const e = s.expenses;
+  return db
+    .select({
+      e,
+      plate: s.vehicles.plate,
+      driver: s.employees.nameAr,
+      kind: s.maintenanceTypes.nameAr,
+      order: s.maintenanceOrders.number,
+      entry: s.journalEntries.number,
+    })
+    .from(e)
+    .leftJoin(s.vehicles, eq(s.vehicles.id, e.vehicleId))
+    .leftJoin(s.drivers, eq(s.drivers.id, e.driverId))
+    .leftJoin(s.employees, eq(s.employees.id, s.drivers.employeeId))
+    .leftJoin(s.maintenanceTypes, eq(s.maintenanceTypes.id, e.maintenanceTypeId))
+    .leftJoin(s.maintenanceOrders, eq(s.maintenanceOrders.id, e.maintenanceOrderId))
+    .leftJoin(s.journalEntries, eq(s.journalEntries.id, e.journalEntryId))
+    .where(and(inArray(e.driverKind, DRIVER_MAINTENANCE_KINDS), f.status ? eq(e.status, f.status) : undefined))
+    .orderBy(desc(e.expenseDate), desc(e.id))
+    .limit(limit);
+}
+
+export interface DriverRequestApproval {
+  /** custody: دفعه السائق من عهدته · cash: دفعته الشركة من صندوق أو بنك · supplier: دين على الورشة */
+  payer: "custody" | "cash" | "supplier";
+  type: MaintenanceType;
+  typeClassId?: number | null;
+  cashAccountId?: number | null;
+  supplierId?: number | null;
+  supplierInvoiceNo?: string | null;
+  vatAmount?: number;
+  userId?: number;
+}
+
+/**
+ * اعتماد طلب صيانة السائق. نوع الصيانة يحدد حساب التكلفة على المركبة.
+ * العهدة أو الصندوق: يُعتمد المصروف ويُقيد كما هو.
+ * دين على الورشة: يُنشأ أمر صيانة خارجي مكتمل بقيده (الورشة دائنة)، ولا يُقيد المصروف نفسه.
+ */
+export async function approveDriverMaintenance(db: Db, expenseId: number, a: DriverRequestApproval) {
+  return db.transaction(async (tx) => {
+    const [e] = await tx.select().from(s.expenses).where(eq(s.expenses.id, expenseId)).for("update");
+    if (!e || !e.driverKind || !DRIVER_MAINTENANCE_KINDS.includes(e.driverKind)) throw new Error("طلب الصيانة غير موجود");
+    if (e.status !== "pending") throw new Error(`الطلب ${e.number} ليس بانتظار الاعتماد`);
+    await checkCustomValue(tx, "maintenance_kind", a.type, a.typeClassId ?? null);
+    const total = round2(num(e.amount) + num(e.vatAmount));
+    const vat = round2(a.vatAmount ?? num(e.vatAmount));
+    if (vat < 0 || vat > round2((total * 15) / 115) + 0.01) throw new Error("الضريبة أكبر من 15% من المبلغ قبلها");
+    const accountId = await accountIdByCode(tx, maintenanceAccountCode(a.type));
+    if (a.payer !== "supplier") {
+      return approveExpenseWith(tx, expenseId, { payer: a.payer === "cash" ? "cash" : "driver_custody", cashAccountId: a.cashAccountId, accountId, vatAmount: vat, userId: a.userId });
+    }
+    if (!a.supplierId) throw new Error("اختر الورشة أو المورد");
+    if (!e.vehicleId) throw new Error("الطلب بلا مركبة؛ لا يُنشأ له أمر صيانة");
+    const o = await createMaintenanceOrder(tx, {
+      vehicleId: e.vehicleId,
+      orderDate: e.expenseDate,
+      type: a.type,
+      typeClassId: a.typeClassId ?? null,
+      provider: "external",
+      supplierId: a.supplierId,
+      supplierInvoiceNo: a.supplierInvoiceNo || null,
+      notes: `طلب السائق ${e.number}`,
+      userId: a.userId,
+    });
+    const net = round2(total - vat);
+    await addMaintenanceLines(tx, o.id, [{ kind: "labor", description: e.description, unitPrice: net, vatRate: vat > 0 ? 15 : 0 }]);
+    // ضريبة الفاتورة كما هي في صورتها (قد تختلف عن 15% من الصافي بالتقريب)
+    await tx.update(s.maintenanceLines).set({ vatAmount: String(vat) }).where(eq(s.maintenanceLines.orderId, o.id));
+    await recomputeTotals(tx, o.id);
+    const entry = await approveMaintenanceOrder(tx, o.id, { userId: a.userId });
+    await completeMaintenanceOrder(tx, o.id, { completedDate: e.expenseDate });
+    await tx
+      .update(s.expenses)
+      .set({ status: "approved", rejectReason: null, maintenanceOrderId: o.id, accountId, approvedBy: a.userId ?? null })
+      .where(eq(s.expenses.id, expenseId));
+    await notifyDriver(tx, e.driverId, { kind: "expense_approved", body: `${e.number} · ${total}`, href: "/driver/expenses" });
+    return entry;
+  });
 }
