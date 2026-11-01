@@ -6,7 +6,7 @@ import { ownerDocuments } from "@/lib/documents";
 import { todayRiyadh } from "@/lib/dates";
 import { Icon } from "@/components/icons";
 import { isRtl } from "@/data/driver-i18n";
-import { Pill, Section, STATUS_TONE } from "../driver-ui";
+import { Pill, Section, STATUS_TONE, TripRoad } from "../driver-ui";
 
 export default async function DriverHome() {
   const { driver, t, lang } = await getDriverContext();
@@ -57,14 +57,7 @@ export default async function DriverHome() {
                     <bdi>{w.from}</bdi> <span className="text-brand-600">{arrow}</span> <bdi>{w.to}</bdi>
                   </div>
                   <div className="text-sm text-gray-500">{w.customer}</div>
-                  <div className="mt-3 flex gap-1">
-                    {(["accept", "loading", "delivery"] as const).map((st, k) => (
-                      <div key={st} className="flex-1">
-                        <div className={`h-1.5 rounded-full ${done[k] ? "bg-brand-600" : "bg-gray-200"}`} />
-                        <div className={`mt-1 text-center text-[10px] ${done[k] ? "text-asphalt-900" : "text-gray-400"}`}>{t.flow.steps[st]}</div>
-                      </div>
-                    ))}
-                  </div>
+                  <TripRoad t={t} done={done as [boolean, boolean, boolean]} rtl={isRtl(lang)} />
                 </Link>
               </li>
             );

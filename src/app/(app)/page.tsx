@@ -7,11 +7,12 @@ import { todayRiyadh } from "@/lib/dates";
 import { setupSteps } from "@/lib/setup";
 import { buildAlerts } from "@/lib/alerts";
 import { alertKindsFor } from "@/lib/documents";
-import { PERIODS, alertCounts, cashFlow, balances, collected, financials, fleetStatus, monthlyTrend, operations, receivablesAging, resolvePeriod, topCustomers, unbilledTrips, vehicleProfit, type Period } from "@/lib/dashboard";
+import { PERIODS, alertCounts, cashFlow, balances, collected, financials, fleetScene, fleetStatus, monthlyTrend, operations, receivablesAging, resolvePeriod, topCustomers, unbilledTrips, vehicleProfit, type Period } from "@/lib/dashboard";
 import { incomeStatement } from "@/lib/reports";
 import type { Entity } from "@/lib/permissions";
 import { WAYBILL_STATUS, type WaybillStatus } from "@/data/waybills";
 import { CountUp } from "@/components/count-up";
+import { FleetScene } from "@/components/fleet-scene";
 import { Icon, Truck, type IconName } from "@/components/icons";
 import { DateInput } from "@/components/date-input";
 import { currentSchema } from "@/db/tenant";
@@ -67,7 +68,7 @@ export default async function Dashboard({
   const tab: Tab = (sp.tab === "income" || sp.tab === "cash") && canFinance ? sp.tab : "overview";
   const ov = tab === "overview";
 
-  const [fin, prevTrend, bal, aging, coll, ops, prevOps, vehicles, fleet, customers, alerts, unbilled, income, cash] = await Promise.all([
+  const [fin, prevTrend, bal, aging, coll, ops, prevOps, vehicles, fleet, customers, alerts, unbilled, income, cash, scene] = await Promise.all([
     canFinance ? financials(db, range) : null,
     canFinance && ov ? monthlyTrend(db, today) : null,
     canFinance ? balances(db, today) : null,
@@ -89,6 +90,8 @@ export default async function Dashboard({
         })
       : null,
     tab === "cash" ? cashFlow(db, range.from, range.to) : null,
+    // مشهد الأسطول للمكتب فقط (من يرى كل الشحنات والمركبات)
+    canFleet && canOps && !ownOnly && ov ? fleetScene(db, today) : null,
   ]);
   // رابط إعدادات القسم يظهر لمن يملك صلاحية فتحها فقط
   const setting = (href: string, entity?: Entity) => (!entity || can(user.perms, entity, "view") ? href : undefined);
@@ -198,6 +201,15 @@ export default async function Dashboard({
               <Kpi i={1} label="تكاليف التشغيل" value={cur.directCost} prev={prev.directCost} icon="truck" href="/waybills?status=approved" unit="ر.س" invert />
               <Kpi i={2} label="مجمل الربح" value={cur.gross} prev={prev.gross} icon="target" href={canReports ? "/reports/income" : undefined} unit="ر.س" note={marginNote(cur?.gross ?? 0, cur?.revenue ?? 0)} />
               <Kpi i={3} label="صافي الربح" value={cur.net} prev={prev.net} icon="ledger" href={canReports ? "/reports/income" : "/accounts"} unit="ر.س" note={`بعد مصروفات إدارية ${money(cur.admin)}`} />
+            </div>
+          )}
+
+          {/* مشهد الأسطول: الرحلات الجارية على خريطة مجسّمة، مع عرض مبسّط */}
+          {scene && (
+            <div className="mb-6">
+              <Panel i={4} title="مشهد الأسطول" icon="truck" sub="الرحلات الجارية الآن" href="/waybills" more="كل الشحنات">
+                <FleetScene trips={scene} />
+              </Panel>
             </div>
           )}
 

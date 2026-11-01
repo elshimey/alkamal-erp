@@ -155,6 +155,18 @@ aside:hover > .road-line {
   animation: wheel 0.8s linear infinite;
   transform-origin: center;
 }
+/* مشهد الأسطول: خط الطريق يجري ببطء والشاحنة الماشية تهتز قليلاً */
+@keyframes lane-flow {
+  to {
+    stroke-dashoffset: -32;
+  }
+}
+.scene-lane {
+  animation: lane-flow 1.6s linear infinite;
+}
+.scene-truck {
+  animation: bump 1.4s ease-in-out infinite;
+}
 /* هيكل الصفحة أثناء التحميل: لمعة تمر كضوء على الإسفلت */
 .skeleton {
   background: linear-gradient(90deg, #e7e9eb 0%, #f4f5f6 40%, #e7e9eb 80%) 0 0 / 300% 100%;

@@ -362,6 +362,62 @@ export async function fleetStatus(db: Db) {
   };
 }
 
+export type SceneTrip = {
+  id: number;
+  number: string;
+  /** wait = أُرسلت للسائق ولم تُحمَّل، run = في الطريق، done = سُلّمت تنتظر الاعتماد */
+  stage: "wait" | "run" | "done";
+  /** وثيقة حاجبة منتهية للمركبة أو السائق */
+  blocked: boolean;
+  from: string;
+  fromCountry: string;
+  to: string;
+  toCountry: string;
+  plate: string | null;
+  driver: string | null;
+  customer: string;
+};
+
+/** الرحلات الجارية لمشهد الأسطول في لوحة القيادة (تشغيلية، لا أرقام مالية). */
+export async function fleetScene(db: Db, today: string): Promise<SceneTrip[]> {
+  const r = await rows<Record<string, string | boolean | null>>(
+    db,
+    sql`select w.id, w.number, w.status, w.sent_to_driver_at is not null as sent,
+          coalesce(fp.name_ar, f.name_ar) as from_name, f.country_code as from_cc,
+          coalesce(tp.name_ar, t.name_ar) as to_name, t.country_code as to_cc,
+          coalesce(v.plate, w.carrier_plate) as plate, coalesce(e.name_ar, w.carrier_driver_name) as driver, p.name_ar as customer,
+          exists (
+            select 1 from fleet_documents fd join document_types dt on dt.id = fd.document_type_id
+            where dt.is_active and (dt.blocking = 'block' or (dt.blocking = 'international' and r.is_international))
+              and (fd.vehicle_id = w.vehicle_id or fd.driver_id = w.driver_id)
+            group by fd.document_type_id, fd.vehicle_id, fd.driver_id
+            having bool_and(fd.expiry_date is not null) and max(fd.expiry_date) < ${today}::date
+          ) as blocked
+        from waybills w
+        join routes r on r.id = w.route_id
+        join locations f on f.id = r.from_location_id left join locations fp on fp.id = f.parent_id and f.level = 'site'
+        join locations t on t.id = r.to_location_id left join locations tp on tp.id = t.parent_id and t.level = 'site'
+        join parties p on p.id = w.customer_id
+        left join vehicles v on v.id = w.vehicle_id
+        left join drivers d on d.id = w.driver_id left join employees e on e.id = d.employee_id
+        where w.status in ('in_transit', 'delivered') or (w.status = 'draft' and w.sent_to_driver_at is not null)
+        order by w.id desc limit 60`,
+  );
+  return r.map((x) => ({
+    id: n(x.id),
+    number: String(x.number),
+    stage: x.status === "in_transit" ? "run" : x.status === "delivered" ? "done" : "wait",
+    blocked: x.blocked === true,
+    from: String(x.from_name),
+    fromCountry: String(x.from_cc),
+    to: String(x.to_name),
+    toCountry: String(x.to_cc),
+    plate: (x.plate as string | null) ?? null,
+    driver: (x.driver as string | null) ?? null,
+    customer: String(x.customer),
+  }));
+}
+
 export async function topCustomers(db: Db, from: string, to: string) {
   const r = await rows<Record<string, string>>(
     db,

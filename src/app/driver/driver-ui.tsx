@@ -1,5 +1,6 @@
 import type { ComponentProps, ReactNode } from "react";
 import type { DriverDict } from "@/data/driver-i18n";
+import { Truck } from "@/components/icons";
 
 export const fmt = (v: number | string | null | undefined) =>
   Number(v ?? 0).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -76,6 +77,31 @@ export function CustodyBox({ t, box }: { t: DriverDict; box: { custody: number; 
           <div className={`ltr-nums text-lg font-bold ${c.cls}`}>{fmt(c.v)}</div>
         </div>
       ))}
+    </div>
+  );
+}
+
+/** شريط الرحلة كطريق: خط أصفر متقطع والشاحنة تقف عند آخر مرحلة تمت، فيفهمه السائق دون قراءة. */
+export function TripRoad({ t, done, rtl }: { t: DriverDict; done: [boolean, boolean, boolean]; rtl: boolean }) {
+  const reached = done.filter(Boolean).length;
+  const at = (reached / 3) * 100;
+  return (
+    <div className="mt-3">
+      <div className="relative h-7 overflow-hidden rounded-lg bg-asphalt-700" aria-hidden="true">
+        <div className="absolute inset-y-0 start-0 bg-brand-500/25" style={{ width: `${at}%` }} />
+        <div className="absolute inset-x-2 top-1/2 h-0.5 -translate-y-1/2 bg-[repeating-linear-gradient(90deg,#f5b82e_0_10px,transparent_10px_17px)]" />
+        <span className="absolute top-0.5" style={{ insetInlineStart: `clamp(2px, calc(${at}% - 40px), calc(100% - 46px))` }}>
+          <Truck className={`w-11 ${rtl ? "" : "-scale-x-100"}`} />
+        </span>
+      </div>
+      <div className="mt-1 grid grid-cols-3 text-center text-[10px]">
+        {(["accept", "loading", "delivery"] as const).map((st, k) => (
+          <span key={st} className={done[k] ? "font-semibold text-asphalt-900" : "text-gray-400"}>
+            {done[k] ? "✓ " : ""}
+            {t.flow.steps[st]}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }

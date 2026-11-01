@@ -8,7 +8,7 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { listAttachments } from "@/lib/attachments";
 import { DriverForm, PhotoInput } from "../../../offline";
 import { undoStageAction } from "../../../actions";
-import { CustodyBox, fmt, Pill, Section, STATUS_TONE } from "../../../driver-ui";
+import { CustodyBox, fmt, Pill, Section, STATUS_TONE, TripRoad } from "../../../driver-ui";
 
 const EXPENSE_TONE = { pending: "amber", approved: "green", rejected: "red", voided: "gray" } as const;
 
@@ -43,6 +43,13 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
         <h1 className="mt-2 text-xl font-bold text-asphalt-900">
           <bdi>{trip.from}</bdi> <span className="text-brand-600">{isRtl(lang) ? "←" : "→"}</span> <bdi>{trip.to}</bdi>
         </h1>
+        {trip.status !== "rejected" && (
+          <TripRoad
+            t={t}
+            rtl={isRtl(lang)}
+            done={[!!trip.driverAcceptedAt || stages.length > 0, stages.length > 0, stages.some((x) => x.stage === "delivery") || ["delivered", "approved", "invoiced"].includes(trip.status)]}
+          />
+        )}
         <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
           <div>
             <dt className="text-xs text-gray-400">{t.customer}</dt>

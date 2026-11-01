@@ -52,7 +52,7 @@ import { adjustPayrollLines, approvePayrollRun, bankTransferRows, createAdvance,
 import { createViolation, deleteViolation, listViolations, payViolations, revertViolationPayment, violationSummary } from "@/lib/violations";
 import { computePayrollLine } from "@/data/payroll";
 import { accountLedger, balanceSheet, costCenterProfit, incomeStatement, previousRange, trialBalance, vatReturn } from "@/lib/reports";
-import { alertCounts, cashFlow, financials, operations, periodRange, receivablesAging, vehicleProfit } from "@/lib/dashboard";
+import { alertCounts, cashFlow, financials, fleetScene, operations, periodRange, receivablesAging, vehicleProfit } from "@/lib/dashboard";
 import { acceptTrip, createDriverExpense, createDriverLogin, linkUserToDriver, removeDriverLogin, resetDriverPassword, driverBalances, driverBreakdowns, driverForUser, driverTrips, isDriverOnly, nextStages, recordDriverStage, reportBreakdown, startTrip, tripDetail, tripCustodySummary, undoDriverStage, updateDriverExpense, voidDriverExpense, driverExpenses } from "@/lib/driver-app";
 import { driverNotifications, unreadCount, markNotificationsRead } from "@/lib/driver-notify";
 import { runImport } from "@/lib/importers";
@@ -1061,6 +1061,8 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       // للأمام خطوة خطوة حتى الاعتماد، ثم للخلف يلغي القيد
       await setWaybillStatus(db, w1.id, "delivered");
       expect((await status(w1.id)).status).toBe("delivered");
+      // مشهد الأسطول: المسلّمة تقف عند وجهتها حتى الاعتماد
+      expect((await fleetScene(db, `${YEAR}-08-31`)).find((t) => t.id === w1.id)).toMatchObject({ stage: "done", blocked: false });
       // تغيير الحالة من المكتب لا يسجّل مراحل؛ المراحل يسجلها السائق
       expect(await db.select().from(s.tripStages).where(eq(s.tripStages.waybillId, w1.id))).toEqual([]);
       await setWaybillStatus(db, w1.id, "approved", ov);
@@ -1068,6 +1070,7 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(entryId).not.toBeNull();
       await setWaybillStatus(db, w1.id, "in_transit");
       expect(await status(w1.id)).toMatchObject({ status: "in_transit", journalEntryId: null });
+      expect((await fleetScene(db, `${YEAR}-08-31`)).find((t) => t.id === w1.id)).toMatchObject({ stage: "run" });
       expect(await db.select().from(s.journalEntries).where(eq(s.journalEntries.id, entryId!))).toHaveLength(0);
       await setWaybillStatus(db, w1.id, "draft");
       expect((await status(w1.id)).status).toBe("draft");
