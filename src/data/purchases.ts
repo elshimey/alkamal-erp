@@ -2,7 +2,7 @@
 
 export const PURCHASE_STATUS = {
   draft: { label: "مسودة", tone: "gray" },
-  posted: { label: "مرحّلة", tone: "blue" },
+  posted: { label: "مرحّلة", tone: "green" },
 } as const;
 
 export const EXPENSE_STATUS = {

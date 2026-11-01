@@ -99,15 +99,24 @@ export function Td({ children, className = "" }: { children?: ReactNode; classNa
   return <td className={`px-4 py-2.5 ${className}`}>{children}</td>;
 }
 
-export function Badge({ children, tone = "gray" }: { children: ReactNode; tone?: "gray" | "green" | "blue" | "amber" | "red" }) {
-  const tones = {
-    gray: "bg-gray-100 text-gray-700",
-    green: "bg-green-100 text-green-800",
-    blue: "bg-sky-100 text-sky-800",
-    amber: "bg-amber-100 text-amber-800",
-    red: "bg-red-100 text-red-700",
-  };
-  return <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap ${tones[tone]}`}>{children}</span>;
+// شارة الحالة الموحدة. معنى كل لون ثابت في كل الشاشات (انظر ألوان st-* في globals.css):
+// gray محايد (مسودة/ملغى)، blue معتمد ينتظر خطوته التالية أو جارٍ، amber ينتظر إجراءً،
+// green مكتمل/مرحّل/مسدد، red مرفوض/متأخر/منتهٍ.
+const BADGE_TONES = {
+  gray: "bg-st-neutral-bg text-st-neutral-fg ring-st-neutral-dot/30 [--dot:var(--color-st-neutral-dot)]",
+  blue: "bg-st-info-bg text-st-info-fg ring-st-info-dot/30 [--dot:var(--color-st-info-dot)]",
+  amber: "bg-st-warn-bg text-st-warn-fg ring-st-warn-dot/40 [--dot:var(--color-st-warn-dot)]",
+  green: "bg-st-ok-bg text-st-ok-fg ring-st-ok-dot/30 [--dot:var(--color-st-ok-dot)]",
+  red: "bg-st-bad-bg text-st-bad-fg ring-st-bad-dot/30 [--dot:var(--color-st-bad-dot)]",
+} as const;
+
+export function Badge({ children, tone = "gray" }: { children: ReactNode; tone?: keyof typeof BADGE_TONES }) {
+  return (
+    <span className={`status-badge inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap ring-1 ring-inset ${BADGE_TONES[tone]}`}>
+      <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-(--dot)" />
+      {children}
+    </span>
+  );
 }
 
 /** سطر تنبيه حين تبلغ القائمة حدها الأقصى: الأقدم لا يظهر إلا بالتصفية. */

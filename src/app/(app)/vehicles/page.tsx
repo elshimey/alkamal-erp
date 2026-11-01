@@ -15,7 +15,7 @@ const STATUS = {
   active: { label: "تعمل", tone: "green" },
   maintenance: { label: "في الصيانة", tone: "amber" },
   stopped: { label: "متوقفة", tone: "gray" },
-  sold: { label: "مباعة", tone: "red" },
+  sold: { label: "مباعة", tone: "gray" },
 } as const;
 
 export default async function VehiclesPage({ searchParams }: { searchParams: Promise<{ add?: string; new?: string; edit?: string; embed?: string; q?: string }> }) {

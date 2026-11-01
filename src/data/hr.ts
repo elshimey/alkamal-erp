@@ -8,7 +8,7 @@ export const CUSTODY_STATUS = {
   delivered: { label: "مسلّمة – مفتوحة", tone: "blue" },
   settled: { label: "مُسوّاة", tone: "green" },
   returned: { label: "مُرجعة", tone: "green" },
-  cancelled: { label: "ملغاة", tone: "red" },
+  cancelled: { label: "ملغاة", tone: "gray" },
 } as const;
 
 export const HR_ACTION_KIND = {

@@ -22,6 +22,25 @@
   --color-asphalt-900: #1b2126;
   --color-concrete: #f3f1eb;
 
+  /* ألوان الحالات (معنى ثابت في كل الشاشات):
+     محايد = مسودة/ملغى/متوقف، معلومة = معتمد وينتظر خطوته التالية أو جارٍ،
+     تنبيه = ينتظر إجراءً منك، نجاح = مكتمل/مرحّل/مسدد، خطر = مرفوض/متأخر/منتهٍ */
+  --color-st-neutral-bg: #eeece6;
+  --color-st-neutral-fg: #3d4952;
+  --color-st-neutral-dot: #8a949c;
+  --color-st-info-bg: #e3eef4;
+  --color-st-info-fg: #1f5470;
+  --color-st-info-dot: #3a86ad;
+  --color-st-warn-bg: #fdf0c8;
+  --color-st-warn-fg: #7a5200;
+  --color-st-warn-dot: #e9a100;
+  --color-st-ok-bg: #e2f2e7;
+  --color-st-ok-fg: #1d6337;
+  --color-st-ok-dot: #2f9a57;
+  --color-st-bad-bg: #fbe5e2;
+  --color-st-bad-fg: #9b2a1e;
+  --color-st-bad-dot: #d2402f;
+
   --animate-flyout: flyout 0.18s cubic-bezier(0.2, 0.7, 0.2, 1) both;
   --animate-page-in: page-in 0.38s cubic-bezier(0.2, 0.7, 0.2, 1) both;
   --animate-rise: rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
@@ -393,6 +412,12 @@ aside:hover > .road-line {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* شارة الحالة: نقطة ملونة + إطار رفيع حتى تبقى مقروءة في الطباعة بالأبيض والأسود */
+.status-badge {
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
 }
 
 @media print {
