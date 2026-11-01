@@ -55,7 +55,7 @@ export const NOTE_KINDS = {
 export type NoteKind = keyof typeof NOTE_KINDS;
 export const NOTE_STATUS = {
   draft: { label: "مسودة", tone: "gray" },
-  posted: { label: "مرحّل", tone: "blue" },
+  posted: { label: "مرحّل", tone: "green" },
 } as const;
 
 export const NOTE_SIDES = {

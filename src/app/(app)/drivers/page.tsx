@@ -17,7 +17,7 @@ const LANG = { ar: "عربي", ur: "أوردو", hi: "هندي", en: "إنجلي
 const STATUS = {
   active: { label: "نشط", tone: "green" },
   on_leave: { label: "إجازة", tone: "amber" },
-  terminated: { label: "منتهية خدمته", tone: "red" },
+  terminated: { label: "منتهية خدمته", tone: "gray" },
 } as const;
 
 export default async function DriversPage({ searchParams }: { searchParams: Promise<{ deleted?: string; add?: string; new?: string; edit?: string; embed?: string; q?: string }> }) {

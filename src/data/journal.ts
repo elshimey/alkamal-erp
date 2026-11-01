@@ -23,5 +23,5 @@ export const ENTRY_KINDS = { manual: "قيود يدوية", auto: "قيود آل
 export const ENTRY_STATUS = {
   draft: { label: "مسودة", tone: "gray" },
   pending: { label: "بانتظار الاعتماد", tone: "amber" },
-  posted: { label: "مرحّل", tone: "blue" },
+  posted: { label: "مرحّل", tone: "green" },
 } as const;

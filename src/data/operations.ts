@@ -19,7 +19,7 @@ export const PRICING_METHODS = {
 export const CONTRACT_STATUS = {
   draft: { label: "مسودة", tone: "gray" },
   active: { label: "ساري", tone: "green" },
-  expired: { label: "منتهٍ", tone: "amber" },
+  expired: { label: "منتهٍ", tone: "red" },
   suspended: { label: "موقوف", tone: "red" },
 } as const;
 
