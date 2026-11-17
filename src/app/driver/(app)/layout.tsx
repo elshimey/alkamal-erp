@@ -7,6 +7,7 @@ import { getBrand } from "@/lib/brand";
 import { TabBar } from "../tab-bar";
 import { driverLogout } from "../actions";
 import { OfflineSync } from "../offline";
+import { DriverLive } from "../live";
 import { Icon } from "@/components/icons";
 import { db } from "@/db";
 import { unreadCount } from "@/lib/driver-notify";
@@ -52,6 +53,7 @@ export default async function DriverLayout({ children }: { children: React.React
       </header>
       <main className="mx-auto max-w-md px-4 pt-4">
         {driver && <OfflineSync owner={`${tenant.schema}:${user.id}`} labels={{ offline: t.offline, pending: t.pendingSync, sending: t.sending, retry: t.sendNow, failed: t.syncFailed }} />}
+        {driver && <DriverLive labels={{ enable: t.x.pushEnable, hint: t.x.pushHint, ios: t.x.pushIos, denied: t.x.pushDenied, later: t.x.pushLater }} />}
         {driver ? (
           children
         ) : (

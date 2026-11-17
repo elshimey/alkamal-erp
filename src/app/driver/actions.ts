@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { db } from "@/db";
 import { requireDriver } from "@/lib/driver-auth";
 import { destroySession, getCurrentUser, hasDriverSession } from "@/lib/auth";
@@ -13,6 +14,8 @@ import { todayRiyadh } from "@/lib/dates";
 import { errorMessage } from "@/lib/errors";
 import { saveDataUrl } from "@/lib/attachments";
 import { onceForOp } from "@/lib/once";
+import { driverPulse } from "@/lib/driver-notify";
+import { savePushSubscription, vapidPublicKey, type PushSubscriptionInput } from "@/lib/push";
 import { DRIVER_EXPENSE_ACCOUNTS, DRIVER_LANGS, type DriverDict, type DriverExpenseType, type DriverLang } from "@/data/driver-i18n";
 import type { FormState } from "@/components/action-form";
 
@@ -279,4 +282,22 @@ export async function driverLogout() {
     if (user && isDriverOnly(user.roles)) await destroySession("office");
   }
   redirect("/driver/login");
+}
+
+// ───────────── الإشعارات الفورية ─────────────
+
+/** نبض الفحص الدوري (كل 15 ثانية احتياطاً لمن لم يفعّل الإشعارات). */
+export async function driverPulseAction() {
+  const { driver } = await requireDriver();
+  return driverPulse(db, driver.id);
+}
+
+export async function driverPushKey() {
+  await requireDriver();
+  return vapidPublicKey();
+}
+
+export async function saveDriverPush(sub: PushSubscriptionInput) {
+  const { user } = await requireDriver();
+  await savePushSubscription(db, user.id, "driver", sub, (await headers()).get("user-agent"));
 }

@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
-import { bellState, markAllRead, markRead } from "@/app/(app)/notifications/actions";
+import { bellPulse, bellState, markAllRead, markRead, officePushKey, saveOfficePush } from "@/app/(app)/notifications/actions";
+import { onPushMessage, pollWhileVisible, pushState, subscribePush, usePushState } from "@/lib/push-client";
 import { Icon } from "./icons";
 
 type State = Awaited<ReturnType<typeof bellState>>;
@@ -17,22 +18,54 @@ export function NotificationBell() {
   const router = useRouter();
   const pathname = usePathname();
   const box = useRef<HTMLDivElement>(null);
+  const lastEvent = useRef<number | null>(null);
+  const push = usePushState();
+  const [, rerender] = useState(0);
 
   const load = useCallback(() => {
     bellState()
       .then(setState)
       .catch(() => {});
   }, []);
-  // يُحدَّث عند التنقل وكل دقيقتين وعند تعليم التنبيهات من صفحتها
+  // يُحدَّث عند التنقل، وفوراً عند وصول إشعار، وكل دقيقتين، وعند تعليم التنبيهات من صفحتها.
+  // واحتياطاً لمن لم يفعّل الإشعارات: فحص خفيف كل 15 ثانية لرقم آخر حدث، والجرس يُعاد عند الجديد فقط.
   useEffect(() => {
     load();
     const t = setInterval(load, 120_000);
     window.addEventListener("alerts-changed", load);
+    const offPush = onPushMessage(load);
+    const offPoll = pollWhileVisible(() => {
+      bellPulse()
+        .then((id) => {
+          if (lastEvent.current !== null && id !== lastEvent.current) load();
+          lastEvent.current = id;
+        })
+        .catch(() => {});
+    });
     return () => {
       clearInterval(t);
       window.removeEventListener("alerts-changed", load);
+      offPush();
+      offPoll();
     };
   }, [load, pathname]);
+
+  // يشترك هذا الجهاز ويحفظ اشتراكه؛ وعند الفشل يبقى الفحص الدوري يعمل
+  const subscribe = useCallback(async (ask: boolean) => {
+    try {
+      const key = await officePushKey();
+      const sub = key ? await subscribePush("/office-sw.js", "/", key, ask) : null;
+      if (sub) await saveOfficePush(sub as Parameters<typeof saveOfficePush>[0]);
+    } catch {}
+  }, []);
+  const enablePush = async () => {
+    await subscribe(true);
+    rerender((n) => n + 1);
+  };
+  // من سمح سابقاً يُجدَّد اشتراك جهازه بصمت
+  useEffect(() => {
+    if (pushState() === "granted") void subscribe(false);
+  }, [subscribe]);
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
@@ -84,6 +117,13 @@ export function NotificationBell() {
               </button>
             </div>
           </div>
+          {push === "default" && (
+            <button type="button" onClick={() => void enablePush()} className="flex w-full items-center gap-2 border-b border-gray-100 bg-brand-50 px-4 py-2.5 text-start text-sm font-medium text-brand-800 hover:bg-brand-100">
+              <Icon name="bell" className="size-4 shrink-0" />
+              <span>فعّل الإشعارات الفورية على هذا الجهاز، لتصلك أفعال السائقين لحظة حدوثها</span>
+            </button>
+          )}
+          {push === "denied" && <p className="border-b border-gray-100 px-4 py-2 text-xs text-gray-500">الإشعارات الفورية محظورة في هذا المتصفح؛ اسمح بها من إعدادات الموقع (رمز القفل بجانب العنوان).</p>}
           <ul className="max-h-96 divide-y divide-gray-50 overflow-y-auto">
             {!state && <li className="px-4 py-6 text-center text-sm text-gray-400">جارٍ التحميل…</li>}
             {state && state.items.length === 0 && <li className="px-4 py-6 text-center text-sm text-gray-500">لا توجد تنبيهات الآن</li>}

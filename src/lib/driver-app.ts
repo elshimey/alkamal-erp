@@ -5,6 +5,7 @@ import * as s from "@/db/schema";
 import { createWaybill, recordStage } from "@/lib/waybills";
 import { createExpense, vehicleCostCenter } from "@/lib/purchases";
 import { createBreakdownRequest } from "@/lib/maintenance";
+import { driverName, notifyOffice } from "@/lib/office-notify";
 import { hashPassword, MIN_PASSWORD_LENGTH } from "@/lib/password";
 import { DRIVER_EXPENSE_ACCOUNTS, type DriverExpenseType, type DriverLang } from "@/data/driver-i18n";
 
@@ -192,6 +193,7 @@ export async function undoDriverStage(db: Db, driverId: number, waybillId: numbe
     if (last.stage === "delivery") set.odometerEnd = null;
     if (last.stage === "loading" && !rest.includes("loading")) set.odometerStart = null;
     await tx.update(s.waybills).set(set).where(eq(s.waybills.id, waybillId));
+    await notifyOffice(tx, { kind: "trip_undo", text: `${await driverName(tx, driverId)} تراجع عن «${STAGE_AR[last.stage] ?? last.stage}» في الرحلة ${w.number}`, href: `/waybills/${waybillId}`, driverId });
     return last.stage;
   });
 }
@@ -199,7 +201,9 @@ export async function undoDriverStage(db: Db, driverId: number, waybillId: numbe
 /** السائق يؤكد استلام الرحلة التي أرسلها له المكتب. */
 export async function acceptTrip(db: Db, driverId: number, waybillId: number) {
   const w = await ownTrip(db, driverId, waybillId);
-  if (!w.driverAcceptedAt) await db.update(s.waybills).set({ driverAcceptedAt: new Date() }).where(eq(s.waybills.id, waybillId));
+  if (w.driverAcceptedAt) return;
+  await db.update(s.waybills).set({ driverAcceptedAt: new Date() }).where(eq(s.waybills.id, waybillId));
+  await notifyOffice(db, { kind: "trip_accepted", text: `${await driverName(db, driverId)} استلم الرحلة ${w.number}`, href: `/waybills/${waybillId}`, driverId });
 }
 
 export async function startTrip(
@@ -223,6 +227,7 @@ export async function startTrip(
     userId: input.userId,
   });
   await recordStage(db, w.id, "loading", { odometer: input.odometer ?? null, userId: input.userId });
+  await notifyOffice(db, { kind: "trip_started", text: `${driver.name} بدأ رحلة جديدة ${w.number} من التطبيق`, href: `/waybills/${w.id}`, driverId: driver.id });
   return w;
 }
 
@@ -232,7 +237,16 @@ export async function recordDriverStage(db: Db, driverId: number, waybillId: num
   // التحميل يعني أنه استلم الرحلة حتى لو لم يضغط «استلمت»
   if (!trip.driverAcceptedAt) await db.update(s.waybills).set({ driverAcceptedAt: new Date() }).where(eq(s.waybills.id, waybillId));
   await recordStage(db, waybillId, stage, opts);
+  const name = await driverName(db, driverId);
+  await notifyOffice(db, {
+    kind: stage === "delivery" ? "trip_delivered" : "trip_loaded",
+    text: stage === "delivery" ? `${name} سلّم الرحلة ${trip.number}، بانتظار الاعتماد` : `${name} حمّل الرحلة ${trip.number} وهي في الطريق`,
+    href: `/waybills/${waybillId}`,
+    driverId,
+  });
 }
+
+const STAGE_AR: Record<string, string> = { loading: "تم التحميل", in_transit: "في الطريق", border: "الحدود", delivery: "تم التسليم" };
 
 // ما يكتبه البرنامج بياناً لمصروف السائق (السائق لا يكتب بياناً)
 const KIND_AR: Record<DriverExpenseType, string> = { diesel: "ديزل", maintenance: "صيانة", road: "مصاريف طريق ورسوم", tires: "إطارات", other: "مصروف آخر" };
@@ -275,7 +289,7 @@ async function resolveDriverExpense(db: Db | Tx, driver: DriverProfile, input: D
  */
 export async function createDriverExpense(db: Db, driver: DriverProfile, input: DriverExpenseInput) {
   const r = await resolveDriverExpense(db, driver, input);
-  return createExpense(db, {
+  const e = await createExpense(db, {
     expenseDate: input.date,
     payer: "driver_custody",
     driverId: driver.id,
@@ -289,6 +303,14 @@ export async function createDriverExpense(db: Db, driver: DriverProfile, input: 
     maintenanceTypeId: r.maintenanceTypeId,
     userId: input.userId,
   });
+  const maint = input.kind === "maintenance";
+  await notifyOffice(db, {
+    kind: maint ? "driver_maintenance" : "driver_expense",
+    text: `${driver.name} سجّل ${maint ? "طلب صيانة" : "مصروفاً"}: ${r.description} بمبلغ ${input.amount.toLocaleString("en")}`,
+    href: maint ? "/maintenance/driver-requests" : "/expenses?status=pending",
+    driverId: driver.id,
+  });
+  return e;
 }
 
 async function lockDriverExpense(tx: Tx, driverId: number, id: number) {
@@ -394,7 +416,7 @@ export async function reportBreakdown(
     type = m.nameAr;
   }
   const description = [type, input.description?.trim()].filter(Boolean).join(" – ");
-  return createBreakdownRequest(db, {
+  const r = await createBreakdownRequest(db, {
     vehicleId: driver.vehicle.id,
     driverId: driver.id,
     reportDate: input.date,
@@ -403,6 +425,8 @@ export async function reportBreakdown(
     maintenanceTypeId: input.maintenanceTypeId ?? null,
     userId: input.userId,
   });
+  await notifyOffice(db, { kind: "breakdown_reported", text: `${driver.name} بلّغ عن عطل في المركبة ${driver.vehicle.plate}${input.priority === "urgent" ? " (عاجل)" : ""}: ${r.number}`, href: "/maintenance/requests", driverId: driver.id });
+  return r;
 }
 
 export async function driverBreakdowns(db: Db | Tx, driverId: number) {

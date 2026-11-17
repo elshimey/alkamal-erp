@@ -10,6 +10,7 @@ import { rateOn } from "@/lib/waybills";
 import { PURCHASE_ACCOUNTS } from "@/data/purchases";
 import { BREAKDOWN_APPROVAL_LIMIT, maintenanceAccountCode, type MaintenanceType } from "@/data/maintenance";
 import { notifyDriver } from "@/lib/driver-notify";
+import { notifyOffice } from "@/lib/office-notify";
 import { cashAccountFor } from "@/lib/banks";
 import { checkCustomValue } from "@/lib/custom-lists";
 
@@ -85,6 +86,7 @@ export async function reviewBreakdownRequest(db: Db | Tx, id: number, opts: { es
       .where(eq(s.breakdownRequests.id, id))
       .returning();
     if (status === "approved") await notifyDriver(tx, r.driverId, { kind: "maint_approved", body: r.number, href: "/driver/breakdown" });
+    else await notifyOffice(tx, { kind: "breakdown_escalated", text: `طلب العطل ${r.number} يحتاج اعتماد المدير (تكلفة تقديرية ${Math.round(cost).toLocaleString("en")})`, href: "/maintenance/requests" });
     return row;
   });
 }

@@ -9,6 +9,7 @@ import { resolvePrice } from "@/lib/pricing";
 import { driverOnDate } from "@/lib/fleet";
 import { driverLeaveOn } from "@/lib/hr";
 import { waybillPostingLines } from "@/lib/waybill-posting";
+import { notifyDriver } from "@/lib/driver-notify";
 import { PERIODS, periodRange, type Period } from "@/lib/doc-filters";
 import { FREIGHT_PAYERS, GOODS_CONDITIONS, LOGISTI_STATUSES, PACKAGE_UNITS, PAYMENT_METHODS, WEIGHT_UNITS, WAYBILL_ACCOUNTS, WAYBILL_FLOW, WAYBILL_SORTS, WAYBILL_STATUS, WAYBILL_TABS, type WaybillAccountKey, type WaybillFlowStatus, type WaybillSort, type WaybillStatus } from "@/data/waybills";
 
@@ -576,6 +577,8 @@ export async function rejectWaybill(db: Db, id: number, reason: string) {
     const w = await lockWaybill(tx, id);
     if (!APPROVABLE.includes(w.status)) throw new Error("لا يمكن رفض شحنة معتمدة؛ أرجعها لمسودة أولاً");
     await tx.update(s.waybills).set({ status: "rejected", rejectionReason: reason.trim(), updatedAt: new Date() }).where(eq(s.waybills.id, id));
+    // السبب يصل للسائق إن كانت الرحلة أُرسلت له
+    if (w.sentToDriverAt) await notifyDriver(tx, w.driverId, { kind: "trip_rejected", body: `${w.number}: ${reason.trim()}`, href: `/driver/trips/${id}` });
   });
 }
 
