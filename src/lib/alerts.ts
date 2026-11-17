@@ -9,6 +9,7 @@ import { daysBetween } from "@/lib/dates";
 import { alertKindsFor } from "@/lib/documents";
 import { alertCounts, balances } from "@/lib/dashboard";
 import type { IconName } from "@/components/icons";
+import { officeEvents } from "@/lib/office-notify";
 
 // التنبيهات المحسوبة لكل مستخدم حسب صلاحياته: تظهر في لوحة القيادة وفي جرس التنبيهات أعلى الصفحة.
 
@@ -283,8 +284,9 @@ export function buildAlerts(
 /** تنبيهات المستخدم الآن (للجرس وصفحة كل التنبيهات). */
 export async function userAlerts(db: Db, user: Pick<SessionUser, "perms">, today: string) {
   const canFinance = can(user.perms, "accounts", "view");
-  const [alerts, bal] = await Promise.all([alertCounts(db, today, alertKindsFor(user.perms)), canFinance ? balances(db, today) : null]);
-  return buildAlerts(user, alerts, bal, today);
+  const [alerts, bal, events] = await Promise.all([alertCounts(db, today, alertKindsFor(user.perms)), canFinance ? balances(db, today) : null, officeEvents(db, user.perms)]);
+  // أحداث السائقين الفورية أولاً (الأحدث فوق)، ثم العدّادات
+  return [...events.map(({ key, tone, icon, text, href }): Alert => ({ key, tone, icon, text, href })), ...buildAlerts(user, alerts, bal, today)];
 }
 
 // ───────────── المقروء: التنبيه يعود غير مقروء إذا تغيّر نصه (العدد) ─────────────

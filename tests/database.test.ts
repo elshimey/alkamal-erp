@@ -54,7 +54,9 @@ import { computePayrollLine } from "@/data/payroll";
 import { accountLedger, balanceSheet, costCenterProfit, incomeStatement, previousRange, trialBalance, vatReturn } from "@/lib/reports";
 import { alertCounts, cashFlow, financials, operations, periodRange, receivablesAging, vehicleProfit } from "@/lib/dashboard";
 import { acceptTrip, createDriverExpense, createDriverLogin, linkUserToDriver, removeDriverLogin, resetDriverPassword, driverBalances, driverBreakdowns, driverForUser, driverTrips, isDriverOnly, nextStages, recordDriverStage, reportBreakdown, startTrip, tripDetail, tripCustodySummary, undoDriverStage, updateDriverExpense, voidDriverExpense, driverExpenses } from "@/lib/driver-app";
-import { driverNotifications, unreadCount, markNotificationsRead } from "@/lib/driver-notify";
+import { driverNotifications, driverPulse, unreadCount, markNotificationsRead } from "@/lib/driver-notify";
+import { lastOfficeEventId, officeEvents } from "@/lib/office-notify";
+import { removePushSubscription, savePushSubscription, usersWithPermission } from "@/lib/push";
 import { runImport } from "@/lib/importers";
 import { applyAdvance, customerCredit, postReceipt } from "@/lib/receipts";
 import { createNote, postNote, revertNote } from "@/lib/notes";
@@ -578,6 +580,11 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       await expect(submitRenewal(db, me, { documentTypeId: code("c_cr"), photo })).rejects.toThrow();
       await expect(submitRenewal(db, { ...me, vehicle: null }, { documentTypeId: code("v_registration"), photo })).rejects.toThrow();
       const sub = await submitRenewal(db, me, { documentTypeId: code("v_registration"), number: "R-1", expiryDate: `${YEAR + 1}-06-30`, photo });
+      // رفع الوثيقة يصل فوراً لمن يملك تعديل سجل الوثائق
+      const [ev] = await officeEvents(db, { isAdmin: true, rows: [] }, 1);
+      expect(ev.text).toContain("رفع وثيقة");
+      expect(ev.href).toBe("/fleet-documents/submissions");
+      expect(await officeEvents(db, { isAdmin: false, rows: [{ entity: "fleet_documents", action: "view", scope: "all" }] })).toHaveLength(0);
       const [pending] = await listSubmissions(db, { status: "pending" });
       expect(pending.sub.id).toBe(sub.id);
       expect(pending.attachmentId).not.toBeNull();
@@ -593,6 +600,10 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       const lic = await submitRenewal(db, me, { documentTypeId: code("d_license"), photo });
       await expect(rejectSubmission(db, lic.id, " ")).rejects.toThrow("سبب");
       await rejectSubmission(db, lic.id, "الصورة غير واضحة");
+      // الاعتماد والرفض يصلان للسائق (الثغرة 2)
+      const kinds = (await driverNotifications(db, driver.id)).map((n) => n.kind);
+      expect(kinds.slice(0, 2)).toEqual(["doc_rejected", "doc_approved"]);
+      expect((await driverNotifications(db, driver.id))[0].body).toContain("الصورة غير واضحة");
       const [mine] = await listSubmissions(db, { driverId: driver.id });
       expect(mine.sub).toMatchObject({ status: "rejected", reviewNote: "الصورة غير واضحة" });
 
@@ -879,6 +890,10 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       const big = await createBreakdownRequest(db, { vehicleId: vehicle.id, reportDate: `${YEAR}-09-10`, description: "عمرة مكينة" });
       await expect(reviewBreakdownRequest(db, big.id)).rejects.toThrow("التكلفة التقديرية");
       expect((await reviewBreakdownRequest(db, big.id, { estimatedCost: 18000, limit: 5000 })).status).toBe("pending_approval");
+      // المحوّل للمدير يصل لمن يملك اعتماد الصيانة فقط (الثغرة 4)
+      const approver = { isAdmin: false, rows: [{ entity: "maintenance", action: "approve", scope: "all" as const }] };
+      expect((await officeEvents(db, approver, 1))[0].text).toContain(`${big.number} يحتاج اعتماد المدير`);
+      expect((await officeEvents(db, { isAdmin: false, rows: [{ entity: "maintenance", action: "view", scope: "all" }] })).some((e) => e.text.includes(big.number))).toBe(false);
       await expect(createMaintenanceOrder(db, { vehicleId: vehicle.id, orderDate: `${YEAR}-09-11`, type: "mechanical", provider: "internal", breakdownRequestId: big.id })).rejects.toThrow("غير معتمد");
       await approveBreakdownRequest(db, big.id);
       await rejectBreakdownRequest(db, big.id, "يؤجل للعام القادم");
@@ -1311,11 +1326,29 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       d = await tripDetail(db, me.id, w.id);
       expect(d.trip.status).toBe("delivered");
       await expect(acceptTrip(db, otherDriverId, w.id)).rejects.toThrow("ليست لك");
+      // كل فعل للسائق يصل للمكتب فوراً (الثغرة 3): استلم، حمّل، سلّم
+      const ops = { isAdmin: false, rows: [{ entity: "waybills", action: "update", scope: "all" as const }] };
+      const texts = (await officeEvents(db, ops, 3)).map((e) => e.text);
+      expect(texts[0]).toContain(`سلّم الرحلة ${w.number}`);
+      expect(texts[1]).toContain(`حمّل الرحلة ${w.number}`);
+      expect(texts[2]).toContain(`استلم الرحلة ${w.number}`);
+      const before = await lastOfficeEventId(db);
+      await acceptTrip(db, me.id, w.id); // الاستلام مرة ثانية لا يكرر الحدث
+      expect(await lastOfficeEventId(db)).toBe(before);
+      // رفض الشحنة يصل للسائق بسببه (الثغرة 1)
+      await rejectWaybill(db, w.id, "الختم غير ظاهر");
+      const [n] = await driverNotifications(db, me.id);
+      expect(n).toMatchObject({ kind: "trip_rejected", href: `/driver/trips/${w.id}` });
+      expect(n.body).toContain("الختم غير ظاهر");
+      expect((await driverPulse(db, me.id)).last).toBe(n.id);
+      await revertWaybill(db, w.id);
     });
 
     it("مصروف السائق ينتظر الاعتماد ثم يُخصم من عهدته، والرصيد يجمع العمولة والمستحق", async () => {
       const e = await createDriverExpense(db, me, { date: D, kind: "road", amount: 115, reportedPayer: "custody", userId });
       expect(e.description).toBe("مصاريف طريق ورسوم");
+      const approver = { isAdmin: false, rows: [{ entity: "expenses", action: "approve", scope: "all" as const }] };
+      expect((await officeEvents(db, approver, 1))[0]).toMatchObject({ href: "/expenses?status=pending" });
       expect(e.status).toBe("pending");
       let b = await driverBalances(db, me, D);
       expect(b.pendingExpenses).toBe(115);
@@ -1761,6 +1794,19 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       await markAlertsRead(db, u.id, list);
       expect((await withReadState(db, u.id, list))[0].read).toBe(true);
       expect((await withReadState(db, u.id, [{ ...list[0], text: "4 مصروف بانتظار الاعتماد" }]))[0].read).toBe(false);
+    });
+
+    it("الإشعار الفوري: اشتراك الجهاز يُحفظ مرة لكل جهاز، ويصل حسب الصلاحية", async () => {
+      const [admin] = await db.select().from(s.users).where(eq(s.users.login, "admin"));
+      const sub = { endpoint: "https://push.example.com/abc", keys: { p256dh: "BPkey", auth: "authkey" } };
+      await expect(savePushSubscription(db, admin.id, "office", { endpoint: "http://bad" })).rejects.toThrow("غير صالح");
+      await savePushSubscription(db, admin.id, "office", sub, "Chrome");
+      await savePushSubscription(db, admin.id, "office", sub, "Chrome"); // نفس الجهاز لا يتكرر
+      expect(await db.select().from(s.pushSubscriptions).where(eq(s.pushSubscriptions.endpoint, sub.endpoint))).toHaveLength(1);
+      // مدير النظام يملك كل شيء؛ ولا يصل لمستخدم موقوف
+      expect(await usersWithPermission(db, "maintenance", "approve")).toContain(admin.id);
+      await removePushSubscription(db, admin.id, sub.endpoint);
+      expect(await db.select().from(s.pushSubscriptions)).toHaveLength(0);
     });
   });
   describe("الاستيراد من Excel", () => {

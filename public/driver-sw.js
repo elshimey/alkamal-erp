@@ -43,3 +43,30 @@ self.addEventListener("fetch", (e) => {
     );
   }
 });
+
+// ───────────── الإشعارات الفورية ─────────────
+// يُظهر الإشعار، ويخبر صفحات التطبيق المفتوحة لتحدّث نفسها، ويفتح الرابط عند الضغط عليه.
+self.addEventListener("push", (e) => {
+  let d = {};
+  try {
+    d = e.data ? e.data.json() : {};
+  } catch {}
+  e.waitUntil(
+    Promise.all([
+      self.registration.showNotification(d.title || "الكمال", { body: d.body || "", tag: d.tag, data: { url: d.url || "/driver" }, icon: "/driver/app-icon/192", badge: "/driver/app-icon/192", dir: "auto" }),
+      self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((cs) => cs.forEach((c) => c.postMessage({ type: "push" }))),
+    ]),
+  );
+});
+
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  const url = new URL((e.notification.data && e.notification.data.url) || "/driver", self.location.origin).href;
+  e.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((cs) => {
+      const c = cs.find((x) => new URL(x.url).pathname.startsWith("/driver"));
+      if (!c) return self.clients.openWindow(url);
+      return c.focus().then(() => (c.navigate ? c.navigate(url) : null)).catch(() => self.clients.openWindow(url));
+    }),
+  );
+});

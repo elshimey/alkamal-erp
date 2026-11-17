@@ -5,6 +5,8 @@ import { daysBetween } from "@/lib/dates";
 import { getCompany } from "@/lib/company";
 import { can, type PermissionSet } from "@/lib/permissions";
 import { saveDataUrl } from "@/lib/attachments";
+import { notifyDriver } from "@/lib/driver-notify";
+import { driverName, notifyOffice } from "@/lib/office-notify";
 
 // سجل الوثائق: لكل صاحب (رأس، مقطورة، سائق، موظف، الشركة، عميل) وثائقه حسب الأنواع المعرّفة في الإعدادات.
 // الوثيقة المجدَّدة سجل جديد؛ الأحدث انتهاءً هو المعتمد، والأقدم يبقى في التاريخ.
@@ -524,6 +526,7 @@ export async function submitRenewal(
       .returning();
     const saved = await saveDataUrl(tx, { entity: "document_submissions", entityId: row.id, kind: "document", dataUrl: input.photo, userId: input.userId });
     if (!saved) throw new Error("صورة الوثيقة إلزامية");
+    await notifyOffice(tx, { kind: "doc_uploaded", text: `${await driverName(tx, driver.id)} رفع وثيقة «${type.nameAr}» بانتظار الاعتماد`, href: "/fleet-documents/submissions", driverId: driver.id });
     return row;
   });
 }
@@ -582,18 +585,27 @@ export async function approveSubmission(
       .update(s.documentSubmissions)
       .set({ status: "approved", documentId: row.id, reviewedBy: input.userId ?? null, reviewedAt: new Date() })
       .where(eq(s.documentSubmissions.id, id));
+    await notifyDriver(tx, sub.driverId, { kind: "doc_approved", body: await docTypeName(tx, sub.documentTypeId), href: "/driver/documents" });
     return row;
   });
 }
 
 export async function rejectSubmission(db: Db, id: number, reason: string, userId?: number) {
   if (!reason.trim()) throw new Error("اكتب سبب الرفض ليصل للسائق");
-  const rows = await db
-    .update(s.documentSubmissions)
-    .set({ status: "rejected", reviewNote: reason.trim(), reviewedBy: userId ?? null, reviewedAt: new Date() })
-    .where(and(eq(s.documentSubmissions.id, id), eq(s.documentSubmissions.status, "pending")))
-    .returning({ id: s.documentSubmissions.id });
-  if (!rows.length) throw new Error("الطلب رُوجع مسبقاً");
+  return db.transaction(async (tx) => {
+    const rows = await tx
+      .update(s.documentSubmissions)
+      .set({ status: "rejected", reviewNote: reason.trim(), reviewedBy: userId ?? null, reviewedAt: new Date() })
+      .where(and(eq(s.documentSubmissions.id, id), eq(s.documentSubmissions.status, "pending")))
+      .returning({ driverId: s.documentSubmissions.driverId, typeId: s.documentSubmissions.documentTypeId });
+    if (!rows.length) throw new Error("الطلب رُوجع مسبقاً");
+    await notifyDriver(tx, rows[0].driverId, { kind: "doc_rejected", body: `${await docTypeName(tx, rows[0].typeId)}: ${reason.trim()}`, href: "/driver/documents" });
+  });
+}
+
+async function docTypeName(db: Db | Tx, typeId: number) {
+  const [t] = await db.select({ nameAr: s.documentTypes.nameAr }).from(s.documentTypes).where(eq(s.documentTypes.id, typeId));
+  return t?.nameAr ?? "";
 }
 
 // ───────────── الملخص اليومي ─────────────
