@@ -4,7 +4,8 @@ import { useState } from "react";
 import type { QuickOption } from "@/lib/quick-add-types";
 import { FormCombo } from "@/components/form-combo";
 import { PanelField } from "@/components/panel-ui";
-import { Input, Select } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { AccountField } from "@/components/account-field";
 
 const radio = "flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm has-[:checked]:border-brand-600 has-[:checked]:bg-brand-50";
 
@@ -12,7 +13,7 @@ const radio = "flex items-center gap-2 rounded-lg border border-gray-300 bg-whit
  * الجهة: ورشة خارجية (تصبح دائنة بقيمة الأمر) أو ورشة داخلية (الميكانيكي موظف).
  * القطع المشتراة للورشة الداخلية من الصندوق أو ديناً على مورد آجل؛ وقطع المستودع تُصرف في البنود.
  */
-export function OrderProviderFields({ suppliers, cashes }: { suppliers: QuickOption[]; cashes: { id: number; nameAr: string }[] }) {
+export function OrderProviderFields({ suppliers, cashes }: { suppliers: QuickOption[]; cashes: QuickOption[] }) {
   const [provider, setProvider] = useState<"external" | "internal">("external");
   const [partsFrom, setPartsFrom] = useState<"cash" | "supplier">("cash");
   const pick = (set: (v: string) => void) => (e: React.FormEvent<HTMLSpanElement>) => set((e.target as HTMLInputElement).value);
@@ -60,14 +61,7 @@ export function OrderProviderFields({ suppliers, cashes }: { suppliers: QuickOpt
             supplierFields("مورد القطع", "يصبح دائناً بقيمة القطع المشتراة عند الاعتماد")
           ) : (
             <PanelField label="الصندوق" hint="يمكن تحديده لاحقاً عند الاعتماد">
-              <Select name="cashAccountId" defaultValue="" className="w-full">
-                <option value="">لاحقاً عند الاعتماد</option>
-                {cashes.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.nameAr}
-                  </option>
-                ))}
-              </Select>
+              <AccountField name="cashAccountId" options={cashes} scope="1101,1102" placeholder="لاحقاً عند الاعتماد" />
             </PanelField>
           )}
         </>

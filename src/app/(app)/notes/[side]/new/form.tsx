@@ -7,6 +7,7 @@ import { Icon, Truck } from "@/components/icons";
 import { invoiceLines, partyInvoices, saveNote } from "../actions";
 import { fmt } from "@/lib/format";
 import { DateInput } from "@/components/date-input";
+import { ComboBox } from "@/components/combo-box";
 
 type Option = { value: string; label: string };
 type Inv = Awaited<ReturnType<typeof partyInvoices>>[number];
@@ -213,14 +214,7 @@ export function NoteForm({
                     <input value={l.description} onChange={(e) => set(n, { description: e.target.value })} className={inputCls} />
                   </td>
                   <td className="px-1 py-1">
-                    <select value={l.accountId} onChange={(e) => set(n, { accountId: e.target.value })} className={inputCls}>
-                      <option value="">اختر الحساب</option>
-                      {accounts.map((a) => (
-                        <option key={a.value} value={a.value}>
-                          {a.label}
-                        </option>
-                      ))}
-                    </select>
+                    <ComboBox value={l.accountId} options={accounts} create="account" placeholder="اختر الحساب" onChange={(v) => set(n, { accountId: v })} className={inputCls} />
                   </td>
                   <td className="px-1 py-1">
                     <select value={l.costCenterId} onChange={(e) => set(n, { costCenterId: e.target.value })} className={inputCls}>

@@ -10,6 +10,7 @@ import { customerOptions } from "@/lib/lookups";
 import { expenseAccountOptions, supplierOptions } from "@/lib/purchases";
 import { NOTE_KINDS, NOTE_SIDES, type NoteKind, type NoteSide } from "@/data/sales";
 import { NoteForm } from "./form";
+import { toAccountOptions } from "@/lib/lookups";
 
 export default async function NewNotePage({ params, searchParams }: { params: Promise<{ side: string }>; searchParams: Promise<{ kind?: string; party?: string; invoice?: string }> }) {
   const sideKey = (await params).side;
@@ -27,7 +28,7 @@ export default async function NewNotePage({ params, searchParams }: { params: Pr
           .from(s.accounts)
           .where(and(eq(s.accounts.type, "revenue"), eq(s.accounts.isPostable, true), eq(s.accounts.isActive, true)))
           .orderBy(asc(s.accounts.code))
-          .then((rows) => rows.map((a) => ({ value: String(a.id), label: `${a.code} ${a.nameAr}` })))
+          .then((rows) => toAccountOptions(rows))
       : expenseAccountOptions(db),
     db.select({ id: s.costCenters.id, code: s.costCenters.code, nameAr: s.costCenters.nameAr }).from(s.costCenters).where(eq(s.costCenters.isActive, true)).orderBy(asc(s.costCenters.code)),
     db.select({ code: s.currencies.code }).from(s.currencies).orderBy(asc(s.currencies.code)),

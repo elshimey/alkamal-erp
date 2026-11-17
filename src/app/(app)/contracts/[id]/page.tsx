@@ -65,18 +65,18 @@ export default async function ContractPage({ params }: { params: Promise<{ id: s
             columns={[
               { key: "method", label: "طريقة التسعير", type: "select", required: true, width: "12rem", options: Object.entries(PRICING_METHODS).map(([value, label]) => ({ value, label })) },
               { key: "routeId", label: "المسار", type: "select", options: routes, width: "14rem" },
-              { key: "vehicleTypeId", label: "نوع المركبة", type: "select", options: types },
+              { key: "vehicleTypeId", label: "فئة المركبة", type: "select", options: types },
               { key: "vehicleId", label: "المركبة", type: "select", options: vehicles },
               { key: "price", label: `السعر (${c.currencyCode})`, type: "number", required: true },
               { key: "unit", label: "الوحدة (للكمية)", placeholder: "طن، كرتون…", width: "7rem" },
             ]}
           />
           <p className="mt-2 text-xs text-gray-500">
-            المسار إلزامي للسعر الثابت ونقل السيارات والمركبة المحددة. نوع المركبة إلزامي لطريقة ريال/كم، والسعر فيها لكل كيلومتر.
+            المسار إلزامي للسعر الثابت ونقل السيارات والمركبة المحددة. فئة المركبة إلزامية لطريقة ريال/كم، والسعر فيها لكل كيلومتر.
           </p>
         </Card>
       )}
-      <Table head={["الطريقة", "المسار", "نوع المركبة", "المركبة", "السعر", "الوحدة", ""]}>
+      <Table head={["الطريقة", "المسار", "فئة المركبة", "المركبة", "السعر", "الوحدة", ""]}>
         {rates.length === 0 && <EmptyRow cols={7}>لا توجد بنود تسعير بعد</EmptyRow>}
         {rates.map((r) => (
           <tr key={r.id}>

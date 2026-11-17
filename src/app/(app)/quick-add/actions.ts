@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { errorMessage, findPgError } from "@/lib/errors";
-import { quickCreate, quickForm, quickPerm } from "@/lib/quick-add";
+import { accountParentRows, quickCreate, quickForm, quickPerm } from "@/lib/quick-add";
 import {
   QUICK_KINDS,
   type QuickForm,
@@ -37,7 +37,6 @@ export async function quickAddFormAction(
 export async function quickAddAction(
   kind: QuickKind,
   values: Record<string, string>,
-  scope?: string,
 ): Promise<QuickResult> {
   if (!QUICK_KINDS.includes(kind)) return { error: "نوع غير معروف" };
   const user = await requireUser();
@@ -45,7 +44,7 @@ export async function quickAddAction(
   if (!can(user.perms, perm, "create"))
     return { error: "ليست لديك صلاحية الإضافة هنا" };
   try {
-    const res = await quickCreate(kind, values, user.perms, scope);
+    const res = await quickCreate(kind, values, user.perms);
     if (LIST[perm]) revalidatePath(LIST[perm]);
     if (values.withContract) revalidatePath("/contracts");
     return res;
@@ -56,4 +55,14 @@ export async function quickAddAction(
       };
     return { error: errorMessage(err) };
   }
+}
+
+/** الحسابات التي يمكن أن تكون أباً لحساب جديد (المستويات 1 إلى 3) لنافذة «حساب جديد» في منتقي الحسابات. */
+export async function accountParentsAction(): Promise<
+  { id: number; code: string; nameAr: string; level: number }[] | { error: string }
+> {
+  const user = await requireUser();
+  if (!can(user.perms, "accounts", "create"))
+    return { error: "ليست لديك صلاحية إضافة حسابات؛ اطلبها من مدير النظام" };
+  return accountParentRows();
 }

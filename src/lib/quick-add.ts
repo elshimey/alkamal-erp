@@ -25,6 +25,7 @@ import { addSubAccount } from "@/lib/accounts";
 import { addCustomValue } from "@/lib/custom-lists";
 import { CUSTOM_LISTS, isCustomList } from "@/data/custom-lists";
 import type { QuickForm, QuickKind, QuickOption } from "@/lib/quick-add-types";
+import { accountPickOptions } from "@/lib/account-options";
 
 // «الإضافة السريعة» من داخل المستندات: نافذة صغيرة تضيف مدينة أو مساراً أو مركبة أو جهة أو سائقاً أو صنفاً
 // دون مغادرة الصفحة، ثم تختاره في الخانة مباشرة. كل نوع يستخدم دالة الإنشاء نفسها في صفحته.
@@ -71,13 +72,19 @@ export function quickPerm(kind: QuickKind): Entity {
 }
 
 /** الحسابات التي يمكن أن يُضاف تحتها حساب (المستوى 3 فأقل)، داخل النطاق إن حُدد. */
-async function accountParents(scope?: string) {
-  const prefix = scope && /^\d{1,8}$/.test(scope) ? scope : "";
-  const rows = await db
-    .select({ id: s.accounts.id, code: s.accounts.code, nameAr: s.accounts.nameAr })
+/** كل الحسابات التي يمكن أن تكون أباً لحساب جديد (المستويات 1 إلى 3). */
+export async function accountParentRows() {
+  return db
+    .select({ id: s.accounts.id, code: s.accounts.code, nameAr: s.accounts.nameAr, level: s.accounts.level })
     .from(s.accounts)
-    .where(and(eq(s.accounts.isActive, true), sql`${s.accounts.level} < 4`, prefix ? sql`${s.accounts.code} like ${`${prefix}%`}` : undefined))
+    .where(and(eq(s.accounts.isActive, true), sql`${s.accounts.level} < 4`))
     .orderBy(asc(s.accounts.code));
+}
+
+/** الآباء المقترحون للخانة (scope رموز مفصولة بفواصل)، أو كل الشجرة. */
+async function accountParents(scope?: string) {
+  const prefixes = (scope ?? "").split(",").filter((p) => /^\d{1,8}$/.test(p));
+  const rows = (await accountParentRows()).filter((r) => !prefixes.length || prefixes.some((p) => r.code.startsWith(p)));
   return rows.map((r) => ({ value: String(r.id), label: `${r.code} ${r.nameAr}` }));
 }
 
@@ -118,7 +125,7 @@ export async function quickForm(
     };
   }
   if (kind === "vehicle_type") {
-    return { title: "إضافة نوع مركبة", primary: "nameAr", fields: [{ key: "nameAr", label: "اسم النوع", required: true, hint: "مثل: تريلا، دينا، لوري، سطحة" }] };
+    return { title: "إضافة فئة مركبة (للتسعير)", primary: "nameAr", fields: [{ key: "nameAr", label: "اسم الفئة", required: true, hint: "مثل: تريلا، دينا، لوري، سطحة" }] };
   }
   if (kind === "account") {
     const parents = await accountParents(scope);
@@ -221,7 +228,7 @@ export async function quickForm(
         { key: "chassis", label: "رقم الشاسيه", ltr: true, hint: "اختياري" },
         {
           key: "vehicleTypeId",
-          label: "نوع المركبة",
+          label: "فئة المركبة (للتسعير)",
           type: "select",
           options: types,
         },
@@ -230,10 +237,8 @@ export async function quickForm(
           label: "حساب الأصل",
           type: "select",
           required: true,
-          options: accounts.map((a) => ({
-            value: String(a.id),
-            label: `${a.code} ${a.nameAr}`,
-          })),
+          options: await accountPickOptions(db, accounts),
+          create: "account",
           default: accounts[0] ? String(accounts[0].id) : undefined,
         },
         { key: "make", label: "الشركة المصنعة" },
@@ -396,7 +401,7 @@ export async function quickForm(
       },
       {
         key: "vehicleTypeId",
-        label: "نوع المركبة",
+        label: "فئة المركبة",
         type: "select",
         options: types,
         showIf: "withContract",
@@ -443,7 +448,6 @@ export async function quickCreate(
   kind: QuickKind,
   v: Values,
   perms: PermissionSet,
-  scope?: string,
 ): Promise<{ option: QuickOption; message?: string }> {
   if (isCustomList(kind)) return { option: await addCustomValue(db, kind, req(v.label, "الاسم"), txt(v.base)) };
   if (kind === "vehicle_type") {
@@ -453,10 +457,14 @@ export async function quickCreate(
   }
   if (kind === "account") {
     const parentId = Number(req(v.parentId, "الحساب الأب"));
-    // الأب من النطاق المسموح لهذه الخانة فقط (حسابات الأصول للمركبة مثلاً)
-    if (!(await accountParents(scope)).some((p) => p.value === String(parentId))) throw new Error("اختر الحساب الأب من القائمة");
+    // الآباء المناسبون للخانة يظهرون أولاً، ويمكن اختيار أي حساب من الشجرة («عرض كل الشجرة»)
+    if (!(await accountParentRows()).some((p) => p.id === parentId)) throw new Error("اختر الحساب الأب من القائمة");
     const a = await addSubAccount(db, parentId, req(v.nameAr, "اسم الحساب"));
-    return { option: { value: String(a.id), label: `${a.code} ${a.nameAr}` }, message: `أُضيف الحساب ${a.code} ${a.nameAr} لشجرة الحسابات` };
+    const [parent] = await db.select({ code: s.accounts.code, nameAr: s.accounts.nameAr }).from(s.accounts).where(eq(s.accounts.id, parentId));
+    return {
+      option: { value: String(a.id), label: a.nameAr, code: a.code, group: parent?.nameAr, groupCode: parent?.code },
+      message: `أُضيف الحساب ${a.code} ${a.nameAr} لشجرة الحسابات`,
+    };
   }
   if (kind === "city") {
     const countryId = Number(req(v.countryId, "الدولة"));
@@ -695,7 +703,7 @@ async function quickContract(
     throw new Error("التسعير لمركبة محددة يُضاف من صفحة العقد");
   if (needRoute && !v.routeId) throw new Error("اختر مسار العقد");
   if (method === "per_km_vehicle_type" && !v.vehicleTypeId)
-    throw new Error("اختر نوع المركبة للتسعير بالكيلومتر");
+    throw new Error("اختر فئة المركبة للتسعير بالكيلومتر");
   if (method === "per_quantity" && !txt(v.unit))
     throw new Error("اكتب وحدة التسعير بالكمية (طن، كرتون…)");
   const fromDate = req(v.fromDate, "بداية العقد");

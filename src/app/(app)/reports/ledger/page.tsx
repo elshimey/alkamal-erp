@@ -5,6 +5,8 @@ import { requirePermission } from "@/lib/auth";
 import { todayRiyadh } from "@/lib/dates";
 import { accountLedger } from "@/lib/reports";
 import { C, money, param, PeriodFilter, periodFrom, ReportHeader, RTable } from "../report-ui";
+import { FormCombo } from "@/components/form-combo";
+import { toAccountOptions } from "@/lib/lookups";
 
 const SOURCE: Record<string, { label: string; href?: (id: number) => string }> = {
   waybill: { label: "شحنة", href: (id) => `/waybills/${id}` },
@@ -43,15 +45,9 @@ export default async function LedgerPage({ searchParams }: { searchParams: Promi
         <PeriodFilter from={from} to={to} today={today}>
           <label className="flex flex-col gap-1 text-sm">
             <span className="font-medium text-gray-700">الحساب</span>
-            <select name="account" defaultValue={accountId ?? ""} required className="max-w-72 rounded-lg border border-gray-300 px-3 py-2 text-sm">
-              <option value="">اختر الحساب</option>
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {" ".repeat((a.level - 1) * 3)}
-                  {a.code} {a.name}
-                </option>
-              ))}
-            </select>
+            <div className="w-72 max-w-full">
+              <FormCombo name="account" options={await toAccountOptions(accounts.map((a) => ({ id: a.id, code: a.code, nameAr: a.name })))} defaultValue={accountId ? String(accountId) : ""} required placeholder="ابحث باسم الحساب أو رقمه…" />
+            </div>
           </label>
           <label className="flex flex-col gap-1 text-sm">
             <span className="font-medium text-gray-700">مركز التكلفة</span>

@@ -6,10 +6,11 @@ import { Icon, Truck } from "@/components/icons";
 import { saveEntry } from "./actions";
 import { fmt } from "@/lib/format";
 import { DateInput } from "@/components/date-input";
+import { ComboBox } from "@/components/combo-box";
 import { newOpId } from "@/lib/op-id";
 import { RETRY_MESSAGE } from "@/components/action-form";
 
-type Option = { value: string; label: string; code?: string; cc?: boolean };
+type Option = { value: string; label: string; code?: string; group?: string; groupCode?: string; cc?: boolean };
 export type EntryLine = { accountId: string; description: string; costCenterId: string; partyId: string; debit: string; credit: string };
 export interface EntryInitial {
   entryDate: string;
@@ -166,14 +167,7 @@ export function EntryForm({ accounts, centers, parties, initial, entryId, canPos
                   <tr key={n} className="group" onPaste={onPaste(n)}>
                     <td className="ltr-nums py-1 text-center text-xs text-gray-400">{n + 1}</td>
                     <td className="px-1 py-1">
-                      <select value={l.accountId} onChange={(e) => set(n, { accountId: e.target.value })} className={cell}>
-                        <option value="">اختر الحساب</option>
-                        {accounts.map((a) => (
-                          <option key={a.value} value={a.value}>
-                            {a.label}
-                          </option>
-                        ))}
-                      </select>
+                      <ComboBox value={l.accountId} options={accounts} create="account" placeholder="اختر الحساب" onChange={(v) => set(n, { accountId: v })} className={cell} />
                     </td>
                     <td className="px-1 py-1">
                       <input value={l.description} onChange={(e) => set(n, { description: e.target.value })} className={cell} />

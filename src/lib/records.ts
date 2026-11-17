@@ -132,7 +132,7 @@ export const RECORDS: Record<string, RecordDef> = {
       { key: "plate", label: "اللوحة", required: true },
       { key: "chassis", label: "رقم الشاسيه", ltr: true, hint: "اختياري" },
       { key: "serialNumber", label: "الرقم التسلسلي", ltr: true },
-      { key: "vehicleTypeId", label: "النوع", type: "select", numeric: true, create: "vehicle_type", options: async () => (await db.select().from(s.vehicleTypes).orderBy(asc(s.vehicleTypes.nameAr))).map((t) => ({ value: String(t.id), label: t.nameAr })) },
+      { key: "vehicleTypeId", label: "فئة المركبة (للتسعير)", hint: "تريلا، دينا، سطحة… تُستخدم في تسعير العقود «ريال/كم حسب فئة المركبة»", type: "select", numeric: true, create: "vehicle_type", options: async () => (await db.select().from(s.vehicleTypes).orderBy(asc(s.vehicleTypes.nameAr))).map((t) => ({ value: String(t.id), label: t.nameAr })) },
       { key: "assetAccountId", label: "حساب الأصل", type: "select", numeric: true, create: "account", scope: "1201", options: () => accountOptions("1201") },
       { key: "make", label: "الماركة" },
       { key: "model", label: "الطراز" },
@@ -516,12 +516,12 @@ export const RECORDS: Record<string, RecordDef> = {
   },
 
   vehicle_types: {
-    noun: "نوع المركبة",
+    noun: "فئة المركبة",
     perm: "vehicles",
     listHref: "/vehicles",
     listLabel: "المركبات",
     table: table(s.vehicleTypes),
-    heading: (r) => `نوع المركبة: ${r.nameAr}`,
+    heading: (r) => `فئة المركبة: ${r.nameAr}`,
     fields: [{ key: "nameAr", label: "الاسم", required: true }],
     instead: "اتركه؛ لا يضر وجوده",
   },

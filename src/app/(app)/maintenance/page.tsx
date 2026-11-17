@@ -22,6 +22,8 @@ import { MaintenanceTabs } from "./tabs";
 import { OrderPanel } from "./order-panel";
 import { approveOrder, bulkOrders, completeOrder, revertOrder, saveOrderSheet } from "./actions";
 import { fmt } from "@/lib/format";
+import { AccountField } from "@/components/account-field";
+import { toAccountOptions } from "@/lib/lookups";
 
 type Status = keyof typeof MAINTENANCE_STATUS;
 const BASE = "/maintenance";
@@ -228,14 +230,7 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
                 {openDoc.o.status === "draft" && canApprove && openDoc.lines.length > 0 && (
                   <ActionForm action={approveOrder.bind(null, openDoc.o.id)} resetOnSuccess={false} className="flex items-center gap-2">
                     {openDoc.o.provider === "internal" && !openDoc.o.supplierId && openDoc.lines.some(({ l }) => !l.warehouseId) && (
-                      <Select name="cashAccountId" defaultValue={openDoc.o.cashAccountId ?? ""} className="w-40">
-                        <option value="">القطع من صندوق…</option>
-                        {cashes.map((a) => (
-                          <option key={a.id} value={a.id}>
-                            {a.nameAr}
-                          </option>
-                        ))}
-                      </Select>
+                      <AccountField name="cashAccountId" options={await toAccountOptions(cashes)} defaultValue={openDoc.o.cashAccountId} scope="1101,1102" placeholder="القطع من صندوق…" className="w-60" />
                     )}
                     <SubmitButton>اعتماد وترحيل القيد</SubmitButton>
                   </ActionForm>

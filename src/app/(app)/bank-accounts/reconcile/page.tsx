@@ -5,10 +5,12 @@ import { can } from "@/lib/permissions";
 import { listReconciliations, reconcilableAccounts } from "@/lib/reconciliation";
 import { todayRiyadh } from "@/lib/dates";
 import { ActionForm, SubmitButton } from "@/components/action-form";
-import { Badge, Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
+import { Badge, Card, EmptyRow, Field, Input, PageHeader, Table, Td } from "@/components/ui";
 import { createReconciliationAction } from "./actions";
 import { fmt } from "@/lib/format";
 import { AddModeBar, ListActions } from "@/components/list-actions";
+import { AccountField } from "@/components/account-field";
+import { toAccountOptions } from "@/lib/lookups";
 
 export default async function ReconciliationsPage({ searchParams }: { searchParams: Promise<{ add?: string }> }) {
   const user = await requirePermission("accounts", "view");
@@ -35,16 +37,7 @@ export default async function ReconciliationsPage({ searchParams }: { searchPara
         <Card className="mb-6">
           <ActionForm action={createReconciliationAction} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Field label="الحساب">
-              <Select name="accountId" required defaultValue="">
-                <option value="" disabled>
-                  اختر البنك أو الصندوق
-                </option>
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.code} – {a.nameAr} {a.currencyCode && a.currencyCode !== "SAR" ? `(${a.currencyCode})` : ""}
-                  </option>
-                ))}
-              </Select>
+              <AccountField name="accountId" required options={await toAccountOptions(accounts)} scope="1101,1102" placeholder="اختر البنك أو الصندوق" />
             </Field>
             <Field label="تاريخ الكشف">
               <Input name="statementDate" type="date" required defaultValue={todayRiyadh()} />

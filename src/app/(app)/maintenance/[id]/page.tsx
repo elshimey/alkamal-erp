@@ -12,9 +12,11 @@ import { todayRiyadh } from "@/lib/dates";
 import { LINE_KINDS, MAINTENANCE_PROVIDERS, MAINTENANCE_STATUS, MAINTENANCE_TYPES, maintenanceAccountCode } from "@/data/maintenance";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { SheetEditor } from "@/components/sheet-editor";
-import { Badge, Card, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
+import { Badge, Card, Field, Input, PageHeader, Table, Td } from "@/components/ui";
 import { approveOrder, completeOrder, deleteOrder, removeLine, revertOrder, saveLines } from "../actions";
 import { fmt } from "@/lib/format";
+import { AccountField } from "@/components/account-field";
+import { toAccountOptions } from "@/lib/lookups";
 
 export default async function MaintenanceOrderPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requirePermission("maintenance", "view");
@@ -157,14 +159,7 @@ export default async function MaintenanceOrderPage({ params }: { params: Promise
             <ActionForm action={approveOrder.bind(null, id)} resetOnSuccess={false} className="flex flex-wrap items-end gap-3">
               {o.provider === "internal" && !o.supplierId && (
                 <Field label="القطع اشتُريت من">
-                  <Select name="cashAccountId" defaultValue={o.cashAccountId ?? ""}>
-                    <option value="">اختر الصندوق</option>
-                    {cashes.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.nameAr}
-                      </option>
-                    ))}
-                  </Select>
+                  <AccountField name="cashAccountId" options={await toAccountOptions(cashes)} defaultValue={o.cashAccountId} scope="1101,1102" placeholder="اختر الصندوق" className="w-64" />
                 </Field>
               )}
               <SubmitButton>اعتماد الأمر</SubmitButton>

@@ -131,7 +131,7 @@ export const IMPORT_SPECS: Record<string, ImportSpec> = {
       { key: "plate", label: "اللوحة", en: "Plate", required: true, rule: "لا تتكرر (تُكتشف المسجلة مسبقاً والمكررة في الملف)", aliases: ["رقم اللوحة"], width: 14 },
       { key: "chassis", label: "رقم الشاسيه", en: "Chassis", rule: "اختياري، ولا يتكرر", aliases: ["الشاسيه", "vin"], width: 20 },
       { key: "assetAccount", label: "حساب الأصل", en: "Asset account", required: true, rule: "رقم أو اسم حساب الأصل، مثل 120101 الشاحنات (الرؤوس)", aliases: ["الحساب", "account"], width: 24 },
-      { key: "vehicleType", label: "النوع", en: "Type", rule: MUST_MATCH, aliases: ["نوع المركبة"], width: 14 },
+      { key: "vehicleType", label: "فئة المركبة (للتسعير)", en: "Type", rule: MUST_MATCH, aliases: ["النوع", "نوع المركبة", "فئة المركبة"], width: 16 },
       { key: "make", label: "الماركة", en: "Make", width: 12 },
       { key: "model", label: "الطراز", en: "Model", width: 12 },
       { key: "year", label: "سنة الصنع", en: "Year", rule: "مثل 2022", width: 9 },

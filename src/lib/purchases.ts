@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
+import { accountPickOptions } from "@/lib/account-options";
 import { receivePurchaseTx, removeMovesTx } from "@/lib/inventory";
 import { createJournalEntryTx, deleteEntryTx, nextDocumentNumber, type LineInput } from "@/lib/ledger";
 import { lineVat, round2 } from "@/lib/invoice-posting";
@@ -719,7 +720,7 @@ export async function expenseAccountOptions(db: Db | Tx) {
     .from(s.accounts)
     .where(and(eq(s.accounts.isPostable, true), eq(s.accounts.isActive, true)))
     .orderBy(asc(s.accounts.code));
-  return rows.filter((a) => isExpenseAccount(a.code)).map((a) => ({ value: String(a.id), label: `${a.code} ${a.nameAr}` }));
+  return accountPickOptions(db, rows.filter((a) => isExpenseAccount(a.code)));
 }
 
 /** رصيد كل جهة دائنة (ما نستحقه لها) من القيود المرحّلة على حسابات الذمم الدائنة، بالريال. */

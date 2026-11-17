@@ -10,7 +10,7 @@ export const PARTY_ROLES = {
 
 export const PRICING_METHODS = {
   route_fixed: "مسار بسعر ثابت",
-  per_km_vehicle_type: "ريال/كم حسب نوع المركبة",
+  per_km_vehicle_type: "ريال/كم حسب فئة المركبة",
   specific_vehicle: "مركبة محددة على مسار",
   car_transport: "نقل سيارة مقطوع",
   per_quantity: "بالكمية",

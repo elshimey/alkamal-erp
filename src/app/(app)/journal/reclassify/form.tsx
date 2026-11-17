@@ -5,8 +5,9 @@ import { useState, useTransition } from "react";
 import { Field, Input, Select } from "@/components/ui";
 import { findReclassLines, reclassifyAction } from "../actions";
 import { fmt } from "@/lib/format";
+import { ComboBox } from "@/components/combo-box";
 
-type Opt = { value: string; label: string };
+type Opt = { value: string; label: string; code?: string; group?: string; groupCode?: string };
 type Line = Awaited<ReturnType<typeof findReclassLines>>[number];
 
 export function ReclassifyForm({ accounts, centers, today }: { accounts: Opt[]; centers: Opt[]; today: string }) {
@@ -53,14 +54,7 @@ export function ReclassifyForm({ accounts, centers, today }: { accounts: Opt[]; 
         <h2 className="mb-3 font-semibold text-brand-900">١. ابحث عن السطور</h2>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <Field label="الحساب الحالي">
-            <Select value={filter.accountId} onChange={set("accountId")}>
-              <option value="">اختر</option>
-              {accounts.map((a) => (
-                <option key={a.value} value={a.value}>
-                  {a.label}
-                </option>
-              ))}
-            </Select>
+            <ComboBox value={filter.accountId} options={accounts} placeholder="ابحث باسم الحساب أو رقمه…" onChange={(v) => setFilter((f) => ({ ...f, accountId: v }))} className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20" />
           </Field>
           <Field label="مركز التكلفة">
             <Select value={filter.costCenterId} onChange={set("costCenterId")}>
@@ -160,14 +154,7 @@ export function ReclassifyForm({ accounts, centers, today }: { accounts: Opt[]; 
           <h2 className="mb-3 font-semibold text-brand-900">٣. انقلها إلى</h2>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Field label="الحساب الجديد" hint="اتركه لتغيير مركز التكلفة فقط">
-              <Select value={target.accountId} onChange={(e) => setTarget((t) => ({ ...t, accountId: e.target.value }))}>
-                <option value="">نفس الحساب</option>
-                {accounts.map((a) => (
-                  <option key={a.value} value={a.value}>
-                    {a.label}
-                  </option>
-                ))}
-              </Select>
+              <ComboBox value={target.accountId} options={accounts} create="account" placeholder="نفس الحساب" onChange={(v) => setTarget((t) => ({ ...t, accountId: v }))} className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20" />
             </Field>
             <Field label="مركز التكلفة الجديد" hint="فارغ = يبقى كما هو">
               <Select value={target.costCenterId} onChange={(e) => setTarget((t) => ({ ...t, costCenterId: e.target.value }))}>

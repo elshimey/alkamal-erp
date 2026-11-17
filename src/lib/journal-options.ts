@@ -2,6 +2,7 @@ import "server-only";
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
+import { toAccountOptions } from "@/lib/lookups";
 
 /** قوائم نموذج القيد: الحسابات التفصيلية ومراكز التكلفة والجهات. */
 export async function journalOptions() {
@@ -11,7 +12,7 @@ export async function journalOptions() {
     db.select({ id: s.parties.id, nameAr: s.parties.nameAr }).from(s.parties).orderBy(asc(s.parties.nameAr)),
   ]);
   return {
-    accounts: accounts.map((a) => ({ value: String(a.id), label: `${a.code} ${a.nameAr}`, code: a.code, cc: a.cc })),
+    accounts: (await toAccountOptions(accounts)).map((o) => ({ ...o, cc: accounts.find((a) => String(a.id) === o.value)?.cc ?? false })),
     centers: centers.map((c) => ({ value: String(c.id), label: c.nameAr, code: c.code })),
     parties: parties.map((p) => ({ value: String(p.id), label: p.nameAr })),
   };

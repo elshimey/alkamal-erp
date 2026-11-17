@@ -6,6 +6,8 @@ import { Field, Input, Select } from "@/components/ui";
 import type { StockDocKind } from "@/data/inventory";
 import { saveStockDoc } from "../../actions";
 import { fmt } from "@/lib/format";
+import { ComboBox } from "@/components/combo-box";
+import type { QuickOption } from "@/lib/quick-add-types";
 
 type Product = { id: number; label: string; unit: string; avg: number };
 type Line = { productId: string; quantity: string; unitCost: string };
@@ -20,7 +22,7 @@ export function StockDocForm(props: {
   products: Product[];
   warehouses: { id: number; nameAr: string }[];
   balances: { p: number; w: number; q: number }[];
-  accounts: { id: number; label: string; code: string }[];
+  accounts: QuickOption[];
   centers: { id: number; nameAr: string }[];
 }) {
   const { kind } = props;
@@ -29,7 +31,7 @@ export function StockDocForm(props: {
   const [warehouseId, setWarehouseId] = useState(String(props.defaultWarehouse ?? ""));
   const [toWarehouseId, setTo] = useState(String(props.warehouses.find((w) => w.id !== props.defaultWarehouse)?.id ?? ""));
   const [direction, setDirection] = useState<"in" | "out">("out");
-  const [offset, setOffset] = useState(String(props.accounts.find((a) => a.code === "6113")?.id ?? ""));
+  const [offset, setOffset] = useState(String(props.accounts.find((a) => a.code === "6113")?.value ?? ""));
   const [costCenterId, setCostCenter] = useState("");
   const [reason, setReason] = useState("");
   const [lines, setLines] = useState<Line[]>([empty(), empty(), empty()]);
@@ -104,13 +106,7 @@ export function StockDocForm(props: {
               </Select>
             </Field>
             <Field label="الحساب المقابل" hint="الرصيد الافتتاحي: 3103 الأرباح المبقاة">
-              <Select value={offset} onChange={(e) => setOffset(e.target.value)}>
-                {props.accounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.label}
-                  </option>
-                ))}
-              </Select>
+              <ComboBox value={offset} options={props.accounts} create="account" allowEmpty={false} placeholder="ابحث باسم الحساب أو رقمه…" onChange={(v) => setOffset(v)} className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20" />
             </Field>
             <Field label="مركز التكلفة">
               <Select value={costCenterId} onChange={(e) => setCostCenter(e.target.value)}>

@@ -80,7 +80,7 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
                     { key: "productId", label: "الصنف", type: "select", options: products, width: "11rem", create: "product" },
                     { key: "warehouseId", label: "المستودع", type: "select", options: warehouses, width: "8rem" },
                     { key: "quantity", label: "الكمية", type: "number", width: "5rem" },
-                    { key: "accountId", label: "الحساب", type: "select", options: accounts, width: "14rem", placeholder: "حساب الصنف" },
+                    { key: "accountId", label: "الحساب", type: "select", options: accounts, width: "14rem", placeholder: "حساب الصنف", create: "account" },
                     { key: "vehicleId", label: "المركبة", type: "select", options: vehicles, width: "8rem", create: "vehicle" },
                     { key: "description", label: "البيان", width: "12rem" },
                     { key: "amount", label: "المبلغ قبل الضريبة", type: "number", required: true, width: "7rem" },

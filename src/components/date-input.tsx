@@ -1,24 +1,58 @@
 "use client";
 
-import { useRef, useState, type ChangeEvent, type ComponentProps } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type ComponentProps, type KeyboardEvent, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { Icon } from "@/components/icons";
 
 // حقل تاريخ يعرض يوم/شهر/سنة دائماً مهما كانت لغة المتصفح، ويُرسل القيمة بصيغة 2026-10-25 كالحقل الأصلي.
-// الكتابة: 25/10/2026 أو 25-10-2026 أو 2026-10-25؛ وزر التقويم يفتح منتقي المتصفح.
+// الكتابة: 25/10/2026 أو 25-10-2026 أو 2026-10-25 أو 25102026 (تُضاف الشرطات تلقائياً)، أو 25/10 للسنة الحالية.
+// زر التقويم يفتح تقويماً عربياً واضحاً: الشهر والسنة، أيام الأسبوع، «اليوم» و«مسح».
 
 export const isoToDmy = (iso: string) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
   return m ? `${m[3]}/${m[2]}/${m[1]}` : iso;
 };
 
+const digits = (t: string) => t.replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
+
 export const dmyToIso = (text: string) => {
-  const t = text.trim().replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
-  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+  let t = digits(text.trim());
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return valid(t);
+  if (/^\d{8}$/.test(t)) t = `${t.slice(0, 2)}/${t.slice(2, 4)}/${t.slice(4)}`;
   const m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/.exec(t);
   if (!m) return null;
-  const iso = `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+  return valid(`${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`);
+};
+
+function valid(iso: string) {
   const d = new Date(`${iso}T00:00:00Z`);
   return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === iso ? iso : null;
+}
+
+/** يوم/شهر بلا سنة: يُكمل بالسنة الحالية عند مغادرة الخانة. */
+const withYear = (text: string) => {
+  const m = /^(\d{1,2})[/.-](\d{1,2})$/.exec(digits(text.trim()));
+  return m ? dmyToIso(`${m[1]}/${m[2]}/${new Date().getFullYear()}`) : null;
+};
+
+/** تنسيق أثناء الكتابة: 2510 ← 25/10، و25102026 ← 25/10/2026. */
+const mask = (prev: string, next: string) => {
+  const t = digits(next);
+  if (t.length < prev.length || !/^[\d/]*$/.test(t)) return next;
+  const d = t.replace(/\//g, "");
+  if (/^\d{4}-/.test(t) || d.length > 8) return next;
+  if (d.length >= 5) return `${d.slice(0, 2)}/${d.slice(2, 4)}/${d.slice(4)}`;
+  if (d.length >= 3 && !t.includes("/")) return `${d.slice(0, 2)}/${d.slice(2)}`;
+  return t;
+};
+
+const MONTHS = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
+const DAYS = ["أحد", "إثنين", "ثلاثاء", "أربعاء", "خميس", "جمعة", "سبت"];
+const pad = (n: number) => String(n).padStart(2, "0");
+const isoOf = (y: number, m: number, d: number) => `${y}-${pad(m + 1)}-${pad(d)}`;
+const todayIso = () => {
+  const n = new Date();
+  return isoOf(n.getFullYear(), n.getMonth(), n.getDate());
 };
 
 type Props = Omit<ComponentProps<"input">, "type" | "value" | "defaultValue" | "onChange"> & {
@@ -32,21 +66,59 @@ export function DateInput({ value, defaultValue, onChange, name, required, min, 
   const [inner, setInner] = useState(defaultValue ?? "");
   const iso = controlled ? value : inner;
   const [text, setText] = useState<string | null>(null); // نص أثناء الكتابة قبل أن يكتمل تاريخاً صحيحاً
-  const picker = useRef<HTMLInputElement>(null);
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLSpanElement>(null);
+  const hidden = useRef<HTMLInputElement>(null);
+  const silent = useRef(false);
+
+  // تفريغ النموذج يعيد القيمة الأولى
+  useEffect(() => {
+    const f = hidden.current?.form;
+    if (!f || controlled) return;
+    const reset = () => (setInner(defaultValue ?? ""), setText(null));
+    f.addEventListener("reset", reset);
+    return () => f.removeEventListener("reset", reset);
+  }, [controlled, defaultValue]);
 
   const commit = (next: string) => {
     if (!controlled) setInner(next);
     onChange?.({ target: { value: next } });
+    // الحقل المخفي لا يُطلق حدث تغيير وحده؛ نُبلغ النموذج (مؤشر «تعديلات لم تُحفظ» وغيره)
+    queueMicrotask(() => {
+      silent.current = true;
+      hidden.current?.dispatchEvent(new Event("change", { bubbles: true }));
+      silent.current = false;
+    });
   };
   const type = (e: ChangeEvent<HTMLInputElement>) => {
-    setText(e.target.value);
-    const parsed = dmyToIso(e.target.value);
+    const next = mask(text ?? isoToDmy(iso), e.target.value);
+    setText(next);
+    const parsed = dmyToIso(next);
     if (parsed) commit(parsed);
-    else if (!e.target.value.trim()) commit("");
+    else if (!next.trim()) commit("");
+  };
+  const blur = () => {
+    if (text != null) {
+      const y = withYear(text);
+      if (y) commit(y);
+    }
+    setText(null);
+  };
+  const key = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowDown" && e.altKey) {
+      e.preventDefault();
+      setOpen(true);
+    } else if (e.key === "Escape" && open) {
+      e.preventDefault();
+      e.stopPropagation();
+      setOpen(false);
+    }
   };
 
+  // عرض محدد (w-40 مثلاً) يبقى للخانة، وإلا تملأ مكانها ولا تتجاوزه
+  const fixedWidth = !!className?.includes("w-") && !className.includes("w-full");
   return (
-    <span className={`relative inline-flex items-center ${className?.includes("w-") && !className.includes("w-full") ? "" : "w-full"}`}>
+    <span ref={box} className={`relative inline-flex items-center ${fixedWidth ? "" : "w-full"}`}>
       <input
         {...rest}
         id={id}
@@ -54,31 +126,27 @@ export function DateInput({ value, defaultValue, onChange, name, required, min, 
         dir="ltr"
         inputMode="numeric"
         autoComplete="off"
-        placeholder="dd/mm/yyyy"
+        placeholder="يوم/شهر/سنة"
         value={text ?? isoToDmy(iso)}
         onChange={type}
-        onBlur={() => setText(null)}
-        className={`${className ?? ""} ltr-nums ps-9 text-start`}
+        onBlur={blur}
+        onKeyDown={key}
+        className={`${className ?? ""} ${fixedWidth ? "" : "w-full min-w-0"} ltr-nums ps-9 text-start`}
       />
       <button
         type="button"
         tabIndex={-1}
         disabled={disabled}
         aria-label="اختر من التقويم"
-        onClick={() => {
-          try {
-            picker.current?.showPicker();
-          } catch {
-            picker.current?.focus();
-          }
-        }}
-        className="absolute end-2 rounded p-1 text-gray-400 hover:text-gray-700"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className={`absolute end-2 rounded p-1 transition ${open ? "bg-brand-50 text-brand-800" : "text-gray-400 hover:text-gray-700"}`}
       >
         <Icon name="calendar" className="size-4" />
       </button>
-      {/* الحقل الأصلي مخفي بصرياً: يحمل الاسم والقيمة للنموذج ويفتح منتقي التاريخ */}
+      {/* الحقل الأصلي مخفي بصرياً: يحمل الاسم والقيمة للنموذج ويتحقق من الإلزام والحدود */}
       <input
-        ref={picker}
+        ref={hidden}
         type="date"
         name={name}
         form={form}
@@ -88,6 +156,7 @@ export function DateInput({ value, defaultValue, onChange, name, required, min, 
         disabled={disabled}
         value={iso}
         onChange={(e) => {
+          if (silent.current) return;
           setText(null);
           commit(e.target.value);
         }}
@@ -95,6 +164,157 @@ export function DateInput({ value, defaultValue, onChange, name, required, min, 
         aria-hidden
         className="pointer-events-none absolute bottom-0 start-0 h-px w-px opacity-0"
       />
+      {open && (
+        <Calendar
+          anchor={box}
+          value={iso}
+          min={typeof min === "string" ? min : undefined}
+          max={typeof max === "string" ? max : undefined}
+          onPick={(d) => {
+            setText(null);
+            commit(d);
+            setOpen(false);
+          }}
+          onClose={() => setOpen(false)}
+        />
+      )}
     </span>
+  );
+}
+
+function Calendar({ anchor: anchorRef, value, min, max, onPick, onClose }: { anchor: RefObject<HTMLSpanElement | null>; value: string; min?: string; max?: string; onPick: (iso: string) => void; onClose: () => void }) {
+  const start = value || todayIso();
+  const [view, setView] = useState({ y: Number(start.slice(0, 4)), m: Number(start.slice(5, 7)) - 1 });
+  const [pos, setPos] = useState<{ top: number; left: number; host: HTMLElement; fixed: boolean } | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const anchor = anchorRef.current;
+    if (!anchor) return;
+    const place = () => {
+      const r = anchor.getBoundingClientRect();
+      // داخل نافذة مفتوحة يُعرض التقويم فيها (ما خارجها لا يستجيب للنقر)
+      const host = (anchor.closest("dialog[open]") as HTMLElement | null) ?? document.body;
+      const width = 272;
+      const left = Math.min(Math.max(8, r.right - width), window.innerWidth - width - 8);
+      if (host === document.body) {
+        const up = r.bottom + 330 > window.innerHeight && r.top > 340;
+        setPos({ top: up ? r.top - 330 : r.bottom + 4, left, host, fixed: true });
+      } else {
+        const b = host.getBoundingClientRect();
+        setPos({ top: r.bottom + 4 - b.top + host.scrollTop, left: left - b.left, host, fixed: false });
+      }
+    };
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [anchorRef]);
+
+  useEffect(() => {
+    const anchor = anchorRef.current;
+    const outside = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!ref.current?.contains(t) && !anchor?.contains(t)) onClose();
+    };
+    const esc = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      // يغلق التقويم وحده، لا النافذة التي هو فيها
+      e.preventDefault();
+      e.stopPropagation();
+      onClose();
+    };
+    document.addEventListener("mousedown", outside);
+    window.addEventListener("keydown", esc, true);
+    return () => {
+      document.removeEventListener("mousedown", outside);
+      window.removeEventListener("keydown", esc, true);
+    };
+  }, [anchorRef, onClose]);
+
+  if (!pos) return null;
+  const first = new Date(Date.UTC(view.y, view.m, 1)).getUTCDay();
+  const count = new Date(Date.UTC(view.y, view.m + 1, 0)).getUTCDate();
+  const cells: (number | null)[] = [...Array(first).fill(null), ...Array.from({ length: count }, (_, i) => i + 1)];
+  const today = todayIso();
+  const shift = (n: number) => setView((v) => ({ y: v.y + Math.floor((v.m + n) / 12), m: (((v.m + n) % 12) + 12) % 12 }));
+  const allowed = (d: string) => (!min || d >= min) && (!max || d <= max);
+  const years = Array.from({ length: 21 }, (_, i) => view.y - 10 + i);
+
+  return createPortal(
+    <div
+      ref={ref}
+      dir="rtl"
+      role="dialog"
+      aria-label="التقويم"
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={(e) => e.stopPropagation()}
+      style={{ position: pos.fixed ? "fixed" : "absolute", top: pos.top, left: pos.left, width: 272 }}
+      className="animate-fade-in z-[96] rounded-2xl border border-gray-200 bg-white p-3 text-sm text-gray-800 shadow-xl"
+    >
+      <div className="mb-2 flex items-center justify-between gap-1">
+        <button type="button" onClick={() => shift(-1)} aria-label="الشهر السابق" className="grid size-8 place-items-center rounded-lg text-gray-500 transition hover:bg-gray-100 hover:text-gray-800">
+          ›
+        </button>
+        <div className="flex items-center gap-1 font-display font-semibold text-brand-900">
+          <select value={view.m} onChange={(e) => setView((v) => ({ ...v, m: Number(e.target.value) }))} aria-label="الشهر" className="rounded-md bg-transparent px-1 py-0.5 hover:bg-gray-100">
+            {MONTHS.map((n, i) => (
+              <option key={n} value={i}>
+                {n}
+              </option>
+            ))}
+          </select>
+          <select value={view.y} onChange={(e) => setView((v) => ({ ...v, y: Number(e.target.value) }))} aria-label="السنة" className="ltr-nums rounded-md bg-transparent px-1 py-0.5 hover:bg-gray-100">
+            {years.map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+          </select>
+        </div>
+        <button type="button" onClick={() => shift(1)} aria-label="الشهر التالي" className="grid size-8 place-items-center rounded-lg text-gray-500 transition hover:bg-gray-100 hover:text-gray-800">
+          ‹
+        </button>
+      </div>
+      <div className="grid grid-cols-7 gap-0.5 text-center">
+        {DAYS.map((d) => (
+          <span key={d} className="py-1 text-[10px] font-semibold text-gray-400">
+            {d}
+          </span>
+        ))}
+        {cells.map((d, i) => {
+          if (d == null) return <span key={`e${i}`} />;
+          const iso = isoOf(view.y, view.m, d);
+          const on = iso === value;
+          const ok = allowed(iso);
+          return (
+            <button
+              key={iso}
+              type="button"
+              disabled={!ok}
+              onClick={() => onPick(iso)}
+              aria-label={`${d} ${MONTHS[view.m]} ${view.y}`}
+              aria-pressed={on}
+              className={`ltr-nums grid h-8 place-items-center rounded-lg transition ${on ? "bg-brand-600 font-bold text-brand-900" : iso === today ? "font-bold text-brand-800 ring-1 ring-brand-400 ring-inset" : "hover:bg-brand-50"} ${ok ? "" : "cursor-not-allowed opacity-30"}`}
+            >
+              {d}
+            </button>
+          );
+        })}
+      </div>
+      <div className="mt-2 flex items-center justify-between border-t border-gray-100 pt-2 text-xs">
+        <button type="button" disabled={!allowed(today)} onClick={() => onPick(today)} className="rounded-lg px-2 py-1 font-semibold text-brand-800 transition hover:bg-brand-50 disabled:opacity-40">
+          اليوم
+        </button>
+        <span className="ltr-nums text-gray-400">{value ? isoToDmy(value) : "يوم/شهر/سنة"}</span>
+        <button type="button" onClick={() => onPick("")} className="rounded-lg px-2 py-1 text-gray-500 transition hover:bg-gray-100">
+          مسح
+        </button>
+      </div>
+    </div>,
+    pos.host,
   );
 }

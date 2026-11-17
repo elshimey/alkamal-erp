@@ -12,7 +12,7 @@ export const norm = (t: string) =>
     .trim();
 
 /** ترتيب النتائج: ما يبدأ بالنص، ثم ما تبدأ به إحدى كلماته، ثم ما يحتويه. */
-export function filterOptions<T extends { label: string }>(
+export function filterOptions<T extends { label: string; code?: string }>(
   options: T[],
   query: string,
   limit = 60,
@@ -22,7 +22,7 @@ export function filterOptions<T extends { label: string }>(
   const tiers: T[][] = [[], [], []];
   for (const o of options) {
     const l = norm(o.label);
-    if (l.startsWith(q)) tiers[0].push(o);
+    if (l.startsWith(q) || o.code?.startsWith(q)) tiers[0].push(o);
     else if (l.split(/[\s/←–-]+/).some((w) => w.startsWith(q)))
       tiers[1].push(o);
     else if (l.includes(q)) tiers[2].push(o);

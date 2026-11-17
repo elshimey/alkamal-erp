@@ -8,10 +8,12 @@ import { todayRiyadh } from "@/lib/dates";
 import { ADVANCE_STATUS } from "@/data/payroll";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { SheetEditor } from "@/components/sheet-editor";
-import { Badge, Card, EmptyRow, Input, PageHeader, Select, Table, Td } from "@/components/ui";
+import { Badge, Card, EmptyRow, Input, PageHeader, Table, Td } from "@/components/ui";
 import { PayrollTabs } from "../tabs";
 import { deleteAdvanceAction, payAdvanceAction, revertAdvanceAction, saveAdvances } from "../actions";
 import { fmt } from "@/lib/format";
+import { AccountField } from "@/components/account-field";
+import { toAccountOptions } from "@/lib/lookups";
 
 export default async function AdvancesPage() {
   const user = await requirePermission("payroll", "view");
@@ -26,6 +28,7 @@ export default async function AdvancesPage() {
       .orderBy(desc(s.employeeAdvances.advanceDate), desc(s.employeeAdvances.id))
       .limit(300),
   ]);
+  const cashOpts = await toAccountOptions(cashes);
   const outstanding = list.filter((x) => x.a.status === "paid").reduce((t, x) => t + Number(x.a.amount) - Number(x.a.repaidAmount), 0);
 
   return (
@@ -77,14 +80,7 @@ export default async function AdvancesPage() {
               <div className="flex flex-wrap gap-2">
                 {a.status === "pending" && can(user.perms, "payroll", "approve") && (
                   <ActionForm action={payAdvanceAction.bind(null, a.id)} resetOnSuccess={false} className="flex gap-1">
-                    <Select name="cashAccountId" className="w-36">
-                      <option value="">من صندوق / بنك</option>
-                      {cashes.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.nameAr}
-                        </option>
-                      ))}
-                    </Select>
+                    <AccountField name="cashAccountId" options={cashOpts} placeholder="من صندوق / بنك" className="w-56" />
                     <SubmitButton>صرف</SubmitButton>
                   </ActionForm>
                 )}

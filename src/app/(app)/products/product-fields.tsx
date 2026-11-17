@@ -1,11 +1,14 @@
 import { Field, Input, Select } from "@/components/ui";
 import type * as s from "@/db/schema";
+import { AccountField } from "@/components/account-field";
+import { toAccountOptions } from "@/lib/lookups";
 
 type Product = typeof s.products.$inferSelect;
 type Opt = { id: number; code: string; nameAr: string };
 
 /** حقول نموذج الصنف (الإضافة والتعديل). */
-export function ProductFields({ p, stockAccounts, serviceAccounts, categories }: { p?: Product; stockAccounts: Opt[]; serviceAccounts: Opt[]; categories: string[] }) {
+export async function ProductFields({ p, stockAccounts, serviceAccounts, categories }: { p?: Product; stockAccounts: Opt[]; serviceAccounts: Opt[]; categories: string[] }) {
+  const accounts = await toAccountOptions([...stockAccounts, ...serviceAccounts]);
   return (
     <>
       <Field label="النوع">
@@ -41,23 +44,7 @@ export function ProductFields({ p, stockAccounts, serviceAccounts, categories }:
         <Input name="reorderLevel" inputMode="decimal" defaultValue={p ? Number(p.reorderLevel) || "" : ""} placeholder="0" />
       </Field>
       <Field label="الحساب" hint="المخزني: حساب المخزون؛ الخدمة: حساب مصروفها">
-        <Select name="accountId" defaultValue={p?.accountId ?? ""}>
-          <option value="">الافتراضي</option>
-          <optgroup label="حسابات المخزون">
-            {stockAccounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.code} {a.nameAr}
-              </option>
-            ))}
-          </optgroup>
-          <optgroup label="حسابات الخدمات">
-            {serviceAccounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.code} {a.nameAr}
-              </option>
-            ))}
-          </optgroup>
-        </Select>
+        <AccountField name="accountId" options={accounts} defaultValue={p?.accountId} placeholder="الافتراضي (أو اختر حساباً)" />
       </Field>
       <Field label="الباركود">
         <Input name="barcode" defaultValue={p?.barcode ?? ""} dir="ltr" />

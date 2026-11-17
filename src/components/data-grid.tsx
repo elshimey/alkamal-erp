@@ -16,7 +16,7 @@ export interface GridColumn {
   defaultValue?: string;
   label: string;
   type?: "text" | "number" | "date" | "select";
-  options?: { value: string; label: string }[];
+  options?: { value: string; label: string; code?: string }[];
   required?: boolean;
   ltr?: boolean;
   width?: string;
@@ -45,7 +45,8 @@ export const isEmptyGridRow = (row: GridRow) => Object.values(row).every((v) => 
 export function normalizeCell(col: GridColumn, raw: string) {
   const v = raw.trim();
   if (col.type === "select" && v) {
-    const hit = col.options?.find((o) => o.value === v || o.label === v);
+    // الحساب يُقبل باسمه أو رقمه أو «الرقم الاسم»
+    const hit = col.options?.find((o) => o.value === v || o.label === v || (o.code && (o.code === v || `${o.code} ${o.label}` === v)));
     return hit ? hit.value : v;
   }
   if (col.type === "number") return v.replace(/[,\s]/g, "").replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));

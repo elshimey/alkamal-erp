@@ -121,7 +121,7 @@ function QuickAddForm({ kind, scope, initial, onClose, onDone }: DialogProps) {
     if (missing) return setError(`${missing.label} إلزامي`);
     setError(undefined);
     start(async () => {
-      const res = await quickAddAction(kind, values, scope);
+      const res = await quickAddAction(kind, values);
       if ("error" in res) return setError(res.error);
       onDone(res.option);
       if (res.message) toast(res.message);
