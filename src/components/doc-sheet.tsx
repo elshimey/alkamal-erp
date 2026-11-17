@@ -156,7 +156,7 @@ export function DocSheet({ columns: baseColumns, rows, action, emptyText, openLa
     if (col.type === "date") v = toIsoDate(v);
     if (col.type === "select" && v) {
       const t = norm(v);
-      const hit = col.options?.find((o) => o.value === v) ?? col.options?.find((o) => norm(o.label) === t) ?? col.options?.find((o) => norm(o.label).includes(t));
+      const hit = col.options?.find((o) => o.value === v || (o.code && (o.code === v || v.startsWith(`${o.code} `)))) ?? col.options?.find((o) => norm(o.label) === t) ?? col.options?.find((o) => norm(o.label).includes(t));
       if (!hit) return false;
       v = hit.value;
     }

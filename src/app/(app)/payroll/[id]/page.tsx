@@ -11,9 +11,11 @@ import { payrollTotals } from "@/lib/payroll";
 import { monthLabel, monthRange, PAYROLL_STATUS } from "@/data/payroll";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { SheetEditor } from "@/components/sheet-editor";
-import { Badge, Card, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
+import { Badge, Card, Field, Input, PageHeader, Table, Td } from "@/components/ui";
 import { adjustLines, approveRun, deleteRun, payRun, refreshRun, revertPay, revertRun } from "../actions";
 import { fmt } from "@/lib/format";
+import { AccountField } from "@/components/account-field";
+import { toAccountOptions } from "@/lib/lookups";
 
 const dash = (v: string | number) => (Number(v) ? fmt(v) : "—");
 
@@ -180,14 +182,7 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
           <Card title="صرف الرواتب بالصافي">
             <ActionForm action={payRun.bind(null, id)} resetOnSuccess={false} className="flex flex-wrap items-end gap-3">
               <Field label="من حساب">
-                <Select name="bankAccountId">
-                  <option value="">اختر البنك</option>
-                  {banks.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.nameAr}
-                    </option>
-                  ))}
-                </Select>
+                <AccountField name="bankAccountId" options={await toAccountOptions(banks)} placeholder="اختر البنك" className="w-64" />
               </Field>
               <Field label="تاريخ الصرف">
                 <Input name="paymentDate" type="date" defaultValue={end} min={end} />

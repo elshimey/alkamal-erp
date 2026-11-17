@@ -14,10 +14,12 @@ import {
   useSyncExternalStore,
   type InputHTMLAttributes,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
 import type { QuickKind, QuickOption } from "@/lib/quick-add-types";
 import { QuickAddDialog } from "./quick-add-dialog";
+import { AccountAddDialog } from "./account-add-dialog";
 import { filterOptions, norm } from "@/lib/filter-options";
 
 // ما يُضاف في هذه الصفحة يظهر فوراً في كل القوائم من النوع نفسه (كل صفوف الشيت)
@@ -46,8 +48,9 @@ export function useCreatedOptions() {
     kind: QuickKind | undefined,
     options: T[] | undefined,
   ): T[] => {
-    const extra = kind ? (created.get(kind) ?? []) : [];
     const base = options ?? [];
+    // الحساب الجديد يظهر فقط في الخانات التي تعرض حسابات من مجموعته
+    const extra = (kind ? (created.get(kind) ?? []) : []).filter((e) => !e.groupCode || base.some((b) => b.groupCode === e.groupCode));
     return extra.length
       ? [
           ...base,
@@ -104,7 +107,11 @@ export function ComboBox({
   createPrefix?: string;
 }) {
   const withCreated = useCreatedOptions();
-  const all = withCreated(create, options);
+  // ما أُضيف من هذه الخانة نفسها يبقى فيها ولو كان من مجموعة أخرى
+  const [mine, setMine] = useState<QuickOption[]>([]);
+  const shared = withCreated(create, options);
+  const all = useMemo(() => (mine.length ? [...shared, ...mine.filter((m) => !shared.some((o) => o.value === m.value))] : shared), [shared, mine]);
+  const wide = options.some((o) => o.code);
   const listId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
@@ -133,10 +140,12 @@ export function ComboBox({
     left: number;
     width: number;
     up: boolean;
+    host: HTMLElement;
   } | null>(null);
 
   const selected = free ? undefined : all.find((o) => o.value === value);
-  const text = query ?? (free ? value : (selected?.label ?? value));
+  // الحساب يظهر باسمه ورقمه بجانبه
+  const text = query ?? (free ? value : selected ? (selected.code ? `${selected.label} · ${selected.code}` : selected.label) : value);
   const shown = useMemo(() => filterOptions(all, query ?? ""), [all, query]);
   const q = (query ?? "").trim();
   const exact = q ? all.find((o) => norm(o.label) === norm(q)) : undefined;
@@ -148,12 +157,15 @@ export function ComboBox({
     const place = () => {
       const r = inputRef.current?.getBoundingClientRect();
       if (!r) return;
+      const host = (inputRef.current?.closest("dialog[open]") as HTMLElement | null) ?? document.body;
       const up = r.bottom + 280 > window.innerHeight && r.top > 300;
+      const width = Math.max(r.width, wide ? 300 : 240);
       setPos({
         top: up ? r.top : r.bottom,
-        left: r.left,
-        width: Math.max(r.width, 240),
+        left: Math.max(4, r.left - Math.max(0, width - r.width)),
+        width,
         up,
+        host,
       });
     };
     place();
@@ -163,7 +175,7 @@ export function ComboBox({
       window.removeEventListener("scroll", place, true);
       window.removeEventListener("resize", place);
     };
-  }, [open]);
+  }, [open, wide]);
 
   useEffect(() => {
     listRef.current
@@ -234,6 +246,12 @@ export function ComboBox({
     onKeyDownClosed?.(e);
   };
 
+  // داخل نافذة مفتوحة تظهر القائمة تحت الخانة ضمن النافذة (ما خارج النافذة لا يستجيب للنقر)، وتُمرَّر النافذة لتظهر كاملة
+  const inDialog = !!pos && pos.host !== document.body;
+  useEffect(() => {
+    if (open && inDialog) listRef.current?.scrollIntoView({ block: "nearest" });
+  }, [open, inDialog]);
+  const place = (list: ReactNode) => (inDialog ? list : createPortal(list, document.body));
   // سهم يوضح أن الخانة قائمة اختيار (عدا الخانة الحرة)
   const arrow = !free;
   return (
@@ -297,28 +315,37 @@ export function ComboBox({
       {open &&
         pos &&
         total > 0 &&
-        createPortal(
+        place(
           <ul
             ref={listRef}
             id={listId}
             role="listbox"
             dir="rtl"
             onMouseDown={(e) => e.preventDefault()}
-            style={{
-              position: "fixed",
-              left: pos.left,
-              width: pos.width,
-              ...(pos.up
-                ? { bottom: window.innerHeight - pos.top + 2 }
-                : { top: pos.top + 2 }),
-            }}
+            // داخل <label> النقر على خيار لا يعيد فتح القائمة عبر الخانة
+            onClick={(e) => e.preventDefault()}
+            style={
+              inDialog
+                ? { position: "absolute", top: "100%", insetInlineStart: 0, marginTop: 2, minWidth: "100%", width: pos.width }
+                : {
+                    position: "fixed",
+                    left: pos.left,
+                    width: pos.width,
+                    ...(pos.up ? { bottom: window.innerHeight - pos.top + 2 } : { top: pos.top + 2 }),
+                  }
+            }
             className="z-[90] max-h-64 overflow-y-auto rounded-xl border border-gray-200 bg-white py-1 text-sm shadow-xl"
           >
             {shown.map((o, i) => (
               <Fragment key={o.value}>
                 {!q && o.group && o.group !== shown[i - 1]?.group && (
-                  <li role="presentation" className="sticky top-0 z-[1] border-y border-gray-100 bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-600 first:border-t-0">
-                    {o.group}
+                  <li role="presentation" className="sticky top-0 z-[1] flex items-center justify-between gap-3 border-y border-gray-100 bg-gray-50 px-3 py-1.5 text-xs font-bold text-gray-800 first:border-t-0">
+                    <span>{o.group}</span>
+                    {o.groupCode && (
+                      <span dir="ltr" className="ltr-nums font-normal text-gray-400">
+                        {o.groupCode}
+                      </span>
+                    )}
                   </li>
                 )}
                 <li
@@ -329,8 +356,17 @@ export function ComboBox({
                   onClick={() => pick(o)}
                   className={`flex cursor-pointer items-center justify-between gap-3 px-3 py-1.5 ${i === active ? "bg-brand-50 text-brand-900" : ""} ${o.value === value ? "font-semibold" : ""} ${!q && o.group ? "ps-5" : ""}`}
                 >
-                  <span>{o.label}</span>
-                  {(q ? o.group : o.hint) && <span className="shrink-0 text-[11px] font-normal text-gray-400">{q ? o.group : o.hint}</span>}
+                  <span className={!q && o.group && o.code ? "border-s-2 border-gray-200 ps-2.5" : ""}>
+                    {o.label}
+                    {q && o.code && o.group && <span className="ms-2 text-[11px] font-normal text-gray-400">{o.group}</span>}
+                  </span>
+                  {o.code ? (
+                    <span dir="ltr" className="ltr-nums shrink-0 text-[11px] font-normal text-gray-400">
+                      {o.code}
+                    </span>
+                  ) : (
+                    (q ? o.group : o.hint) && <span className="shrink-0 text-[11px] font-normal text-gray-400">{q ? o.group : o.hint}</span>
+                  )}
                 </li>
               </Fragment>
             ))}
@@ -347,9 +383,27 @@ export function ComboBox({
               </li>
             )}
           </ul>,
-          document.body,
         )}
-      {dialog != null && create && (
+      {dialog != null && create === "account" && (
+        <AccountAddDialog
+          scope={scope}
+          options={all}
+          initial={dialog}
+          onClose={() => {
+            setDialog(null);
+            setQuery(null);
+            setTimeout(() => inputRef.current?.focus());
+          }}
+          onDone={(o) => {
+            setMine((m) => [...m, o]);
+            addCreatedOption("account", o);
+            setMissing(null);
+            onCreated?.(o);
+            onChange(o.value, o);
+          }}
+        />
+      )}
+      {dialog != null && create && create !== "account" && (
         <QuickAddDialog
           kind={create}
           scope={scope}

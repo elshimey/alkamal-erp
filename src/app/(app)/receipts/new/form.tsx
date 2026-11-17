@@ -193,14 +193,7 @@ export function ReceiptForm({
             <ComboBox value={customerId} options={customers} onChange={(v) => setCustomerId(v)} create="customer" placeholder="ابحث عن العميل…" className={inputCls} />
           </Row>
           <Row label={kind === "refund" ? "تم الصرف من خلال" : "تم الدفع من خلال"} required hint="الصندوق أو البنك">
-            <select value={cashId} onChange={(e) => setCashId(e.target.value)} className={inputCls}>
-              <option value="">اختر الحساب</option>
-              {cash.map((c) => (
-                <option key={c.value} value={c.value}>
-                  {c.label}
-                </option>
-              ))}
-            </select>
+            <ComboBox value={cashId} options={cash} onChange={(v) => setCashId(v)} create="account" scope="1101,1102" placeholder="ابحث باسم الحساب أو رقمه…" className={inputCls} />
             {cashCurrency && cashCurrency !== currency && <span className="text-xs text-red-700">الحساب بعملة {cashCurrency}</span>}
           </Row>
           <Row label="عملة الدفع" required>
@@ -384,21 +377,18 @@ export function ReceiptForm({
             </div>
             {adjustments.map((a, n) => (
               <div key={n} className="grid animate-rise grid-cols-[1fr_6.5rem_auto] items-center gap-2">
-                <select
+                <ComboBox
                   value={a.accountId}
-                  onChange={(e) => {
-                    const acc = adjustmentAccounts.find((x) => x.value === e.target.value);
-                    setAdjustments(adjustments.map((x, i) => (i === n ? { ...x, accountId: e.target.value, description: x.description || acc?.name || "" } : x)));
+                  options={adjustmentAccounts}
+                  create="account"
+                  placeholder="نوع التعديل (الحساب)"
+                  onChange={(v, o) => {
+                    const acc = adjustmentAccounts.find((x) => x.value === v);
+                    const name = acc?.name ?? o?.label;
+                    setAdjustments(adjustments.map((x, i) => (i === n ? { ...x, accountId: v, description: x.description || name || "" } : x)));
                   }}
                   className={`${inputCls} h-8 text-xs`}
-                >
-                  <option value="">نوع التعديل (الحساب)</option>
-                  {adjustmentAccounts.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
+                />
                 <input
                   value={a.amount}
                   inputMode="decimal"

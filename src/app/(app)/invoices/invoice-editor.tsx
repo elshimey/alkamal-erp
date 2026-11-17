@@ -271,7 +271,7 @@ export function InvoiceEditor({
                     { value: "0", label: "صفر (دولي)" },
                   ],
                 },
-                { key: "accountId", label: "نوع الإيراد", type: "select", width: "10rem", defaultValue: accounts[0]?.value ?? "", options: accounts },
+                { key: "accountId", label: "نوع الإيراد", type: "select", width: "12rem", defaultValue: accounts[0]?.value ?? "", options: accounts, create: "account" },
                 { key: "costCenterId", label: "المركبة", type: "select", width: "8rem", options: costCenters },
               ]}
             />

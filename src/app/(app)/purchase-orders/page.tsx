@@ -64,7 +64,7 @@ export default async function PurchaseOrdersPage({ searchParams }: { searchParam
                 totals={{ qty: "quantity", price: "price", vat: "vatRate" }}
                 columns={[
                   { key: "productId", label: "الصنف (للمخزون)", type: "select", width: "14rem", options: products, placeholder: "—", create: "product" },
-                  { key: "accountId", label: "أو حساب المصروف", type: "select", width: "13rem", options: accounts, placeholder: "—" },
+                  { key: "accountId", label: "أو حساب المصروف", type: "select", width: "13rem", options: accounts, placeholder: "—", create: "account" },
                   { key: "description", label: "الوصف" },
                   { key: "quantity", label: "الكمية", type: "number", width: "6rem", defaultValue: "1" },
                   { key: "price", label: "سعر الوحدة", type: "number", width: "8rem" },

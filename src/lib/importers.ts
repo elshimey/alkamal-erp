@@ -667,7 +667,7 @@ export async function templateLists(db: Db, spec: ImportSpec): Promise<TemplateL
     return [
       { title: "حسابات الأصول (الرقم)", values: assets.map((a) => a.code), field: "assetAccount" },
       { title: "اسم الحساب", values: assets.map((a) => a.nameAr) },
-      { title: "أنواع المركبات", values: ctx.vehicleTypes.map((t) => t.nameAr).sort(), field: "vehicleType" },
+      { title: "فئات المركبات", values: ctx.vehicleTypes.map((t) => t.nameAr).sort(), field: "vehicleType" },
       { title: "الملكية", values: ["مملوكة", "مستأجرة"], field: "ownership" },
     ];
   }

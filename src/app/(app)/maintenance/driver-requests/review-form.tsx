@@ -4,7 +4,8 @@ import { useState } from "react";
 import type { QuickOption } from "@/lib/quick-add-types";
 import { ActionForm, SubmitButton, type FormState } from "@/components/action-form";
 import { FormCombo } from "@/components/form-combo";
-import { Field, Input, Select } from "@/components/ui";
+import { Field, Input } from "@/components/ui";
+import { AccountField } from "@/components/account-field";
 
 const radio = "flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm has-[:checked]:border-brand-600 has-[:checked]:bg-brand-50";
 const PAYERS = [
@@ -26,7 +27,7 @@ export function ReviewForm({
   kinds: QuickOption[];
   defaultKind: string;
   suppliers: QuickOption[];
-  cashes: { id: number; nameAr: string }[];
+  cashes: QuickOption[];
   reportedPayer: string | null;
 }) {
   const [payer, setPayer] = useState<string>(reportedPayer === "company" ? "cash" : "custody");
@@ -52,14 +53,7 @@ export function ReviewForm({
       </fieldset>
       {payer === "cash" && (
         <Field label="الصندوق أو البنك">
-          <Select name="cashAccountId" required defaultValue="">
-            <option value="">اختر…</option>
-            {cashes.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.nameAr}
-              </option>
-            ))}
-          </Select>
+          <AccountField name="cashAccountId" required options={cashes} scope="1101,1102" placeholder="اختر…" />
         </Field>
       )}
       {payer === "supplier" && (

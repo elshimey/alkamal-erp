@@ -11,6 +11,8 @@ import { Icon } from "@/components/icons";
 import { Badge, Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { addAsset, depreciate, dispose, removeAsset, undoDepreciation } from "./actions";
 import { fmt } from "@/lib/format";
+import { AccountField } from "@/components/account-field";
+import { toAccountOptions } from "@/lib/lookups";
 
 const life = (m: number) => (m % 12 === 0 ? `${m / 12} سنوات` : `${m} شهراً`);
 
@@ -27,6 +29,7 @@ export default async function FixedAssetsPage({ searchParams }: { searchParams: 
     db.select().from(s.accounts).where(or(postable("1101"), postable("1102"), postable("21"), postable("3104"))).orderBy(asc(s.accounts.code)),
     db.select().from(s.accounts).where(or(postable("1101"), postable("1102"), postable("1103"))).orderBy(asc(s.accounts.code)),
   ]);
+  const [categoryOpts, offsetOpts, proceedsOpts] = await Promise.all([toAccountOptions(categories), toAccountOptions(offsets), toAccountOptions(proceeds)]);
   const open = rows.find((r) => r.a.id === openId) ?? null;
   const schedule = open ? await assetSchedule(db, open.a.id) : [];
   const active = rows.filter((r) => r.a.status === "active");
@@ -141,14 +144,7 @@ export default async function FixedAssetsPage({ searchParams }: { searchParams: 
                       <Input name="proceeds" inputMode="decimal" placeholder="0.00" />
                     </Field>
                     <Field label="استُلم في">
-                      <Select name="proceedsAccountId" defaultValue="">
-                        <option value="">— تخريد بلا مقابل —</option>
-                        {proceeds.map((a) => (
-                          <option key={a.id} value={a.id}>
-                            {a.code} {a.nameAr}
-                          </option>
-                        ))}
-                      </Select>
+                      <AccountField name="proceedsAccountId" options={proceedsOpts} scope="1101,1102,1103" placeholder="— تخريد بلا مقابل —" />
                     </Field>
                     <p className="col-span-full text-xs text-gray-500">يُقفل الأصل ومجمع إهلاكه، والفرق بين المبلغ والقيمة الدفترية ربح (4202) أو خسارة (7104). شغّل إهلاك شهر الاستبعاد أولاً.</p>
                     <div>
@@ -203,16 +199,7 @@ export default async function FixedAssetsPage({ searchParams }: { searchParams: 
               <Input name="nameAr" required placeholder="مثل: شاحنة مرسيدس أكتروس 2024" />
             </Field>
             <Field label="الفئة">
-              <Select name="assetAccountId" required defaultValue="">
-                <option value="" disabled>
-                  اختر
-                </option>
-                {categories.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.code} {a.nameAr}
-                  </option>
-                ))}
-              </Select>
+              <AccountField name="assetAccountId" required options={categoryOpts} scope="1201" placeholder="اختر الفئة" />
             </Field>
             <Field label="المركبة" hint="للشاحنات والمقطورات؛ الإهلاك على مركزها">
               <Select name="vehicleId" defaultValue="">
@@ -253,14 +240,7 @@ export default async function FixedAssetsPage({ searchParams }: { searchParams: 
               <Input name="openingDepreciation" inputMode="decimal" placeholder="0.00" />
             </Field>
             <Field label="قيد الاقتناء مقابل" hint="اتركه فارغاً إن كان الشراء مقيداً من فاتورة مورد">
-              <Select name="offsetAccountId" defaultValue="">
-                <option value="">— بدون قيد —</option>
-                {offsets.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.code} {a.nameAr}
-                  </option>
-                ))}
-              </Select>
+              <AccountField name="offsetAccountId" options={offsetOpts} placeholder="— بدون قيد —" />
             </Field>
             <Field label="ملاحظات">
               <Input name="notes" />

@@ -10,6 +10,7 @@ import { todayRiyadh } from "@/lib/dates";
 import { customerOptions } from "@/lib/lookups";
 import { RECEIPT_KINDS } from "@/data/sales";
 import { ReceiptForm } from "./form";
+import { toAccountOptions } from "@/lib/lookups";
 
 export default async function NewReceiptPage({ searchParams }: { searchParams: Promise<{ kind?: string; customer?: string; invoice?: string }> }) {
   const user = await requirePermission("receipts", "create");
@@ -43,8 +44,8 @@ export default async function NewReceiptPage({ searchParams }: { searchParams: P
           kind={kind}
           title={kind === "invoice_payment" ? "دفعة فواتير" : RECEIPT_KINDS[kind].label}
           customers={customers}
-          cash={cash.map((a) => ({ value: String(a.id), label: `${a.code} ${a.nameAr}`, currency: a.currencyCode }))}
-          adjustmentAccounts={adjustments.map((a) => ({ value: String(a.id), label: `${a.code} ${a.nameAr}`, name: a.nameAr }))}
+          cash={(await toAccountOptions(cash)).map((o) => ({ ...o, currency: cash.find((a) => String(a.id) === o.value)?.currencyCode ?? null }))}
+          adjustmentAccounts={(await toAccountOptions(adjustments)).map((o) => ({ ...o, name: adjustments.find((a) => String(a.id) === o.value)?.nameAr ?? o.label }))}
           currencies={currencies.map((c) => c.code)}
           today={todayRiyadh()}
           initialCustomer={sp.customer ?? ""}

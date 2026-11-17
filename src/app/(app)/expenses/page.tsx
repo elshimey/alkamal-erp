@@ -18,6 +18,8 @@ import { Badge, Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } fr
 import { DialogButton } from "@/components/dialog-button";
 import { approve, approveMany, approveReviewed, reject, remove, revert, saveExpenses } from "./actions";
 import { fmt } from "@/lib/format";
+import { AccountField } from "@/components/account-field";
+import { toAccountOptions } from "@/lib/lookups";
 
 type Status = keyof typeof EXPENSE_STATUS;
 
@@ -68,6 +70,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
       .orderBy(desc(s.expenses.expenseDate), desc(s.expenses.id))
       .limit(300),
   ]);
+  const cashOpts = await toAccountOptions(cashes);
   const photos = new Map((await listAttachments(db, "expenses", list.map((r) => r.e.id))).map((a) => [a.entityId, a.id]));
   // مصروف قال السائق إن الشركة دفعته لا يُعتمد جماعياً؛ يحدد المعتمد صندوقه أولاً
   const pending = list.filter((x) => x.e.status === "pending" && !(x.e.payer === "driver_custody" && x.e.reportedPayer === "company")).map((x) => x.e.id);
@@ -90,8 +93,8 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
                 { key: "date", label: "التاريخ", type: "date", placeholder: today },
                 { key: "payer", label: "الدافع", type: "select", required: true, options: Object.entries(EXPENSE_PAYERS).map(([value, label]) => ({ value, label })), width: "8rem" },
                 { key: "driverId", label: "السائق", type: "select", options: drivers, width: "9rem", create: "driver" },
-                { key: "cashAccountId", label: "أو الصندوق", type: "select", options: cashes.map((a) => ({ value: String(a.id), label: a.nameAr })), width: "9rem" },
-                { key: "accountId", label: "نوع المصروف", type: "select", required: true, options: accounts, width: "13rem" },
+                { key: "cashAccountId", label: "أو الصندوق", type: "select", options: cashOpts, width: "11rem", create: "account" },
+                { key: "accountId", label: "نوع المصروف", type: "select", required: true, options: accounts, width: "13rem", create: "account" },
                 { key: "vehicleId", label: "المركبة", type: "select", options: vehicles, width: "8rem", create: "vehicle" },
                 { key: "waybillId", label: "الشحنة", type: "select", options: waybills.map((w) => ({ value: String(w.id), label: `${w.number} · ${w.date}` })), width: "11rem" },
                 { key: "description", label: "البيان", width: "10rem" },
@@ -203,23 +206,10 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
                             </Select>
                           </Field>
                           <Field label="الصندوق أو البنك (إن دفعت الشركة)">
-                            <Select name="cashAccountId" defaultValue="">
-                              <option value="">—</option>
-                              {cashes.map((a) => (
-                                <option key={a.id} value={a.id}>
-                                  {a.nameAr}
-                                </option>
-                              ))}
-                            </Select>
+                            <AccountField name="cashAccountId" options={cashOpts} placeholder="—" />
                           </Field>
                           <Field label="حساب المصروف">
-                            <Select name="accountId" defaultValue={String(e.accountId)}>
-                              {accounts.map((a) => (
-                                <option key={a.value} value={a.value}>
-                                  {a.label}
-                                </option>
-                              ))}
-                            </Select>
+                            <AccountField name="accountId" options={accounts} defaultValue={e.accountId} required />
                           </Field>
                           <div className="grid grid-cols-2 gap-3">
                             <Field label="الضريبة ضمن المبلغ">

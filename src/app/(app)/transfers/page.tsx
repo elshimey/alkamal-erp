@@ -5,9 +5,11 @@ import { can } from "@/lib/permissions";
 import { listTransfers, transferAccounts } from "@/lib/transfers";
 import { todayRiyadh } from "@/lib/dates";
 import { ActionForm, SubmitButton } from "@/components/action-form";
-import { Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
+import { Card, EmptyRow, Field, Input, PageHeader, Table, Td } from "@/components/ui";
 import { removeTransfer, saveTransfer } from "./actions";
 import { fmt } from "@/lib/format";
+import { toAccountOptions } from "@/lib/lookups";
+import { AccountField } from "@/components/account-field";
 import { AddModeBar, ListActions } from "@/components/list-actions";
 
 export default async function TransfersPage({ searchParams }: { searchParams: Promise<{ add?: string }> }) {
@@ -15,7 +17,7 @@ export default async function TransfersPage({ searchParams }: { searchParams: Pr
   const [accounts, rows] = await Promise.all([transferAccounts(db), listTransfers(db)]);
   const canCreate = can(user.perms, "payments", "create");
   const canDelete = can(user.perms, "payments", "delete");
-  const label = (a: (typeof accounts)[number]) => `${a.code} ${a.nameAr}${a.currencyCode && a.currencyCode !== "SAR" ? ` (${a.currencyCode})` : ""}`;
+  const options = await toAccountOptions(accounts);
 
   const adding = (await searchParams).add === "1" && !!(canCreate);
   return (
@@ -37,28 +39,10 @@ export default async function TransfersPage({ searchParams }: { searchParams: Pr
               <Input name="date" type="date" required defaultValue={todayRiyadh()} />
             </Field>
             <Field label="من حساب">
-              <Select name="fromAccountId" required defaultValue="">
-                <option value="" disabled>
-                  اختر
-                </option>
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {label(a)}
-                  </option>
-                ))}
-              </Select>
+              <AccountField name="fromAccountId" required options={options} scope="1101,1102" />
             </Field>
             <Field label="إلى حساب">
-              <Select name="toAccountId" required defaultValue="">
-                <option value="" disabled>
-                  اختر
-                </option>
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {label(a)}
-                  </option>
-                ))}
-              </Select>
+              <AccountField name="toAccountId" required options={options} scope="1101,1102" />
             </Field>
             <Field label="المبلغ" hint="بعملة الحساب المحوَّل منه">
               <Input name="amount" inputMode="decimal" dir="ltr" required />

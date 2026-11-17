@@ -14,6 +14,7 @@ import { Badge, Card, EmptyRow, Field, Input, PageHeader, Table, Td } from "@/co
 import { MaintenanceTabs } from "../tabs";
 import { approveDriverRequest, rejectDriverRequest, revertDriverRequest } from "../actions";
 import { ReviewForm } from "./review-form";
+import { toAccountOptions } from "@/lib/lookups";
 
 const BASE = "/maintenance/driver-requests";
 const fmt = (v: number) => v.toLocaleString("en", { maximumFractionDigits: 2 });
@@ -155,7 +156,7 @@ export default async function DriverRequestsPage({ searchParams }: { searchParam
                   kinds={kinds}
                   defaultKind={open.e.driverKind === "tires" ? "tires" : "mechanical"}
                   suppliers={suppliers}
-                  cashes={cashes}
+                  cashes={await toAccountOptions(cashes)}
                   reportedPayer={open.e.reportedPayer}
                 />
                 <details className="mt-4 border-t border-gray-100 pt-3">

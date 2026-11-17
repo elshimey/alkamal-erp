@@ -31,6 +31,10 @@ export interface QuickOption {
   group?: string;
   /** وصف صغير بجانب الخيار */
   hint?: string;
+  /** رقم الحساب: يظهر بجانب الاسم ويُبحث به */
+  code?: string;
+  /** رقم الحساب الأب الذي يظهر بجانب عنوان المجموعة */
+  groupCode?: string;
   fill?: Record<string, string>;
 }
 

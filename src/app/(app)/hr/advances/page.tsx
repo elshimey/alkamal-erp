@@ -8,11 +8,13 @@ import { todayRiyadh } from "@/lib/dates";
 import { parseDocFilter, type DocListParams } from "@/lib/doc-filters";
 import { ADVANCE_REQUEST_STATUS } from "@/data/hr";
 import { ActionForm, SubmitButton } from "@/components/action-form";
-import { Badge, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
+import { Badge, EmptyRow, Field, Input, PageHeader, Table, Td } from "@/components/ui";
 import { RowCheck, SelectAll, SelectionTotal } from "@/components/row-selection";
 import { DocToolbar } from "@/components/doc-toolbar";
 import { approveAdvanceAction, bulkAdvances, rejectAdvanceAction } from "../actions";
 import { fmt, HrTabs, Kpis } from "../ui";
+import { AccountField } from "@/components/account-field";
+import { toAccountOptions } from "@/lib/lookups";
 
 const BASE = "/hr/advances";
 const BULK_FORM = "bulk-advances";
@@ -35,14 +37,7 @@ export default async function AdvanceRequestsPage({ searchParams }: { searchPara
   const isOpen = day >= settings.advanceOpenDay && day <= settings.advanceCloseDay;
 
   const cashSelect = (
-    <Select name="cashAccountId" defaultValue="" className="w-40">
-      <option value="">اعتماد دون صرف</option>
-      {cashes.map((a) => (
-        <option key={a.id} value={a.id}>
-          صرف من {a.nameAr}
-        </option>
-      ))}
-    </Select>
+    <AccountField name="cashAccountId" options={await toAccountOptions(cashes)} placeholder="اعتماد دون صرف (أو اختر الصندوق)" className="w-64" />
   );
 
   return (

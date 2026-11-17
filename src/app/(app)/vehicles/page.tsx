@@ -57,7 +57,7 @@ export default async function VehiclesPage({ searchParams }: { searchParams: Pro
       </PageHeader>
       {rows.length > 0 && canEdit && <p className="mb-2 text-sm text-gray-500">اضغط اللوحة لتعديل بيانات المركبة ووثائقها.</p>}
       {(
-      <Table head={["اللوحة", "النوع", "الماركة والطراز", "السنة", "العداد", "الملكية", "الحالة", "حساب الأصل", "مركز التكلفة", ""]}>
+      <Table head={["اللوحة", "الفئة", "الماركة والطراز", "السنة", "العداد", "الملكية", "الحالة", "حساب الأصل", "مركز التكلفة", ""]}>
         {rows.length === 0 && <EmptyRow cols={10}>لا توجد مركبات بعد</EmptyRow>}
         {rows.map(({ v, typeName, ccCode, accCode, accName }) => (
           <tr key={v.id}>

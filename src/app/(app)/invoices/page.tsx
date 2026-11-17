@@ -33,6 +33,7 @@ import { ListActions } from "@/components/list-actions";
 import { bulkInvoiceOps, invoiceAll, invoiceCustomer, issue, saveInvoicePanel, saveInvoiceSheet, sendToZatca } from "./actions";
 import { ActionsMenu, type MenuItem } from "@/components/actions-menu";
 import { fmt } from "@/lib/format";
+import { toAccountOptions } from "@/lib/lookups";
 
 const BASE = "/invoices";
 const BULK_FORM = "invoice-bulk";
@@ -527,7 +528,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
           title={editing ? `تعديل الفاتورة ${initial.number}` : "فاتورة مبيعات جديدة"}
           initial={initial}
           customers={customers.map((c) => ({ value: String(c.id), label: c.nameAr, vatNumber: c.vat, days: terms.find((t) => t.customerId === c.id)?.days ?? null }))}
-          accounts={[...(domestic ? [domestic] : []), ...revenue.filter((a) => a !== domestic)].map((a) => ({ value: String(a.id), label: `${a.code} ${a.nameAr}` }))}
+          accounts={await toAccountOptions([...(domestic ? [domestic] : []), ...revenue.filter((a) => a !== domestic)]).then((o) => [...o.filter((x) => x.code === domestic?.code), ...o.filter((x) => x.code !== domestic?.code)])}
           costCenters={centers.map((c) => ({ value: String(c.id), label: c.nameAr }))}
           currencies={currencies.map((c) => c.code)}
           routes={tripRoutes}

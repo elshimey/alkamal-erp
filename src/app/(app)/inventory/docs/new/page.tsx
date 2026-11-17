@@ -8,6 +8,7 @@ import { todayRiyadh } from "@/lib/dates";
 import { STOCK_DOC_KINDS, type StockDocKind } from "@/data/inventory";
 import { PageHeader } from "@/components/ui";
 import { StockDocForm } from "./form";
+import { toAccountOptions } from "@/lib/lookups";
 
 export default async function NewStockDocPage({ searchParams }: { searchParams: Promise<{ kind?: string; wh?: string }> }) {
   const user = await requirePermission("inventory", "create");
@@ -31,7 +32,7 @@ export default async function NewStockDocPage({ searchParams }: { searchParams: 
         products={products.filter((p) => p.p.isActive).map((p) => ({ id: p.p.id, label: `${p.p.code} ${p.p.nameAr}`, unit: p.p.unit, avg: p.avgCost }))}
         warehouses={warehouses}
         balances={balances.map((b) => ({ p: Number(b.product_id), w: Number(b.warehouse_id), q: Number(b.qty) }))}
-        accounts={accounts.filter((a) => !a.code.startsWith("1110")).map((a) => ({ id: a.id, label: `${a.code} ${a.nameAr}`, code: a.code }))}
+        accounts={await toAccountOptions(accounts.filter((a) => !a.code.startsWith("1110")))}
         centers={centers}
       />
     </>

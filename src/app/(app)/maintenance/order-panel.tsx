@@ -15,6 +15,7 @@ import { RecordPanel } from "@/components/record-panel";
 import { Input } from "@/components/ui";
 import { OrderProviderFields } from "./order-provider-fields";
 import { saveOrderPanelAction } from "./actions";
+import { toAccountOptions } from "@/lib/lookups";
 
 /** نافذة أمر صيانة جديد: الرأس والبنود معاً، وبعد الحفظ تُفتح معاينته للاعتماد. يُربط بطلب عطل أو خطة دورية إن جاء منهما. */
 export async function OrderPanel({ closeHref, savedHref, vehicle, request, plan, type }: { closeHref: string; savedHref: string; vehicle?: string; request?: string; plan?: string; type?: string }) {
@@ -54,7 +55,7 @@ export async function OrderPanel({ closeHref, savedHref, vehicle, request, plan,
         <PanelField label="نوع الصيانة" required hint="أو أضف نوعاً جديداً من القائمة">
           <FormCombo name="type" options={kinds} create="maintenance_kind" defaultValue={type && kinds.some((k) => k.value === type) ? type : "mechanical"} required placeholder="اختر أو أضف نوعاً…" />
         </PanelField>
-        <OrderProviderFields suppliers={suppliers} cashes={cashes} />
+        <OrderProviderFields suppliers={suppliers} cashes={await toAccountOptions(cashes)} />
       </PanelSection>
       <PanelSection title="البنود" optional open hint="قطع الغيار وشغل اليد، ويمكن إضافتها لاحقاً قبل الاعتماد">
         <LinesEditor

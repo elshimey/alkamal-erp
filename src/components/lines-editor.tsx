@@ -12,6 +12,9 @@ import { ComboBox, useCreatedOptions } from "./combo-box";
 export interface LineOption {
   value: string;
   label: string;
+  code?: string;
+  group?: string;
+  groupCode?: string;
   // قيم تُملأ في السطر عند اختيار هذا الخيار (مثل وصف الصنف وسعره)
   fill?: Record<string, string>;
 }
@@ -117,7 +120,7 @@ export function LinesEditor({
           const col = columns[start + vi];
           if (!col) return;
           const t = v.trim();
-          row[col.key] = col.type === "select" ? (col.options?.find((o) => o.value === t || o.label === t || o.label.includes(t))?.value ?? "") : t;
+          row[col.key] = col.type === "select" ? (col.options?.find((o) => o.value === t || o.code === t || o.label === t || o.label.includes(t))?.value ?? "") : t;
         });
         next[n + gi] = row;
       });
