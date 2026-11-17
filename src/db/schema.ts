@@ -2304,3 +2304,37 @@ export const driverNotifications = pgTable(
   },
   (t) => [index("driver_notifications_driver_idx").on(t.driverId, t.createdAt)],
 );
+
+// ───────────── الإشعارات الفورية (Web Push) وأحداث المكتب ─────────────
+
+// اشتراك جهاز في الإشعارات: متصفح المكتب أو جوال السائق. الجهاز الذي يرفض الإشعار (410) يُحذف اشتراكه.
+export const pushSubscriptions = pgTable(
+  "push_subscriptions",
+  {
+    id: id(),
+    userId: ref("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    app: varchar("app", { length: 10 }).notNull(), // office | driver
+    endpoint: text("endpoint").notNull().unique(),
+    p256dh: text("p256dh").notNull(),
+    auth: text("auth").notNull(),
+    userAgent: text("user_agent"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("push_subscriptions_user_idx").on(t.userId, t.app)],
+);
+
+// أحداث تخص المكتب (أفعال السائق، طلب عطل محوّل للمدير): تظهر في جرس من يملك الصلاحية وتصله فوراً.
+export const officeNotifications = pgTable(
+  "office_notifications",
+  {
+    id: id(),
+    kind: varchar("kind", { length: 30 }).notNull(),
+    text: text("text").notNull(),
+    href: text("href").notNull(),
+    entity: varchar("entity", { length: 40 }).notNull(),
+    action: varchar("action", { length: 20 }).notNull(),
+    driverId: ref("driver_id").references(() => drivers.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("office_notifications_created_idx").on(t.createdAt)],
+);

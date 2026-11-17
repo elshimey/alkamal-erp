@@ -72,6 +72,11 @@ export async function ensurePlatform(sql: Sql, homeName = "الكمال للنق
       at timestamptz not null default now()
     );
     create index if not exists login_failures_idx on platform.login_failures (login, at);
+    -- إعدادات المنصة العامة (مثل مفاتيح الإشعارات الفورية التي تُنشأ تلقائياً مرة واحدة)
+    create table if not exists platform.settings (
+      key text primary key,
+      value text not null
+    );
     create table if not exists platform.access_requests (
       id bigserial primary key,
       schema_name text,

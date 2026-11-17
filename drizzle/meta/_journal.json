@@ -267,6 +267,13 @@
       "when": 1793200000000,
       "tag": "0037_maintenance_alerts",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1793210000000,
+      "tag": "0038_push_notifications",
+      "breakpoints": true
     }
   ]
 }

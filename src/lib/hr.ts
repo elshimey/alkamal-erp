@@ -8,6 +8,7 @@ import { createAdvance, payAdvance } from "@/lib/payroll";
 import { monthRange } from "@/data/payroll";
 import { annualEntitlement, computeEvaluation, inclusiveDays } from "@/data/hr";
 import { notifyDriver } from "@/lib/driver-notify";
+import { driverName, notifyOffice } from "@/lib/office-notify";
 import { cashAccountFor } from "@/lib/banks";
 
 // الموارد البشرية: العُهد، والإنذارات والجزاءات والحوافز، والإجازات والحضور، والتقييم والترقية، ومقدم العمولة.
@@ -907,6 +908,7 @@ export async function requestCommissionAdvance(db: Db, input: { driverId: number
       .insert(s.commissionAdvanceRequests)
       .values({ number, driverId: input.driverId, requestDate: input.today, amount: String(r2(input.amount)), source, notes: input.notes?.trim() || null })
       .returning();
+    await notifyOffice(tx, { kind: "advance_requested", text: `${await driverName(tx, input.driverId)} طلب ${source === "custody" ? "سلفة من العهدة" : "مقدم عمولة"} ${r2(input.amount).toLocaleString("en")} (${number})`, href: "/hr/advances", driverId: input.driverId });
     return row;
   });
 }

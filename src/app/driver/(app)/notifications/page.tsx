@@ -13,6 +13,9 @@ const ICON: Record<string, string> = {
   maint_rejected: "❌",
   advance_approved: "💵",
   advance_rejected: "❌",
+  trip_rejected: "⛔",
+  doc_approved: "📄",
+  doc_rejected: "❌",
 };
 
 export default async function DriverNotifications() {

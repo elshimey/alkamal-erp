@@ -4,7 +4,10 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import { requireUser } from "@/lib/auth";
 import { todayRiyadh } from "@/lib/dates";
+import { headers } from "next/headers";
 import { markAlertsRead, userAlerts, withReadState } from "@/lib/alerts";
+import { lastOfficeEventId } from "@/lib/office-notify";
+import { savePushSubscription, vapidPublicKey, type PushSubscriptionInput } from "@/lib/push";
 
 /** حالة الجرس: التنبيهات بحالة القراءة، غير المقروء أولاً. */
 export async function bellState() {
@@ -24,4 +27,21 @@ export async function markAllRead() {
   const user = await requireUser();
   await markAlertsRead(db, user.id, await userAlerts(db, user, todayRiyadh()));
   revalidatePath("/notifications");
+}
+
+/** نبض الفحص الدوري: رقم آخر حدث فقط، فلا يُعاد حساب الجرس كاملاً كل 15 ثانية. */
+export async function bellPulse() {
+  await requireUser();
+  return lastOfficeEventId(db);
+}
+
+export async function officePushKey() {
+  await requireUser();
+  return vapidPublicKey();
+}
+
+/** يحفظ اشتراك متصفح هذا المستخدم في الإشعارات الفورية. */
+export async function saveOfficePush(sub: PushSubscriptionInput) {
+  const user = await requireUser();
+  await savePushSubscription(db, user.id, "office", sub, (await headers()).get("user-agent"));
 }
