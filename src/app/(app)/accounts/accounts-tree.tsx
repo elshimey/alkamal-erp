@@ -38,8 +38,8 @@ export function AccountsTree({ rows, canCreate }: { rows: TreeAccount[]; canCrea
     for (const a of rows) m.set(a.parentId, [...(m.get(a.parentId) ?? []), a]);
     return m;
   }, [rows]);
-  // تبدأ الشجرة مفتوحة حتى المجموعات (المستوى الثاني)، والحسابات العامة مطوية
-  const [open, setOpen] = useState<Set<number>>(() => new Set(rows.filter((a) => a.level < 2).map((a) => a.id)));
+  // تبدأ الشجرة مطوية بالكامل (الحسابات الرئيسية فقط)، والمستخدم يفتح ما يحتاجه (طلب أحمد 2026-11-18)
+  const [open, setOpen] = useState<Set<number>>(() => new Set());
   const [query, setQuery] = useState("");
 
   const q = norm(query);

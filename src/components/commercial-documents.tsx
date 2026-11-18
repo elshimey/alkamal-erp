@@ -71,7 +71,7 @@ export function PurchaseOrderDocument({ company, doc, template = DEFAULT_TEMPLAT
       ]}
       signatures={["أعدّه", "اعتمده", "توقيع المورد وختمه"]}
     >
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 @xl:grid-cols-2">
         <Facts
           rows={[
             ["المورد", doc.supplier.nameAr],
@@ -109,7 +109,7 @@ export function QuotationDocument({ company, doc, template = DEFAULT_TEMPLATE, c
       ]}
       signatures={["المفوض بالتوقيع", "موافقة العميل"]}
     >
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 @xl:grid-cols-2">
         <Facts
           rows={[
             ["السادة", doc.customer.nameAr],
