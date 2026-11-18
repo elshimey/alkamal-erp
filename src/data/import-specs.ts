@@ -52,14 +52,14 @@ export const IMPORT_SPECS: Record<string, ImportSpec> = {
       { key: "quantity", label: "الكمية", en: "Item qty", required: true, rule: "رقم أكبر من صفر", aliases: ["كمية المنتج"], width: 9 },
       { key: "unitPrice", label: "السعر", en: "Item Price", required: true, rule: "سعر الوحدة بعملة الفاتورة", aliases: ["سعر المنتج"], width: 12 },
       { key: "account", label: "حساب البند", en: "Item Account", required: true, rule: "رقم أو اسم حساب إيراد في شجرة الحسابات", aliases: ["حساب المنتج", "الحساب"], width: 24 },
-      { key: "taxCode", label: "معدل الضريبة", en: "Item tax rate name", rule: "15% أو صفر أو معفى، فارغ = 15%", aliases: ["إسم معدل الضريبة للمنتج", "اسم معدل الضريبة للمنتج", "الضريبة"], width: 14 },
+      { key: "taxCode", label: "معدل الضريبة", en: "Item tax rate name", rule: "اسم نوع الضريبة كما في وافق (انظر «القوائم»)، أو 15% أو صفر أو معفى؛ فارغ = 15%", aliases: ["إسم معدل الضريبة للمنتج", "اسم معدل الضريبة للمنتج", "الضريبة"], width: 14 },
       { key: "costCenter", label: "مركز التكلفة أو المركبة", en: "Item Cost Center", rule: "رقم لوحة المركبة أو رمز/اسم مركز التكلفة", aliases: ["مركز تكلفة المنتج", "مركز التكلفة", "المركبة"], width: 18 },
       { key: "discount", label: "الخصم %", en: "Item discount (%)", rule: "نسبة من 0 إلى 100", aliases: ["الخصم على المنتج"], width: 9 },
     ],
     samples: [
-      { customer: "شركة مثال للتجارة", reference: "INV-001", currency: "SAR", invoiceDate: "2026-10-01", dueDate: "2026-10-31", taxInclusive: "خالٍ من الضريبة", description: "نقل حاوية الرياض ← الدمام", quantity: "2", unitPrice: "1500", account: "4101", taxCode: "15%", costCenter: "", discount: "" },
-      { customer: "شركة مثال للتجارة", reference: "INV-002", currency: "SAR", invoiceDate: "2026-10-05", dueDate: "", taxInclusive: "شامل الضريبة", description: "نقل دولي إلى الكويت", quantity: "1", unitPrice: "5750", account: "إيراد النقل الدولي", taxCode: "صفر", costCenter: "", discount: "" },
-      { customer: "شركة مثال للتجارة", reference: "INV-002", currency: "SAR", invoiceDate: "2026-10-05", dueDate: "", taxInclusive: "شامل الضريبة", description: "رسوم تخليص", quantity: "1", unitPrice: "300", account: "4103", taxCode: "15%", costCenter: "", discount: "5" },
+      { customer: "شركة مثال للتجارة", reference: "INV-001", currency: "SAR", invoiceDate: "2026-10-01", dueDate: "2026-10-31", taxInclusive: "خالٍ من الضريبة", description: "نقل حاوية الرياض ← الدمام", quantity: "2", unitPrice: "1500", account: "4101", taxCode: "ضريبة القيمة المضافة على الإيرادات", costCenter: "", discount: "" },
+      { customer: "شركة مثال للتجارة", reference: "INV-002", currency: "SAR", invoiceDate: "2026-10-05", dueDate: "", taxInclusive: "شامل الضريبة", description: "نقل دولي إلى الكويت", quantity: "1", unitPrice: "5750", account: "إيراد النقل الدولي", taxCode: "توريدات داخل المملكة خاضعة للضريبة بنسبة صفر", costCenter: "", discount: "" },
+      { customer: "شركة مثال للتجارة", reference: "INV-002", currency: "SAR", invoiceDate: "2026-10-05", dueDate: "", taxInclusive: "شامل الضريبة", description: "رسوم تخليص", quantity: "1", unitPrice: "300", account: "4103", taxCode: "ضريبة القيمة المضافة على الإيرادات", costCenter: "", discount: "5" },
     ],
   },
 
@@ -83,12 +83,12 @@ export const IMPORT_SPECS: Record<string, ImportSpec> = {
       { key: "description", label: "وصف البند", en: "Item description", required: true, aliases: ["وصف المنتج", "الوصف", "البند"], width: 30 },
       { key: "quantity", label: "الكمية", en: "Item qty", required: true, rule: "رقم أكبر من صفر", aliases: ["كمية المنتج"], width: 9 },
       { key: "unitPrice", label: "السعر", en: "Item Price", required: true, rule: "سعر الوحدة قبل الضريبة", aliases: ["سعر المنتج"], width: 12 },
-      { key: "taxCode", label: "معدل الضريبة", en: "Item tax rate", rule: "15% أو صفر، فارغ = حسب نوع الشحن", aliases: ["الضريبة", "اسم معدل الضريبة للمنتج"], width: 14 },
+      { key: "taxCode", label: "معدل الضريبة", en: "Item tax rate", rule: "اسم نوع الضريبة كما في وافق أو 15% أو صفر؛ فارغ = حسب نوع الشحن", aliases: ["الضريبة", "اسم معدل الضريبة للمنتج"], width: 14 },
     ],
     samples: [
       { customer: "شركة مثال للتجارة", reference: "Q-001", date: "2026-10-01", validUntil: "2026-10-15", shippingType: "دولي", currency: "SAR", notes: "", terms: "", description: "نقل الدمام ← الكويت شاحنة سطحة", quantity: "2", unitPrice: "4500", taxCode: "" },
       { customer: "شركة مثال للتجارة", reference: "Q-002", date: "2026-10-05", validUntil: "", shippingType: "داخلي", currency: "SAR", notes: "", terms: "", description: "نقل الرياض ← جدة", quantity: "1", unitPrice: "2200", taxCode: "" },
-      { customer: "شركة مثال للتجارة", reference: "Q-002", date: "2026-10-05", validUntil: "", shippingType: "داخلي", currency: "SAR", notes: "", terms: "", description: "تحميل وتنزيل", quantity: "1", unitPrice: "300", taxCode: "15%" },
+      { customer: "شركة مثال للتجارة", reference: "Q-002", date: "2026-10-05", validUntil: "", shippingType: "داخلي", currency: "SAR", notes: "", terms: "", description: "تحميل وتنزيل", quantity: "1", unitPrice: "300", taxCode: "ضريبة القيمة المضافة على الإيرادات" },
     ],
   },
 
@@ -297,7 +297,7 @@ export const IMPORT_SPECS: Record<string, ImportSpec> = {
       { key: "description", label: "الوصف", en: "Description", required: true, aliases: ["وصف البند", "description"], width: 26 },
       { key: "quantity", label: "الكمية", en: "Quantity", rule: "فارغ = 1", aliases: ["qty"], width: 8 },
       { key: "unitPrice", label: "سعر الوحدة", en: "Unit price", required: true, rule: "قبل الضريبة", aliases: ["السعر", "price"], width: 11 },
-      { key: "vat", label: "الضريبة", en: "VAT", rule: "15% أو بدون؛ فارغ = 15%", aliases: ["ضريبة"], width: 9 },
+      { key: "vat", label: "الضريبة", en: "VAT", rule: "15% أو بدون، أو اسم ضريبة المشتريات كما في وافق؛ فارغ = 15%", aliases: ["ضريبة"], width: 9 },
       { key: "notes", label: "ملاحظات", en: "Notes", width: 18 },
     ],
     samples: [

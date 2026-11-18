@@ -62,9 +62,10 @@ function toNumber(raw: string, label: string, opts: { min?: number; max?: number
   return n;
 }
 
-/** يقبل 2026-10-05 أو 05/10/2026 أو 5-10-2026. */
+/** يقبل 2026-10-05 أو 05/10/2026 أو 5-10-2026، أو رقم التاريخ في Excel (خلية تاريخ بتنسيق «عام» مثل 46300). */
 export function toDate(raw: string, label: string) {
   const t = raw.trim().replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
+  if (/^\d{5}$/.test(t) && Number(t) > 20000 && Number(t) < 80000) return new Date(Date.UTC(1899, 11, 30) + Number(t) * 86400000).toISOString().slice(0, 10);
   const dmy = t.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/);
   const ymd = t.match(/^(\d{4})[/.-](\d{1,2})[/.-](\d{1,2})/);
   const iso = dmy ? `${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}` : ymd ? `${ymd[1]}-${ymd[2].padStart(2, "0")}-${ymd[3].padStart(2, "0")}` : "";
@@ -104,8 +105,8 @@ class TaxIndex<T> extends Index<T> {
 }
 
 async function lookups(tx: Tx) {
-  const [accounts, customers, parties, currencies, taxCodes, costCenters, vehicles, vehicleTypes] = await Promise.all([
-    tx.select().from(s.accounts).where(and(eq(s.accounts.isPostable, true), eq(s.accounts.isActive, true))),
+  const [allAccounts, customers, parties, currencies, taxCodes, costCenters, vehicles, vehicleTypes] = await Promise.all([
+    tx.select().from(s.accounts),
     tx.select({ id: s.parties.id, nameAr: s.parties.nameAr, nameEn: s.parties.nameEn }).from(s.parties).innerJoin(s.partyRoles, and(eq(s.partyRoles.partyId, s.parties.id), eq(s.partyRoles.role, "customer"))),
     tx.select({ id: s.parties.id, nameAr: s.parties.nameAr }).from(s.parties),
     tx.select().from(s.currencies),
@@ -114,8 +115,11 @@ async function lookups(tx: Tx) {
     tx.select({ id: s.vehicles.id, plate: s.vehicles.plate, chassis: s.vehicles.chassis, costCenterId: s.vehicles.costCenterId }).from(s.vehicles),
     tx.select().from(s.vehicleTypes),
   ]);
+  const accounts = allAccounts.filter((a) => a.isPostable && a.isActive);
   const idx = {
     accounts: new Index<(typeof accounts)[number]>(),
+    // الحسابات الرئيسية والموقوفة: لرسالة أوضح من «غير موجود»
+    otherAccounts: new Index<(typeof accounts)[number]>(),
     customers: new Index<number>(),
     parties: new Index<number>(),
     currencies: new Index<string>(),
@@ -129,6 +133,7 @@ async function lookups(tx: Tx) {
     vehicles: new Index<number>(),
   };
   for (const a of accounts) idx.accounts.add([a.code, a.nameAr, a.nameEn, `${a.code} ${a.nameAr}`], a);
+  for (const a of allAccounts) if (!a.isPostable || !a.isActive) idx.otherAccounts.add([a.code, a.nameAr, a.nameEn, `${a.code} ${a.nameAr}`], a);
   for (const c of customers) idx.customers.add([c.nameAr, c.nameEn], c.id);
   for (const p of parties) idx.parties.add([p.nameAr], p.id);
   for (const c of currencies) idx.currencies.add([c.code, c.nameAr], c.code);
@@ -136,6 +141,8 @@ async function lookups(tx: Tx) {
   const outTax = taxCodes.filter((t) => t.side !== "purchases");
   const byCode = (code: string) => outTax.find((t) => t.code === code);
   for (const t of outTax) idx.taxCodes.add([t.code, t.nameAr, normalizeTaxName(t.nameAr)], t);
+  const purchaseTax = new TaxIndex<(typeof taxCodes)[number]>();
+  for (const t of taxCodes.filter((x) => x.side === "purchases")) purchaseTax.add([t.code, t.nameAr, normalizeTaxName(t.nameAr)], t);
   const vat = byCode("VAT15-OUT");
   const zero = byCode("ZERO");
   const exempt = byCode("EXEMPT");
@@ -146,7 +153,8 @@ async function lookups(tx: Tx) {
   for (const x of vehicles) idx.costCenters.add([x.plate], x.costCenterId);
   for (const x of vehicles) idx.vehicles.add([x.plate], x.id);
   for (const t of vehicleTypes) idx.vehicleTypes.add([t.nameAr], t.id);
-  return { idx, defaultTax: vat ?? null, accounts, customers, currencies, outTax, costCenters, vehicles, vehicleTypes };
+  const purchaseTaxNames = taxCodes.filter((x) => x.side === "purchases").map((x) => x.nameAr);
+  return { idx, purchaseTax, purchaseTaxNames, defaultTax: vat ?? null, accounts, customers, currencies, outTax, costCenters, vehicles, vehicleTypes };
 }
 
 type Ctx = Awaited<ReturnType<typeof lookups>> & { post?: boolean };
@@ -155,6 +163,17 @@ function resolve<T>(found: T | undefined | null, raw: string, kind: Missing["kin
   if (found === null) throw new Error(`${label} «${raw}» يطابق أكثر من سجل؛ استخدم الرقم أو الرمز`);
   if (found === undefined) throw new MissingRef({ kind, value: raw }, `${label} «${raw}» غير موجود في النظام`);
   return found;
+}
+
+/** الحساب بالرقم أو الاسم؛ الحساب الرئيسي أو الموقوف يُرفض برسالة تقول السبب. */
+function findAccount(ctx: Ctx, raw: string, label: string) {
+  const found = ctx.idx.accounts.find(raw);
+  if (found === undefined) {
+    const other = ctx.idx.otherAccounts.find(raw);
+    if (other && !other.isPostable) throw new Error(`${label} «${raw}» حساب رئيسي لا يُقيد عليه؛ اختر حساباً فرعياً تحته (مثل ${ctx.accounts.find((a) => a.code.startsWith(other.code))?.code ?? `${other.code}01`})`);
+    if (other) throw new Error(`${label} «${raw}» موقوف؛ فعّله من شجرة الحسابات أو اختر غيره`);
+  }
+  return resolve(found, raw, "account", label);
 }
 
 // ───────────── فواتير البيع ─────────────
@@ -184,7 +203,7 @@ async function importInvoice(tx: Tx, rows: ImportRow[], ctx: Ctx, userId?: numbe
     const unitPrice = toNumber(required(r, "unitPrice", `السعر${at}`), `السعر${at}`, { min: 0 });
     const discountPercent = v(r, "discount") ? toNumber(v(r, "discount"), `الخصم${at}`, { min: 0, max: 100 }) : 0;
     const accRaw = required(r, "account", `حساب البند${at}`);
-    const account = resolve(ctx.idx.accounts.find(accRaw), accRaw, "account", `الحساب${at}`);
+    const account = findAccount(ctx, accRaw, `الحساب${at}`);
     if (account.type !== "revenue") throw new Error(`الحساب ${account.code} ${account.nameAr} ليس حساب إيراد${at}`);
     const taxRaw = v(r, "taxCode");
     const tax = taxRaw ? resolve(ctx.idx.taxCodes.find(taxRaw), taxRaw, "taxCode", `معدل الضريبة${at}`) : ctx.defaultTax;
@@ -258,7 +277,7 @@ async function waybillLookups(tx: Tx) {
   for (const c of carriers) carrier.add([c.nameAr], c.id);
   // مكونات السعر بأسمائها (الأساسية والمضافة)، والقيمة «الأساسي~رقم»
   const components = new Index<string>();
-  for (const o of await customListOptions(tx, "price_component")) components.add([o.label, o.value.includes("~") ? null : o.value], o.value);
+  for (const o of await customListOptions(tx, "price_component")) components.add([o.label, o.label.replace(/\s*\(.*\)\s*$/, ""), o.value.includes("~") ? null : o.value], o.value);
   return { route, driver, carrier, components };
 }
 
@@ -322,10 +341,10 @@ async function importVehicle(tx: Tx, [r]: ImportRow[], ctx: Ctx) {
   if (ctx.idx.plates.has(plateKey(plate))) throw new Error(`اللوحة ${plate} مسجلة مسبقاً`);
   if (chassis && ctx.idx.chassis.has(normText(chassis))) throw new Error(`رقم الشاسيه ${chassis} مسجل مسبقاً`);
   const accRaw = required(r, "assetAccount", "حساب الأصل");
-  const account = resolve(ctx.idx.accounts.find(accRaw), accRaw, "account", "حساب الأصل");
+  const account = findAccount(ctx, accRaw, "حساب الأصل");
   if (account.type !== "asset") throw new Error(`الحساب ${account.code} ${account.nameAr} ليس حساب أصل`);
   const typeRaw = v(r, "vehicleType");
-  const vehicleTypeId = typeRaw ? resolve(ctx.idx.vehicleTypes.find(typeRaw), typeRaw, "vehicleType", "نوع المركبة") : null;
+  const vehicleTypeId = typeRaw ? resolve(ctx.idx.vehicleTypes.find(typeRaw), typeRaw, "vehicleType", "فئة المركبة") : null;
   const year = v(r, "year") ? toNumber(v(r, "year"), "سنة الصنع", { min: 1980, max: 2100 }) : null;
   const own = normText(v(r, "ownership"));
   if (own && !/^(مملوك|مملوكه|owned|مستاجر|مستاجره|leased|ايجار)$/.test(own)) throw new Error(`الملكية «${v(r, "ownership")}»: اكتب مملوكة أو مستأجرة`);
@@ -391,7 +410,7 @@ async function importReceipt(tx: Tx, [r]: ImportRow[], ctx: Ctx, userId?: number
   const receiptDate = toDate(required(r, "receiptDate", "التاريخ"), "التاريخ");
   const amount = toNumber(required(r, "amount", "المبلغ"), "المبلغ", { positive: true });
   const cashRaw = required(r, "cashAccount", "تم الدفع من خلال");
-  const cash = resolve(ctx.idx.accounts.find(cashRaw), cashRaw, "account", "الحساب");
+  const cash = findAccount(ctx, cashRaw, "تم الدفع من خلال");
   if (!/^110[12]/.test(cash.code)) throw new Error(`الحساب ${cash.code} ${cash.nameAr} ليس صندوقاً أو بنكاً`);
   const curRaw = v(r, "currency") || "SAR";
   const currencyCode = resolve(ctx.idx.currencies.find(curRaw), curRaw, "currency", "العملة");
@@ -400,6 +419,11 @@ async function importReceipt(tx: Tx, [r]: ImportRow[], ctx: Ctx, userId?: number
   const methodRaw = normText(v(r, "method"));
   const method = methodRaw ? METHODS.find(([re]) => re.test(methodRaw))?.[1] : "transfer";
   if (!method) throw new Error(`طريقة الدفع «${v(r, "method")}»: نقد أو تحويل أو شيك أو بطاقة`);
+  const reference = v(r, "reference");
+  if (reference) {
+    const [dup] = await tx.select({ number: s.receipts.number }).from(s.receipts).where(eq(s.receipts.reference, reference)).limit(1);
+    if (dup) throw new Error(`المرجع ${reference} مستورد مسبقاً (${dup.number})`);
+  }
   let invoiceId: number | null = null;
   const invRaw = v(r, "invoice");
   if (invRaw) {
@@ -421,7 +445,7 @@ async function importReceipt(tx: Tx, [r]: ImportRow[], ctx: Ctx, userId?: number
     method,
     cashAccountId: cash.id,
     invoiceId,
-    reference: v(r, "reference") || null,
+    reference: reference || null,
     notes: v(r, "notes") || null,
     post: ctx.post,
     userId,
@@ -439,10 +463,11 @@ async function importJournal(tx: Tx, rows: ImportRow[], ctx: Ctx, userId?: numbe
   const [dup] = await tx.select({ number: s.journalEntries.number }).from(s.journalEntries).where(eq(s.journalEntries.reference, reference)).limit(1);
   if (dup) throw new Error(`القيد ${reference} مستورد مسبقاً (${dup.number})`);
   const lines = rows.map((r) => {
-    const accRaw = required(r, "account", "الحساب");
-    const account = resolve(ctx.idx.accounts.find(accRaw), accRaw, "account", "الحساب");
-    const debit = v(r, "debit") ? toNumber(v(r, "debit"), "مدين", { min: 0 }) : 0;
-    const credit = v(r, "credit") ? toNumber(v(r, "credit"), "دائن", { min: 0 }) : 0;
+    const at = ` (الصف ${r.row})`;
+    const accRaw = required(r, "account", `الحساب${at}`);
+    const account = findAccount(ctx, accRaw, `الحساب${at}`);
+    const debit = v(r, "debit") ? toNumber(v(r, "debit"), `مدين${at}`, { min: 0 }) : 0;
+    const credit = v(r, "credit") ? toNumber(v(r, "credit"), `دائن${at}`, { min: 0 }) : 0;
     const ccRaw = v(r, "costCenter");
     const partyRaw = v(r, "party");
     return {
@@ -450,8 +475,8 @@ async function importJournal(tx: Tx, rows: ImportRow[], ctx: Ctx, userId?: numbe
       description: v(r, "lineDescription") || null,
       debit,
       credit,
-      costCenterId: ccRaw ? resolve(ctx.idx.costCenters.find(ccRaw), ccRaw, "costCenter", "مركز التكلفة") : null,
-      partyId: partyRaw ? resolve(ctx.idx.parties.find(partyRaw), partyRaw, "customer", "الجهة") : null,
+      costCenterId: ccRaw ? resolve(ctx.idx.costCenters.find(ccRaw), ccRaw, "costCenter", `مركز التكلفة${at}`) : null,
+      partyId: partyRaw ? resolve(ctx.idx.parties.find(partyRaw), partyRaw, "customer", `الجهة${at}`) : null,
     };
   });
   const description = rows.map((r) => v(r, "description")).find(Boolean) || `قيد مستورد ${reference}`;
@@ -528,7 +553,7 @@ async function importMaintenanceOrder(tx: Tx, rows: ImportRow[], ctx: Ctx, userI
   if (workshop && found == null) throw new Error(found === null ? `الورشة «${workshop}» تطابق أكثر من جهة` : `الورشة «${workshop}» غير موجودة؛ أضفها من شاشة الموردين أولاً`);
   const supplierId = found ?? null;
   const cashRaw = v(r, "cashAccount");
-  const cash = cashRaw ? resolve(ctx.idx.accounts.find(cashRaw), cashRaw, "account", "الصندوق") : null;
+  const cash = cashRaw ? findAccount(ctx, cashRaw, "الصندوق") : null;
   const odometer = v(r, "odometer") ? toNumber(v(r, "odometer"), "قراءة العداد", { min: 0 }) : null;
   const order = await createMaintenanceOrder(tx, {
     vehicleId,
@@ -546,17 +571,31 @@ async function importMaintenanceOrder(tx: Tx, rows: ImportRow[], ctx: Ctx, userI
     tx,
     order.id,
     rows.map((x) => {
-      const vat = normText(v(x, "vat"));
+      const vat = purchaseVat(ctx, v(x, "vat"));
       return {
         kind: /شغل|يد|labor|عمل/.test(normText(v(x, "lineKind"))) ? ("labor" as const) : ("part" as const),
         description: required(x, "description", "الوصف"),
         quantity: v(x, "quantity") ? toNumber(v(x, "quantity"), "الكمية", { positive: true }) : 1,
         unitPrice: toNumber(required(x, "unitPrice", "سعر الوحدة"), "سعر الوحدة", { min: 0 }),
-        vatRate: !vat || /15/.test(vat) ? 15 : /^0|بدون|صفر|معفي|no/.test(vat) ? 0 : 15,
+        vatRate: vat,
       };
     }),
   );
   return order.number;
+}
+
+const badPriority = (raw: string): never => {
+  throw new Error(`الأولوية «${raw}»: اكتب منخفضة أو عادية أو عاجلة`);
+};
+
+/** نسبة ضريبة المشتريات: فارغ = 15%، أو 15% / بدون، أو اسم ضريبة مشتريات كما في وافق. */
+function purchaseVat(ctx: Ctx, raw: string) {
+  const t = normText(raw);
+  if (!t || /^(15|15 ?%|vat|خاضع)$/.test(t.replace(/\s/g, ""))) return 15;
+  if (/^(0|بدون|صفر|معفي|معفاه|لا|no|none)$/.test(t)) return 0;
+  const tax = ctx.purchaseTax.find(raw);
+  if (tax) return Number(tax.rate);
+  throw new Error(`الضريبة «${raw}» غير معروفة؛ اكتب 15% أو بدون، أو اسم ضريبة مشتريات كما في وافق`);
 }
 
 async function importBreakdown(tx: Tx, [r]: ImportRow[], ctx: Ctx, userId?: number) {
@@ -566,7 +605,7 @@ async function importBreakdown(tx: Tx, [r]: ImportRow[], ctx: Ctx, userId?: numb
     vehicleId: resolve(ctx.idx.vehicles.find(plate), plate, "costCenter", "المركبة"),
     reportDate: toDate(required(r, "reportDate", "التاريخ"), "التاريخ"),
     description: required(r, "description", "وصف العطل"),
-    priority: /عاجل|urgent/.test(p) ? "urgent" : /منخفض|low/.test(p) ? "low" : "normal",
+    priority: /عاجل|urgent/.test(p) ? "urgent" : /منخفض|low/.test(p) ? "low" : !p || /عادي|normal/.test(p) ? "normal" : badPriority(v(r, "priority")),
     estimatedCost: v(r, "estimatedCost") ? toNumber(v(r, "estimatedCost"), "التكلفة التقديرية", { min: 0 }) : null,
     userId,
   });
@@ -613,6 +652,48 @@ function groupRows(spec: ImportSpec, rows: ImportRow[]) {
   return [...groups.values(), ...loose];
 }
 
+const DATE_KEYS = new Set(["invoiceDate", "dueDate", "date", "validUntil", "receiptDate", "entryDate", "violationDate", "orderDate", "reportDate", "lastDone"]);
+const NUMBER_KEYS = new Set(["quantity", "unitPrice", "discount", "amount", "carrierCost", "comp1Qty", "comp1Price", "comp2Qty", "comp2Price", "weight", "year", "odometer", "debit", "credit", "purchasePrice", "salePrice", "reorderLevel", "openingQty", "estimatedCost", "intervalDays"]);
+
+/**
+ * فحص أولي لكل خانات السجل قبل حفظه، فتظهر كل أخطاء الصف معاً (لا الأول فقط) كما في وافق:
+ * المطلوب الفارغ، والرقم أو التاريخ غير الصحيح. في السجل متعدد السطور تُفحص البيانات الرئيسية في سطره الأول.
+ */
+function precheck(spec: ImportSpec, group: ImportRow[]): ImportIssue[] {
+  const issues: ImportIssue[] = [];
+  group.forEach((r, i) => {
+    for (const f of spec.fields) {
+      const raw = v(r, f.key);
+      let message = "";
+      if (!raw) {
+        if (f.required && (i === 0 || !spec.groupBy)) message = `${f.label} مطلوب`;
+      } else {
+        try {
+          if (DATE_KEYS.has(f.key)) toDate(raw, f.label);
+          else if (NUMBER_KEYS.has(f.key)) toNumber(raw, f.label);
+        } catch (err) {
+          message = errorMessage(err);
+        }
+      }
+      if (message) issues.push({ rows: [r.row], message, field: f.key });
+    }
+  });
+  return issues;
+}
+
+/** العمود المقصود في رسالة الخطأ (أطول اسم حقل يرد فيها)، ليُعرض بجانب رقم الصف كما في وافق. */
+export function fieldOf(spec: ImportSpec, message: string) {
+  const m = ` ${normText(message)} `;
+  let best: { key: string; len: number } | undefined;
+  for (const f of spec.fields) {
+    for (const name of [f.label, ...(f.aliases ?? [])]) {
+      const n = normText(name);
+      if (n.length >= 3 && m.includes(` ${n} `) && (!best || n.length > best.len)) best = { key: f.key, len: n.length };
+    }
+  }
+  return best?.key;
+}
+
 export async function runImport(db: Db, spec: ImportSpec, rows: ImportRow[], opts: { dryRun: boolean; userId?: number; post?: boolean }): Promise<ImportReport> {
   const importer = IMPORTERS[spec.entity];
   if (!importer) return { dryRun: opts.dryRun, total: 0, ok: 0, issues: [], error: "هذا البند لا يدعم الاستيراد" };
@@ -623,14 +704,21 @@ export async function runImport(db: Db, spec: ImportSpec, rows: ImportRow[], opt
     await db.transaction(async (tx) => {
       const ctx: Ctx = { ...(await lookups(tx)), post: opts.post };
       for (const group of groups) {
+        const pre = precheck(spec, group);
+        if (pre.length) {
+          report.issues.push(...pre);
+          continue;
+        }
         try {
           const label = await tx.transaction((sp) => importer(sp, group, ctx, opts.userId));
           report.ok++;
           report.created!.push(label);
         } catch (err) {
+          const message = errorMessage(err);
           report.issues.push({
             rows: group.map((r) => r.row),
-            message: errorMessage(err),
+            message,
+            field: fieldOf(spec, message),
             missing: err instanceof MissingRef ? err.missing : undefined,
           });
         }
@@ -666,7 +754,7 @@ export async function templateLists(db: Db, spec: ImportSpec): Promise<TemplateL
       { title: "العملاء", values: ctx.customers.map((c) => c.nameAr).sort(), field: "customer" },
       { title: "نوع الشحن", values: ["دولي", "داخلي"], field: "shippingType" },
       { ...currencies, field: "currency" },
-      { title: "معدلات الضريبة", values: ["15%", "صفر"], field: "taxCode" },
+      { title: "أنواع الضريبة (كما في وافق)", values: ctx.outTax.map((t) => t.nameAr), field: "taxCode" },
     ];
   }
   if (spec.entity === "waybills") {
@@ -740,7 +828,7 @@ export async function templateLists(db: Db, spec: ImportSpec): Promise<TemplateL
         { title: "الورش والموردون", values: [...new Set(workshops.map((w) => w.n))].sort(), field: "workshop" },
         { title: "الصناديق (الرقم)", values: ctx.accounts.filter((a) => /^1101/.test(a.code)).map((a) => a.code).sort(), field: "cashAccount" },
         { title: "نوع البند", values: ["قطعة غيار", "شغل يد"], field: "lineKind" },
-        { title: "الضريبة", values: ["15%", "بدون"], field: "vat" },
+        { title: "الضريبة", values: ["15%", "بدون", ...ctx.purchaseTaxNames], field: "vat" },
       );
     }
     if (spec.entity === "breakdown-requests") lists.push({ title: "الأولوية", values: ["منخفضة", "عادية", "عاجلة"], field: "priority" });

@@ -1867,7 +1867,7 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
 
       report = await runImport(db, spec, rows, { dryRun: true });
       expect(report.ok).toBe(2);
-      expect(report.issues).toEqual([{ rows: [8], message: "الحساب «9999» غير موجود في النظام", missing: { kind: "account", value: "9999" } }]);
+      expect(report.issues).toEqual([{ rows: [8], message: "الحساب «9999» غير موجود في النظام", field: "account", missing: { kind: "account", value: "9999" } }]);
       // التحقق لا يكتب شيئاً
       expect(await db.select().from(s.salesInvoices)).toHaveLength(before.length);
 
@@ -1898,6 +1898,37 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(jl.find((l) => l.accountId === acc["4101"])).toMatchObject({ costCenterId: vehicleCc });
       expect(Number(jl.find((l) => l.accountId === acc["4101"])!.credit)).toBe(1000);
       expect(jl.reduce((t, l) => t + Number(l.debit), 0)).toBe(1250);
+    });
+
+    it("تجربة الخطوة 7: كل أخطاء الصف معاً مع العمود، والحساب الرئيسي، وعدم تكرار السندات، وضريبة الصيانة", async () => {
+      // صف واحد بثلاثة أخطاء تظهر معاً، كل خطأ بعموده
+      let report = await runImport(db, IMPORT_SPECS["sales-invoices"], rowsOf([line({ reference: "S7-1", invoiceDate: "", description: "", quantity: "اثنين" })]), { dryRun: true });
+      expect(report.issues.map((i) => [i.field, i.message])).toEqual([
+        ["invoiceDate", "التاريخ مطلوب"],
+        ["description", "وصف البند مطلوب"],
+        ["quantity", "الكمية: «اثنين» ليس رقماً"],
+      ]);
+      expect([report.total, report.ok]).toEqual([1, 0]);
+      // الحساب الرئيسي برسالة واضحة، ورقم التاريخ في Excel يُقبل
+      report = await runImport(db, IMPORT_SPECS["sales-invoices"], rowsOf([line({ reference: "S7-2", account: "41" }), line({ reference: "S7-3", invoiceDate: "46300" })]), { dryRun: true });
+      expect(report.issues).toHaveLength(1);
+      expect(report.issues[0]).toMatchObject({ field: "account", message: expect.stringContaining("حساب رئيسي") });
+      expect(report.ok).toBe(1);
+      // سند القبض بنفس المرجع لا يُستورد مرتين
+      const rc = (o: Record<string, string>) => ({ customer: "مؤسسة الاستيراد", receiptDate: `${YEAR}-11-05`, amount: "10", cashAccount: "110101", kind: "دفعة مقدمة", ...o });
+      expect((await runImport(db, IMPORT_SPECS.receipts, rowsOf([rc({ reference: "S7-R1" })]), { dryRun: false })).ok).toBe(1);
+      report = await runImport(db, IMPORT_SPECS.receipts, rowsOf([rc({ reference: "S7-R1" })]), { dryRun: true });
+      expect(report.issues[0]).toMatchObject({ field: "reference", message: expect.stringContaining("مستورد مسبقاً") });
+      // ضريبة أمر الصيانة: اسم وافق المعفى = صفر، والقيمة الغريبة تُرفض بدل 15% صامتة
+      const mo = (o: Record<string, string>) => ({ ref: "1", orderDate: `${YEAR}-11-05`, vehicle: "أ ب ج 1234", description: "قطعة", unitPrice: "100", ...o });
+      report = await runImport(db, IMPORT_SPECS["maintenance-orders"], rowsOf([mo({ ref: "S7-M1", vat: "مشتريات معفاة من الضريبة (0.00%)" }), mo({ ref: "S7-M2", vat: "س" })]), { dryRun: false });
+      expect(report.ok).toBe(1);
+      expect(report.issues[0]).toMatchObject({ field: "vat" });
+      const [m1] = await db.select().from(s.maintenanceLines).orderBy(desc(s.maintenanceLines.id)).limit(1);
+      expect(Number(m1.vatRate)).toBe(0);
+      // الأولوية غير المعروفة تُرفض
+      report = await runImport(db, IMPORT_SPECS["breakdown-requests"], rowsOf([{ reportDate: `${YEAR}-11-05`, vehicle: "أ ب ج 1234", description: "عطل", priority: "قصوى" }]), { dryRun: true });
+      expect(report.issues[0]).toMatchObject({ field: "priority" });
     });
 
     it("المركبات: حساب الأصل إلزامي ويجب أن يكون أصلاً، واللوحة لا تتكرر", async () => {
