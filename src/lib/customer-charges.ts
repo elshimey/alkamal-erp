@@ -142,9 +142,11 @@ export async function unbilledCharges(db: Db | Tx) {
     .select({
       id: s.waybillExpenses.id,
       waybillId: s.waybills.id,
-      waybill: s.waybills.number,
-      waybillDate: s.waybills.waybillDate,
+      // مصروف الفاتورة المباشرة دون شحنة: رقم الفاتورة وتاريخها مكان الشحنة
+      waybill: sql<string>`coalesce(${s.waybills.number}, ${s.salesInvoices.number})`,
+      waybillDate: sql<string>`coalesce(${s.waybills.waybillDate}, ${s.salesInvoices.invoiceDate})`,
       status: s.waybills.status,
+      invoiceId: s.waybillExpenses.invoiceId,
       customer: s.parties.nameAr,
       type: s.chargeTypes.nameAr,
       note: s.waybillExpenses.note,
@@ -155,8 +157,9 @@ export async function unbilledCharges(db: Db | Tx) {
       draftInvoice: sql<string | null>`(select i.number from sales_invoice_lines l join sales_invoices i on i.id = l.invoice_id where l.waybill_expense_id = ${s.waybillExpenses.id})`,
     })
     .from(s.waybillExpenses)
-    .innerJoin(s.waybills, eq(s.waybills.id, s.waybillExpenses.waybillId))
-    .innerJoin(s.parties, eq(s.parties.id, s.waybills.customerId))
+    .leftJoin(s.waybills, eq(s.waybills.id, s.waybillExpenses.waybillId))
+    .leftJoin(s.salesInvoices, eq(s.salesInvoices.id, s.waybillExpenses.invoiceId))
+    .innerJoin(s.parties, eq(s.parties.id, sql`coalesce(${s.waybills.customerId}, ${s.salesInvoices.customerId})`))
     .innerJoin(s.chargeTypes, eq(s.chargeTypes.id, s.waybillExpenses.chargeTypeId))
     .where(
       and(
@@ -164,12 +167,15 @@ export async function unbilledCharges(db: Db | Tx) {
         sql`not exists (select 1 from sales_invoice_lines l join sales_invoices i on i.id = l.invoice_id where l.waybill_expense_id = ${s.waybillExpenses.id} and i.status = 'issued')`,
       ),
     )
-    .orderBy(asc(s.parties.nameAr), asc(s.waybills.waybillDate));
+    .orderBy(asc(s.parties.nameAr), sql`coalesce(${s.waybills.waybillDate}, ${s.salesInvoices.invoiceDate})`);
 }
 
 
-/** يقرأ صفوف «مصاريف على العميل» من النافذة ويتحقق منها قبل أي حفظ (الصف الفارغ يُتجاهل). */
-export function parseChargeRows(json: string, fallbackWaybillId?: number): { waybillId: number; charge: ExpenseInput }[] {
+/**
+ * يقرأ صفوف «مصاريف على العميل» من النافذة ويتحقق منها قبل أي حفظ (الصف الفارغ يُتجاهل).
+ * في الفاتورة المباشرة (invoiceLevel) يكون المصروف على الفاتورة نفسها: waybillId = 0.
+ */
+export function parseChargeRows(json: string, fallbackWaybillId?: number, opts?: { invoiceLevel?: boolean }): { waybillId: number; charge: ExpenseInput }[] {
   let rows: Record<string, string>[];
   try {
     rows = JSON.parse(json || "[]");
@@ -184,9 +190,9 @@ export function parseChargeRows(json: string, fallbackWaybillId?: number): { way
     if (!r.chargeTypeId) throw new Error(`${n}: اختر النوع`);
     if (!(amount > 0)) throw new Error(`${n}: اكتب المبلغ`);
     const waybillId = Number(r.waybillId) || fallbackWaybillId || 0;
-    if (!waybillId) throw new Error(`${n}: اختر الشحنة`);
+    if (!waybillId && !opts?.invoiceLevel) throw new Error(`${n}: اختر الشحنة`);
     const payer = r.payer === "customs_broker" || r.payer === "cash" ? r.payer : "driver_custody";
-    if (payer === "cash" && !Number(r.cashAccountId)) throw new Error(`${n}: اختر الصندوق أو البنك`);
+    if (payer === "cash" && !Number(r.cashAccountId)) throw new Error(`${n}: اختر الحساب الذي دفعت منه الشركة`);
     if (payer === "customs_broker" && !Number(r.partyId)) throw new Error(`${n}: اختر المخلص`);
     out.push({
       waybillId,
@@ -202,4 +208,14 @@ export function parseChargeRows(json: string, fallbackWaybillId?: number): { way
     });
   });
   return out;
+}
+
+/** أرقام الإيصالات المعلَّمة في النافذة (JSON). */
+export function readIds(json: string): number[] {
+  try {
+    const v = JSON.parse(json || "[]");
+    return Array.isArray(v) ? [...new Set(v.map(Number).filter((n) => Number.isInteger(n) && n > 0))] : [];
+  } catch {
+    return [];
+  }
 }

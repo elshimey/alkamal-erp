@@ -9,7 +9,7 @@ import { PanelField, PanelSection } from "@/components/panel-ui";
 import { RecordPanel, type PanelResult } from "@/components/record-panel";
 import { TaxInvoiceDocument } from "@/components/tax-invoice";
 import { Icon } from "@/components/icons";
-import { CustomerChargesEditor, type ChargeDraft } from "@/components/customer-charges-editor";
+import { CustomerChargesEditor, type ChargeDraft, type TripExpense } from "@/components/customer-charges-editor";
 import { fmt } from "@/lib/format";
 import type { CompanyProfile } from "@/lib/company";
 import type { InvoiceTemplate } from "@/lib/invoice-template";
@@ -34,7 +34,7 @@ export interface InvoiceDraft {
   notes: string;
   lines: Record<string, string>[];
   /** سطور الشحنات ومصاريفها في المسودة: يُعدَّل سعرها ووصفها هنا، وضريبتها وحسابها من الشحنة */
-  fixedLines: { id: number; kind: "waybill" | "expense"; description: string; amount: string; vatAmount: string; vatRate: string; details?: string | null; cost?: string | null; taxName?: string | null }[];
+  fixedLines: { id: number; kind: "waybill" | "expense"; own?: boolean; description: string; amount: string; vatAmount: string; vatRate: string; details?: string | null; cost?: string | null; taxName?: string | null }[];
   /** رحلة السائق للفاتورة المباشرة: تظهر في تطبيقه عند الإرسال ومعها عهدتها */
   trip: { on: boolean; routeId: string; vehicleId: string; driverId: string; shipper: string; consignee: string; custody: string; number?: string; sent?: boolean };
 }
@@ -85,7 +85,7 @@ export function InvoiceEditor({
   taxes: TaxOption[];
   lineDefaults: LineDefaults;
   /** مصاريف على العميل تُضاف من المسودة لأي شحنة فيها */
-  chargeOptions?: { chargeTypes: QuickOption[]; brokers: QuickOption[]; cashAccounts: QuickOption[]; waybills: (QuickOption & { fleet: boolean })[] };
+  chargeOptions?: { chargeTypes: QuickOption[]; brokers: QuickOption[]; cashAccounts: QuickOption[]; waybills: (QuickOption & { fleet: boolean })[]; tripExpenses: TripExpense[] };
   currencies: string[];
   routes: QuickOption[];
   vehicles: QuickOption[];
@@ -101,11 +101,13 @@ export function InvoiceEditor({
   const [preview, setPreview] = useState(true);
   const box = useRef<HTMLDivElement>(null);
   const first = useRef(JSON.stringify(initial.lines));
-  const locked = initial.fixedLines.length > 0;
+  // الشحنات تثبّت العميل والعملة؛ مصاريف الفاتورة المباشرة نفسها لا
+  const locked = initial.fixedLines.some((l) => l.kind === "waybill" || !l.own);
   // سعر سطور الشحنات ومصاريفها ووصفها قابلان للتعديل في المسودة
   const [fixed, setFixed] = useState(initial.fixedLines);
   const [charges, setCharges] = useState<ChargeDraft[]>([]);
-  const canCharge = !!initial.id && !!chargeOptions?.waybills.length;
+  const [billExpenses, setBillExpenses] = useState<number[]>([]);
+  const canCharge = !!chargeOptions;
   const editFixed = (id: number, patch: { amount?: string; description?: string }) => {
     setFixed((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
     touch();
@@ -282,6 +284,7 @@ export function InvoiceEditor({
               {canCharge && chargeOptions && (
                 <>
                   <input type="hidden" name="newCharges" value={JSON.stringify(charges)} />
+                  <input type="hidden" name="billExpenses" value={JSON.stringify(billExpenses)} />
                   <CustomerChargesEditor
                     rows={charges}
                     onChange={(rows) => {
@@ -291,10 +294,16 @@ export function InvoiceEditor({
                     chargeTypes={chargeOptions.chargeTypes}
                     brokers={chargeOptions.brokers}
                     cashAccounts={chargeOptions.cashAccounts}
-                    waybills={chargeOptions.waybills}
+                    waybills={chargeOptions.waybills.length ? chargeOptions.waybills : undefined}
                     fleet={false}
+                    tripExpenses={chargeOptions.tripExpenses}
+                    picked={billExpenses}
+                    onPick={(ids) => {
+                      setBillExpenses(ids);
+                      touch();
+                    }}
                   />
-                  {charges.length > 0 && <span className="block text-xs text-amber-700">تظهر المصاريف الجديدة في الفاتورة ومعاينتها بعد «حفظ».</span>}
+                  {charges.length + billExpenses.length > 0 && <span className="block text-xs text-amber-700">تظهر المصاريف الجديدة في الفاتورة ومعاينتها بعد «حفظ».</span>}
                 </>
               )}
             </PanelSection>

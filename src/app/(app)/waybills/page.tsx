@@ -3,13 +3,14 @@ import { headers } from "next/headers";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
+import { toTripExpense, tripExpensesForBilling } from "@/lib/purchases";
 import { requirePermission } from "@/lib/auth";
 import { can, hasSpecial, scopeFor } from "@/lib/permissions";
-import { chargeTypeOptions, cityNames, contactCards, customerOptions, driverOptions, locationOptions, partyOptions, shipperSuggestions, vehicleOptions } from "@/lib/lookups";
+import { accountOptions, chargeTypeOptions, cityNames, contactCards, customerOptions, driverOptions, locationOptions, partyOptions, shipperSuggestions, vehicleOptions } from "@/lib/lookups";
 import { emptyTransport, toTransportDraft } from "@/lib/transport-draft";
 import { getCompany, getInvoiceTemplate } from "@/lib/company";
 import { todayRiyadh } from "@/lib/dates";
-import { cashAccounts, fundingAccounts } from "@/lib/invoices";
+import { fundingAccounts } from "@/lib/invoices";
 import { listHref, type DocListParams } from "@/lib/doc-filters";
 import { PAGE_SIZE, pageOf } from "@/lib/paging";
 import { fmt } from "@/lib/format";
@@ -134,10 +135,11 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
     editing && editRow ? waybillComponents(db, editRow.id) : Promise.resolve([]),
   ]);
   // مصاريف على العميل من نافذة الشحنة نفسها
-  const [chargeTypes, brokers, chargeCash, savedCharges] = await Promise.all([
+  const [chargeTypes, brokers, chargeCash, savedCharges, tripExpenses] = await Promise.all([
     creating || editing ? chargeTypeOptions() : Promise.resolve([]),
     creating || editing ? partyOptions("customs_broker") : Promise.resolve([]),
-    creating || editing ? cashAccounts(db).then((r) => r.map((a) => ({ value: String(a.id), label: `${a.nameAr} ${a.code}` }))) : Promise.resolve([]),
+    // «دفعه: الشركة» من أي حساب في الشجرة (الصناديق والبنوك أولاً في البحث)
+    creating || editing ? accountOptions(["1", "2"]).then((o) => o.filter((x) => x.code !== "1114")) : Promise.resolve([]),
     editing && editRow
       ? db
           .select({ e: s.waybillExpenses, label: s.chargeTypes.nameAr, line: s.salesInvoiceLines.id })
@@ -147,6 +149,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
           .where(and(eq(s.waybillExpenses.waybillId, editRow.id), eq(s.waybillExpenses.billTo, "customer")))
           .orderBy(s.waybillExpenses.id)
       : Promise.resolve([]),
+    editing && editRow ? tripExpensesForBilling(db, [editRow.id]) : Promise.resolve([]),
   ]);
   const [customers, routeRows, locs, vehicles, trailers, drivers, carriers, shippers] = needOptions
     ? await Promise.all([
@@ -355,11 +358,13 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
         priceNote: w.priceNote,
         transport: toTransportDraft(w, editGoods),
         charges: [],
+        billExpenses: [],
+        tripExpenses: tripExpenses.map(toTripExpense),
         savedCharges: savedCharges.map(({ e, label, line }) => ({ label: e.note ? `${label}: ${e.note}` : label, amount: e.amount, payer: e.payer, invoiced: !!line })),
       };
     }
     if (creating)
-      return { date: prefill?.date ?? today, customerId: "", routeId: "", execution: "fleet", vehicleId: prefill ? String(prefill.vehicleId) : "", trailerId: "", driverId: prefill ? String(prefill.driverId) : "", carrierId: "", carrierCost: "", carrierPlate: "", carrierDriverName: "", shipper: "", consignee: "", amount: "", components: [], taxCodeId: "", commission: "", tripCustody: "", weight: "", container: "", deliveryNote: "", customs: "", notes: "", transport: emptyTransport(), charges: [] };
+      return { date: prefill?.date ?? today, customerId: "", routeId: "", execution: "fleet", vehicleId: prefill ? String(prefill.vehicleId) : "", trailerId: "", driverId: prefill ? String(prefill.driverId) : "", carrierId: "", carrierCost: "", carrierPlate: "", carrierDriverName: "", shipper: "", consignee: "", amount: "", components: [], taxCodeId: "", commission: "", tripCustody: "", weight: "", container: "", deliveryNote: "", customs: "", notes: "", transport: emptyTransport(), charges: [], billExpenses: [] };
     return null;
   };
   const initial = draft();

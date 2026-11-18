@@ -940,7 +940,9 @@ export const waybillExpenses = pgTable(
   "waybill_expenses",
   {
     id: id(),
-    waybillId: ref("waybill_id").notNull().references(() => waybills.id, { onDelete: "cascade" }),
+    // مصروف الشحنة، أو مصروف الفاتورة المباشرة دون شحنة (أحدهما فقط)
+    waybillId: ref("waybill_id").references(() => waybills.id, { onDelete: "cascade" }),
+    invoiceId: ref("invoice_id").references((): AnyPgColumn => salesInvoices.id),
     chargeTypeId: ref("charge_type_id").notNull().references(() => chargeTypes.id),
     amount: money("amount").notNull(),
     currencyCode: varchar("currency_code", { length: 3 }).notNull().default("SAR").references(() => currencies.code),
@@ -959,6 +961,8 @@ export const waybillExpenses = pgTable(
   },
   (t) => [
     index("waybill_expenses_waybill_idx").on(t.waybillId),
+    index("waybill_expenses_invoice_idx").on(t.invoiceId),
+    check("waybill_expenses_home", sql`(${t.waybillId} is null) <> (${t.invoiceId} is null)`),
     uniqueIndex("waybill_expenses_source_uq").on(t.sourceExpenseId).where(sql`${t.sourceExpenseId} is not null`),
     check("waybill_expenses_cash", sql`${t.payer} <> 'cash' or ${t.cashAccountId} is not null`),
     check("waybill_expenses_amounts", sql`${t.amount} > 0 and ${t.exchangeRate} > 0`),

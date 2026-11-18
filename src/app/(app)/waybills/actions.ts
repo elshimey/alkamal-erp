@@ -35,7 +35,8 @@ import { EXPENSE_BILL_TO, EXPENSE_PAYERS, FUEL_SOURCES, TRIP_STAGES, WAYBILL_FLO
 import { parseTransport } from "@/lib/transport-draft";
 import type { PanelResult } from "@/components/record-panel";
 import { removeWaybillsFromDrafts } from "@/lib/invoices";
-import { addCustomerCharges, addWaybillCharge, parseChargeRows, removeWaybillCharge } from "@/lib/customer-charges";
+import { addCustomerCharges, addWaybillCharge, parseChargeRows, readIds, removeWaybillCharge } from "@/lib/customer-charges";
+import { billTripExpensesToCustomer } from "@/lib/purchases";
 import { convertTripRequestTx, linkTripRequest, rejectTripRequest } from "@/lib/driver-trip-requests";
 import { splitCustom } from "@/data/custom-lists";
 import type { PriceComponentInput } from "@/lib/waybills";
@@ -379,9 +380,15 @@ export async function saveWaybillPanel(id: number | null, fd: FormData): Promise
       // من لا يرى الأسعار يبقى سعر الشحنة كما هو
       row = await editWaybill(db, id, { ...input, amount: prices ? input.amount : Number(cur?.amount ?? 0) });
       if (transport) row = await saveTransportDoc(db, id, transport);
-      if (charges.length) {
-        await addCustomerCharges(db, charges, user.id);
+      const billIds = readIds(str(fd, "billExpenses"));
+      if (charges.length || billIds.length) {
+        // إيصالات الرحلة المعلَّمة ومصاريفها الجديدة معاً: كلها أو لا شيء
+        await db.transaction(async (tx) => {
+          await billTripExpensesToCustomer(tx, billIds, [id], user.id);
+          await addCustomerCharges(tx, charges, user.id);
+        });
         revalidatePath("/invoices");
+        revalidatePath("/expenses");
       }
     } else {
       // الشحنة ووثيقة نقلها معاً: خطأ في البضاعة لا يترك شحنة ناقصة
