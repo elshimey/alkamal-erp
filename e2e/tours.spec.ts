@@ -48,7 +48,7 @@ test("جولة المركبة: تنتقل وحدها مع الكتابة، و«�
 
   // الضغط على البند المضاء يفتح النافذة وتنتقل الجولة لأول خانة فوراً
   await page.getByRole("link", { name: "+ إضافة مركبة" }).click();
-  const panel = page.locator('[role="dialog"][aria-label="إضافة مركبة"]');
+  const panel = page.locator('[role="dialog"][aria-label="إضافة مركبة"]:not([data-tour-ui] *)');
   await expect(panel).toBeVisible();
   await expect(card(page)).toContainText("اللوحة: الأحرف");
 

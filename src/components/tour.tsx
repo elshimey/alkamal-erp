@@ -456,7 +456,7 @@ export function TourRunner() {
 
   const corner = (extra?: React.ReactNode) => (
     <Portal layer={null}>
-      <div data-tour-ui role="dialog" aria-label={tour.title} className="animate-fade-in fixed bottom-20 left-4 z-[95] w-[min(24rem,calc(100vw-2rem))] rounded-2xl border border-brand-500/40 bg-white p-4 shadow-2xl md:bottom-4 print:hidden">
+      <div data-tour-ui role="dialog" aria-label={`جولة: ${tour.title}`} className="animate-fade-in fixed bottom-20 left-4 z-[95] w-[min(24rem,calc(100vw-2rem))] rounded-2xl border border-brand-500/40 bg-white p-4 shadow-2xl md:bottom-4 print:hidden">
         {head}
         {extra}
         {controls}
@@ -538,7 +538,7 @@ export function TourRunner() {
     <Portal layer={current?.layer ?? null}>
       <div data-tour-ui className="print:hidden">
         <div className="pointer-events-none fixed z-[94] rounded-xl ring-4 ring-brand-500 transition-all duration-150" style={{ ...box, boxShadow: "0 0 0 9999px rgba(20, 25, 30, 0.35)" }} />
-        <div role="dialog" aria-label={tour.title} className="fixed z-[95] overflow-y-auto rounded-2xl border border-brand-500/40 bg-white p-4 shadow-2xl transition-[top,left,bottom] duration-150" style={style}>
+        <div role="dialog" aria-label={`جولة: ${tour.title}`} className="fixed z-[95] overflow-y-auto rounded-2xl border border-brand-500/40 bg-white p-4 shadow-2xl transition-[top,left,bottom] duration-150" style={style}>
           {head}
           {controls}
         </div>
