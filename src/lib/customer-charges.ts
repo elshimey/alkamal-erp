@@ -50,17 +50,33 @@ async function postChargeTx(tx: Tx, w: typeof s.waybills.$inferSelect, rowId: nu
   return entry;
 }
 
+/** يضيف مصروفاً للشحنة داخل معاملة قائمة (قبل الاعتماد مع قيدها، وبعده بقيد مستقل ويدخل مسودة فاتورتها). */
+export async function addWaybillChargeTx(tx: Tx, waybillId: number, e: ExpenseInput, userId?: number) {
+  const w = await lockWaybill(tx, waybillId);
+  if (w.status === "invoiced") throw new Error(`الشحنة ${w.number} مفوترة؛ حمّل المصروف على العميل بإشعار مدين مربوط بفاتورتها`);
+  if (w.status === "rejected" && e.billTo === "customer") throw new Error(`الشحنة ${w.number} مرفوضة؛ لا يُحمَّل عليها مصروف للعميل`);
+  const row = await insertExpenseTx(tx, w, e);
+  if (EDITABLE.includes(w.status)) return { row, invoice: null };
+  await postChargeTx(tx, w, row.id, userId);
+  const invoice = await attachChargeToDraftInvoiceTx(tx, row.id);
+  return { row, invoice };
+}
+
 /** يضيف مصروفاً للشحنة في أي مرحلة قبل إصدار فاتورتها. */
 export async function addWaybillCharge(db: Db, waybillId: number, e: ExpenseInput, userId?: number) {
-  return db.transaction(async (tx) => {
-    const w = await lockWaybill(tx, waybillId);
-    if (w.status === "invoiced") throw new Error(`الشحنة ${w.number} مفوترة؛ حمّل المصروف على العميل بإشعار مدين مربوط بفاتورتها`);
-    const row = await insertExpenseTx(tx, w, e);
-    if (EDITABLE.includes(w.status)) return { row, invoice: null };
-    await postChargeTx(tx, w, row.id, userId);
-    const invoice = await attachChargeToDraftInvoiceTx(tx, row.id);
-    return { row, invoice };
-  });
+  return db.transaction((tx) => addWaybillChargeTx(tx, waybillId, e, userId));
+}
+
+/** عدة مصاريف على العميل معاً (من نافذة الشحنة أو مسودة الفاتورة): كلها أو لا شيء. */
+export async function addCustomerCharges(db: Db | Tx, items: { waybillId: number; charge: ExpenseInput }[], userId?: number) {
+  if (!items.length) return [];
+  const run = async (tx: Tx) => {
+    const out = [];
+    for (const it of items) out.push(await addWaybillChargeTx(tx, it.waybillId, { ...it.charge, billTo: "customer" }, userId));
+    return out;
+  };
+  // داخل معاملة قائمة تصبح نقطة حفظ، فالخطأ يُرجع المصاريف وحدها أو المعاملة كلها حسب المستدعي
+  return (db as Db).transaction(run);
 }
 
 /** يحذف مصروف الشحنة: يخرج من مسودة الفاتورة، ويُحذف قيده المستقل إن وُجد. */
@@ -126,9 +142,11 @@ export async function unbilledCharges(db: Db | Tx) {
     .select({
       id: s.waybillExpenses.id,
       waybillId: s.waybills.id,
-      waybill: s.waybills.number,
-      waybillDate: s.waybills.waybillDate,
+      // مصروف الفاتورة المباشرة دون شحنة: رقم الفاتورة وتاريخها مكان الشحنة
+      waybill: sql<string>`coalesce(${s.waybills.number}, ${s.salesInvoices.number})`,
+      waybillDate: sql<string>`coalesce(${s.waybills.waybillDate}, ${s.salesInvoices.invoiceDate})`,
       status: s.waybills.status,
+      invoiceId: s.waybillExpenses.invoiceId,
       customer: s.parties.nameAr,
       type: s.chargeTypes.nameAr,
       note: s.waybillExpenses.note,
@@ -139,8 +157,9 @@ export async function unbilledCharges(db: Db | Tx) {
       draftInvoice: sql<string | null>`(select i.number from sales_invoice_lines l join sales_invoices i on i.id = l.invoice_id where l.waybill_expense_id = ${s.waybillExpenses.id})`,
     })
     .from(s.waybillExpenses)
-    .innerJoin(s.waybills, eq(s.waybills.id, s.waybillExpenses.waybillId))
-    .innerJoin(s.parties, eq(s.parties.id, s.waybills.customerId))
+    .leftJoin(s.waybills, eq(s.waybills.id, s.waybillExpenses.waybillId))
+    .leftJoin(s.salesInvoices, eq(s.salesInvoices.id, s.waybillExpenses.invoiceId))
+    .innerJoin(s.parties, eq(s.parties.id, sql`coalesce(${s.waybills.customerId}, ${s.salesInvoices.customerId})`))
     .innerJoin(s.chargeTypes, eq(s.chargeTypes.id, s.waybillExpenses.chargeTypeId))
     .where(
       and(
@@ -148,6 +167,55 @@ export async function unbilledCharges(db: Db | Tx) {
         sql`not exists (select 1 from sales_invoice_lines l join sales_invoices i on i.id = l.invoice_id where l.waybill_expense_id = ${s.waybillExpenses.id} and i.status = 'issued')`,
       ),
     )
-    .orderBy(asc(s.parties.nameAr), asc(s.waybills.waybillDate));
+    .orderBy(asc(s.parties.nameAr), sql`coalesce(${s.waybills.waybillDate}, ${s.salesInvoices.invoiceDate})`);
 }
 
+
+/**
+ * يقرأ صفوف «مصاريف على العميل» من النافذة ويتحقق منها قبل أي حفظ (الصف الفارغ يُتجاهل).
+ * في الفاتورة المباشرة (invoiceLevel) يكون المصروف على الفاتورة نفسها: waybillId = 0.
+ */
+export function parseChargeRows(json: string, fallbackWaybillId?: number, opts?: { invoiceLevel?: boolean }): { waybillId: number; charge: ExpenseInput }[] {
+  let rows: Record<string, string>[];
+  try {
+    rows = JSON.parse(json || "[]");
+  } catch {
+    return [];
+  }
+  const out: { waybillId: number; charge: ExpenseInput }[] = [];
+  rows.forEach((r, i) => {
+    const amount = Number(String(r.amount ?? "").replace(/[,\s]/g, "")) || 0;
+    if (!r.chargeTypeId && !amount) return;
+    const n = `مصروف العميل ${i + 1}`;
+    if (!r.chargeTypeId) throw new Error(`${n}: اختر النوع`);
+    if (!(amount > 0)) throw new Error(`${n}: اكتب المبلغ`);
+    const waybillId = Number(r.waybillId) || fallbackWaybillId || 0;
+    if (!waybillId && !opts?.invoiceLevel) throw new Error(`${n}: اختر الشحنة`);
+    const payer = r.payer === "customs_broker" || r.payer === "cash" ? r.payer : "driver_custody";
+    if (payer === "cash" && !Number(r.cashAccountId)) throw new Error(`${n}: اختر الحساب الذي دفعت منه الشركة`);
+    if (payer === "customs_broker" && !Number(r.partyId)) throw new Error(`${n}: اختر المخلص`);
+    out.push({
+      waybillId,
+      charge: {
+        chargeTypeId: Number(r.chargeTypeId),
+        amount,
+        billTo: "customer",
+        payer,
+        partyId: Number(r.partyId) || null,
+        cashAccountId: Number(r.cashAccountId) || null,
+        note: String(r.note ?? "").trim() || null,
+      },
+    });
+  });
+  return out;
+}
+
+/** أرقام الإيصالات المعلَّمة في النافذة (JSON). */
+export function readIds(json: string): number[] {
+  try {
+    const v = JSON.parse(json || "[]");
+    return Array.isArray(v) ? [...new Set(v.map(Number).filter((n) => Number.isInteger(n) && n > 0))] : [];
+  } catch {
+    return [];
+  }
+}

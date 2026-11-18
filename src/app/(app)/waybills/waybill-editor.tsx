@@ -7,6 +7,7 @@ import { PanelField, PanelSection } from "@/components/panel-ui";
 import { RecordPanel, type PanelResult } from "@/components/record-panel";
 import { WaybillDocument } from "@/components/waybill-document";
 import { Icon } from "@/components/icons";
+import { CustomerChargesEditor, PAYER_LABELS, type ChargeDraft, type TripExpense } from "@/components/customer-charges-editor";
 import type { CompanyProfile } from "@/lib/company";
 import type { InvoiceTemplate } from "@/lib/invoice-template";
 import type { QuickOption } from "@/lib/quick-add-types";
@@ -46,6 +47,13 @@ export interface WaybillDraft {
   notes: string;
   priceNote?: string | null;
   transport: TransportDraft;
+  /** مصاريف جديدة على العميل تُضاف مع الحفظ */
+  charges: ChargeDraft[];
+  /** مصاريف العميل المسجلة من قبل (للعرض) */
+  savedCharges?: { label: string; amount: string; payer: keyof typeof PAYER_LABELS; invoiced: boolean }[];
+  /** إيصالات الرحلة المسجلة التي لم تُحمَّل على العميل بعد، وما علّمه المستخدم منها */
+  tripExpenses?: TripExpense[];
+  billExpenses: number[];
 }
 
 export type RouteOption = QuickOption & { international: boolean };
@@ -74,6 +82,9 @@ export function WaybillEditor({
   showPrices,
   componentKinds,
   taxes,
+  chargeTypes,
+  brokers,
+  cashAccounts,
   company,
   template,
   action,
@@ -95,6 +106,9 @@ export function WaybillEditor({
   showPrices: boolean;
   componentKinds: QuickOption[];
   taxes: TaxOption[];
+  chargeTypes: QuickOption[];
+  brokers: QuickOption[];
+  cashAccounts: QuickOption[];
   company: CompanyProfile;
   template: InvoiceTemplate;
   action: (data: FormData) => Promise<PanelResult>;
@@ -329,6 +343,35 @@ export function WaybillEditor({
                   </span>
                 </div>
               )}
+            </PanelSection>
+          )}
+
+          {showPrices && (
+            <PanelSection
+              title={`مصاريف على العميل${(d.savedCharges?.length ?? 0) + d.charges.length ? ` (${(d.savedCharges?.length ?? 0) + d.charges.length})` : ""}`}
+              hint="ما تدفعه عن العميل (جمارك، رسوم ميناء…) ويُفوتر عليه سطراً مستقلاً"
+              optional
+              open={d.charges.length > 0 || !!d.savedCharges?.length || !!d.tripExpenses?.length}
+            >
+              <input type="hidden" name="charges" value={JSON.stringify(d.charges)} />
+              <input type="hidden" name="billExpenses" value={JSON.stringify(d.billExpenses)} />
+              {!!d.savedCharges?.length && (
+                <ul className="divide-y divide-gray-100 rounded-xl border border-gray-200 text-sm">
+                  {d.savedCharges.map((c, i) => (
+                    <li key={i} className="flex items-center justify-between gap-2 px-3 py-2">
+                      <span>
+                        {c.label}
+                        <span className="block text-[11px] text-gray-500">
+                          دفعه: {PAYER_LABELS[c.payer]}
+                          {c.invoiced ? " · في الفاتورة" : ""}
+                        </span>
+                      </span>
+                      <span className="ltr-nums font-medium">{fmt(c.amount)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <CustomerChargesEditor rows={d.charges} onChange={(rows) => set("charges", rows)} chargeTypes={chargeTypes} brokers={brokers} cashAccounts={cashAccounts} fleet={d.execution === "fleet"} tripExpenses={d.tripExpenses} picked={d.billExpenses} onPick={(ids) => set("billExpenses", ids)} />
             </PanelSection>
           )}
 

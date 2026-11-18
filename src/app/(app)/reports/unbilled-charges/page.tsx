@@ -18,7 +18,7 @@ export default async function UnbilledChargesReport() {
   ]);
   const total = rows.reduce((t, r) => t + Number(r.base), 0);
   // ما لم يُقيد بعد (مصروف على شحنة لم تُعتمد) يظهر في القائمة ولا يظهر في رصيد الحساب
-  const posted = rows.filter((r) => !["draft", "in_transit", "delivered", "rejected"].includes(r.status)).reduce((t, r) => t + Number(r.base), 0);
+  const posted = rows.filter((r) => !r.status || !["draft", "in_transit", "delivered", "rejected"].includes(r.status)).reduce((t, r) => t + Number(r.base), 0);
 
   return (
     <>
@@ -29,7 +29,7 @@ export default async function UnbilledChargesReport() {
           <div className="ltr-nums mt-1 text-xl font-semibold">{money(total, false)}</div>
         </div>
         <div className="rounded-2xl bg-white p-4 shadow-sm">
-          <div className="text-xs text-gray-500">منه مقيد (شحنات معتمدة)</div>
+          <div className="text-xs text-gray-500">منه مقيد (شحنات معتمدة وفواتير مباشرة)</div>
           <div className="ltr-nums mt-1 text-xl font-semibold">{money(posted, false)}</div>
         </div>
         <div className="rounded-2xl bg-white p-4 shadow-sm">
@@ -42,12 +42,12 @@ export default async function UnbilledChargesReport() {
           <tr key={r.id}>
             <C>{r.customer}</C>
             <C>
-              <Link href={`/waybills/${r.waybillId}`} className="ltr-nums text-brand-700 hover:underline">
+              <Link href={r.waybillId ? `/waybills/${r.waybillId}` : `/invoices/${r.invoiceId}`} className="ltr-nums text-brand-700 hover:underline">
                 {r.waybill}
               </Link>
             </C>
             <C className="ltr-nums">{r.waybillDate}</C>
-            <C>{WAYBILL_STATUS[r.status]?.label ?? r.status}</C>
+            <C>{r.status ? (WAYBILL_STATUS[r.status]?.label ?? r.status) : "فاتورة مباشرة"}</C>
             <C>
               {r.type}
               {r.note && <span className="block text-xs text-gray-500">{r.note}</span>}

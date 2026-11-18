@@ -400,11 +400,18 @@ export async function addExpense(db: Db, waybillId: number, e: ExpenseInput) {
 }
 
 /** يضيف سطر مصروف للشحنة بعد التحقق من الدافع (دون قيد؛ القيد مع الاعتماد أو مستقل بعده). */
+/** حساب «دفعته الشركة»: أي حساب تفصيلي نشط في الأصول أو الالتزامات، عدا حساب المصاريف المستردة نفسه. */
+export async function checkPayAccountTx(tx: Tx, accountId: number) {
+  const [a] = await tx.select({ code: s.accounts.code, postable: s.accounts.isPostable, active: s.accounts.isActive }).from(s.accounts).where(eq(s.accounts.id, accountId));
+  if (!a || !a.postable || !a.active || !/^[12]/.test(a.code) || a.code === "1114") throw new Error("حساب الدفع يكون حساباً تفصيلياً نشطاً من الأصول أو الالتزامات (غير 1114)");
+}
+
 export async function insertExpenseTx(tx: Tx, w: typeof s.waybills.$inferSelect, e: ExpenseInput & { journalEntryId?: number | null; sourceExpenseId?: number | null }) {
   const payer = e.payer ?? (w.execution === "fleet" ? "driver_custody" : "customs_broker");
   if (payer === "driver_custody" && w.execution !== "fleet") throw new Error("عهدة السائق متاحة لشحنات الأسطول فقط");
   if (payer === "customs_broker" && !e.partyId) throw new Error("اختر المخلص");
-  if (payer === "cash" && !e.cashAccountId) throw new Error("اختر الصندوق أو البنك الذي دفعت منه الشركة");
+  if (payer === "cash" && !e.cashAccountId) throw new Error("اختر الحساب الذي دفعت منه الشركة");
+  if (payer === "cash") await checkPayAccountTx(tx, e.cashAccountId!);
   if (!(e.amount > 0)) throw new Error("المبلغ إلزامي");
   const currency = e.currencyCode ?? "SAR";
   const [row] = await tx

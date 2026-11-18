@@ -14,10 +14,12 @@ export function errorMessage(err: unknown): string {
 /** يسجّل الخطأ غير المتوقع وينبّه مالك المنصة (src/lib/error-log.ts)؛ بعد انتهاء الطلب حتى لا يبطئه. */
 function report(err: unknown) {
   void (async () => {
-    const { recordError } = await import("@/lib/error-log");
+    const { recordError, currentRequester } = await import("@/lib/error-log");
+    // المستخدم يُعرف الآن (داخل الطلب) قبل أن يُؤجَّل التسجيل لما بعد الرد
+    const user = await currentRequester();
     try {
       const { after } = await import("next/server");
-      after(() => recordError(err));
+      after(() => recordError(err, { user }));
     } catch {
       await recordError(err); // خارج طلب ويب
     }

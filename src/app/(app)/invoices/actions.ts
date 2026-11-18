@@ -3,17 +3,19 @@
 import { localPath } from "@/lib/safe-path";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
 import { todayRiyadh } from "@/lib/dates";
 import {
+  addInvoiceChargesTx,
   addWaybillsToInvoice,
   createAllInvoices,
   createDirectInvoice,
   createInvoice,
+  currentTrip,
   deleteInvoice,
   issueInvoice,
   mergeInvoices,
@@ -27,6 +29,8 @@ import {
 } from "@/lib/invoices";
 import { lineVat, round2 } from "@/lib/invoice-posting";
 import { taxCodesFor } from "@/lib/tax-codes";
+import { addCustomerCharges, parseChargeRows, readIds } from "@/lib/customer-charges";
+import { billTripExpensesToCustomer } from "@/lib/purchases";
 import type { PanelResult } from "@/components/record-panel";
 import type { SheetChange, DocSheetResult } from "@/components/doc-sheet";
 import type { FormState } from "@/components/action-form";
@@ -284,7 +288,28 @@ export async function saveInvoicePanel(id: number | null, fd: FormData): Promise
   const user = await requirePermission("sales_invoices", id ? "update" : "create");
   try {
     const input = await readInvoiceForm(fd);
-    const inv = id ? await updateDirectInvoice(db, id, input) : await createDirectInvoice(db, { ...input, userId: user.id });
+    // مصاريف على العميل: تُفحص قبل الحفظ، وتُحفظ مع الفاتورة كلها أو لا شيء. في الفاتورة المباشرة (بلا شحنات)
+    // يكون المصروف على الفاتورة نفسها، وإيصالات سائق رحلتها تُحمَّل برقمها
+    const own = id
+      ? (await db.selectDistinct({ w: s.salesInvoiceLines.waybillId }).from(s.salesInvoiceLines).where(and(eq(s.salesInvoiceLines.invoiceId, id), eq(s.salesInvoiceLines.kind, "waybill")))).flatMap((o) => (o.w ? [o.w] : []))
+      : [];
+    const charges = parseChargeRows(str(fd, "newCharges"), undefined, { invoiceLevel: !own.length });
+    const billIds = id ? readIds(str(fd, "billExpenses")) : [];
+    if (charges.some((c) => c.waybillId && !own.includes(c.waybillId))) throw new Error("المصروف لشحنة ليست في هذه الفاتورة");
+    if (charges.length || billIds.length) await requirePermission("waybills", "update");
+    const trip = id ? await currentTrip(db, id) : null;
+    const inv = await db.transaction(async (tx) => {
+      const saved = id ? await updateDirectInvoice(tx as unknown as typeof db, id, input) : await createDirectInvoice(tx as unknown as typeof db, { ...input, userId: user.id });
+      if (billIds.length) await billTripExpensesToCustomer(tx, billIds, [...own, ...(trip ? [trip.id] : [])], user.id);
+      await addCustomerCharges(tx, charges.filter((c) => c.waybillId), user.id);
+      await addInvoiceChargesTx(tx, saved.id, charges.filter((c) => !c.waybillId).map((c) => c.charge), user.id);
+      return saved;
+    });
+    if (charges.length || billIds.length) {
+      revalidatePath("/expenses");
+      revalidatePath("/waybills");
+      revalidatePath("/reports/unbilled-charges");
+    }
     refresh(inv.id);
     return { ok: id ? `حُفظت الفاتورة ${inv.number}` : `أُنشئت الفاتورة ${inv.number} مسودة؛ اعتمدها لتصدر برقمها الرسمي`, id: inv.id, label: inv.number };
   } catch (err) {

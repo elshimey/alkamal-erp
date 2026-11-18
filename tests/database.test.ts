@@ -82,13 +82,14 @@ import { createAsset, deleteAsset, disposeAsset, listAssets, runDepreciation, un
 import { IMPORT_SPECS } from "@/data/import-specs";
 import * as hr from "@/lib/hr";
 import * as platform from "@/lib/platform";
-import { recentErrors, recordError } from "@/lib/error-log";
+import { explainError, recentErrors, recordError } from "@/lib/error-log";
+import { DRIVER_DICT } from "@/data/driver-i18n";
 import { runInTenant, tenantClient } from "@/db/tenant";
 import { addExpense, addFuel, approvalIssues, approveWaybill, createWaybill, deleteWaybill, invoiceSelectedWaybills, invoiceWaybillsNow, listWaybills, parseWaybillFilter, patchWaybill, recordStage, rejectWaybill, revertWaybill, saveTransportDoc, setWaybillStatus, updateWaybill, waybillDoc } from "@/lib/waybills";
 import { sendTrip, unsendTrip, bulkTrips, invoiceTripIds } from "@/lib/trip-dispatch";
 import { parseTransport } from "@/lib/transport-draft";
 import { addTaxCode, matchTaxCode, setTaxCodeActive } from "@/lib/tax-codes";
-import { addWaybillCharge, removeWaybillCharge, unbilledCharges } from "@/lib/customer-charges";
+import { addCustomerCharges, addWaybillCharge, parseChargeRows, removeWaybillCharge, unbilledCharges } from "@/lib/customer-charges";
 
 const url = process.env.TEST_DATABASE_URL;
 const YEAR = 2026;
@@ -2587,6 +2588,11 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       ["خطأ آخر", 1, null],
       ["تعذّر حساب 12", 2, "/invoices"],
     ]);
+    // البريد والصفحة يذكران المستخدم، والرسائل المعروفة لها شرح وما يُفعل
+    await recordError(new Error("خطأ بمستخدم"), { sql: client, user: { name: "أحمد", login: "ahmed", roles: ["المدير"] } });
+    expect((await recentErrors(1, client))[0].stack).toMatch(/^المستخدم: أحمد \(اسم الدخول: ahmed، الدور: المدير\)/);
+    for (const d of Object.values(DRIVER_DICT)) expect(explainError(d.notLinked).bug).toBe(false);
+    expect(explainError("Cannot read properties of undefined").bug).toBe(true);
     // قفل الدخول: 10 محاولات خاطئة في 15 دقيقة توقف الاسم مؤقتاً، بلا فرق بين الحروف، والدخول الناجح يمسح العدّاد
     for (let i = 0; i < platform.LOGIN_MAX_FAILURES - 1; i++) await platform.recordLoginFailure(client, "Guess_Me");
     expect(await platform.loginThrottled(client, "guess_me")).toBe(false);
@@ -3163,6 +3169,145 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect((await unbilledCharges(db)).some((r) => r.id === linked.id)).toBe(true);
       await revertExpense(db, e.id);
       expect(await db.select().from(s.waybillExpenses).where(eq(s.waybillExpenses.sourceExpenseId, e.id))).toHaveLength(0);
+    });
+
+    it("إيصال السائق يُحمَّل على العميل برقمه من الشحنة أو الفاتورة: يُخصم من العهدة مرة ويُفوتر مرة", async () => {
+      const { billTripExpensesToCustomer, tripExpensesForBilling } = await import("@/lib/purchases");
+      const w = await createWaybill(db, { waybillDate: D, customerId, routeId: intlRoute, shipper: "أ", consignee: "ب", vehicleId: vehicle.id, amount: 1500 });
+      const [tolls] = await db.select().from(s.accounts).where(eq(s.accounts.code, "5104"));
+      // إيصال معتمد على الشركة، وآخر معلّق
+      const approved = await createExpense(db, { expenseDate: D, payer: "driver_custody", driverId, waybillId: w.id, accountId: tolls.id, description: "رسوم ميناء", amount: 60, approve: true });
+      const pending = await createExpense(db, { expenseDate: D, payer: "driver_custody", driverId, waybillId: w.id, accountId: tolls.id, description: "أرضيات", amount: 40 });
+      expect((await tripExpensesForBilling(db, [w.id])).map((r) => r.e.id).sort()).toEqual([approved.id, pending.id].sort());
+      await approveWaybill(db, w.id, { canOverride: true, overrideReason: "تجربة" });
+      const inv = await createInvoice(db, { customerId, invoiceDate: D });
+      // شحنة ليست من الفاتورة تُرفض
+      await expect(billTripExpensesToCustomer(db, [approved.id], [w.id + 999])).rejects.toThrow("ليس من هذه الشحنات");
+
+      await billTripExpensesToCustomer(db, [approved.id, pending.id], [w.id]);
+      const [a] = await db.select().from(s.expenses).where(eq(s.expenses.id, approved.id));
+      expect(a.billToCustomer).toBe(true);
+      const jl = await entryLines(a.journalEntryId!);
+      // قيد واحد: مدين 1114 بدل 5104، ودائن العهدة مرة واحدة
+      expect(jl.find((l) => l.code === "1114")?.debit).toBe(60);
+      expect(jl.some((l) => l.code === "5104")).toBe(false);
+      expect(jl.filter((l) => l.credit > 0)).toHaveLength(1);
+      const lines = (await db.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, inv.id))).filter((l) => l.kind === "expense");
+      expect(lines.map((l) => Number(l.amount))).toEqual([60]);
+      // المعلّق يُعلَّم فقط، ويدخل الفاتورة عند اعتماده
+      const [p] = await db.select().from(s.expenses).where(eq(s.expenses.id, pending.id));
+      expect([p.status, p.billToCustomer]).toEqual(["pending", true]);
+      // التكرار لا يضيف شيئاً، والقائمة لا تعرضهما بعد ذلك
+      await billTripExpensesToCustomer(db, [approved.id], [w.id]);
+      expect((await db.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, inv.id))).filter((l) => l.kind === "expense")).toHaveLength(1);
+      expect(await tripExpensesForBilling(db, [w.id])).toHaveLength(0);
+    });
+
+    it("مصاريف العميل من نافذة الشحنة ومسودة الفاتورة: تُفحص أولاً، وتُضاف كلها أو لا شيء، وتدخل الفاتورة سطوراً", async () => {
+      const [customs] = await db.select().from(s.chargeTypes).where(eq(s.chargeTypes.nameAr, "رسوم جمركية باسم العميل"));
+      // الفحص قبل الحفظ: الصف الفارغ يُتجاهل، والناقص يُرفض برقمه
+      expect(parseChargeRows(JSON.stringify([{ chargeTypeId: "", amount: "" }]), 1)).toEqual([]);
+      expect(() => parseChargeRows(JSON.stringify([{ chargeTypeId: String(customs.id), amount: "50", payer: "cash", cashAccountId: "" }]), 1)).toThrow("مصروف العميل 1: اختر الحساب الذي دفعت منه الشركة");
+      expect(() => parseChargeRows(JSON.stringify([{ chargeTypeId: String(customs.id), amount: "0" }]), 1)).toThrow("اكتب المبلغ");
+
+      const w = await createWaybill(db, { waybillDate: D, customerId, routeId: intlRoute, shipper: "أ", consignee: "ب", vehicleId: vehicle.id, amount: 2000 });
+      // من نافذة الشحنة قبل الاعتماد: يُقيد مع قيدها
+      await addCustomerCharges(db, parseChargeRows(JSON.stringify([{ chargeTypeId: String(customs.id), amount: "80", payer: "driver_custody" }]), w.id));
+      await approveWaybill(db, w.id, { canOverride: true, overrideReason: "تجربة" });
+      const inv = await createInvoice(db, { customerId, invoiceDate: D });
+      const expenseLines = async () => (await db.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, inv.id))).filter((l) => l.kind === "expense");
+      expect((await expenseLines()).map((l) => Number(l.amount))).toEqual([80]);
+
+      // من مسودة الفاتورة: صفان والثاني ناقص (المخلص)، فلا يُضاف أي منهما
+      const bad = [
+        { waybillId: w.id, charge: { chargeTypeId: customs.id, amount: 40, payer: "cash" as const, cashAccountId: acc["110101"] } },
+        { waybillId: w.id, charge: { chargeTypeId: customs.id, amount: 25, payer: "customs_broker" as const } },
+      ];
+      await expect(addCustomerCharges(db, bad)).rejects.toThrow("اختر المخلص");
+      expect(await expenseLines()).toHaveLength(1);
+
+      // صف سليم: يُقيد فوراً على 1114 ويدخل المسودة سطراً مستقلاً
+      const [added] = await addCustomerCharges(db, [bad[0]]);
+      expect(added.invoice).toBe(inv.number);
+      expect((await expenseLines()).map((l) => Number(l.amount)).sort()).toEqual([40, 80]);
+      const [row] = await db.select().from(s.waybillExpenses).where(eq(s.waybillExpenses.id, added.row.id));
+      expect(row.billTo).toBe("customer");
+      const jl = await entryLines(row.journalEntryId!);
+      expect(jl.find((l) => l.code === "1114")?.debit).toBe(40);
+
+      // شحنة جديدة ومصاريفها في معاملة واحدة: خطأ في المصروف لا يترك شحنة دونه
+      const { createWaybillTx } = await import("@/lib/waybills");
+      const count = async () => (await db.select().from(s.waybills)).length;
+      const n = await count();
+      await expect(
+        db.transaction(async (tx) => {
+          const c = await createWaybillTx(tx, { waybillDate: D, customerId, routeId: intlRoute, shipper: "أ", consignee: "ب", vehicleId: vehicle.id, amount: 900 });
+          await addCustomerCharges(tx, [{ waybillId: c.id, charge: { chargeTypeId: customs.id, amount: 30, payer: "customs_broker" } }]);
+        }),
+      ).rejects.toThrow("اختر المخلص");
+      expect(await count()).toBe(n);
+    });
+
+    it("الفاتورة المباشرة دون شحنة: نفس قسم مصاريف العميل، قيد 1114 عند الحفظ، سطر مستقل يُقفله عند الإصدار", async () => {
+      const { addInvoiceCharges, removeInvoiceLine } = await import("@/lib/invoices");
+      const [customs] = await db.select().from(s.chargeTypes).where(eq(s.chargeTypes.nameAr, "رسوم جمركية باسم العميل"));
+      const [clearing] = await db.insert(s.chargeTypes).values({ nameAr: "أجور تخليص مستردة" }).returning();
+      const vat = await tax("VAT15-OUT");
+      const line = { description: "نقل خاص", quantity: 1, unitPrice: 1000, discountPercent: 0, amount: 1000, vatRate: 15, vatAmount: 150, taxCodeId: vat.id, accountId: acc["4101"], costCenterId: null };
+      const head = { customerId, invoiceDate: D, dueDate: D, currencyCode: "SAR", lines: [line] };
+      const inv = await createDirectInvoice(db, head);
+      // في الفاتورة المباشرة الصف بلا شحنة مقبول (المصروف على الفاتورة نفسها)
+      expect(parseChargeRows(JSON.stringify([{ chargeTypeId: String(customs.id), amount: "200", payer: "cash", cashAccountId: String(acc["110101"]) }]), undefined, { invoiceLevel: true })[0].waybillId).toBe(0);
+      expect(() => parseChargeRows(JSON.stringify([{ chargeTypeId: String(customs.id), amount: "200", payer: "cash", cashAccountId: String(acc["110101"]) }]))).toThrow("اختر الشحنة");
+      // ما دفعه السائق لا يُكتب يدوياً، والخطأ لا يترك شيئاً
+      await expect(
+        addInvoiceCharges(db, inv.id, [
+          { chargeTypeId: customs.id, amount: 200, payer: "cash", cashAccountId: acc["110101"] },
+          { chargeTypeId: clearing.id, amount: 100, payer: "driver_custody" },
+        ]),
+      ).rejects.toThrow("من إيصاله");
+      expect(await db.select().from(s.waybillExpenses).where(eq(s.waybillExpenses.invoiceId, inv.id))).toHaveLength(0);
+
+      await addInvoiceCharges(db, inv.id, [
+        { chargeTypeId: customs.id, amount: 200, payer: "cash", cashAccountId: acc["110101"], note: "بيان 55" },
+        { chargeTypeId: clearing.id, amount: 100, payer: "cash", cashAccountId: acc["110101"] },
+      ]);
+      const expenseLines = async (id = inv.id) => (await db.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, id))).filter((l) => l.kind === "expense").sort((a, b) => a.lineNo - b.lineNo);
+      // الرسوم باسم العميل «غير خاضع»، والأجور بضريبة البند الأول
+      expect((await expenseLines()).map((l) => [Number(l.amount), Number(l.vatAmount), Number(l.costAmount)])).toEqual([
+        [200, 0, 200],
+        [100, 15, 100],
+      ]);
+      const charges = await db.select().from(s.waybillExpenses).where(eq(s.waybillExpenses.invoiceId, inv.id));
+      const jl = await entryLines(charges[0].journalEntryId!);
+      expect(jl.find((l) => l.code === "1114")?.debit).toBe(200);
+      expect(jl.find((l) => l.code === "110101")?.credit).toBe(200);
+      expect((await unbilledCharges(db)).filter((r) => r.invoiceId === inv.id).map((r) => r.waybill)).toEqual([inv.number, inv.number]);
+
+      // التعديل يبقي المصاريف، ولا يثبّت العميل لأنها ليست شحنات
+      const other = (await createParty(db, { nameAr: "عميل الفاتورة المباشرة", roles: ["customer"] })).id;
+      await updateDirectInvoice(db, inv.id, { ...head, customerId: other, lines: [{ ...line, amount: 1200, unitPrice: 1200, vatAmount: 180 }] });
+      expect((await expenseLines()).map((l) => Number(l.amount))).toEqual([200, 100]);
+
+      // حذف سطر المصروف يحذفه مع قيده
+      await removeInvoiceLine(db, inv.id, (await expenseLines())[1].id);
+      expect(await db.select().from(s.journalEntries).where(eq(s.journalEntries.id, charges.find((c) => c.chargeTypeId === clearing.id)!.journalEntryId!))).toHaveLength(0);
+
+      // الإصدار: مدين العميل، ودائن 1114 بالمدفوع
+      const entry = await issueInvoice(db, inv.id);
+      const il = await entryLines(entry.id);
+      expect(il.find((l) => l.code === "1114")?.credit).toBe(200);
+      expect(il.filter((l) => l.code === "1103").reduce((a, l) => a + l.debit, 0)).toBe(1200 + 180 + 200);
+      expect((await unbilledCharges(db)).some((r) => r.invoiceId === inv.id)).toBe(false);
+      await expect(addInvoiceCharges(db, inv.id, [{ chargeTypeId: customs.id, amount: 5, payer: "cash", cashAccountId: acc["110101"] }])).rejects.toThrow("إشعار مدين");
+
+      // حذف مسودة بمصروف يحذف المصروف وقيده، فلا يبقى شيء على 1114
+      const draft = await createDirectInvoice(db, head);
+      await addInvoiceCharges(db, draft.id, [{ chargeTypeId: customs.id, amount: 70, payer: "cash", cashAccountId: acc["110101"] }]);
+      const [c] = await db.select().from(s.waybillExpenses).where(eq(s.waybillExpenses.invoiceId, draft.id));
+      await deleteInvoice(db, draft.id, { reason: "تجربة" });
+      expect(await db.select().from(s.waybillExpenses).where(eq(s.waybillExpenses.id, c.id))).toHaveLength(0);
+      expect(await db.select().from(s.journalEntries).where(eq(s.journalEntries.id, c.journalEntryId!))).toHaveLength(0);
     });
 
     it("فاتورة المورد بالاحتساب العكسي: المورد بالصافي، والضريبة مدين 1108 ودائن 2109؛ والإشعار يحفظ نوع الضريبة", async () => {
