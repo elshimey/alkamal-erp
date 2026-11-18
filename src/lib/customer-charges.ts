@@ -50,17 +50,33 @@ async function postChargeTx(tx: Tx, w: typeof s.waybills.$inferSelect, rowId: nu
   return entry;
 }
 
+/** يضيف مصروفاً للشحنة داخل معاملة قائمة (قبل الاعتماد مع قيدها، وبعده بقيد مستقل ويدخل مسودة فاتورتها). */
+export async function addWaybillChargeTx(tx: Tx, waybillId: number, e: ExpenseInput, userId?: number) {
+  const w = await lockWaybill(tx, waybillId);
+  if (w.status === "invoiced") throw new Error(`الشحنة ${w.number} مفوترة؛ حمّل المصروف على العميل بإشعار مدين مربوط بفاتورتها`);
+  if (w.status === "rejected" && e.billTo === "customer") throw new Error(`الشحنة ${w.number} مرفوضة؛ لا يُحمَّل عليها مصروف للعميل`);
+  const row = await insertExpenseTx(tx, w, e);
+  if (EDITABLE.includes(w.status)) return { row, invoice: null };
+  await postChargeTx(tx, w, row.id, userId);
+  const invoice = await attachChargeToDraftInvoiceTx(tx, row.id);
+  return { row, invoice };
+}
+
 /** يضيف مصروفاً للشحنة في أي مرحلة قبل إصدار فاتورتها. */
 export async function addWaybillCharge(db: Db, waybillId: number, e: ExpenseInput, userId?: number) {
-  return db.transaction(async (tx) => {
-    const w = await lockWaybill(tx, waybillId);
-    if (w.status === "invoiced") throw new Error(`الشحنة ${w.number} مفوترة؛ حمّل المصروف على العميل بإشعار مدين مربوط بفاتورتها`);
-    const row = await insertExpenseTx(tx, w, e);
-    if (EDITABLE.includes(w.status)) return { row, invoice: null };
-    await postChargeTx(tx, w, row.id, userId);
-    const invoice = await attachChargeToDraftInvoiceTx(tx, row.id);
-    return { row, invoice };
-  });
+  return db.transaction((tx) => addWaybillChargeTx(tx, waybillId, e, userId));
+}
+
+/** عدة مصاريف على العميل معاً (من نافذة الشحنة أو مسودة الفاتورة): كلها أو لا شيء. */
+export async function addCustomerCharges(db: Db | Tx, items: { waybillId: number; charge: ExpenseInput }[], userId?: number) {
+  if (!items.length) return [];
+  const run = async (tx: Tx) => {
+    const out = [];
+    for (const it of items) out.push(await addWaybillChargeTx(tx, it.waybillId, { ...it.charge, billTo: "customer" }, userId));
+    return out;
+  };
+  // داخل معاملة قائمة تصبح نقطة حفظ، فالخطأ يُرجع المصاريف وحدها أو المعاملة كلها حسب المستدعي
+  return (db as Db).transaction(run);
 }
 
 /** يحذف مصروف الشحنة: يخرج من مسودة الفاتورة، ويُحذف قيده المستقل إن وُجد. */
@@ -151,3 +167,39 @@ export async function unbilledCharges(db: Db | Tx) {
     .orderBy(asc(s.parties.nameAr), asc(s.waybills.waybillDate));
 }
 
+
+/** يقرأ صفوف «مصاريف على العميل» من النافذة ويتحقق منها قبل أي حفظ (الصف الفارغ يُتجاهل). */
+export function parseChargeRows(json: string, fallbackWaybillId?: number): { waybillId: number; charge: ExpenseInput }[] {
+  let rows: Record<string, string>[];
+  try {
+    rows = JSON.parse(json || "[]");
+  } catch {
+    return [];
+  }
+  const out: { waybillId: number; charge: ExpenseInput }[] = [];
+  rows.forEach((r, i) => {
+    const amount = Number(String(r.amount ?? "").replace(/[,\s]/g, "")) || 0;
+    if (!r.chargeTypeId && !amount) return;
+    const n = `مصروف العميل ${i + 1}`;
+    if (!r.chargeTypeId) throw new Error(`${n}: اختر النوع`);
+    if (!(amount > 0)) throw new Error(`${n}: اكتب المبلغ`);
+    const waybillId = Number(r.waybillId) || fallbackWaybillId || 0;
+    if (!waybillId) throw new Error(`${n}: اختر الشحنة`);
+    const payer = r.payer === "customs_broker" || r.payer === "cash" ? r.payer : "driver_custody";
+    if (payer === "cash" && !Number(r.cashAccountId)) throw new Error(`${n}: اختر الصندوق أو البنك`);
+    if (payer === "customs_broker" && !Number(r.partyId)) throw new Error(`${n}: اختر المخلص`);
+    out.push({
+      waybillId,
+      charge: {
+        chargeTypeId: Number(r.chargeTypeId),
+        amount,
+        billTo: "customer",
+        payer,
+        partyId: Number(r.partyId) || null,
+        cashAccountId: Number(r.cashAccountId) || null,
+        note: String(r.note ?? "").trim() || null,
+      },
+    });
+  });
+  return out;
+}

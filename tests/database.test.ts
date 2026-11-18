@@ -88,7 +88,7 @@ import { addExpense, addFuel, approvalIssues, approveWaybill, createWaybill, del
 import { sendTrip, unsendTrip, bulkTrips, invoiceTripIds } from "@/lib/trip-dispatch";
 import { parseTransport } from "@/lib/transport-draft";
 import { addTaxCode, matchTaxCode, setTaxCodeActive } from "@/lib/tax-codes";
-import { addWaybillCharge, removeWaybillCharge, unbilledCharges } from "@/lib/customer-charges";
+import { addCustomerCharges, addWaybillCharge, parseChargeRows, removeWaybillCharge, unbilledCharges } from "@/lib/customer-charges";
 
 const url = process.env.TEST_DATABASE_URL;
 const YEAR = 2026;
@@ -3163,6 +3163,51 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect((await unbilledCharges(db)).some((r) => r.id === linked.id)).toBe(true);
       await revertExpense(db, e.id);
       expect(await db.select().from(s.waybillExpenses).where(eq(s.waybillExpenses.sourceExpenseId, e.id))).toHaveLength(0);
+    });
+
+    it("مصاريف العميل من نافذة الشحنة ومسودة الفاتورة: تُفحص أولاً، وتُضاف كلها أو لا شيء، وتدخل الفاتورة سطوراً", async () => {
+      const [customs] = await db.select().from(s.chargeTypes).where(eq(s.chargeTypes.nameAr, "رسوم جمركية باسم العميل"));
+      // الفحص قبل الحفظ: الصف الفارغ يُتجاهل، والناقص يُرفض برقمه
+      expect(parseChargeRows(JSON.stringify([{ chargeTypeId: "", amount: "" }]), 1)).toEqual([]);
+      expect(() => parseChargeRows(JSON.stringify([{ chargeTypeId: String(customs.id), amount: "50", payer: "cash", cashAccountId: "" }]), 1)).toThrow("مصروف العميل 1: اختر الصندوق أو البنك");
+      expect(() => parseChargeRows(JSON.stringify([{ chargeTypeId: String(customs.id), amount: "0" }]), 1)).toThrow("اكتب المبلغ");
+
+      const w = await createWaybill(db, { waybillDate: D, customerId, routeId: intlRoute, shipper: "أ", consignee: "ب", vehicleId: vehicle.id, amount: 2000 });
+      // من نافذة الشحنة قبل الاعتماد: يُقيد مع قيدها
+      await addCustomerCharges(db, parseChargeRows(JSON.stringify([{ chargeTypeId: String(customs.id), amount: "80", payer: "driver_custody" }]), w.id));
+      await approveWaybill(db, w.id, { canOverride: true, overrideReason: "تجربة" });
+      const inv = await createInvoice(db, { customerId, invoiceDate: D });
+      const expenseLines = async () => (await db.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, inv.id))).filter((l) => l.kind === "expense");
+      expect((await expenseLines()).map((l) => Number(l.amount))).toEqual([80]);
+
+      // من مسودة الفاتورة: صفان والثاني ناقص (المخلص)، فلا يُضاف أي منهما
+      const bad = [
+        { waybillId: w.id, charge: { chargeTypeId: customs.id, amount: 40, payer: "cash" as const, cashAccountId: acc["110101"] } },
+        { waybillId: w.id, charge: { chargeTypeId: customs.id, amount: 25, payer: "customs_broker" as const } },
+      ];
+      await expect(addCustomerCharges(db, bad)).rejects.toThrow("اختر المخلص");
+      expect(await expenseLines()).toHaveLength(1);
+
+      // صف سليم: يُقيد فوراً على 1114 ويدخل المسودة سطراً مستقلاً
+      const [added] = await addCustomerCharges(db, [bad[0]]);
+      expect(added.invoice).toBe(inv.number);
+      expect((await expenseLines()).map((l) => Number(l.amount)).sort()).toEqual([40, 80]);
+      const [row] = await db.select().from(s.waybillExpenses).where(eq(s.waybillExpenses.id, added.row.id));
+      expect(row.billTo).toBe("customer");
+      const jl = await entryLines(row.journalEntryId!);
+      expect(jl.find((l) => l.code === "1114")?.debit).toBe(40);
+
+      // شحنة جديدة ومصاريفها في معاملة واحدة: خطأ في المصروف لا يترك شحنة دونه
+      const { createWaybillTx } = await import("@/lib/waybills");
+      const count = async () => (await db.select().from(s.waybills)).length;
+      const n = await count();
+      await expect(
+        db.transaction(async (tx) => {
+          const c = await createWaybillTx(tx, { waybillDate: D, customerId, routeId: intlRoute, shipper: "أ", consignee: "ب", vehicleId: vehicle.id, amount: 900 });
+          await addCustomerCharges(tx, [{ waybillId: c.id, charge: { chargeTypeId: customs.id, amount: 30, payer: "customs_broker" } }]);
+        }),
+      ).rejects.toThrow("اختر المخلص");
+      expect(await count()).toBe(n);
     });
 
     it("فاتورة المورد بالاحتساب العكسي: المورد بالصافي، والضريبة مدين 1108 ودائن 2109؛ والإشعار يحفظ نوع الضريبة", async () => {
