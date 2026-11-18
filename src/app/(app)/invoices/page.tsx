@@ -3,11 +3,12 @@ import Link from "next/link";
 import { and, asc, eq, inArray, like } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
+import { toTripExpense, tripExpensesForBilling } from "@/lib/purchases";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
-import { cashAccounts, fundingAccounts, currentTrip, invoicingQueue, listSalesInvoices, salesInvoiceDoc, summarizeSalesInvoices } from "@/lib/invoices";
+import { fundingAccounts, currentTrip, invoicingQueue, listSalesInvoices, salesInvoiceDoc, summarizeSalesInvoices } from "@/lib/invoices";
 import { PAGE_SIZE, pageOf } from "@/lib/paging";
-import { chargeTypeOptions, driverOptions, partyOptions, routeOptions, vehicleOptions } from "@/lib/lookups";
+import { accountOptions, chargeTypeOptions, driverOptions, partyOptions, routeOptions, vehicleOptions } from "@/lib/lookups";
 import { getCompany, getInvoiceTemplate, invoiceReadiness } from "@/lib/company";
 import { invoiceQrSvg } from "@/lib/zatca-qr";
 import { clearedQr, getSettings, latestDocument, sendBlocker } from "@/lib/zatca/service";
@@ -108,19 +109,20 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
   const taxRows = creating || editing ? await taxCodesFor(db, "sales") : [];
   // مصاريف على العميل تُضاف من المسودة نفسها لأي شحنة فيها
   const invoiceWaybillIds = editing && editDoc ? [...new Set(editDoc.lines.filter((l) => l.kind === "waybill" && l.waybillId).map((l) => l.waybillId!))] : [];
-  const [chargeTypes, chargeBrokers, chargeCash, chargeWaybills] = invoiceWaybillIds.length
+  const [chargeTypes, chargeBrokers, chargeCash, chargeWaybills, tripExpenses] = invoiceWaybillIds.length
     ? await Promise.all([
         chargeTypeOptions(),
         partyOptions("customs_broker"),
-        cashAccounts(db).then((r) => r.map((a) => ({ value: String(a.id), label: `${a.nameAr} ${a.code}` }))),
+        accountOptions(["1", "2"]).then((o) => o.filter((x) => x.code !== "1114")),
         db
           .select({ id: s.waybills.id, number: s.waybills.number, execution: s.waybills.execution })
           .from(s.waybills)
           .where(inArray(s.waybills.id, invoiceWaybillIds))
           .orderBy(asc(s.waybills.number))
           .then((r) => r.map((w) => ({ value: String(w.id), label: `الشحنة ${w.number}`, fleet: w.execution === "fleet" }))),
+        tripExpensesForBilling(db, invoiceWaybillIds).then((r) => r.map(toTripExpense)),
       ])
-    : [[], [], [], []];
+    : [[], [], [], [], []];
   const taxOpts = taxRows.map((x) => ({ value: String(x.id), label: `${x.nameAr} (${Number(x.rate)}%)`, rate: Number(x.rate) }));
   const taxName = (id: number | null) => taxRows.find((x) => x.id === id)?.nameAr ?? null;
   // البند الإضافي يبدأ بضريبة أول شحنة في الفاتورة وحسابها ومركبتها
@@ -571,7 +573,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
           costCenters={centers.map((c) => ({ value: String(c.id), label: c.nameAr }))}
           taxes={taxOpts}
           lineDefaults={lineDefaults}
-          chargeOptions={{ chargeTypes, brokers: chargeBrokers, cashAccounts: chargeCash, waybills: chargeWaybills }}
+          chargeOptions={{ chargeTypes, brokers: chargeBrokers, cashAccounts: chargeCash, waybills: chargeWaybills, tripExpenses }}
           currencies={currencies.map((c) => c.code)}
           routes={tripRoutes}
           vehicles={tripVehicles}

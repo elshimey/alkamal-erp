@@ -17,7 +17,17 @@ export interface ChargeDraft {
   note: string;
 }
 
-export const PAYER_LABELS = { driver_custody: "عهدة السائق", customs_broker: "المخلص", cash: "صندوق / بنك الشركة" } as const;
+export interface TripExpense {
+  id: number;
+  number: string;
+  label: string;
+  amount: string;
+  status: "pending" | "approved";
+  payer: string;
+  waybill?: string;
+}
+
+export const PAYER_LABELS = { driver_custody: "عهدة السائق", customs_broker: "المخلص", cash: "الشركة" } as const;
 
 const field = "w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20";
 const num = (v: string) => Number(v.replace(/[,\s]/g, "")) || 0;
@@ -27,9 +37,10 @@ export function newCharge(opts: { fleet: boolean; cashAccounts: QuickOption[]; w
     waybillId: opts.waybillId ?? "",
     chargeTypeId: "",
     amount: "",
-    payer: opts.fleet ? "driver_custody" : "cash",
+    // ما دفعه السائق من عهدته يأتي من إيصاله (القائمة أعلاه) لا يُكتب يدوياً، حتى لا يتكرر
+    payer: "cash",
     partyId: "",
-    cashAccountId: opts.fleet ? "" : (opts.cashAccounts[0]?.value ?? ""),
+    cashAccountId: "",
     note: "",
   };
 }
@@ -43,6 +54,9 @@ export function CustomerChargesEditor({
   cashAccounts,
   waybills,
   fleet,
+  tripExpenses,
+  picked,
+  onPick,
 }: {
   rows: ChargeDraft[];
   onChange: (rows: ChargeDraft[]) => void;
@@ -51,11 +65,14 @@ export function CustomerChargesEditor({
   cashAccounts: QuickOption[];
   /** قائمة الشحنات (في الفاتورة فقط) */
   waybills?: (QuickOption & { fleet: boolean })[];
-  /** شحنة أسطول: عهدة السائق متاحة */
+  /** شحنة أسطول */
   fleet: boolean;
+  /** إيصالات السائق والمصروفات المسجلة للرحلة: تُحمَّل على العميل برقمها بدل إعادة كتابتها */
+  tripExpenses?: TripExpense[];
+  picked?: number[];
+  onPick?: (ids: number[]) => void;
 }) {
   const set = (i: number, patch: Partial<ChargeDraft>) => onChange(rows.map((r, k) => (k === i ? { ...r, ...patch } : r)));
-  const fleetOf = (r: ChargeDraft) => (waybills ? (waybills.find((w) => w.value === r.waybillId)?.fleet ?? false) : fleet);
   const total = rows.reduce((a, r) => a + num(r.amount), 0);
   const add = () => {
     const w = waybills?.length === 1 ? waybills[0] : undefined;
@@ -64,8 +81,32 @@ export function CustomerChargesEditor({
 
   return (
     <div className="space-y-3">
+      {!!tripExpenses?.length && (
+        <div className="space-y-1 rounded-xl border border-sky-200 bg-sky-50/50 p-3">
+          <span className="block text-xs font-medium text-sky-900">مصروفات مسجلة لهذه الرحلة (من تطبيق السائق أو المصروفات)</span>
+          <span className="block text-[11px] text-sky-800">علّم ما يُحمَّل على العميل؛ يبقى مخصوماً من العهدة مرة واحدة ويُفوتر مرة واحدة.</span>
+          {tripExpenses.map((x) => (
+            <label key={x.id} className="flex cursor-pointer items-center gap-2 rounded-lg px-1 py-1 text-sm hover:bg-sky-100/60">
+              <input
+                type="checkbox"
+                className="size-4 accent-brand-600"
+                checked={picked?.includes(x.id) ?? false}
+                onChange={(e) => onPick?.(e.target.checked ? [...(picked ?? []), x.id] : (picked ?? []).filter((id) => id !== x.id))}
+              />
+              <span className="min-w-0 flex-1">
+                <span className="ltr-nums text-gray-500">{x.number}</span> {x.label}
+                <span className="block text-[11px] text-gray-500">
+                  {x.waybill ? `${x.waybill} · ` : ""}
+                  {x.payer} · {x.status === "pending" ? "بانتظار الاعتماد: يدخل الفاتورة عند اعتماده" : "معتمد"}
+                </span>
+              </span>
+              <span className="ltr-nums font-medium">{fmt(x.amount)}</span>
+            </label>
+          ))}
+        </div>
+      )}
       {rows.map((r, i) => {
-        const payers = (fleetOf(r) ? (["driver_custody", "cash", "customs_broker"] as const) : (["cash", "customs_broker"] as const)).map((p) => ({ value: p, label: PAYER_LABELS[p] }));
+        const payers = (["cash", "customs_broker"] as const).map((p) => ({ value: p, label: PAYER_LABELS[p] }));
         return (
           <div key={i} className="space-y-2 rounded-xl border border-amber-200 bg-amber-50/40 p-3">
             <div className="flex items-center justify-between text-xs text-amber-800">
@@ -80,7 +121,7 @@ export function CustomerChargesEditor({
                 value={r.waybillId}
                 onChange={(e) => {
                   const w = waybills.find((x) => x.value === e.target.value);
-                  set(i, { waybillId: e.target.value, ...(w && !w.fleet && r.payer === "driver_custody" ? { payer: "cash", cashAccountId: r.cashAccountId || (cashAccounts[0]?.value ?? "") } : {}) });
+                  set(i, { waybillId: e.target.value, ...(w && !w.fleet && r.payer === "driver_custody" ? { payer: "cash" } : {}) });
                 }}
                 className={field}
               >
@@ -93,7 +134,7 @@ export function CustomerChargesEditor({
               </select>
             )}
             <div className="grid grid-cols-[minmax(0,1fr)_7rem] gap-2">
-              <ComboBox value={r.chargeTypeId} options={chargeTypes} allowEmpty={false} placeholder="النوع: رسوم جمركية، ميناء…" onChange={(v) => set(i, { chargeTypeId: v })} className={field} />
+              <ComboBox value={r.chargeTypeId} options={chargeTypes} create="charge_type" allowEmpty={false} placeholder="النوع: رسوم جمركية، ميناء…" onChange={(v) => set(i, { chargeTypeId: v })} className={field} />
               <input value={r.amount} onChange={(e) => set(i, { amount: e.target.value })} inputMode="decimal" placeholder="المبلغ" aria-label="المبلغ" className={`${field} ltr-nums`} />
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -102,7 +143,7 @@ export function CustomerChargesEditor({
                 value={r.payer}
                 onChange={(e) => {
                   const payer = e.target.value as ChargeDraft["payer"];
-                  set(i, { payer, cashAccountId: payer === "cash" ? r.cashAccountId || (cashAccounts[0]?.value ?? "") : r.cashAccountId });
+                  set(i, { payer });
                 }}
                 className={field}
               >
@@ -112,9 +153,10 @@ export function CustomerChargesEditor({
                   </option>
                 ))}
               </select>
-              {r.payer === "cash" && <ComboBox value={r.cashAccountId} options={cashAccounts} allowEmpty={false} placeholder="الصندوق أو البنك" onChange={(v) => set(i, { cashAccountId: v })} className={field} />}
+              {r.payer === "cash" && (
+                <ComboBox value={r.cashAccountId} options={cashAccounts} create="account" scope="1101,1102" allowEmpty={false} placeholder="من أي حساب؟ صندوق، بنك…" onChange={(v) => set(i, { cashAccountId: v })} className={field} />
+              )}
               {r.payer === "customs_broker" && <ComboBox value={r.partyId} options={brokers} create="customs_broker" allowEmpty={false} placeholder="المخلص" onChange={(v) => set(i, { partyId: v })} className={field} />}
-              {r.payer === "driver_custody" && <span className="self-center text-xs text-gray-500">يُخصم من عهدة سائق الرحلة</span>}
             </div>
             <input value={r.note} onChange={(e) => set(i, { note: e.target.value })} placeholder="ملاحظة (رقم الإيصال مثلاً)" aria-label="ملاحظة" className={field} />
           </div>

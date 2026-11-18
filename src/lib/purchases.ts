@@ -527,7 +527,7 @@ export async function rejectExpense(db: Db, id: number, reason: string) {
 }
 
 /** يعيد المصروف المعتمد أو المرفوض إلى «بانتظار الاعتماد»، ويلغي قيده. */
-export async function revertExpense(db: Db, id: number) {
+export async function revertExpense(db: Db | Tx, id: number) {
   return db.transaction(async (tx) => {
     const e = await lockExpense(tx, id);
     if (e.status === "pending") throw new Error("المصروف معلّق أصلاً");
@@ -780,4 +780,57 @@ export async function custodyBalances(db: Db | Tx) {
     group by d.id, e.name_ar
     order by e.name_ar`)) as unknown as { id: number; name_ar: string; balance: string }[];
   return rows.map((r) => ({ id: Number(r.id), name: r.name_ar, balance: Number(r.balance) }));
+}
+
+/**
+ * مصروفات الرحلة المسجلة (من تطبيق السائق أو شاشة المصروفات) التي لم تُحمَّل على العميل بعد:
+ * تظهر في نافذة الشحنة ومسودة الفاتورة برقمها، فيُحمَّل الإيصال نفسه على العميل بدل إعادة كتابة مبلغه.
+ */
+export async function tripExpensesForBilling(db: Db | Tx, waybillIds: number[]) {
+  if (!waybillIds.length) return [];
+  return db
+    .select({ e: s.expenses, waybill: s.waybills.number })
+    .from(s.expenses)
+    .innerJoin(s.waybills, eq(s.waybills.id, s.expenses.waybillId))
+    .where(and(inArray(s.expenses.waybillId, waybillIds), inArray(s.expenses.status, ["pending", "approved"]), eq(s.expenses.billToCustomer, false), sql`${s.expenses.maintenanceOrderId} is null`))
+    .orderBy(asc(s.expenses.id));
+}
+
+/**
+ * يحمّل مصروفات رحلة مسجلة على العميل (رابطها رقم الإيصال، فلا يتكرر المبلغ ولا يُخصم من العهدة مرتين):
+ * المعلّق يُعلَّم ويدخل الشحنة وفاتورتها عند اعتماده، والمعتمد يُعاد قيده على 1114 ويدخلها فوراً.
+ */
+export async function billTripExpensesToCustomer(db: Db | Tx, ids: number[], allowedWaybillIds: number[], userId?: number) {
+  if (!ids.length) return [];
+  return db.transaction(async (tx) => {
+    const done: string[] = [];
+    for (const id of ids) {
+      const e = await lockExpense(tx, id);
+      if (!e.waybillId || !allowedWaybillIds.includes(e.waybillId)) throw new Error(`المصروف ${e.number} ليس من هذه الشحنات`);
+      if (e.billToCustomer) continue;
+      if (e.maintenanceOrderId) throw new Error(`المصروف ${e.number} طلب صيانة؛ لا يُحمَّل على العميل`);
+      if (e.status === "pending") {
+        await tx.update(s.expenses).set({ billToCustomer: true }).where(eq(s.expenses.id, id));
+      } else if (e.status === "approved") {
+        // يُرجَع ويُعتمد من جديد بنفس الدافع والحساب والضريبة، فيتحول قيده إلى 1114 ويدخل الشحنة
+        await revertExpense(tx, id);
+        await approveExpenseWith(tx, id, { payer: e.payer, billToCustomer: true, cashAccountId: e.cashAccountId, accountId: e.accountId, vatAmount: num(e.vatAmount), userId });
+      } else throw new Error(`المصروف ${e.number} ليس معلّقاً ولا معتمداً`);
+      done.push(e.number);
+    }
+    return done;
+  });
+}
+
+/** شكل إيصال الرحلة في نافذة الشحنة والفاتورة. */
+export function toTripExpense({ e, waybill }: Awaited<ReturnType<typeof tripExpensesForBilling>>[number]) {
+  return {
+    id: e.id,
+    number: e.number,
+    label: e.description,
+    amount: String(round2(num(e.amount) + num(e.vatAmount))),
+    status: e.status as "pending" | "approved",
+    payer: e.payer === "driver_custody" ? "من عهدة السائق" : "دفعته الشركة",
+    waybill,
+  };
 }

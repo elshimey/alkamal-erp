@@ -3165,11 +3165,43 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(await db.select().from(s.waybillExpenses).where(eq(s.waybillExpenses.sourceExpenseId, e.id))).toHaveLength(0);
     });
 
+    it("إيصال السائق يُحمَّل على العميل برقمه من الشحنة أو الفاتورة: يُخصم من العهدة مرة ويُفوتر مرة", async () => {
+      const { billTripExpensesToCustomer, tripExpensesForBilling } = await import("@/lib/purchases");
+      const w = await createWaybill(db, { waybillDate: D, customerId, routeId: intlRoute, shipper: "أ", consignee: "ب", vehicleId: vehicle.id, amount: 1500 });
+      const [tolls] = await db.select().from(s.accounts).where(eq(s.accounts.code, "5104"));
+      // إيصال معتمد على الشركة، وآخر معلّق
+      const approved = await createExpense(db, { expenseDate: D, payer: "driver_custody", driverId, waybillId: w.id, accountId: tolls.id, description: "رسوم ميناء", amount: 60, approve: true });
+      const pending = await createExpense(db, { expenseDate: D, payer: "driver_custody", driverId, waybillId: w.id, accountId: tolls.id, description: "أرضيات", amount: 40 });
+      expect((await tripExpensesForBilling(db, [w.id])).map((r) => r.e.id).sort()).toEqual([approved.id, pending.id].sort());
+      await approveWaybill(db, w.id, { canOverride: true, overrideReason: "تجربة" });
+      const inv = await createInvoice(db, { customerId, invoiceDate: D });
+      // شحنة ليست من الفاتورة تُرفض
+      await expect(billTripExpensesToCustomer(db, [approved.id], [w.id + 999])).rejects.toThrow("ليس من هذه الشحنات");
+
+      await billTripExpensesToCustomer(db, [approved.id, pending.id], [w.id]);
+      const [a] = await db.select().from(s.expenses).where(eq(s.expenses.id, approved.id));
+      expect(a.billToCustomer).toBe(true);
+      const jl = await entryLines(a.journalEntryId!);
+      // قيد واحد: مدين 1114 بدل 5104، ودائن العهدة مرة واحدة
+      expect(jl.find((l) => l.code === "1114")?.debit).toBe(60);
+      expect(jl.some((l) => l.code === "5104")).toBe(false);
+      expect(jl.filter((l) => l.credit > 0)).toHaveLength(1);
+      const lines = (await db.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, inv.id))).filter((l) => l.kind === "expense");
+      expect(lines.map((l) => Number(l.amount))).toEqual([60]);
+      // المعلّق يُعلَّم فقط، ويدخل الفاتورة عند اعتماده
+      const [p] = await db.select().from(s.expenses).where(eq(s.expenses.id, pending.id));
+      expect([p.status, p.billToCustomer]).toEqual(["pending", true]);
+      // التكرار لا يضيف شيئاً، والقائمة لا تعرضهما بعد ذلك
+      await billTripExpensesToCustomer(db, [approved.id], [w.id]);
+      expect((await db.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, inv.id))).filter((l) => l.kind === "expense")).toHaveLength(1);
+      expect(await tripExpensesForBilling(db, [w.id])).toHaveLength(0);
+    });
+
     it("مصاريف العميل من نافذة الشحنة ومسودة الفاتورة: تُفحص أولاً، وتُضاف كلها أو لا شيء، وتدخل الفاتورة سطوراً", async () => {
       const [customs] = await db.select().from(s.chargeTypes).where(eq(s.chargeTypes.nameAr, "رسوم جمركية باسم العميل"));
       // الفحص قبل الحفظ: الصف الفارغ يُتجاهل، والناقص يُرفض برقمه
       expect(parseChargeRows(JSON.stringify([{ chargeTypeId: "", amount: "" }]), 1)).toEqual([]);
-      expect(() => parseChargeRows(JSON.stringify([{ chargeTypeId: String(customs.id), amount: "50", payer: "cash", cashAccountId: "" }]), 1)).toThrow("مصروف العميل 1: اختر الصندوق أو البنك");
+      expect(() => parseChargeRows(JSON.stringify([{ chargeTypeId: String(customs.id), amount: "50", payer: "cash", cashAccountId: "" }]), 1)).toThrow("مصروف العميل 1: اختر الحساب الذي دفعت منه الشركة");
       expect(() => parseChargeRows(JSON.stringify([{ chargeTypeId: String(customs.id), amount: "0" }]), 1)).toThrow("اكتب المبلغ");
 
       const w = await createWaybill(db, { waybillDate: D, customerId, routeId: intlRoute, shipper: "أ", consignee: "ب", vehicleId: vehicle.id, amount: 2000 });

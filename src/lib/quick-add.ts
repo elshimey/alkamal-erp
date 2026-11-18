@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq, like, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, like, sql } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
 import { can, type Entity, type PermissionSet } from "@/lib/permissions";
@@ -65,7 +65,7 @@ export function quickPerm(kind: QuickKind): Entity {
   if (kind === "account") return "accounts";
   if (kind === "violation_type") return "violations";
   if (kind === "maintenance_kind") return "maintenance";
-  if (kind === "price_component") return "waybills";
+  if (kind === "price_component" || kind === "charge_type") return "waybills";
   if (kind === "vehicle" || kind === "vehicle_type" || isCustomList(kind)) return "vehicles";
   if (kind === "driver") return "drivers";
   if (kind === "product") return "inventory";
@@ -122,6 +122,16 @@ export async function quickForm(
               },
             ]
           : []),
+      ],
+    };
+  }
+  if (kind === "charge_type") {
+    return {
+      title: "بند مصروف جديد",
+      primary: "nameAr",
+      fields: [
+        { key: "nameAr", label: "اسم البند", required: true, hint: "مثل: رسوم ميناء، أرضيات، شهادة منشأ" },
+        { key: "onBehalf", label: "يُدفع باسم العميل (رسوم حكومية أو جمركية)", type: "check", hint: "يُفوتر «غير خاضع للضريبة». اتركه فارغاً للخدمات التي تقدمها الشركة (انتظار، تحميل)." },
       ],
     };
   }
@@ -451,6 +461,21 @@ export async function quickCreate(
   perms: PermissionSet,
 ): Promise<{ option: QuickOption; message?: string }> {
   if (isCustomList(kind)) return { option: await addCustomValue(db, kind, req(v.label, "الاسم"), txt(v.base)) };
+  if (kind === "charge_type") {
+    const name = req(v.nameAr, "اسم البند");
+    const accs = await db.select({ id: s.accounts.id, code: s.accounts.code }).from(s.accounts).where(inArray(s.accounts.code, ["4103", "5104"]));
+    const byCode = new Map(accs.map((a) => [a.code, a.id]));
+    const [dup] = await db.select().from(s.chargeTypes).where(eq(s.chargeTypes.nameAr, name));
+    if (dup) {
+      if (!dup.isActive) await db.update(s.chargeTypes).set({ isActive: true }).where(eq(s.chargeTypes.id, dup.id));
+      return { option: { value: String(dup.id), label: dup.nameAr } };
+    }
+    const [row] = await db
+      .insert(s.chargeTypes)
+      .values({ nameAr: name, onBehalf: yes(v.onBehalf), revenueAccountId: byCode.get("4103") ?? null, costAccountId: byCode.get("5104") ?? null })
+      .returning();
+    return { option: { value: String(row.id), label: row.nameAr }, message: `أُضيف البند «${row.nameAr}»` };
+  }
   if (kind === "vehicle_type") {
     const name = req(v.nameAr, "اسم النوع");
     const [row] = await db.insert(s.vehicleTypes).values({ nameAr: name }).onConflictDoUpdate({ target: s.vehicleTypes.nameAr, set: { nameAr: name } }).returning();

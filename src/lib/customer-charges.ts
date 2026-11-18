@@ -186,7 +186,7 @@ export function parseChargeRows(json: string, fallbackWaybillId?: number): { way
     const waybillId = Number(r.waybillId) || fallbackWaybillId || 0;
     if (!waybillId) throw new Error(`${n}: اختر الشحنة`);
     const payer = r.payer === "customs_broker" || r.payer === "cash" ? r.payer : "driver_custody";
-    if (payer === "cash" && !Number(r.cashAccountId)) throw new Error(`${n}: اختر الصندوق أو البنك`);
+    if (payer === "cash" && !Number(r.cashAccountId)) throw new Error(`${n}: اختر الحساب الذي دفعت منه الشركة`);
     if (payer === "customs_broker" && !Number(r.partyId)) throw new Error(`${n}: اختر المخلص`);
     out.push({
       waybillId,
@@ -202,4 +202,14 @@ export function parseChargeRows(json: string, fallbackWaybillId?: number): { way
     });
   });
   return out;
+}
+
+/** أرقام الإيصالات المعلَّمة في النافذة (JSON). */
+export function readIds(json: string): number[] {
+  try {
+    const v = JSON.parse(json || "[]");
+    return Array.isArray(v) ? [...new Set(v.map(Number).filter((n) => Number.isInteger(n) && n > 0))] : [];
+  } catch {
+    return [];
+  }
 }

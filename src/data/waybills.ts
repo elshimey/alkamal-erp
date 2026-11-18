@@ -24,7 +24,7 @@ export const FUEL_SOURCES = {
 export const EXPENSE_PAYERS = {
   driver_custody: "عهدة السائق",
   customs_broker: "المخلص",
-  cash: "صندوق / بنك الشركة",
+  cash: "الشركة (صندوق / بنك / حساب)",
 } as const;
 
 export const EXPENSE_BILL_TO = {

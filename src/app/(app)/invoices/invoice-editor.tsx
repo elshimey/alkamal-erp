@@ -9,7 +9,7 @@ import { PanelField, PanelSection } from "@/components/panel-ui";
 import { RecordPanel, type PanelResult } from "@/components/record-panel";
 import { TaxInvoiceDocument } from "@/components/tax-invoice";
 import { Icon } from "@/components/icons";
-import { CustomerChargesEditor, type ChargeDraft } from "@/components/customer-charges-editor";
+import { CustomerChargesEditor, type ChargeDraft, type TripExpense } from "@/components/customer-charges-editor";
 import { fmt } from "@/lib/format";
 import type { CompanyProfile } from "@/lib/company";
 import type { InvoiceTemplate } from "@/lib/invoice-template";
@@ -85,7 +85,7 @@ export function InvoiceEditor({
   taxes: TaxOption[];
   lineDefaults: LineDefaults;
   /** مصاريف على العميل تُضاف من المسودة لأي شحنة فيها */
-  chargeOptions?: { chargeTypes: QuickOption[]; brokers: QuickOption[]; cashAccounts: QuickOption[]; waybills: (QuickOption & { fleet: boolean })[] };
+  chargeOptions?: { chargeTypes: QuickOption[]; brokers: QuickOption[]; cashAccounts: QuickOption[]; waybills: (QuickOption & { fleet: boolean })[]; tripExpenses: TripExpense[] };
   currencies: string[];
   routes: QuickOption[];
   vehicles: QuickOption[];
@@ -105,6 +105,7 @@ export function InvoiceEditor({
   // سعر سطور الشحنات ومصاريفها ووصفها قابلان للتعديل في المسودة
   const [fixed, setFixed] = useState(initial.fixedLines);
   const [charges, setCharges] = useState<ChargeDraft[]>([]);
+  const [billExpenses, setBillExpenses] = useState<number[]>([]);
   const canCharge = !!initial.id && !!chargeOptions?.waybills.length;
   const editFixed = (id: number, patch: { amount?: string; description?: string }) => {
     setFixed((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
@@ -282,6 +283,7 @@ export function InvoiceEditor({
               {canCharge && chargeOptions && (
                 <>
                   <input type="hidden" name="newCharges" value={JSON.stringify(charges)} />
+                  <input type="hidden" name="billExpenses" value={JSON.stringify(billExpenses)} />
                   <CustomerChargesEditor
                     rows={charges}
                     onChange={(rows) => {
@@ -293,8 +295,14 @@ export function InvoiceEditor({
                     cashAccounts={chargeOptions.cashAccounts}
                     waybills={chargeOptions.waybills}
                     fleet={false}
+                    tripExpenses={chargeOptions.tripExpenses}
+                    picked={billExpenses}
+                    onPick={(ids) => {
+                      setBillExpenses(ids);
+                      touch();
+                    }}
                   />
-                  {charges.length > 0 && <span className="block text-xs text-amber-700">تظهر المصاريف الجديدة في الفاتورة ومعاينتها بعد «حفظ».</span>}
+                  {charges.length + billExpenses.length > 0 && <span className="block text-xs text-amber-700">تظهر المصاريف الجديدة في الفاتورة ومعاينتها بعد «حفظ».</span>}
                 </>
               )}
             </PanelSection>

@@ -27,7 +27,8 @@ import {
 } from "@/lib/invoices";
 import { lineVat, round2 } from "@/lib/invoice-posting";
 import { taxCodesFor } from "@/lib/tax-codes";
-import { addCustomerCharges, parseChargeRows } from "@/lib/customer-charges";
+import { addCustomerCharges, parseChargeRows, readIds } from "@/lib/customer-charges";
+import { billTripExpensesToCustomer } from "@/lib/purchases";
 import type { PanelResult } from "@/components/record-panel";
 import type { SheetChange, DocSheetResult } from "@/components/doc-sheet";
 import type { FormState } from "@/components/action-form";
@@ -287,14 +288,20 @@ export async function saveInvoicePanel(id: number | null, fd: FormData): Promise
     const input = await readInvoiceForm(fd);
     // مصاريف على العميل من المسودة: تُفحص قبل الحفظ، وتُضاف كلها أو لا شيء بعد حفظ الفاتورة فتدخلها سطوراً
     const charges = id ? parseChargeRows(str(fd, "newCharges")) : [];
-    if (charges.length) {
+    const billIds = id ? readIds(str(fd, "billExpenses")) : [];
+    let own: number[] = [];
+    if (charges.length || billIds.length) {
       await requirePermission("waybills", "update");
-      const own = await db.select({ w: s.salesInvoiceLines.waybillId }).from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, id!));
-      if (charges.some((c) => !own.some((o) => o.w === c.waybillId))) throw new Error("المصروف لشحنة ليست في هذه الفاتورة");
+      own = (await db.select({ w: s.salesInvoiceLines.waybillId }).from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, id!))).flatMap((o) => (o.w ? [o.w] : []));
+      if (charges.some((c) => !own.includes(c.waybillId))) throw new Error("المصروف لشحنة ليست في هذه الفاتورة");
     }
     const inv = id ? await updateDirectInvoice(db, id, input) : await createDirectInvoice(db, { ...input, userId: user.id });
-    if (charges.length) {
-      await addCustomerCharges(db, charges, user.id);
+    if (charges.length || billIds.length) {
+      await db.transaction(async (tx) => {
+        await billTripExpensesToCustomer(tx, billIds, own, user.id);
+        await addCustomerCharges(tx, charges, user.id);
+      });
+      revalidatePath("/expenses");
       revalidatePath("/waybills");
       revalidatePath("/reports/unbilled-charges");
     }
