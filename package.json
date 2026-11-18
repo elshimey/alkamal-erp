@@ -17,7 +17,10 @@
     "db:migrate": "tsx scripts/migrate.ts",
     "db:seed": "tsx scripts/seed.ts",
     "db:setup": "npm run db:migrate && npm run db:seed",
-    "vercel-build": "tsx scripts/vercel-build.ts"
+    "vercel-build": "tsx scripts/vercel-build.ts",
+    "e2e:seed": "tsx e2e/seed.ts",
+    "e2e": "npm run e2e:seed && playwright test",
+    "security": "semgrep scan --config .semgrep/ --error --metrics off"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
@@ -38,6 +41,7 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.7",
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^26.6.6",
     "@types/nodemailer": "^8.0.2",
