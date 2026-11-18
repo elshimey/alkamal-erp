@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, ilike, inArray, like, lte, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, isNull, like, lte, or, sql, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { Db, Tx } from "@/db";
 import { blockingDocumentIssues } from "@/lib/documents";
@@ -12,6 +12,10 @@ import { waybillPostingLines } from "@/lib/waybill-posting";
 import { notifyDriver } from "@/lib/driver-notify";
 import { PERIODS, periodRange, type Period } from "@/lib/doc-filters";
 import { FREIGHT_PAYERS, GOODS_CONDITIONS, LOGISTI_STATUSES, PACKAGE_UNITS, PAYMENT_METHODS, WEIGHT_UNITS, WAYBILL_ACCOUNTS, WAYBILL_FLOW, WAYBILL_SORTS, WAYBILL_STATUS, WAYBILL_TABS, type WaybillAccountKey, type WaybillFlowStatus, type WaybillSort, type WaybillStatus } from "@/data/waybills";
+import { CUSTOM_LISTS } from "@/data/custom-lists";
+import { checkCustomValue } from "@/lib/custom-lists";
+import { requireTaxCode, taxCodeByCode } from "@/lib/tax-codes";
+import { waybillTaxCode } from "@/data/tax-codes";
 
 // الشحنة = رحلة واحدة (القرار 2). لا قيد قبل الاعتماد (القرار 3).
 
@@ -25,7 +29,7 @@ async function hasRole(tx: Db | Tx, partyId: number, role: (typeof s.partyRoleTy
   return rows.length > 0;
 }
 
-async function lockWaybill(tx: Tx, id: number) {
+export async function lockWaybill(tx: Tx, id: number) {
   const [w] = await tx.select().from(s.waybills).where(eq(s.waybills.id, id)).for("update");
   if (!w) throw new Error("الشحنة غير موجودة");
   return w;
@@ -74,7 +78,46 @@ export interface WaybillInput {
   notes?: string | null;
   // عهدة الرحلة للسائق (تُصرف عند الإرسال)
   tripCustody?: number | null;
+  /** مكونات السعر فوق الأساسي؛ غير مُرسلة = تبقى الموجودة */
+  priceComponents?: PriceComponentInput[];
+  /** نوع ضريبة مختلف عن التلقائي (الدولية نسبة صفر، والداخلية الأساسية) */
+  taxCodeId?: number | null;
   userId?: number;
+}
+
+export interface PriceComponentInput {
+  kind: string;
+  classId?: number | null;
+  label?: string | null;
+  quantity?: number | null;
+  unitPrice: number;
+}
+
+/** يتحقق من مكونات السعر ويحسب مبلغ كل مكون (الخصم بالسالب). */
+async function resolveComponents(tx: Db | Tx, list: PriceComponentInput[]) {
+  const names = CUSTOM_LISTS.price_component.base;
+  const out: { lineNo: number; kind: string; classId: number | null; label: string; quantity: string; unitPrice: string; amount: string }[] = [];
+  for (const [i, c] of list.entries()) {
+    if (!(c.kind in names)) throw new Error(`مكون السعر ${i + 1}: اختر النوع`);
+    const classId = await checkCustomValue(tx, "price_component", c.kind, c.classId ?? null);
+    const quantity = c.quantity ?? 1;
+    if (!(quantity > 0)) throw new Error(`مكون السعر ${i + 1}: الكمية أكبر من صفر`);
+    if (!(c.unitPrice > 0)) throw new Error(`مكون السعر ${i + 1}: السعر أكبر من صفر`);
+    const value = Math.round(quantity * c.unitPrice * 100) / 100;
+    const label = c.label?.trim() || (classId ? ((await tx.select({ l: s.lookupValues.label }).from(s.lookupValues).where(eq(s.lookupValues.id, classId)))[0]?.l ?? names[c.kind]) : names[c.kind]);
+    out.push({ lineNo: i + 1, kind: c.kind, classId, label, quantity: String(quantity), unitPrice: String(c.unitPrice), amount: String(c.kind === "discount" ? -value : value) });
+  }
+  return out;
+}
+
+/** مكونات سعر الشحنة كما هي محفوظة (للتعديل والعرض). */
+export async function waybillComponents(db: Db | Tx, waybillId: number) {
+  return db.select().from(s.waybillPriceComponents).where(eq(s.waybillPriceComponents.waybillId, waybillId)).orderBy(s.waybillPriceComponents.lineNo);
+}
+
+async function saveComponents(tx: Tx, waybillId: number, rows: Awaited<ReturnType<typeof resolveComponents>>) {
+  await tx.delete(s.waybillPriceComponents).where(eq(s.waybillPriceComponents.waybillId, waybillId));
+  if (rows.length) await tx.insert(s.waybillPriceComponents).values(rows.map((r) => ({ ...r, waybillId })));
 }
 
 /** المقطورة المختارة يجب أن تكون مقطورة غير مباعة. */
@@ -134,10 +177,13 @@ async function resolveWaybill(tx: Tx, input: WaybillInput) {
     priceNote = price ? price.explanation : contract ? "لا يوجد بند مطابق في العقد" : "لا يوجد عقد ساري";
   }
 
-  const [taxCode] = await tx
-    .select({ id: s.taxCodes.id })
-    .from(s.taxCodes)
-    .where(eq(s.taxCodes.code, route.isInternational ? "ZERO" : "VAT15-OUT"));
+  const taxCode = input.taxCodeId ? await requireTaxCode(tx, input.taxCodeId, "sales") : await taxCodeByCode(tx, waybillTaxCode(route.isInternational));
+
+  // الإجمالي = الأساسي (من العقد أو اليدوي) + المكونات
+  const components = await resolveComponents(tx, input.priceComponents ?? []);
+  const extras = Math.round(components.reduce((t, c) => t + Number(c.amount), 0) * 100) / 100;
+  const total = Math.round((amount + extras) * 100) / 100;
+  if (total < 0) throw new Error("الخصم أكبر من سعر الشحنة");
 
   return {
     waybillDate: input.waybillDate,
@@ -160,7 +206,9 @@ async function resolveWaybill(tx: Tx, input: WaybillInput) {
     distanceKm: route.distanceKm,
     weightTons: input.weightTons != null ? String(input.weightTons) : null,
     containerNumber: input.containerNumber || null,
-    amount: String(amount),
+    amount: String(total),
+    baseAmount: components.length ? String(amount) : null,
+    components,
     taxCodeId: taxCode?.id ?? null,
     priceNote,
     // العمولة من المسار، وتُعدَّل قبل الاعتماد
@@ -193,12 +241,13 @@ export async function createWaybill(db: Db, input: WaybillInput) {
 }
 
 export async function createWaybillTx(tx: Tx, input: WaybillInput) {
-  const values = await resolveWaybill(tx, input);
+  const { components, ...values } = await resolveWaybill(tx, input);
   const number = await nextDocumentNumber(tx, "waybill", "WB", Number(input.waybillDate.slice(0, 4)));
   const [row] = await tx
     .insert(s.waybills)
     .values({ ...values, number, createdBy: input.userId })
     .returning();
+  await saveComponents(tx, row.id, components);
   return row;
 }
 
@@ -210,7 +259,15 @@ export async function editWaybill(db: Db, id: number, input: Omit<WaybillInput, 
   return db.transaction(async (tx) => {
     const w = await lockWaybill(tx, id);
     assertEditable(w);
-    const values = await resolveWaybill(tx, input);
+    // من لا يرسل مكونات السعر (الجدول) تبقى مكوناته
+    const keep = input.priceComponents === undefined ? (await waybillComponents(tx, id)).map((c) => ({ kind: c.kind, classId: c.classId, label: c.label, quantity: Number(c.quantity), unitPrice: Number(c.unitPrice) })) : input.priceComponents;
+    // ونوع الضريبة المختار يدوياً يبقى إن لم يتغير المسار
+    const sameRoute = w.routeId === input.routeId;
+    // من لا يرسل المكونات يرسل الإجمالي في «المبلغ»، فالأساسي = المبلغ − المكونات الموجودة
+    const keptExtras = input.priceComponents === undefined ? (await waybillComponents(tx, id)).reduce((t, c) => t + num(c.amount), 0) : 0;
+    const amount = input.amount != null && keptExtras ? Math.round((input.amount - keptExtras) * 100) / 100 : input.amount;
+    const { components, ...values } = await resolveWaybill(tx, { ...input, amount, priceComponents: keep, taxCodeId: input.taxCodeId !== undefined ? input.taxCodeId : sameRoute ? w.taxCodeId : null });
+    await saveComponents(tx, id, components);
     // من لا يرسل العهدة في النموذج (الجدول) تبقى عهدته كما هي
     if (input.tripCustody == null) values.tripCustody = w.tripCustody;
     assertSentLocks(w, values);
@@ -252,7 +309,10 @@ export async function updateWaybill(db: Db, id: number, patch: WaybillUpdate) {
     assertEditable(w);
     const set: Partial<typeof s.waybills.$inferInsert> = { updatedAt: new Date() };
     if (patch.amount !== undefined && patch.amount !== num(w.amount)) {
+      const extras = (await waybillComponents(tx, id)).reduce((t, c) => t + num(c.amount), 0);
+      if (extras && patch.amount - extras < 0) throw new Error(`الشحنة ${w.number}: السعر أقل من مجموع مكوناته (${extras})`);
       set.amount = String(patch.amount);
+      if (extras) set.baseAmount = String(Math.round((patch.amount - extras) * 100) / 100);
       set.priceNote = "سعر معدَّل يدوياً";
     }
     if (patch.driverCommission !== undefined) set.driverCommission = String(patch.driverCommission);
@@ -324,8 +384,9 @@ export interface ExpenseInput {
   currencyCode?: string;
   exchangeRate?: number | null;
   billTo?: "company" | "customer";
-  payer?: "driver_custody" | "customs_broker";
+  payer?: "driver_custody" | "customs_broker" | "cash";
   partyId?: number | null;
+  cashAccountId?: number | null;
   note?: string | null;
 }
 
@@ -333,32 +394,60 @@ export async function addExpense(db: Db, waybillId: number, e: ExpenseInput) {
   return db.transaction(async (tx) => {
     const w = await lockWaybill(tx, waybillId);
     assertEditable(w);
-    const payer = e.payer ?? (w.execution === "fleet" ? "driver_custody" : "customs_broker");
-    if (payer === "driver_custody" && w.execution !== "fleet") throw new Error("عهدة السائق متاحة لشحنات الأسطول فقط");
-    if (payer === "customs_broker" && !e.partyId) throw new Error("اختر المخلص");
-    const currency = e.currencyCode ?? "SAR";
-    const [row] = await tx
-      .insert(s.waybillExpenses)
-      .values({
-        waybillId,
-        chargeTypeId: e.chargeTypeId,
-        amount: String(e.amount),
-        currencyCode: currency,
-        exchangeRate: String(e.exchangeRate ?? (await rateOn(tx, currency, w.waybillDate))),
-        billTo: e.billTo ?? "company",
-        payer,
-        partyId: payer === "customs_broker" ? (e.partyId ?? null) : null,
-        note: e.note || null,
-      })
-      .returning();
-    return row;
+    return insertExpenseTx(tx, w, e);
   });
 }
+
+/** يضيف سطر مصروف للشحنة بعد التحقق من الدافع (دون قيد؛ القيد مع الاعتماد أو مستقل بعده). */
+export async function insertExpenseTx(tx: Tx, w: typeof s.waybills.$inferSelect, e: ExpenseInput & { journalEntryId?: number | null; sourceExpenseId?: number | null }) {
+  const payer = e.payer ?? (w.execution === "fleet" ? "driver_custody" : "customs_broker");
+  if (payer === "driver_custody" && w.execution !== "fleet") throw new Error("عهدة السائق متاحة لشحنات الأسطول فقط");
+  if (payer === "customs_broker" && !e.partyId) throw new Error("اختر المخلص");
+  if (payer === "cash" && !e.cashAccountId) throw new Error("اختر الصندوق أو البنك الذي دفعت منه الشركة");
+  if (!(e.amount > 0)) throw new Error("المبلغ إلزامي");
+  const currency = e.currencyCode ?? "SAR";
+  const [row] = await tx
+    .insert(s.waybillExpenses)
+    .values({
+      waybillId: w.id,
+      chargeTypeId: e.chargeTypeId,
+      amount: String(e.amount),
+      currencyCode: currency,
+      exchangeRate: String(e.exchangeRate ?? (await rateOn(tx, currency, w.waybillDate))),
+      billTo: e.billTo ?? "company",
+      payer,
+      partyId: payer === "customs_broker" ? (e.partyId ?? null) : null,
+      cashAccountId: payer === "cash" ? (e.cashAccountId ?? null) : null,
+      note: e.note || null,
+      journalEntryId: e.journalEntryId ?? null,
+      sourceExpenseId: e.sourceExpenseId ?? null,
+    })
+    .returning();
+  return row;
+}
+
+/** مركز تكلفة الشحنة وحساب عهدة سائقها (لقيد مصروف يُضاف بعد اعتمادها). */
+export async function waybillPostingDims(tx: Tx, w: typeof s.waybills.$inferSelect) {
+  if (w.execution === "fleet") {
+    const [v] = await tx.select({ cc: s.vehicles.costCenterId }).from(s.vehicles).where(eq(s.vehicles.id, w.vehicleId!));
+    const [d] = w.driverId ? await tx.select({ custody: s.drivers.custodyAccountId }).from(s.drivers).where(eq(s.drivers.id, w.driverId)) : [];
+    return { costCenterId: v.cc, custodyId: d?.custody ?? null };
+  }
+  const [cc] = await tx.select({ id: s.costCenters.id }).from(s.costCenters).where(eq(s.costCenters.code, "EXT"));
+  if (!cc) throw new Error("مركز تكلفة الناقلين الخارجيين (EXT) غير موجود");
+  return { costCenterId: cc.id, custodyId: null };
+}
+
+export { accountIds as waybillAccountIds };
 
 /** يحذف سطر ديزل أو مصروف ما دامت الشحنة غير معتمدة. */
 export async function deleteWaybillItem(db: Db, waybillId: number, kind: "fuel" | "expense", itemId: number) {
   return db.transaction(async (tx) => {
     assertEditable(await lockWaybill(tx, waybillId));
+    if (kind === "expense") {
+      const [e] = await tx.select({ source: s.waybillExpenses.sourceExpenseId }).from(s.waybillExpenses).where(and(eq(s.waybillExpenses.id, itemId), eq(s.waybillExpenses.waybillId, waybillId)));
+      if (e?.source) throw new Error("هذا المصروف من مصروفات السائق؛ يُعدَّل من شاشة المصروفات");
+    }
     const table = kind === "fuel" ? s.waybillFuel : s.waybillExpenses;
     await tx.delete(table).where(and(eq(table.id, itemId), eq(table.waybillId, waybillId)));
   });
@@ -502,7 +591,8 @@ export async function approveWaybill(
       .select({ e: s.waybillExpenses, label: s.chargeTypes.nameAr, costAccountId: s.chargeTypes.costAccountId })
       .from(s.waybillExpenses)
       .innerJoin(s.chargeTypes, eq(s.chargeTypes.id, s.waybillExpenses.chargeTypeId))
-      .where(eq(s.waybillExpenses.waybillId, id));
+      // ما له قيد مستقل (أُضيف بعد الاعتماد، أو من مصروف السائق) لا يُقيد مرة ثانية
+      .where(and(eq(s.waybillExpenses.waybillId, id), isNull(s.waybillExpenses.journalEntryId)));
     const [vatIn] = await tx.select({ id: s.taxCodes.id }).from(s.taxCodes).where(eq(s.taxCodes.code, "VAT15-IN"));
 
     const lines = waybillPostingLines(
@@ -533,6 +623,8 @@ export async function approveWaybill(
         label,
         payer: e.payer,
         partyId: e.partyId,
+        cashAccountId: e.cashAccountId,
+        billToCustomer: e.billTo === "customer",
         amount: num(e.amount),
         currencyCode: e.currencyCode,
         exchangeRate: num(e.exchangeRate),
@@ -1093,7 +1185,7 @@ export async function syncInvoiceTripTx(
     await tx.delete(s.waybills).where(eq(s.waybills.id, existing.id));
     return null;
   }
-  const values = await resolveWaybill(tx, {
+  const { components: _c, ...values } = await resolveWaybill(tx, {
     waybillDate: inv.invoiceDate,
     customerId: inv.customerId,
     routeId: trip.routeId,

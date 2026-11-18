@@ -9,12 +9,26 @@ import { invoiceTerms } from "@/lib/invoice-terms";
 
 type Invoice = typeof s.salesInvoices.$inferSelect;
 type Party = typeof s.parties.$inferSelect;
-type Line = typeof s.salesInvoiceLines.$inferSelect;
+// اسم نوع الضريبة يظهر تحت نسبتها (كما في وافق)
+type Line = typeof s.salesInvoiceLines.$inferSelect & { taxName?: string | null };
 
 export function companyAddress(c: CompanyProfile) {
   return [[c.buildingNo, c.street].filter(Boolean).join(" "), c.district, [c.city, c.postalCode].filter(Boolean).join(" "), c.additionalNo && `الرقم الإضافي ${c.additionalNo}`]
     .filter(Boolean)
     .join("، ");
+}
+
+/** ملخص الفاتورة حسب نوع الضريبة: المبلغ الخاضع وضريبته. */
+function taxGroups(lines: Line[]) {
+  const groups = new Map<string, { name: string; amount: number; vat: number }>();
+  for (const l of lines) {
+    const name = l.taxName ?? `ضريبة ${Number(l.vatRate)}%`;
+    const g = groups.get(name) ?? { name, amount: 0, vat: 0 };
+    g.amount += Number(l.amount);
+    g.vat += Number(l.vatAmount);
+    groups.set(name, g);
+  }
+  return [...groups.values()];
 }
 
 /**
@@ -208,9 +222,12 @@ export function TaxInvoiceDocument({
                 ) : (
                   <span className="ps-3">↳ {l.description}</span>
                 )}
+                {l.details && <span className="ltr-nums mt-0.5 block text-[11px] leading-snug text-gray-500">{l.details}</span>}
               </td>
               <td className="ltr-nums px-2.5 py-2 text-end">{fmt(l.amount)}</td>
-              <td className="ltr-nums px-2.5 py-2 text-end">{Number(l.vatRate)}%</td>
+              <td className="ltr-nums px-2.5 py-2 text-end align-top">
+                {Number(l.vatRate)}%{l.taxName && <span className="block text-[10px] leading-tight text-gray-500">{l.taxName}</span>}
+              </td>
               <td className="ltr-nums px-2.5 py-2 text-end">{fmt(l.vatAmount)}</td>
               <td className="ltr-nums px-2.5 py-2 text-end font-medium">{fmt(Number(l.amount) + Number(l.vatAmount))}</td>
               {lineAction && <td className="px-2 py-2 print:hidden">{lineAction(l)}</td>}
@@ -234,6 +251,16 @@ export function TaxInvoiceDocument({
               <dd className="ltr-nums">{fmt(v)}</dd>
             </div>
           ))}
+          {taxGroups(lines).length > 1 &&
+            taxGroups(lines).map((g) => (
+              <div key={g.name} className="flex justify-between border-b border-gray-100 py-1 text-[11px] text-gray-500">
+                <dt>{g.name}</dt>
+                <dd className="ltr-nums">
+                  {fmt(g.amount)}
+                  {g.vat > 0 && ` · ${fmt(g.vat)}`}
+                </dd>
+              </div>
+            ))}
           <div className={`flex justify-between py-2 text-sm font-semibold text-[var(--inv-dark)] ${minimal ? "" : "mt-1 rounded-lg bg-[var(--inv-accent)]/10 px-2 print:[print-color-adjust:exact]"}`}>
             <dt>
               الإجمالي شامل الضريبة

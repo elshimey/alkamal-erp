@@ -6,6 +6,7 @@ import { db } from "@/db";
 import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { can, hasSpecial, scopeFor } from "@/lib/permissions";
+import { cashAccounts } from "@/lib/invoices";
 import { chargeTypeOptions, partyOptions, routeOptions, vehicleOptions } from "@/lib/lookups";
 import { approvalIssues } from "@/lib/waybills";
 import { EXPENSE_BILL_TO, EXPENSE_PAYERS, FUEL_SOURCES, TRIP_STAGES, WAYBILL_STATUS } from "@/data/waybills";
@@ -88,10 +89,13 @@ export default async function WaybillPage({ params }: { params: Promise<{ id: st
     listAttachments(db, "waybills", [id]),
     vehicleOptions("trailer"),
   ]);
+  const cashOpts = (await cashAccounts(db)).map((a) => ({ value: String(a.id), label: `${a.code} ${a.nameAr}` }));
 
   const showPrices = hasSpecial(user.perms, "view_prices");
   const editable = ["draft", "in_transit", "delivered", "rejected"].includes(w.status);
   const canUpdate = editable && can(user.perms, "waybills", "update");
+  // المصاريف تُضاف أيضاً بعد الاعتماد (بقيد مستقل) حتى إصدار الفاتورة
+  const canCharge = (editable || w.status === "approved") && can(user.perms, "waybills", "update");
   const canApprove = ["draft", "in_transit", "delivered"].includes(w.status) && can(user.perms, "waybills", "approve");
   const canOverride = hasSpecial(user.perms, "override_controls");
   const canRevert = ["approved", "rejected"].includes(w.status) && can(user.perms, "waybills", "revert");
@@ -342,9 +346,12 @@ export default async function WaybillPage({ params }: { params: Promise<{ id: st
                   <Td>{e.currencyCode === "SAR" ? "ريال" : `${e.currencyCode} × ${Number(e.exchangeRate)}`}</Td>
                   <Td>{EXPENSE_BILL_TO[e.billTo]}</Td>
                   <Td>{e.payer === "customs_broker" ? `المخلص: ${party}` : EXPENSE_PAYERS[e.payer]}</Td>
-                  <Td>{e.note ?? "—"}</Td>
                   <Td>
-                    {canUpdate && (
+                    {e.note ?? "—"}
+                    {e.journalEntryId && <div className="text-[11px] text-gray-400">{e.sourceExpenseId ? "من مصروفات السائق" : "قيد مستقل بعد الاعتماد"}</div>}
+                  </Td>
+                  <Td>
+                    {canCharge && !e.sourceExpenseId && (canUpdate || e.journalEntryId) && (
                       <form action={removeItem.bind(null, id, "expense", e.id)}>
                         <button className="text-xs text-red-600 hover:underline">حذف</button>
                       </form>
@@ -353,8 +360,9 @@ export default async function WaybillPage({ params }: { params: Promise<{ id: st
                 </tr>
               ))}
             </Table>
-            {canUpdate && (
+            {canCharge && (
               <div className="mt-4">
+                {!canUpdate && <p className="mb-2 rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-800">الشحنة معتمدة: كل مصروف يُضاف يُقيد فوراً، وما على العميل يدخل مسودة فاتورتها إن وُجدت.</p>}
                 <SheetEditor
                   templateName={`مصاريف-${w.number}`}
                   action={saveExpenses.bind(null, id)}
@@ -365,8 +373,9 @@ export default async function WaybillPage({ params }: { params: Promise<{ id: st
                     { key: "currency", label: "العملة", type: "select", options: [{ value: "SAR", label: "ريال" }, { value: "KWD", label: "دينار" }], width: "5rem" },
                     { key: "rate", label: "سعر الصرف", type: "number", width: "5rem", placeholder: "تلقائي" },
                     { key: "billTo", label: "على", type: "select", options: options(EXPENSE_BILL_TO), width: "8rem" },
-                    { key: "payer", label: "الدافع", type: "select", options: options(fleet ? EXPENSE_PAYERS : { customs_broker: EXPENSE_PAYERS.customs_broker }), width: "7rem" },
+                    { key: "payer", label: "الدافع", type: "select", options: options(fleet ? EXPENSE_PAYERS : { customs_broker: EXPENSE_PAYERS.customs_broker, cash: EXPENSE_PAYERS.cash }), width: "8rem" },
                     { key: "partyId", label: "المخلص", type: "select", options: brokers, width: "8rem" },
+                    { key: "cashAccountId", label: "الصندوق / البنك", type: "select", options: cashOpts, width: "9rem" },
                     { key: "note", label: "ملاحظة", width: "8rem" },
                   ]}
                 />

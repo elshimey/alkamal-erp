@@ -19,6 +19,7 @@ import { todayRiyadh } from "@/lib/dates";
 import { plateKey } from "@/lib/plates";
 import { normText, type ImportIssue, type ImportReport } from "@/lib/import-match";
 import type { TemplateList } from "@/lib/xlsx";
+import { normalizeTaxName } from "@/data/tax-codes";
 
 // تنفيذ الاستيراد: كل سجل (فاتورة بكل بنودها، أو مركبة، أو عميل) في نقطة حفظ مستقلة داخل
 // معاملة واحدة، فيُرفض السجل الخاطئ وحده. في وضع «التحقق» تُلغى المعاملة كلها في النهاية.
@@ -93,6 +94,13 @@ class Index<T> {
   }
 }
 
+/** فهرس الضرائب: يقبل الاسم كما يصدّره وافق «… (15.00%)». */
+class TaxIndex<T> extends Index<T> {
+  find(raw: string) {
+    return super.find(raw) ?? super.find(normalizeTaxName(raw));
+  }
+}
+
 async function lookups(tx: Tx) {
   const [accounts, customers, parties, currencies, taxCodes, costCenters, vehicles, vehicleTypes] = await Promise.all([
     tx.select().from(s.accounts).where(and(eq(s.accounts.isPostable, true), eq(s.accounts.isActive, true))),
@@ -109,7 +117,7 @@ async function lookups(tx: Tx) {
     customers: new Index<number>(),
     parties: new Index<number>(),
     currencies: new Index<string>(),
-    taxCodes: new Index<(typeof taxCodes)[number]>(),
+    taxCodes: new TaxIndex<(typeof taxCodes)[number]>(),
     costCenters: new Index<number>(),
     plates: new Set(vehicles.map((x) => plateKey(x.plate))),
     // اللوحات التي أُضيفت من الملف نفسه (لتمييز «مكررة في الملف» عن «مسجلة مسبقاً»)
@@ -122,9 +130,10 @@ async function lookups(tx: Tx) {
   for (const c of customers) idx.customers.add([c.nameAr, c.nameEn], c.id);
   for (const p of parties) idx.parties.add([p.nameAr], p.id);
   for (const c of currencies) idx.currencies.add([c.code, c.nameAr], c.code);
-  const outTax = taxCodes.filter((t) => t.kind !== "input");
+  // ضرائب المبيعات بأسمائها في وافق (مع «(15.00%)» أو دونها) أو برمزها، والأسماء القديمة تبقى
+  const outTax = taxCodes.filter((t) => t.side !== "purchases");
   const byCode = (code: string) => outTax.find((t) => t.code === code);
-  for (const t of outTax) idx.taxCodes.add([t.code, t.nameAr], t);
+  for (const t of outTax) idx.taxCodes.add([t.code, t.nameAr, normalizeTaxName(t.nameAr)], t);
   const vat = byCode("VAT15-OUT");
   const zero = byCode("ZERO");
   const exempt = byCode("EXEMPT");
@@ -632,7 +641,7 @@ export async function templateLists(db: Db, spec: ImportSpec): Promise<TemplateL
       { title: "حسابات الإيراد (الرقم)", values: revenue.map((a) => a.code), field: "account" },
       { title: "اسم الحساب", values: revenue.map((a) => a.nameAr) },
       { ...currencies, field: "currency" },
-      { title: "معدلات الضريبة", values: ["15%", "صفر", "معفى"], field: "taxCode" },
+      { title: "أنواع الضريبة (كما في وافق)", values: ctx.outTax.map((t) => t.nameAr), field: "taxCode" },
       { title: "المركبات (اللوحة)", values: ctx.vehicles.map((x) => x.plate).sort(), field: "costCenter" },
       { title: "مراكز التكلفة (الرمز)", values: ctx.costCenters.map((c) => c.code) },
       { title: "شامل/خالٍ من الضريبة", values: ["خالٍ من الضريبة", "شامل الضريبة"], field: "taxInclusive" },

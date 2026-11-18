@@ -3,6 +3,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import * as s from "@/db/schema";
 import { CHART_OF_ACCOUNTS } from "@/data/chart-of-accounts";
+import { DEFAULT_TAX_CODES, TAX_BEHAVIORS, type TaxBehavior } from "@/data/tax-codes";
 import { CORE_ROLES } from "@/lib/permissions";
 import { hashPassword } from "@/lib/password";
 
@@ -50,13 +51,30 @@ export async function seedReferenceData(db: Db, year = new Date().getFullYear())
   );
   await db
     .insert(s.taxCodes)
-    .values([
-      { code: "VAT15-OUT", nameAr: "ضريبة مخرجات 15%", kind: "output", rate: "15", accountId: byCode.get("2109") },
-      { code: "VAT15-IN", nameAr: "ضريبة مدخلات 15%", kind: "input", rate: "15", accountId: byCode.get("1108") },
-      { code: "ZERO", nameAr: "نسبة صفر (نقل دولي)", kind: "zero_rated", rate: "0", accountId: byCode.get("2109") },
-      { code: "EXEMPT", nameAr: "معفى", kind: "exempt", rate: "0" },
-    ])
+    .values(
+      DEFAULT_TAX_CODES.map(({ code, behavior, sort }) => {
+        const b: TaxBehavior = TAX_BEHAVIORS[behavior];
+        return {
+          code,
+          nameAr: b.label,
+          kind: b.kind,
+          rate: String(b.rate),
+          accountId: b.account ? byCode.get(b.account) : null,
+          behavior,
+          side: b.side,
+          category: b.category,
+          exemptionCode: b.exemptionCode,
+          exemptionReason: b.exemptionReason,
+          sort,
+        };
+      }),
+    )
     .onConflictDoNothing({ target: s.taxCodes.code });
+  // الترحيل يسبق شجرة الحسابات في الشركة الجديدة، فيُربط حساب الضريبة هنا
+  await db.execute(sql`
+    update tax_codes t set account_id = a.id from accounts a
+    where t.account_id is null and a.code = case when t.behavior in ('standard', 'zero', 'export') then '2109' when t.behavior in ('pur_standard', 'customs', 'reverse') then '1108' end
+  `);
 
   await db
     .insert(s.costCenters)

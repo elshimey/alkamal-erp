@@ -281,6 +281,13 @@ export const taxCodes = pgTable("tax_codes", {
   rate: numeric("rate", { precision: 5, scale: 2 }).notNull(),
   accountId: ref("account_id").references(() => accounts.id),
   isActive: boolean("is_active").notNull().default(true),
+  // السلوك الذي يحدد الجهة والإقرار والفوترة الإلكترونية (src/data/tax-codes.ts)
+  behavior: varchar("behavior", { length: 20 }).notNull().default("standard"),
+  side: varchar("side", { length: 10 }).notNull().default("sales"),
+  category: varchar("category", { length: 1 }),
+  exemptionCode: varchar("exemption_code", { length: 30 }),
+  exemptionReason: text("exemption_reason"),
+  sort: smallint("sort").notNull().default(0),
 });
 
 export const periodStatus = pgEnum("period_status", ["open", "closed"]);
@@ -713,6 +720,8 @@ export const chargeTypes = pgTable("charge_types", {
   nameAr: text("name_ar").notNull().unique(),
   revenueAccountId: ref("revenue_account_id").references(() => accounts.id),
   costAccountId: ref("cost_account_id").references(() => accounts.id),
+  // رسوم تُدفع باسم العميل (جمارك، رسوم حكومية): تُفوتر «غير خاضع للضريبة»
+  onBehalf: boolean("on_behalf").notNull().default(false),
   isActive: boolean("is_active").notNull().default(true),
 });
 
@@ -754,6 +763,8 @@ export const waybills = pgTable(
     deliveryNoteNumber: varchar("delivery_note_number", { length: 40 }),
     // المالي
     amount: money("amount").notNull().default("0"),
+    // السعر الأساسي (من العقد أو يدوي)؛ المبلغ = الأساسي + مكونات السعر. فارغ = لا مكونات
+    baseAmount: money("base_amount"),
     taxCodeId: ref("tax_code_id").references(() => taxCodes.id),
     // شرح مصدر السعر (بند العقد المطبَّق) للمراجعة
     priceNote: text("price_note"),
@@ -883,7 +894,7 @@ export const waybillFuel = pgTable(
 );
 
 export const expenseBillTo = pgEnum("expense_bill_to", ["company", "customer"]);
-export const expensePayer = pgEnum("expense_payer", ["driver_custody", "customs_broker"]);
+export const expensePayer = pgEnum("expense_payer", ["driver_custody", "customs_broker", "cash"]);
 
 // مصاريف الحدود والطريق على الشحنة؛ ما يكون على العميل يُسحب للفاتورة كرسوم
 export const waybillExpenses = pgTable(
@@ -899,14 +910,39 @@ export const waybillExpenses = pgTable(
     payer: expensePayer("payer").notNull().default("driver_custody"),
     // المخلص عند الدفع عن طريقه
     partyId: ref("party_id").references(() => parties.id),
+    // الصندوق أو البنك عند الدفع من الشركة
+    cashAccountId: ref("cash_account_id").references(() => accounts.id),
     note: text("note"),
+    // قيد المصروف المضاف بعد اعتماد الشحنة، أو قيد مصروف السائق الذي جاء منه
+    journalEntryId: ref("journal_entry_id").references(() => journalEntries.id),
+    sourceExpenseId: ref("source_expense_id").references((): AnyPgColumn => expenses.id, { onDelete: "cascade" }),
     createdAt: createdAt(),
   },
   (t) => [
     index("waybill_expenses_waybill_idx").on(t.waybillId),
+    uniqueIndex("waybill_expenses_source_uq").on(t.sourceExpenseId).where(sql`${t.sourceExpenseId} is not null`),
+    check("waybill_expenses_cash", sql`${t.payer} <> 'cash' or ${t.cashAccountId} is not null`),
     check("waybill_expenses_amounts", sql`${t.amount} > 0 and ${t.exchangeRate} > 0`),
     check("waybill_expenses_broker", sql`${t.payer} <> 'customs_broker' or ${t.partyId} is not null`),
   ],
+);
+
+// مكونات سعر الشحنة فوق السعر الأساسي (وزن زائد، كيلومترات، انتظار…)؛ النوع من قائمة «مكون السعر»
+export const waybillPriceComponents = pgTable(
+  "waybill_price_components",
+  {
+    id: id(),
+    waybillId: ref("waybill_id").notNull().references(() => waybills.id, { onDelete: "cascade" }),
+    lineNo: smallint("line_no").notNull(),
+    // القيمة الأساسية (src/data/custom-lists.ts) ورقم العنصر المضاف إن وُجد
+    kind: varchar("kind", { length: 30 }).notNull(),
+    classId: ref("class_id").references(() => lookupValues.id),
+    label: text("label").notNull(),
+    quantity: numeric("quantity", { precision: 14, scale: 3 }).notNull().default("1"),
+    unitPrice: numeric("unit_price", { precision: 18, scale: 4 }).notNull(),
+    amount: money("amount").notNull(),
+  },
+  (t) => [index("waybill_price_components_waybill_idx").on(t.waybillId)],
 );
 
 // ───────────────────────── المبيعات: الفاتورة التجميعية والتحصيل ─────────────────────────
@@ -977,6 +1013,10 @@ export const salesInvoiceLines = pgTable(
     accountId: ref("account_id").notNull().references(() => accounts.id),
     // مركز التكلفة = مركبة الشحنة (أو مركز الناقلين الخارجيين)
     costCenterId: ref("cost_center_id").references(() => costCenters.id),
+    // تفاصيل تظهر تحت السطر بخط صغير (مكونات سعر الشحنة)
+    details: text("details"),
+    // للمصروف المحمّل على العميل: تكلفته بعملة الفاتورة؛ ما يزيد عليها إيراد 4104
+    costAmount: money("cost_amount"),
     // للبند الحر بعد الدمج: رقم الفاتورة التي جاء منها، ليعود إليها عند فك الدمج
     groupKey: integer("group_key"),
   },
@@ -1179,6 +1219,7 @@ export const adjustmentNoteLines = pgTable(
     accountId: ref("account_id").notNull().references(() => accounts.id),
     costCenterId: ref("cost_center_id").references(() => costCenters.id),
     amount: money("amount").notNull(),
+    taxCodeId: ref("tax_code_id").references(() => taxCodes.id),
     vatRate: numeric("vat_rate", { precision: 5, scale: 2 }).notNull().default("0"),
     vatAmount: money("vat_amount").notNull().default("0"),
   },
@@ -1217,6 +1258,8 @@ export const expenses = pgTable(
     reportedPayer: varchar("reported_payer", { length: 10 }),
     maintenanceTypeId: ref("maintenance_type_id").references((): AnyPgColumn => maintenanceTypes.id),
     voidReason: text("void_reason"),
+    // مصروف رحلة يُحمَّل على العميل: يُقيد على 1114 ويظهر في فاتورة الشحنة
+    billToCustomer: boolean("bill_to_customer").notNull().default(false),
     journalEntryId: ref("journal_entry_id").references(() => journalEntries.id),
     // طلب صيانة السائق المعتمد ديناً على ورشة: قيده في أمر الصيانة لا في المصروف
     maintenanceOrderId: ref("maintenance_order_id").references((): AnyPgColumn => maintenanceOrders.id),

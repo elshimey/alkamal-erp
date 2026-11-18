@@ -12,7 +12,6 @@ import { errorMessage } from "@/lib/errors";
 import { todayRiyadh } from "@/lib/dates";
 import { cell, saveSheetRows, type SheetRow } from "@/lib/sheet-server";
 import {
-  addExpense,
   addFuel,
   approveWaybill,
   createWaybill,
@@ -35,6 +34,7 @@ import { EXPENSE_BILL_TO, EXPENSE_PAYERS, FUEL_SOURCES, TRIP_STAGES, WAYBILL_FLO
 import { parseTransport } from "@/lib/transport-draft";
 import type { PanelResult } from "@/components/record-panel";
 import { removeWaybillsFromDrafts } from "@/lib/invoices";
+import { addWaybillCharge, removeWaybillCharge } from "@/lib/customer-charges";
 import { bulkTrips, sendTrip, unsendTrip } from "@/lib/trip-dispatch";
 import { autoSubmit } from "@/lib/zatca/service";
 import type { FormState } from "@/components/action-form";
@@ -209,11 +209,11 @@ export async function saveFuel(id: number, rows: SheetRow[]) {
 }
 
 export async function saveExpenses(id: number, rows: SheetRow[]) {
-  await guard("update", id);
+  const user = await guard("update", id);
   const result = await saveSheetRows(rows, async (r) => {
     const amount = cell.number(r.amount, "المبلغ");
     if (!amount) throw new Error("المبلغ إلزامي");
-    await addExpense(db, id, {
+    await addWaybillCharge(db, id, {
       chargeTypeId: Number(cell.required(r.chargeTypeId, "النوع")),
       amount,
       currencyCode: r.currency === "KWD" ? "KWD" : "SAR",
@@ -221,16 +221,24 @@ export async function saveExpenses(id: number, rows: SheetRow[]) {
       billTo: r.billTo ? pick(EXPENSE_BILL_TO, r.billTo, "على من") : undefined,
       payer: r.payer ? pick(EXPENSE_PAYERS, r.payer, "الدافع") : undefined,
       partyId: optId(r.partyId),
+      cashAccountId: optId(r.cashAccountId),
       note: cell.text(r.note),
-    });
+    }, user.id);
   });
   refresh(id);
+  revalidatePath("/invoices");
   return result;
 }
 
 export async function removeItem(id: number, kind: "fuel" | "expense", itemId: number) {
-  await guard("update", id);
-  await deleteWaybillItem(db, id, kind, itemId);
+  if (kind === "expense") {
+    await guard("update", id);
+    await removeWaybillCharge(db, id, itemId);
+    revalidatePath("/invoices");
+  } else {
+    await guard("update", id);
+    await deleteWaybillItem(db, id, kind, itemId);
+  }
   refresh(id);
 }
 

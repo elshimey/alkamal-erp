@@ -21,6 +21,7 @@ export const QUICK_KINDS = [
   "plate_type",
   "violation_type",
   "maintenance_kind",
+  "price_component",
 ] as const;
 export type QuickKind = (typeof QUICK_KINDS)[number];
 

@@ -48,6 +48,7 @@ export function LinesEditor({
   minRows = 3,
   onChange,
   totalsVat,
+  vatRateOf,
 }: {
   columns: LineColumn[];
   initial?: Row[];
@@ -59,6 +60,8 @@ export function LinesEditor({
   onChange?: (rows: Row[]) => void;
   /** نسبة الضريبة حين تكون خانة الضريبة في السطر فارغة («حسب نوع الشحن») */
   totalsVat?: number;
+  /** نسبة ضريبة السطر حين تكون خانته نوع ضريبة لا نسبة (رقم النوع ← نسبته) */
+  vatRateOf?: (row: Row) => number;
 }) {
   const withCreated = useCreatedOptions();
   const columns = baseColumns.map((c) => (c.create ? { ...c, options: withCreated(c.create, c.options) } : c));
@@ -103,7 +106,7 @@ export function LinesEditor({
 
   const lineTotal = (r: Row) => (totals ? toNum(r[totals.qty]) * toNum(r[totals.price]) : 0);
   const sub = rows.reduce((t, r) => t + lineTotal(r), 0);
-  const rate = (r: Row) => ((r[totals!.vat!] ?? "") === "" && totalsVat !== undefined ? totalsVat : toNum(r[totals!.vat!]));
+  const rate = (r: Row) => (vatRateOf ? vatRateOf(r) : (r[totals!.vat!] ?? "") === "" && totalsVat !== undefined ? totalsVat : toNum(r[totals!.vat!]));
   const vat = totals?.vat ? rows.reduce((t, r) => t + (lineTotal(r) * rate(r)) / 100, 0) : 0;
 
   const onPaste = (n: number, start: number) => (e: ClipboardEvent<HTMLElement>) => {

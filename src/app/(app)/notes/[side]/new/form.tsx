@@ -11,7 +11,8 @@ import { ComboBox } from "@/components/combo-box";
 
 type Option = { value: string; label: string };
 type Inv = Awaited<ReturnType<typeof partyInvoices>>[number];
-type Line = { description: string; accountId: string; costCenterId: string; amount: string; vatRate: string };
+type Line = { description: string; accountId: string; costCenterId: string; amount: string; vatRate: string; taxCodeId: string };
+type TaxOption = Option & { rate: number };
 
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 const toNum = (v: string) => {
@@ -20,7 +21,7 @@ const toNum = (v: string) => {
 };
 const inputCls =
   "h-9 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm shadow-sm transition placeholder:text-gray-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none";
-const emptyLine = (): Line => ({ description: "", accountId: "", costCenterId: "", amount: "", vatRate: "15" });
+const emptyLine = (tax?: TaxOption): Line => ({ description: "", accountId: "", costCenterId: "", amount: "", vatRate: String(tax?.rate ?? 15), taxCodeId: tax?.value ?? "" });
 
 function Row({ label, required, children }: { label: string; required?: boolean; children: ReactNode }) {
   return (
@@ -45,6 +46,7 @@ export function NoteForm({
   initialParty,
   initialInvoice,
   willPost,
+  taxes,
 }: {
   side: NoteSide;
   kind: NoteKind;
@@ -56,6 +58,7 @@ export function NoteForm({
   initialParty: string;
   initialInvoice: number | null;
   willPost: boolean;
+  taxes: TaxOption[];
 }) {
   const router = useRouter();
   const cfg = NOTE_SIDES[side];
@@ -66,7 +69,7 @@ export function NoteForm({
   const [currency, setCurrency] = useState("SAR");
   const [date, setDate] = useState(today);
   const [reason, setReason] = useState("");
-  const [lines, setLines] = useState<Line[]>([emptyLine()]);
+  const [lines, setLines] = useState<Line[]>([emptyLine(taxes.find((x) => x.rate === 15))]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, start] = useTransition();
@@ -98,7 +101,7 @@ export function NoteForm({
     if (!invoice) return;
     setLoading(true);
     invoiceLines(side, invoice.id).then((rows) => {
-      setLines(rows.map((r) => ({ description: r.description, accountId: String(r.accountId), costCenterId: r.costCenterId ? String(r.costCenterId) : "", amount: String(r.amount), vatRate: String(r.vatRate) })));
+      setLines(rows.map((r) => ({ description: r.description, accountId: String(r.accountId), costCenterId: r.costCenterId ? String(r.costCenterId) : "", amount: String(r.amount), vatRate: String(r.vatRate), taxCodeId: r.taxCodeId && taxes.some((x) => x.value === String(r.taxCodeId)) ? String(r.taxCodeId) : (taxes.find((x) => x.rate === Number(r.vatRate))?.value ?? "") })));
       setLoading(false);
     });
   };
@@ -113,7 +116,7 @@ export function NoteForm({
         invoiceId: invoice ? invoice.id : null,
         currencyCode: cur,
         reason,
-        lines: lines.filter((l) => toNum(l.amount) > 0).map((l) => ({ description: l.description, accountId: Number(l.accountId), costCenterId: l.costCenterId ? Number(l.costCenterId) : null, amount: toNum(l.amount), vatRate: toNum(l.vatRate) })),
+        lines: lines.filter((l) => toNum(l.amount) > 0).map((l) => ({ description: l.description, accountId: Number(l.accountId), costCenterId: l.costCenterId ? Number(l.costCenterId) : null, amount: toNum(l.amount), vatRate: toNum(l.vatRate), taxCodeId: l.taxCodeId ? Number(l.taxCodeId) : null })),
       });
       if (res.error) setError(res.error);
       else router.push(`/notes/${side}?open=${res.id}`);
@@ -230,9 +233,16 @@ export function NoteForm({
                     <input value={l.amount} inputMode="decimal" placeholder="0.00" onChange={(e) => set(n, { amount: e.target.value })} className={`${inputCls} ltr-nums text-end`} />
                   </td>
                   <td className="px-1 py-1">
-                    <select value={l.vatRate} onChange={(e) => set(n, { vatRate: e.target.value })} className={inputCls}>
-                      <option value="15">15%</option>
-                      <option value="0">صفر</option>
+                    <select
+                      value={l.taxCodeId}
+                      onChange={(e) => set(n, { taxCodeId: e.target.value, vatRate: String(taxes.find((x) => x.value === e.target.value)?.rate ?? 0) })}
+                      className={inputCls}
+                    >
+                      {taxes.map((x) => (
+                        <option key={x.value} value={x.value}>
+                          {x.label}
+                        </option>
+                      ))}
                     </select>
                   </td>
                   <td className="px-1">
@@ -247,7 +257,7 @@ export function NoteForm({
             </tbody>
           </table>
         </div>
-        <button type="button" onClick={() => setLines([...lines, emptyLine()])} className="mt-2 text-xs text-brand-700 hover:underline">
+        <button type="button" onClick={() => setLines([...lines, emptyLine(taxes.find((x) => x.rate === 15))])} className="mt-2 text-xs text-brand-700 hover:underline">
           + أضف سطراً
         </button>
         <dl className="mt-4 ms-auto max-w-xs space-y-1.5 border-t border-gray-100 pt-3 text-sm">

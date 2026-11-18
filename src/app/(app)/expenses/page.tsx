@@ -97,6 +97,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
                 { key: "accountId", label: "نوع المصروف", type: "select", required: true, options: accounts, width: "13rem", create: "account" },
                 { key: "vehicleId", label: "المركبة", type: "select", options: vehicles, width: "8rem", create: "vehicle" },
                 { key: "waybillId", label: "الشحنة", type: "select", options: waybills.map((w) => ({ value: String(w.id), label: `${w.number} · ${w.date}` })), width: "11rem" },
+                { key: "billTo", label: "على العميل؟", type: "select", options: [{ value: "customer", label: "نعم، يُفوتر" }], width: "7rem", placeholder: "لا" },
                 { key: "description", label: "البيان", width: "10rem" },
                 { key: "amount", label: "المبلغ قبل الضريبة", type: "number", required: true, width: "6rem" },
                 { key: "vat", label: "الضريبة", type: "number", width: "5rem", placeholder: "0" },
@@ -105,7 +106,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
               ]}
             />
             <p className="mt-2 text-xs text-gray-500">
-              اختيار الشحنة يملأ المركبة والسائق تلقائياً. {canApprove ? "تُعتمد المصروفات فور الحفظ." : "تبقى بانتظار الاعتماد حتى يعتمدها المحاسب."}
+              اختيار الشحنة يملأ المركبة والسائق تلقائياً. «على العميل» يُقيد على 1114 ويظهر سطراً في فاتورة الشحنة. {canApprove ? "تُعتمد المصروفات فور الحفظ." : "تبقى بانتظار الاعتماد حتى يعتمدها المحاسب."}
             </p>
           </Card>
         )}
@@ -167,6 +168,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
               )}
               {maintenance && <div className="text-xs text-gray-500">نوع الصيانة: {maintenance}</div>}
               {waybill && <div className="ltr-nums text-xs text-gray-400">{waybill}</div>}
+              {e.billToCustomer && <div className="text-[11px] font-medium text-amber-700">على العميل (يُفوتر)</div>}
               {e.driverKind && <div className="text-[11px] text-sky-700">📱 من تطبيق السائق</div>}
             </Td>
             <Td>{plate ?? "—"}</Td>
@@ -211,6 +213,15 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
                           <Field label="حساب المصروف">
                             <AccountField name="accountId" options={accounts} defaultValue={e.accountId} required />
                           </Field>
+                          {waybill && (
+                            <label className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                              <input type="checkbox" name="billToCustomer" value="1" defaultChecked={e.billToCustomer} className="mt-0.5 accent-brand-600" />
+                              <span>
+                                <b>يُحمَّل على العميل</b> ويظهر سطراً في فاتورة الشحنة {waybill}
+                                <span className="block text-xs text-gray-600">يُقيد على «مصاريف مستردة من العملاء» 1114 بدل مصروف المركبة، ويُقفل عند الفوترة.</span>
+                              </span>
+                            </label>
+                          )}
                           <div className="grid grid-cols-2 gap-3">
                             <Field label="الضريبة ضمن المبلغ">
                               <Input name="vat" inputMode="decimal" dir="ltr" defaultValue={Number(e.vatAmount) ? String(e.vatAmount) : ""} placeholder="0" />

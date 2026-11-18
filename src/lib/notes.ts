@@ -5,6 +5,7 @@ import { createJournalEntryTx, deleteEntryTx, nextDocumentNumber, type LineInput
 import { lineVat, round2 } from "@/lib/invoice-posting";
 import { rateOn } from "@/lib/waybills";
 import { payableAccountFor } from "@/lib/purchases";
+import { requireTaxCode } from "@/lib/tax-codes";
 import { NOTE_KINDS, SALES_ACCOUNTS, type NoteKind } from "@/data/sales";
 import { PURCHASE_ACCOUNTS, isExpenseAccount } from "@/data/purchases";
 import type { DocFilter } from "@/lib/doc-filters";
@@ -31,6 +32,8 @@ export interface NoteLineInput {
   costCenterId?: number | null;
   amount: number;
   vatRate: number;
+  /** نوع الضريبة من قائمة وافق؛ إن وُجد تُؤخذ نسبته منه */
+  taxCodeId?: number | null;
 }
 
 export interface NoteInput {
@@ -75,10 +78,15 @@ export async function createNote(db: Db | Tx, input: NoteInput) {
     const rate = inv && inv.currencyCode !== "SAR" && input.noteDate === inv.date ? inv.exchangeRate : await rateOn(tx, currency, input.noteDate);
     const accounts = await tx.select().from(s.accounts).where(inArray(s.accounts.id, [...new Set(lines.map((l) => l.accountId))]));
     for (const l of lines) {
+      if (l.taxCodeId) {
+        const code = await requireTaxCode(tx, l.taxCodeId, isSales(input.kind) ? "sales" : "purchases");
+        if (code.behavior === "reverse") throw new Error("الاحتساب العكسي يُسجل في فاتورة المورد، لا في الإشعار");
+        l.vatRate = Number(code.rate);
+      }
       const a = accounts.find((x) => x.id === l.accountId);
       if (!a || !a.isPostable || !a.isActive) throw new Error("اختر حساباً تفصيلياً لكل سطر");
       if (isSales(input.kind) ? a.type !== "revenue" : !isExpenseAccount(a.code)) throw new Error(`الحساب ${a.code} ${a.nameAr} لا يصلح لهذا الإشعار`);
-      if (![0, 15].includes(l.vatRate)) throw new Error("نسبة الضريبة 15% أو صفر");
+      if (!l.taxCodeId && ![0, 15].includes(l.vatRate)) throw new Error("نسبة الضريبة 15% أو صفر");
       if (a.requiresCostCenter && !l.costCenterId) throw new Error(`الحساب ${a.nameAr} يتطلب مركبة أو مركز تكلفة`);
     }
     const rows = lines.map((l, i) => ({ ...l, lineNo: i + 1, amount: round2(l.amount), vatAmount: lineVat(l.amount, l.vatRate) }));
@@ -105,7 +113,7 @@ export async function createNote(db: Db | Tx, input: NoteInput) {
       })
       .returning();
     await tx.insert(s.adjustmentNoteLines).values(
-      rows.map((l) => ({ noteId: note.id, lineNo: l.lineNo, description: l.description || input.reason.trim(), accountId: l.accountId, costCenterId: l.costCenterId ?? null, amount: String(l.amount), vatRate: String(l.vatRate), vatAmount: String(l.vatAmount) })),
+      rows.map((l) => ({ noteId: note.id, lineNo: l.lineNo, description: l.description || input.reason.trim(), accountId: l.accountId, costCenterId: l.costCenterId ?? null, amount: String(l.amount), vatRate: String(l.vatRate), vatAmount: String(l.vatAmount), taxCodeId: l.taxCodeId ?? null })),
     );
     if (input.post) await postNoteTx(tx, note.id, input.userId);
     return note;
@@ -136,7 +144,7 @@ async function postNoteTx(tx: Tx, id: number, userId?: number) {
   const out: LineInput[] = [];
   for (const l of lines) {
     out.push({ accountId: l.accountId, [lineSide]: num(l.amount), ...fx, costCenterId: l.costCenterId, description: l.description });
-    if (num(l.vatAmount) > 0) out.push({ accountId: vatAcc, [lineSide]: num(l.vatAmount), ...fx, taxCodeId: tax?.id ?? null, description: `ضريبة – ${l.description}` });
+    if (num(l.vatAmount) > 0) out.push({ accountId: vatAcc, [lineSide]: num(l.vatAmount), ...fx, taxCodeId: l.taxCodeId ?? tax?.id ?? null, description: `ضريبة – ${l.description}` });
   }
   out.push({ accountId: party, [partySide]: num(n.total), ...fx, description: `${k.label} ${n.number}` });
   const entry = await createJournalEntryTx(tx, { entryDate: n.noteDate, description: `${k.label} ${n.number} – ${n.reason}`, source: { type: "adjustment_note", id: n.id }, post: true, userId, lines: out });
@@ -255,6 +263,6 @@ export async function noteDoc(db: Db | Tx, id: number) {
 /** سطور الفاتورة لتعبئة الإشعار منها (مرتجع كامل أو جزئي). */
 export async function invoiceLinesForNote(db: Db | Tx, side: "sales" | "purchase", invoiceId: number) {
   const t = side === "sales" ? s.salesInvoiceLines : s.purchaseInvoiceLines;
-  const lines = await db.select({ description: t.description, accountId: t.accountId, costCenterId: t.costCenterId, amount: t.amount, vatRate: t.vatRate }).from(t).where(eq(t.invoiceId, invoiceId)).orderBy(asc(t.lineNo));
+  const lines = await db.select({ description: t.description, accountId: t.accountId, costCenterId: t.costCenterId, amount: t.amount, vatRate: t.vatRate, taxCodeId: t.taxCodeId }).from(t).where(eq(t.invoiceId, invoiceId)).orderBy(asc(t.lineNo));
   return lines.map((l) => ({ ...l, amount: num(l.amount), vatRate: num(l.vatRate) }));
 }

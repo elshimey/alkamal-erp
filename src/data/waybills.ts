@@ -24,6 +24,7 @@ export const FUEL_SOURCES = {
 export const EXPENSE_PAYERS = {
   driver_custody: "عهدة السائق",
   customs_broker: "المخلص",
+  cash: "صندوق / بنك الشركة",
 } as const;
 
 export const EXPENSE_BILL_TO = {
@@ -44,6 +45,7 @@ export const WAYBILL_ACCOUNTS = {
   fuelStations: "2103",
   customsBrokers: "2105",
   accrued: "2106",
+  rechargeable: "1114",
 } as const;
 export type WaybillAccountKey = keyof typeof WAYBILL_ACCOUNTS;
 

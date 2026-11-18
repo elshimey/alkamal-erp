@@ -65,15 +65,34 @@ export async function invoicingQueue(db: Db | Tx, upTo?: string) {
     .orderBy(asc(s.parties.nameAr));
 }
 
+const plain = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 3 });
+
+/** تفاصيل سعر الشحنة تحت سطرها: «أساسي 3,000 + وزن زائد 2 × 200 = 400». فارغ بلا مكونات. */
+export function priceDetails(baseAmount: string | null, components: { label: string; quantity: string; unitPrice: string; amount: string }[]) {
+  if (!components.length) return null;
+  const parts = components.map((c) => {
+    const q = Number(c.quantity);
+    return q === 1 ? `${c.label} ${plain(Number(c.amount))}` : `${c.label} ${plain(q)} × ${plain(Number(c.unitPrice))} = ${plain(Number(c.amount))}`;
+  });
+  return [`أساسي ${plain(num(baseAmount))}`, ...parts].join(" + ");
+}
+
 /** يبني سطور الشحنات ومصاريفها المحمّلة على العميل، بعملة الفاتورة. */
-async function buildLines(tx: Tx, waybillIds: number[], currencyCode: string, rate: number) {
+async function buildLines(tx: Tx, waybillIds: number[], currencyCode: string, rate: number, expensesOnly?: number[]) {
   if (!waybillIds.length) return [];
   const [ext] = await tx.select({ id: s.costCenters.id }).from(s.costCenters).where(eq(s.costCenters.code, "EXT"));
   const acc = {
     domestic: await accountId(tx, SALES_ACCOUNTS.domesticRevenue),
     international: await accountId(tx, SALES_ACCOUNTS.internationalRevenue),
-    recharged: await accountId(tx, SALES_ACCOUNTS.rechargedExpenses),
+    rechargeable: await accountId(tx, SALES_ACCOUNTS.rechargeable),
   };
+  // الرسوم المدفوعة باسم العميل تُفوتر «غير خاضع للضريبة»
+  const [oos] = await tx.select({ id: s.taxCodes.id }).from(s.taxCodes).where(eq(s.taxCodes.code, "OOS"));
+  const components = await tx
+    .select()
+    .from(s.waybillPriceComponents)
+    .where(inArray(s.waybillPriceComponents.waybillId, waybillIds))
+    .orderBy(asc(s.waybillPriceComponents.lineNo));
   const rows = await tx
     .select({ w: s.waybills, plate: s.vehicles.plate, vehicleCc: s.vehicles.costCenterId, taxRate: s.taxCodes.rate })
     .from(s.waybills)
@@ -90,20 +109,21 @@ async function buildLines(tx: Tx, waybillIds: number[], currencyCode: string, ra
     ).map((r) => [Number(r.id), r.label]),
   );
   const expenses = await tx
-    .select({ e: s.waybillExpenses, type: s.chargeTypes.nameAr })
+    .select({ e: s.waybillExpenses, type: s.chargeTypes.nameAr, onBehalf: s.chargeTypes.onBehalf })
     .from(s.waybillExpenses)
     .innerJoin(s.chargeTypes, eq(s.chargeTypes.id, s.waybillExpenses.chargeTypeId))
     .where(
       and(
         inArray(s.waybillExpenses.waybillId, waybillIds),
         eq(s.waybillExpenses.billTo, "customer"),
+        expensesOnly ? inArray(s.waybillExpenses.id, expensesOnly) : undefined,
         sql`not exists (select 1 from sales_invoice_lines l where l.waybill_expense_id = ${s.waybillExpenses.id})`,
       ),
     );
 
   const lines: (typeof s.salesInvoiceLines.$inferInsert)[] = [];
   for (const { w, plate, vehicleCc, taxRate } of rows) {
-    if (w.status !== "approved") throw new Error(`الشحنة ${w.number} غير معتمدة`);
+    if (w.status !== "approved" && !expensesOnly) throw new Error(`الشحنة ${w.number} غير معتمدة`);
     if (w.currencyCode !== currencyCode) throw new Error(`الشحنة ${w.number} بعملة ${w.currencyCode} والفاتورة بـ ${currencyCode}`);
     const vatRate = num(taxRate);
     const amount = num(w.amount);
@@ -113,29 +133,35 @@ async function buildLines(tx: Tx, waybillIds: number[], currencyCode: string, ra
       costCenterId: vehicleCc ?? ext?.id ?? null,
       waybillId: w.id,
     };
-    lines.push({
+    if (!expensesOnly) lines.push({
       ...base,
       lineNo: 0,
       invoiceId: 0,
       kind: "waybill",
       description: `${w.number} · ${routeNames.get(w.routeId) ?? ""} · ${plate ?? "ناقل خارجي"} · ${w.waybillDate}`,
+      details: priceDetails(w.baseAmount, components.filter((c) => c.waybillId === w.id)),
       amount: String(amount),
       vatAmount: String(lineVat(amount, vatRate)),
       accountId: w.isInternational ? acc.international : acc.domestic,
     });
-    for (const { e, type } of expenses.filter((x) => x.e.waybillId === w.id)) {
-      // المصروف بعملته، ويُحوَّل لعملة الفاتورة بسعري الصرف
+    for (const { e, type, onBehalf } of expenses.filter((x) => x.e.waybillId === w.id)) {
+      // المصروف بعملته، ويُحوَّل لعملة الفاتورة بسعري الصرف. يُقفل حساب المستردة 1114 (لا إيراد)
       const converted = round2((num(e.amount) * num(e.exchangeRate)) / rate);
+      const behalf = onBehalf && oos;
       lines.push({
         ...base,
+        taxCodeId: behalf ? oos.id : w.taxCodeId,
+        vatRate: behalf ? "0" : String(vatRate),
+        costCenterId: null,
         lineNo: 0,
         invoiceId: 0,
         kind: "expense",
         waybillExpenseId: e.id,
-        description: `${type} – ${w.number}`,
+        description: `${type}${e.note ? ` (${e.note})` : ""} – ${w.number}`,
         amount: String(converted),
-        vatAmount: String(lineVat(converted, vatRate)),
-        accountId: acc.recharged,
+        costAmount: String(converted),
+        vatAmount: String(behalf ? 0 : lineVat(converted, vatRate)),
+        accountId: acc.rechargeable,
       });
     }
   }
@@ -234,6 +260,8 @@ export interface ManualInvoiceInput {
   userId?: number;
   // رحلة السائق للفاتورة المباشرة؛ undefined = تبقى كما هي، null = بلا رحلة
   trip?: InvoiceTripInput | null;
+  // تعديل سطور الشحنات ومصاريفها في المسودة: السعر والوصف (السعر يُحدّث مبلغ الشحنة نفسها)
+  fixedEdits?: { lineId: number; amount: number; description: string }[];
   lines: {
     description: string;
     quantity: number;
@@ -357,12 +385,15 @@ export async function updateDirectInvoice(db: Db, id: number, input: ManualInvoi
       .set({ customerId: input.customerId, invoiceDate: input.invoiceDate, dueDate: input.dueDate, currencyCode: input.currencyCode, exchangeRate: String(rate), reference, notes: input.notes?.trim() || null, updatedAt: new Date() })
       .where(eq(s.salesInvoices.id, id));
     await tx.delete(s.salesInvoiceLines).where(and(eq(s.salesInvoiceLines.invoiceId, id), eq(s.salesInvoiceLines.kind, "manual")));
+    const edits = await resolveFixedEdits(tx, id, input.fixedEdits);
+    for (const e of edits) if (e.kind === "waybill") await setWaybillPriceTx(tx, e.waybillId!, e.amount, "سعر معدَّل في الفاتورة");
     if (fixed.length && rate !== num(inv.exchangeRate)) {
       // سطور الشحنات بعملة الفاتورة بسعر يومها؛ تُبنى من جديد بالسعر الجديد
       const waybillIds = (await tx.selectDistinct({ id: s.salesInvoiceLines.waybillId }).from(s.salesInvoiceLines).where(and(eq(s.salesInvoiceLines.invoiceId, id), eq(s.salesInvoiceLines.kind, "waybill")))).map((r) => r.id!);
       await tx.delete(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, id));
       await insertLines(tx, id, await buildLines(tx, waybillIds, input.currencyCode, rate));
     }
+    await applyFixedEdits(tx, id, edits);
     await insertLines(tx, id, manualLines(input.lines));
     await recomputeTotals(tx, id);
     // الرحلة تتبع الفاتورة (التاريخ والعميل والمبلغ)؛ بلا تغيير في بياناتها إن لم تُرسل
@@ -370,6 +401,95 @@ export async function updateDirectInvoice(db: Db, id: number, input: ManualInvoi
     if (input.trip !== undefined || trip) await syncTrip(tx, id, input.userId, trip);
     return { ...inv, number: inv.number };
   });
+}
+
+type FixedEdit = { lineId: number; amount: number; description: string; kind: "waybill" | "expense"; waybillId: number | null; expenseId: number | null };
+
+/** يتحقق من تعديلات سطور الشحنات والمصاريف ويعيد ما تغيّر منها فقط. */
+async function resolveFixedEdits(tx: Tx, invoiceId: number, edits: ManualInvoiceInput["fixedEdits"]): Promise<FixedEdit[]> {
+  if (!edits?.length) return [];
+  const rows = await tx
+    .select()
+    .from(s.salesInvoiceLines)
+    .where(and(eq(s.salesInvoiceLines.invoiceId, invoiceId), inArray(s.salesInvoiceLines.id, edits.map((e) => e.lineId))));
+  const out: FixedEdit[] = [];
+  for (const e of edits) {
+    const l = rows.find((r) => r.id === e.lineId);
+    if (!l || l.kind === "manual") throw new Error("سطر الشحنة غير موجود في الفاتورة؛ حدّث الصفحة");
+    const amount = round2(e.amount);
+    const description = e.description || l.description;
+    if (amount === num(l.amount) && description === l.description) continue;
+    if (l.kind === "waybill" && !(amount > 0)) throw new Error(`«${l.description}»: سعر الشحنة يجب أن يكون أكبر من صفر`);
+    if (l.kind === "expense" && l.costAmount != null && amount < num(l.costAmount)) {
+      throw new Error(`«${l.description}»: لا يقل عن المبلغ المدفوع ${num(l.costAmount)}؛ لتحميل جزء منه فقط عدّل المصروف في الشحنة`);
+    }
+    out.push({ lineId: l.id, amount, description, kind: l.kind, waybillId: l.waybillId, expenseId: l.waybillExpenseId });
+  }
+  return out;
+}
+
+/** يطبّق التعديلات على السطور (بعد أي إعادة بناء لها بسعر صرف جديد). */
+async function applyFixedEdits(tx: Tx, invoiceId: number, edits: FixedEdit[]) {
+  for (const e of edits) {
+    const where =
+      e.kind === "waybill"
+        ? and(eq(s.salesInvoiceLines.invoiceId, invoiceId), eq(s.salesInvoiceLines.kind, "waybill"), eq(s.salesInvoiceLines.waybillId, e.waybillId!))
+        : and(eq(s.salesInvoiceLines.invoiceId, invoiceId), eq(s.salesInvoiceLines.waybillExpenseId, e.expenseId!));
+    const [l] = await tx.select().from(s.salesInvoiceLines).where(where);
+    if (!l) continue;
+    await tx
+      .update(s.salesInvoiceLines)
+      .set({ amount: String(e.amount), vatAmount: String(lineVat(e.amount, num(l.vatRate))), description: e.description })
+      .where(eq(s.salesInvoiceLines.id, l.id));
+  }
+}
+
+/** سعر الشحنة الإجمالي: يتغير معه السعر الأساسي وتبقى المكونات كما هي. */
+export async function setWaybillPriceTx(tx: Tx, waybillId: number, amount: number, note: string) {
+  const [w] = await tx.select().from(s.waybills).where(eq(s.waybills.id, waybillId)).for("update");
+  if (!w) throw new Error("الشحنة غير موجودة");
+  const [c] = await tx
+    .select({ sum: sql<string>`coalesce(sum(${s.waybillPriceComponents.amount}), 0)` })
+    .from(s.waybillPriceComponents)
+    .where(eq(s.waybillPriceComponents.waybillId, waybillId));
+  const extras = num(c.sum);
+  const base = round2(amount - extras);
+  if (extras && base < 0) throw new Error(`الشحنة ${w.number}: السعر أقل من مجموع مكوناته (${extras})`);
+  await tx
+    .update(s.waybills)
+    .set({ amount: String(amount), baseAmount: extras ? String(base) : w.baseAmount, priceNote: note, updatedAt: new Date() })
+    .where(eq(s.waybills.id, waybillId));
+}
+
+/** مصروف على العميل أُضيف لشحنة في مسودة فاتورة: يدخل الفاتورة مباشرة. */
+export async function attachChargeToDraftInvoiceTx(tx: Tx, waybillExpenseId: number) {
+  const [e] = await tx.select().from(s.waybillExpenses).where(eq(s.waybillExpenses.id, waybillExpenseId));
+  if (!e || e.billTo !== "customer") return null;
+  const [line] = await tx
+    .select({ invoiceId: s.salesInvoiceLines.invoiceId, status: s.salesInvoices.status, number: s.salesInvoices.number, currency: s.salesInvoices.currencyCode, rate: s.salesInvoices.exchangeRate })
+    .from(s.salesInvoiceLines)
+    .innerJoin(s.salesInvoices, eq(s.salesInvoices.id, s.salesInvoiceLines.invoiceId))
+    .where(and(eq(s.salesInvoiceLines.waybillId, e.waybillId), eq(s.salesInvoiceLines.kind, "waybill")));
+  if (!line) return null;
+  if (line.status !== "draft") throw new Error(`الشحنة على الفاتورة الصادرة ${line.number}؛ حمّل المصروف بإشعار مدين مربوط بها`);
+  await lockInvoice(tx, line.invoiceId);
+  await insertLines(tx, line.invoiceId, await buildLines(tx, [e.waybillId], line.currency, num(line.rate), [e.id]));
+  await recomputeTotals(tx, line.invoiceId);
+  return line.number;
+}
+
+/** يخرج المصروف من مسودة فاتورته قبل حذفه؛ يُمنع إن كانت الفاتورة صادرة. */
+export async function detachChargeTx(tx: Tx, waybillExpenseId: number) {
+  const [line] = await tx
+    .select({ id: s.salesInvoiceLines.id, invoiceId: s.salesInvoiceLines.invoiceId, status: s.salesInvoices.status, number: s.salesInvoices.number })
+    .from(s.salesInvoiceLines)
+    .innerJoin(s.salesInvoices, eq(s.salesInvoices.id, s.salesInvoiceLines.invoiceId))
+    .where(eq(s.salesInvoiceLines.waybillExpenseId, waybillExpenseId));
+  if (!line) return;
+  if (line.status !== "draft") throw new Error(`المصروف مفوتر في الفاتورة ${line.number}؛ أرجعها لمسودة أو صحّح بإشعار`);
+  await lockInvoice(tx, line.invoiceId);
+  await tx.delete(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.id, line.id));
+  await recomputeTotals(tx, line.invoiceId);
 }
 
 /** فوترة الكل: فاتورة لكل عميل وعملة بكل شحناته المعتمدة غير المفوترة. */
@@ -454,8 +574,14 @@ export async function issueInvoice(db: Db, invoiceId: number, userId?: number) {
           costCenterId: l.costCenterId,
           waybillId: l.waybillId,
           description: l.description,
+          taxCodeId: l.taxCodeId,
+          costAmount: l.costAmount == null ? null : num(l.costAmount),
         })),
-        { receivable: await accountId(tx, SALES_ACCOUNTS.receivable), outputVat: await accountId(tx, SALES_ACCOUNTS.outputVat) },
+        {
+          receivable: await accountId(tx, SALES_ACCOUNTS.receivable),
+          outputVat: await accountId(tx, SALES_ACCOUNTS.outputVat),
+          markup: await accountId(tx, SALES_ACCOUNTS.rechargedExpenses),
+        },
         vatOut?.id ?? null,
       ),
     });
@@ -701,10 +827,15 @@ export async function salesInvoiceDoc(db: Db | Tx, id: number) {
     .where(eq(s.salesInvoices.id, id));
   if (!row) return null;
   const [lines, trips] = await Promise.all([
-    db.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, id)).orderBy(asc(s.salesInvoiceLines.lineNo)),
+    db
+      .select({ l: s.salesInvoiceLines, taxName: s.taxCodes.nameAr })
+      .from(s.salesInvoiceLines)
+      .leftJoin(s.taxCodes, eq(s.taxCodes.id, s.salesInvoiceLines.taxCodeId))
+      .where(eq(s.salesInvoiceLines.invoiceId, id))
+      .orderBy(asc(s.salesInvoiceLines.lineNo)),
     invoiceTrips(db, id),
   ]);
-  return { ...row, lines, trips };
+  return { ...row, lines: lines.map(({ l, taxName }) => ({ ...l, taxName })), trips };
 }
 
 /** رحلات السائقين في الفاتورة (رحلتها المباشرة والشحنات التي فيها) وحالة إرسالها. */

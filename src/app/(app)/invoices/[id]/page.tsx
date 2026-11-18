@@ -39,7 +39,13 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   const draft = i.status === "draft";
 
   const [lines, allocations, available, company, template] = await Promise.all([
-    db.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, id)).orderBy(asc(s.salesInvoiceLines.lineNo)),
+    db
+      .select({ l: s.salesInvoiceLines, taxName: s.taxCodes.nameAr })
+      .from(s.salesInvoiceLines)
+      .leftJoin(s.taxCodes, eq(s.taxCodes.id, s.salesInvoiceLines.taxCodeId))
+      .where(eq(s.salesInvoiceLines.invoiceId, id))
+      .orderBy(asc(s.salesInvoiceLines.lineNo))
+      .then((rows) => rows.map(({ l, taxName }) => ({ ...l, taxName }))),
     db
       .select({ a: s.receiptAllocations, r: s.receipts })
       .from(s.receiptAllocations)

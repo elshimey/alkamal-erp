@@ -55,7 +55,7 @@ export interface NotePayload {
   invoiceId: number | null;
   currencyCode: string;
   reason: string;
-  lines: { description: string; accountId: number; costCenterId: number | null; amount: number; vatRate: number }[];
+  lines: { description: string; accountId: number; costCenterId: number | null; amount: number; vatRate: number; taxCodeId?: number | null }[];
 }
 
 export async function saveNote(p: NotePayload): Promise<{ id?: number; error?: string }> {
@@ -72,7 +72,7 @@ export async function saveNote(p: NotePayload): Promise<{ id?: number; error?: s
       invoiceId: p.invoiceId ? Number(p.invoiceId) : null,
       currencyCode: p.currencyCode,
       reason: p.reason,
-      lines: p.lines.map((l) => ({ description: l.description.trim(), accountId: Number(l.accountId), costCenterId: l.costCenterId ? Number(l.costCenterId) : null, amount: Number(l.amount), vatRate: Number(l.vatRate) })),
+      lines: p.lines.map((l) => ({ description: l.description.trim(), accountId: Number(l.accountId), costCenterId: l.costCenterId ? Number(l.costCenterId) : null, amount: Number(l.amount), vatRate: Number(l.vatRate), taxCodeId: l.taxCodeId ? Number(l.taxCodeId) : null })),
       post: can(user.perms, entity, "approve"),
       userId: user.id,
     });
