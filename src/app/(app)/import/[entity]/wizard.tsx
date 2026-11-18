@@ -435,14 +435,22 @@ function ReportStep({
   onBack: () => void;
   onReset: () => void;
 }) {
-  const bad = report.issues.length;
+  // عدد السجلات المرفوضة (للسجل الواحد قد تظهر عدة أخطاء، خطأ لكل خانة)
+  const bad = report.error ? report.issues.length : report.total - report.ok;
   const missing = groupMissing(report.issues);
 
+  // اسم العمود كما في القالب (يظهر أيضاً في عنوان عمود وافق الثنائي اللغة)
+  const columnOf = (key?: string) => (key ? (spec.fields.find((f) => f.key === key)?.label ?? "") : "");
   const errorFile = () => {
-    const reason = new Map<number, string>();
-    for (const i of report.issues) for (const r of i.rows) reason.set(r, i.message);
-    const rows = parsed.rows.flatMap((cells, i) => (reason.has(parsed.rowNumbers[i]) ? [[String(parsed.rowNumbers[i]), reason.get(parsed.rowNumbers[i])!, ...cells]] : []));
-    download(`أخطاء ${spec.title}.csv`, [["رقم الصف", "سبب الخطأ", ...parsed.headers], ...rows]);
+    const reason = new Map<number, [string, string]>();
+    // الصف ذو عدة أخطاء يجمعها في خانة واحدة
+    const join = (a: string, b: string) => (a && b ? `${a}؛ ${b}` : a || b);
+    for (const i of report.issues) for (const r of i.rows) {
+      const [col, msg] = reason.get(r) ?? ["", ""];
+      reason.set(r, [join(col, columnOf(i.field)), join(msg, i.message)]);
+    }
+    const rows = parsed.rows.flatMap((cells, i) => (reason.has(parsed.rowNumbers[i]) ? [[String(parsed.rowNumbers[i]), ...reason.get(parsed.rowNumbers[i])!, ...cells]] : []));
+    download(`أخطاء ${spec.title}.csv`, [["رقم الصف", "العمود", "سبب الخطأ", ...parsed.headers], ...rows]);
   };
 
   if (!report.dryRun && !report.error) {
@@ -545,7 +553,8 @@ function ReportStep({
             <table className="w-full text-sm">
               <thead className="sticky top-0 bg-gray-50 text-xs text-gray-500">
                 <tr>
-                  <th className="w-32 px-4 py-2 text-start font-medium">الصف في الملف</th>
+                  <th className="w-16 px-3 py-2 text-start font-medium sm:w-32 sm:px-4">الصف في الملف</th>
+                  <th className="w-24 px-3 py-2 text-start font-medium sm:w-40 sm:px-4">العمود</th>
                   <th className="px-4 py-2 text-start font-medium">السبب</th>
                 </tr>
               </thead>
@@ -553,6 +562,7 @@ function ReportStep({
                 {report.issues.slice(0, 300).map((i, n) => (
                   <tr key={n}>
                     <td className="ltr-nums px-4 py-2 text-gray-500">{i.rows.length > 3 ? `${i.rows[0]}…${i.rows.at(-1)}` : i.rows.join("، ")}</td>
+                    <td className="px-3 py-2 font-medium text-gray-700 sm:px-4">{columnOf(i.field) || "—"}</td>
                     <td className="px-4 py-2 text-red-800">{i.message}</td>
                   </tr>
                 ))}

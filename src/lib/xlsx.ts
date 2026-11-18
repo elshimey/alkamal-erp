@@ -151,7 +151,8 @@ export async function readImportFile(file: File, spec: ImportSpec): Promise<Pars
     const grid: { cells: string[]; n: number }[] = [];
     ws.eachRow({ includeEmpty: false }, (row, n) => {
       const cells: string[] = [];
-      row.eachCell({ includeEmpty: true }, (c, col) => (cells[col - 1] = cellText(c.value)));
+      // خلية بتنسيق نسبة مئوية (5% مخزنة 0.05) تُقرأ كما تظهر للمستخدم: 5
+      row.eachCell({ includeEmpty: true }, (c, col) => (cells[col - 1] = typeof c.value === "number" && /%/.test(c.numFmt ?? "") ? String(Math.round(c.value * 100 * 1e6) / 1e6) : cellText(c.value)));
       grid.push({ cells: Array.from(cells, (c) => c ?? ""), n });
     });
     const parsed = fromGrid(grid, spec);

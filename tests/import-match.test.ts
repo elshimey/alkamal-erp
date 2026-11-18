@@ -76,6 +76,16 @@ describe("مطابقة أعمدة الاستيراد", () => {
     expect(get("customer")).toBe("عميل أ");
   });
 
+  it("خلية النسبة المئوية تُقرأ كما تظهر (5% لا 0.05)", async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("x");
+    ws.addRow(["اسم العميل", "رقم الفاتورة", "الخصم %"]);
+    ws.addRow(["عميل أ", "A-1", 0.05]);
+    ws.getCell("C2").numFmt = "0%";
+    const parsed = await readImportFile(new File([new Uint8Array(await wb.xlsx.writeBuffer())], "p.xlsx"), invoices);
+    expect(parsed.rows[0][2]).toBe("5");
+  });
+
   it("يقرأ CSV ويكتشف صف العناوين ولو لم يكن الأول", async () => {
     const csv = "تقرير مبيعات\nاسم العميل,رقم الفاتورة,السعر\nعميل أ,A-1,50\n";
     const parsed = await readImportFile(new File([csv], "x.csv"), invoices);

@@ -54,6 +54,8 @@ export interface ImportIssue {
   // أرقام الصفوف في ملف Excel
   rows: number[];
   message: string;
+  // مفتاح الحقل (العمود) الذي فيه الخطأ إن عُرف
+  field?: string;
   // بيانات غير موجودة في النظام تحتاج إنشاءها أولاً
   missing?: { kind: "customer" | "account" | "vehicleType" | "costCenter" | "currency" | "taxCode" | "invoice"; value: string };
 }
@@ -74,6 +76,6 @@ export const MISSING_LABELS: Record<NonNullable<ImportIssue["missing"]>["kind"],
   vehicleType: { label: "أنواع مركبات غير موجودة", href: "/vehicles", action: "أضف النوع أو اترك العمود فارغاً" },
   costCenter: { label: "مراكز تكلفة أو مركبات غير موجودة", href: "/cost-centers", action: "أضف المركبة أو مركز التكلفة" },
   currency: { label: "عملات غير معرفة", href: "/exchange-rates", action: "استخدم رمز عملة معرف" },
-  taxCode: { label: "معدلات ضريبة غير معروفة", href: "/settings", action: "استخدم 15% أو صفر أو معفى" },
+  taxCode: { label: "أنواع ضريبة غير معروفة", href: "/settings/taxes", action: "اكتب اسم نوع الضريبة كما في «القوائم» بالقالب (أسماء وافق)" },
   invoice: { label: "فواتير غير موجودة أو غير مُصدرة", href: "/invoices", action: "تأكد من رقم الفاتورة وأصدرها أولاً" },
 };
