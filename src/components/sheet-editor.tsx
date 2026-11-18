@@ -100,7 +100,7 @@ export function SheetEditor({
   };
 
   return (
-    <div className="flex flex-col gap-3">
+    <div data-tour="sheet" className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <button type="button" onClick={save} disabled={pending} className="rounded-lg bg-brand-600 px-4 py-2 font-semibold text-brand-900 hover:bg-brand-500 disabled:opacity-60">
           {pending ? (

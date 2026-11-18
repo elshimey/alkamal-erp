@@ -122,8 +122,8 @@ export default async function HelpPage() {
         </a>
       </div>
 
-      <h2 className="mb-1 text-base font-semibold text-brand-900">الدورات المستندية: جولات تفاعلية</h2>
-      <p className="mb-3 text-sm text-gray-500">اختر دورة فينقلك البرنامج إلى كل خطوة، ويضيء البند المطلوب برقمه، ويشرح ما تفعله وأثره المحاسبي، ويختم بالقيود التي تكوّنت.</p>
+      <h2 className="mb-1 text-base font-semibold text-brand-900">جولات تفاعلية: جولة لكل مهمة</h2>
+      <p className="mb-3 text-sm text-gray-500">اختر المهمة فيضيء البرنامج كل خانة وزر بالترتيب. اكتب في الخانة المضاءة فتنتقل الجولة وحدها، أو «أعرف هذا» لتتخطى القسم. أوقفها في أي وقت بـ × أو Esc وتستكملها لاحقاً. كل شاشة فيها زر «كيف أعمل هذا؟» يبدأ جولتها من مكانك. ما تسجله في الجولة حقيقي في شركتك.</p>
       <div className="mb-9">
         <TourCards />
       </div>
