@@ -9,7 +9,7 @@ import { GlobalSearch, type SearchPage } from "@/components/global-search";
 import { BrandMark, Logo } from "@/components/logo";
 import { getBrand } from "@/lib/brand";
 import { MobileNav, NavLinks, type NavGroup } from "@/components/nav-links";
-import { TourRunner } from "@/components/tour";
+import { TourHelpButton, TourRunner } from "@/components/tour";
 import { TruckRoad } from "@/components/truck-road";
 import { Sidebar } from "@/components/sidebar";
 import { SIDEBAR_COOKIE } from "@/components/sidebar-cookie";
@@ -82,6 +82,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </Link>
           <GlobalSearch pages={pages} />
           <div className="ms-auto flex items-center gap-2 text-sm md:gap-4">
+            <TourHelpButton />
             <NotificationBell />
             <Link href="/account" className="flex items-center gap-2 text-gray-700 hover:text-brand-700">
               <span className="flex size-9 items-center justify-center rounded-full bg-asphalt-900 font-display font-semibold text-brand-500 ring-2 ring-brand-600/40">{user.name.trim()[0]}</span>
