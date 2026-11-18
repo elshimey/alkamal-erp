@@ -288,6 +288,13 @@
       "when": 1793230000000,
       "tag": "0040_customer_photos",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1793240000000,
+      "tag": "0041_driver_trip_requests",
+      "breakpoints": true
     }
   ]
 }

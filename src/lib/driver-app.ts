@@ -2,7 +2,7 @@ import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, or, sql } from "dr
 import { alias } from "drizzle-orm/pg-core";
 import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
-import { createWaybill, recordStage } from "@/lib/waybills";
+import { recordStage } from "@/lib/waybills";
 import { createExpense, vehicleCostCenter } from "@/lib/purchases";
 import { createBreakdownRequest } from "@/lib/maintenance";
 import { driverName, notifyOffice } from "@/lib/office-notify";
@@ -204,31 +204,6 @@ export async function acceptTrip(db: Db, driverId: number, waybillId: number) {
   if (w.driverAcceptedAt) return;
   await db.update(s.waybills).set({ driverAcceptedAt: new Date() }).where(eq(s.waybills.id, waybillId));
   await notifyOffice(db, { kind: "trip_accepted", text: `${await driverName(db, driverId)} استلم الرحلة ${w.number}`, href: `/waybills/${waybillId}`, driverId });
-}
-
-export async function startTrip(
-  db: Db,
-  driver: DriverProfile,
-  input: { date: string; customerId: number; routeId: number; shipper: string; consignee: string; containerNumber?: string | null; weightTons?: number | null; odometer?: number | null; notes?: string | null; userId?: number },
-) {
-  if (!driver.vehicle) throw new Error("لا توجد مركبة مسندة لك");
-  if (!input.shipper.trim() || !input.consignee.trim()) throw new Error("المرسل والمستلم إلزاميان");
-  const w = await createWaybill(db, {
-    waybillDate: input.date,
-    customerId: input.customerId,
-    routeId: input.routeId,
-    shipper: input.shipper,
-    consignee: input.consignee,
-    vehicleId: driver.vehicle.id,
-    driverId: driver.id,
-    containerNumber: input.containerNumber,
-    weightTons: input.weightTons,
-    notes: input.notes,
-    userId: input.userId,
-  });
-  await recordStage(db, w.id, "loading", { odometer: input.odometer ?? null, userId: input.userId });
-  await notifyOffice(db, { kind: "trip_started", text: `${driver.name} بدأ رحلة جديدة ${w.number} من التطبيق`, href: `/waybills/${w.id}`, driverId: driver.id });
-  return w;
 }
 
 export async function recordDriverStage(db: Db, driverId: number, waybillId: number, stage: TripStage, opts: { odometer?: number | null; note?: string | null; userId?: number }) {

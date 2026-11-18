@@ -38,6 +38,7 @@ export function RecordPanel({
   savedHref,
   wide = false,
   toolbar,
+  altSubmit,
   children,
 }: {
   title: string;
@@ -55,6 +56,8 @@ export function RecordPanel({
   wide?: boolean;
   /** أزرار إضافية في رأس النافذة بجانب «حفظ» (إخفاء المعاينة، طباعة…) */
   toolbar?: ReactNode;
+  /** زر حفظ ثانٍ يرسل الحقل name=1 مع النموذج (مثل «حفظ واعتماد وإصدار فاتورة فوراً») */
+  altSubmit?: { label: string; name: string };
   children: ReactNode;
 }) {
   const router = useRouter();
@@ -101,11 +104,12 @@ export function RecordPanel({
     return () => window.removeEventListener("keydown", esc);
   });
 
-  const submit = (again: boolean) => {
+  const submit = (again: boolean, alt?: string) => {
     const el = form.current;
     if (!el) return;
     if (!el.reportValidity()) return;
     const data = new FormData(el);
+    if (alt) data.set(alt, "1");
     setError(undefined);
     start(async () => {
       const res = await action(data);
@@ -145,6 +149,11 @@ export function RecordPanel({
           {creating && !embed && (
             <button type="button" disabled={saving} onClick={() => submit(true)} className="hidden rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-60 sm:block">
               حفظ وإضافة أخرى
+            </button>
+          )}
+          {altSubmit && (
+            <button type="button" disabled={saving} onClick={() => submit(false, altSubmit.name)} className="rounded-lg border border-brand-600 bg-white px-3 py-2 text-sm font-semibold text-brand-900 shadow-sm hover:bg-brand-50 disabled:opacity-60">
+              {altSubmit.label}
             </button>
           )}
           <button type="button" disabled={saving} onClick={() => submit(false)} className="min-w-20 rounded-lg bg-brand-600 px-5 py-2 text-sm font-semibold text-brand-900 shadow-sm hover:bg-brand-500 disabled:opacity-70">

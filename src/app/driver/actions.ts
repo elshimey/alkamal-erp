@@ -8,6 +8,7 @@ import { requireDriver } from "@/lib/driver-auth";
 import { destroySession, getCurrentUser, hasDriverSession } from "@/lib/auth";
 import { acceptTrip, createDriverExpense, isDriverOnly, ownTrip, recordDriverStage, reportBreakdown, setDriverLanguage, undoDriverStage, updateDriverExpense, voidDriverExpense, type DriverExpenseInput, type DriverProfile, type TripStage } from "@/lib/driver-app";
 import { requestCommissionAdvance } from "@/lib/hr";
+import { cancelTripRequest, recordRequestStage, startTripRequest, undoRequestStage } from "@/lib/driver-trip-requests";
 import { submitRenewal } from "@/lib/documents";
 import { addExpense, addFuel, deleteWaybillItem } from "@/lib/waybills";
 import { todayRiyadh } from "@/lib/dates";
@@ -53,6 +54,67 @@ export async function stageAction(_: FormState, data: FormData): Promise<FormSta
   revalidatePath(`/driver/trips/${waybillId}`);
   revalidatePath("/driver");
   return { ok: t.stageDone };
+}
+
+// ───────────── رحلة يبدؤها السائق ─────────────
+
+// الموقع يُلتقط تلقائياً من الجوال إن سمح السائق؛ وإلا يُحفظ الطلب بدونه
+const coords = (d: FormData) => {
+  const n = (k: string) => (str(d, k) ? Number(str(d, k)) : null);
+  return { latitude: n("lat"), longitude: n("lng") };
+};
+
+export async function tripRequestAction(_: FormState, data: FormData): Promise<FormState> {
+  const { user, driver, t } = await requireDriver();
+  try {
+    if (!photo(data)) throw new Error(t.x.photoMissing);
+    await onceForOp(db, op(data), async () => {
+      await startTripRequest(db, driver, { ...coords(data), photos: [photo(data), str(data, "photo2") || null], userId: user.id });
+    });
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+  revalidatePath("/driver");
+  return { ok: t.req.started };
+}
+
+export async function requestStageAction(_: FormState, data: FormData): Promise<FormState> {
+  const { user, driver, t } = await requireDriver();
+  const id = Number(str(data, "requestId"));
+  const stage = str(data, "stage");
+  try {
+    if (stage !== "loading" && stage !== "delivery") throw new Error("اختر المرحلة");
+    if (!photo(data)) throw new Error(t.x.photoMissing);
+    await onceForOp(db, op(data), () => recordRequestStage(db, driver, id, stage, { ...coords(data), odometer: num(data, "odometer"), photos: [photo(data), str(data, "photo2") || null], userId: user.id }));
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+  revalidatePath(`/driver/requests/${id}`);
+  revalidatePath("/driver");
+  return { ok: t.stageDone };
+}
+
+export async function undoRequestStageAction(id: number): Promise<FormState> {
+  const { driver, t } = await requireDriver();
+  try {
+    await undoRequestStage(db, driver.id, id);
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+  revalidatePath(`/driver/requests/${id}`);
+  return { ok: t.x.undone };
+}
+
+export async function cancelRequestAction(id: number): Promise<FormState> {
+  const { driver, t } = await requireDriver();
+  try {
+    await cancelTripRequest(db, driver.id, id);
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+  revalidatePath("/driver");
+  revalidatePath(`/driver/requests/${id}`);
+  return { ok: t.req.cancelled };
 }
 
 export async function undoStageAction(waybillId: number): Promise<FormState> {

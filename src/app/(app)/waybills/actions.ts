@@ -36,6 +36,7 @@ import { parseTransport } from "@/lib/transport-draft";
 import type { PanelResult } from "@/components/record-panel";
 import { removeWaybillsFromDrafts } from "@/lib/invoices";
 import { addWaybillCharge, removeWaybillCharge } from "@/lib/customer-charges";
+import { convertTripRequestTx, linkTripRequest, rejectTripRequest } from "@/lib/driver-trip-requests";
 import { splitCustom } from "@/data/custom-lists";
 import type { PriceComponentInput } from "@/lib/waybills";
 import { bulkTrips, sendTrip, unsendTrip } from "@/lib/trip-dispatch";
@@ -378,12 +379,26 @@ export async function saveWaybillPanel(id: number | null, fd: FormData): Promise
       if (transport) row = await saveTransportDoc(db, id, transport);
     } else {
       // الشحنة ووثيقة نقلها معاً: خطأ في البضاعة لا يترك شحنة ناقصة
+      // ومن رحلة بدأها السائق: التحويل في نفس المعاملة، فلا تبقى شحنة دون طلبها أو طلب دون شحنته
+      const requestId = optId(str(fd, "driverRequestId"));
       row = await db.transaction(async (tx) => {
         const created = await createWaybillTx(tx, { ...input, amount: input.amount ?? null, userId: user.id });
         if (input.deliveryNoteNumber || input.customsDeclaration)
           await tx.update(s.waybills).set({ deliveryNoteNumber: input.deliveryNoteNumber || null, customsDeclaration: input.customsDeclaration || null }).where(eq(s.waybills.id, created.id));
+        if (requestId) await convertTripRequestTx(tx, requestId, created.id, user.id);
         return transport ? saveTransportDoc(tx, created.id, transport) : created;
       });
+      if (requestId) {
+        revalidatePath("/waybills/driver-requests");
+        // «حفظ واعتماد وإصدار فاتورة فوراً»: الاعتماد (قيد التكلفة) ثم فاتورة الشحنة وحدها (قيد الإيراد)
+        if (str(fd, "finishNow") === "1") {
+          const done = await approveOne(row.id, undefined, new FormData());
+          const issued = done?.ok ? await issueWaybills([row.id], todayRiyadh()) : done;
+          refresh(row.id);
+          const msg = `حُوّلت الرحلة إلى الشحنة ${row.number}`;
+          return { ok: issued?.error ? `${msg}، ولم تكتمل الفوترة:\n${issued.error}` : `${msg}. ${issued?.ok ?? ""}`, id: row.id, label: row.number };
+        }
+      }
     }
     refresh(row.id);
     return { ok: id ? `حُفظت الشحنة ${row.number}` : `أُنشئت الشحنة ${row.number}`, id: row.id, label: row.number };
@@ -607,4 +622,31 @@ export async function bulkWaybillOps(_: FormState, fd: FormData): Promise<FormSt
   const what = `أصبحت «${WAYBILL_STATUS[op].label}» ${ok} شحنة`;
   if (!ok) return { error: failed.join("\n") };
   return failed.length ? { error: `${what}، ولم يُنفذ على ${failed.length}:\n${failed.join("\n")}` } : { ok: what };
+}
+
+// ───────────── رحلات بدأها السائقون ─────────────
+
+/** ربط رحلة بدأها السائق بشحنة موجودة له (أنشأها المكتب للرحلة نفسها). */
+export async function linkRequestAction(requestId: number, _: FormState, fd: FormData): Promise<FormState> {
+  const user = await guard("create");
+  try {
+    const waybillId = Number(cell.required(str(fd, "waybillId"), "الشحنة"));
+    const w = await linkTripRequest(db, requestId, waybillId, user.id);
+    refresh(waybillId);
+    revalidatePath("/waybills/driver-requests");
+    return { ok: `رُبطت الرحلة بالشحنة ${w.number}، وانتقلت إليها المراحل والصور` };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+}
+
+export async function rejectRequestAction(requestId: number, _: FormState, fd: FormData): Promise<FormState> {
+  const user = await guard("create");
+  try {
+    await rejectTripRequest(db, requestId, str(fd, "reason"), user.id);
+    revalidatePath("/waybills/driver-requests");
+    return { ok: "رُفض الطلب ووصل السبب للسائق" };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
 }
