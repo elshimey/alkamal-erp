@@ -1,0 +1,95 @@
+# قواعد فحص أمني خاصة ببرنامج الكمال، تعمل مع كل طلب دمج (.github/workflows/ci.yml).
+# أي نتيجة هنا توقف الدمج حتى تُصلح، أو يُراجعها مطوّر ويضيف الملف لاستثناءات القاعدة مع السبب.
+rules:
+  - id: alkamal-raw-sql-with-variables
+    severity: ERROR
+    message: >-
+      نص SQL مبني بدمج متغير (حقن SQL محتمل). استخدم sql`... ${value}` من drizzle أو معاملات $1
+      بدل sql.raw / unsafe مع ${...}. إن كانت القيمة ثابتة من الكود وروجعت، أضف الملف للاستثناءات مع السبب.
+    languages: [typescript]
+    patterns:
+      - pattern-either:
+          - pattern: sql.raw(`...${$X}...`)
+          - pattern: $DB.unsafe(`...${$X}...`, ...)
+    paths:
+      exclude:
+        # روجعت: أسماء المخططات تمر بـ isSchemaName، وأسماء الجداول والأعمدة من الكود لا من المستخدم
+        - /src/lib/platform.ts
+        - /src/lib/password-reset.ts
+        - /src/lib/export.ts
+        - /src/lib/banks.ts
+        - /src/db/tenant.ts
+        - /tests/
+        - /scripts/
+    metadata:
+      category: security
+      cwe: "CWE-89: SQL Injection"
+
+  - id: alkamal-platform-sql-outside-allowlist
+    severity: ERROR
+    message: >-
+      baseSql يتجاوز فصل الشركات ويقرأ كل المخططات. استخدم db (يتبع شركة المستخدم الحالية).
+      baseSql لجداول المنصة فقط، في الملفات المراجعة المستثناة أدناه.
+    languages: [typescript]
+    pattern-either:
+      - pattern: import { ..., baseSql, ... } from "@/db"
+      - pattern: |
+          const { ..., baseSql, ... } = await import("@/db")
+    paths:
+      exclude:
+        # روجعت: كلها تمرر مخطط الشركة الحالية صراحة أو تعمل على جداول المنصة فقط
+        - /src/db/index.ts
+        - /src/lib/auth.ts
+        - /src/lib/sign-in.ts
+        - /src/lib/share.ts
+        - /src/lib/push.ts
+        - /src/lib/error-log.ts
+        - /src/app/login/
+        - /src/app/(app)/owner/
+        - /src/app/(app)/users/
+        - /src/app/(app)/settings/driver-app/page.tsx
+        - /src/app/(app)/settings/subscription/actions.ts
+        - /src/app/(app)/drivers/*/page.tsx
+        - /tests/
+        - /scripts/
+    metadata:
+      category: security
+      cwe: "CWE-639: Authorization Bypass (cross-tenant data access)"
+
+  - id: alkamal-dangerously-set-inner-html
+    severity: ERROR
+    message: >-
+      dangerouslySetInnerHTML يعرض HTML كما هو (ثغرة XSS إن وصل له نص من المستخدم). اعرض النص عادياً،
+      أو إن كان من مكتبة موثوقة (مثل رمز QR) أضف الملف للاستثناءات مع السبب.
+    languages: [typescript]
+    pattern: <$EL dangerouslySetInnerHTML={...} />
+    paths:
+      exclude:
+        # روجعت: SVG لرمز QR تولّده مكتبة qrcode من بيانات الفاتورة
+        - /src/components/note-document.tsx
+        - /src/components/tax-invoice.tsx
+        - /src/app/(app)/settings/driver-app/page.tsx
+    metadata:
+      category: security
+      cwe: "CWE-79: Cross-site Scripting"
+
+  - id: alkamal-no-eval
+    severity: ERROR
+    message: "تنفيذ نص كبرنامج (eval أو new Function) ممنوع."
+    languages: [typescript, javascript]
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: new Function(...)
+    metadata:
+      category: security
+      cwe: "CWE-95: Code Injection"
+
+  - id: alkamal-session-cookie-flags
+    severity: ERROR
+    message: "ملف الجلسة يجب أن يكون httpOnly حتى لا يقرأه أي سكربت في الصفحة."
+    languages: [typescript]
+    patterns:
+      - pattern: "$STORE.set($NAME, $VALUE, { ..., httpOnly: false, ... })"
+    metadata:
+      category: security
+      cwe: "CWE-1004: Sensitive Cookie Without HttpOnly"
