@@ -9,6 +9,7 @@ import { PanelField, PanelSection } from "@/components/panel-ui";
 import { RecordPanel, type PanelResult } from "@/components/record-panel";
 import { TaxInvoiceDocument } from "@/components/tax-invoice";
 import { Icon } from "@/components/icons";
+import { CustomerChargesEditor, type ChargeDraft } from "@/components/customer-charges-editor";
 import { fmt } from "@/lib/format";
 import type { CompanyProfile } from "@/lib/company";
 import type { InvoiceTemplate } from "@/lib/invoice-template";
@@ -65,6 +66,7 @@ export function InvoiceEditor({
   costCenters,
   taxes,
   lineDefaults,
+  chargeOptions,
   currencies,
   routes,
   vehicles,
@@ -82,6 +84,8 @@ export function InvoiceEditor({
   costCenters: LineOption[];
   taxes: TaxOption[];
   lineDefaults: LineDefaults;
+  /** مصاريف على العميل تُضاف من المسودة لأي شحنة فيها */
+  chargeOptions?: { chargeTypes: QuickOption[]; brokers: QuickOption[]; cashAccounts: QuickOption[]; waybills: (QuickOption & { fleet: boolean })[] };
   currencies: string[];
   routes: QuickOption[];
   vehicles: QuickOption[];
@@ -100,6 +104,8 @@ export function InvoiceEditor({
   const locked = initial.fixedLines.length > 0;
   // سعر سطور الشحنات ومصاريفها ووصفها قابلان للتعديل في المسودة
   const [fixed, setFixed] = useState(initial.fixedLines);
+  const [charges, setCharges] = useState<ChargeDraft[]>([]);
+  const canCharge = !!initial.id && !!chargeOptions?.waybills.length;
   const editFixed = (id: number, patch: { amount?: string; description?: string }) => {
     setFixed((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
     touch();
@@ -265,9 +271,32 @@ export function InvoiceEditor({
               <FixedRows rows={fixed.filter((l) => l.kind === "waybill")} onEdit={editFixed} />
             </PanelSection>
           )}
-          {fixed.some((l) => l.kind === "expense") && (
-            <PanelSection title={`مصاريف على العميل (${fixed.filter((l) => l.kind === "expense").length})`} hint="من مصاريف الشحنة؛ تُقفل حساب المستردة 1114، وما يزيد على المدفوع إيراد">
-              <FixedRows rows={fixed.filter((l) => l.kind === "expense")} onEdit={editFixed} />
+          {(fixed.some((l) => l.kind === "expense") || canCharge) && (
+            <PanelSection
+              title={`مصاريف على العميل${fixed.filter((l) => l.kind === "expense").length + charges.length ? ` (${fixed.filter((l) => l.kind === "expense").length + charges.length})` : ""}`}
+              hint="ما دفعته عن العميل (جمارك، رسوم ميناء…): كل مصروف سطر مستقل، يُقفل حساب المستردة 1114، وما يزيد على المدفوع إيراد"
+              optional
+              open
+            >
+              {fixed.some((l) => l.kind === "expense") && <FixedRows rows={fixed.filter((l) => l.kind === "expense")} onEdit={editFixed} />}
+              {canCharge && chargeOptions && (
+                <>
+                  <input type="hidden" name="newCharges" value={JSON.stringify(charges)} />
+                  <CustomerChargesEditor
+                    rows={charges}
+                    onChange={(rows) => {
+                      setCharges(rows);
+                      touch();
+                    }}
+                    chargeTypes={chargeOptions.chargeTypes}
+                    brokers={chargeOptions.brokers}
+                    cashAccounts={chargeOptions.cashAccounts}
+                    waybills={chargeOptions.waybills}
+                    fleet={false}
+                  />
+                  {charges.length > 0 && <span className="block text-xs text-amber-700">تظهر المصاريف الجديدة في الفاتورة ومعاينتها بعد «حفظ».</span>}
+                </>
+              )}
             </PanelSection>
           )}
 

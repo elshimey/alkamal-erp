@@ -1,15 +1,15 @@
 import Link from "next/link";
 import { headers } from "next/headers";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { can, hasSpecial, scopeFor } from "@/lib/permissions";
-import { cityNames, contactCards, customerOptions, driverOptions, locationOptions, partyOptions, shipperSuggestions, vehicleOptions } from "@/lib/lookups";
+import { chargeTypeOptions, cityNames, contactCards, customerOptions, driverOptions, locationOptions, partyOptions, shipperSuggestions, vehicleOptions } from "@/lib/lookups";
 import { emptyTransport, toTransportDraft } from "@/lib/transport-draft";
 import { getCompany, getInvoiceTemplate } from "@/lib/company";
 import { todayRiyadh } from "@/lib/dates";
-import { fundingAccounts } from "@/lib/invoices";
+import { cashAccounts, fundingAccounts } from "@/lib/invoices";
 import { listHref, type DocListParams } from "@/lib/doc-filters";
 import { PAGE_SIZE, pageOf } from "@/lib/paging";
 import { fmt } from "@/lib/format";
@@ -132,6 +132,21 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
     creating || editing ? customListOptions(db, "price_component") : Promise.resolve([]),
     creating || editing ? taxCodeOptions(db, "sales") : Promise.resolve([]),
     editing && editRow ? waybillComponents(db, editRow.id) : Promise.resolve([]),
+  ]);
+  // مصاريف على العميل من نافذة الشحنة نفسها
+  const [chargeTypes, brokers, chargeCash, savedCharges] = await Promise.all([
+    creating || editing ? chargeTypeOptions() : Promise.resolve([]),
+    creating || editing ? partyOptions("customs_broker") : Promise.resolve([]),
+    creating || editing ? cashAccounts(db).then((r) => r.map((a) => ({ value: String(a.id), label: `${a.nameAr} ${a.code}` }))) : Promise.resolve([]),
+    editing && editRow
+      ? db
+          .select({ e: s.waybillExpenses, label: s.chargeTypes.nameAr, line: s.salesInvoiceLines.id })
+          .from(s.waybillExpenses)
+          .innerJoin(s.chargeTypes, eq(s.chargeTypes.id, s.waybillExpenses.chargeTypeId))
+          .leftJoin(s.salesInvoiceLines, eq(s.salesInvoiceLines.waybillExpenseId, s.waybillExpenses.id))
+          .where(and(eq(s.waybillExpenses.waybillId, editRow.id), eq(s.waybillExpenses.billTo, "customer")))
+          .orderBy(s.waybillExpenses.id)
+      : Promise.resolve([]),
   ]);
   const [customers, routeRows, locs, vehicles, trailers, drivers, carriers, shippers] = needOptions
     ? await Promise.all([
@@ -339,10 +354,12 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
         notes: str(w.notes),
         priceNote: w.priceNote,
         transport: toTransportDraft(w, editGoods),
+        charges: [],
+        savedCharges: savedCharges.map(({ e, label, line }) => ({ label: e.note ? `${label}: ${e.note}` : label, amount: e.amount, payer: e.payer, invoiced: !!line })),
       };
     }
     if (creating)
-      return { date: prefill?.date ?? today, customerId: "", routeId: "", execution: "fleet", vehicleId: prefill ? String(prefill.vehicleId) : "", trailerId: "", driverId: prefill ? String(prefill.driverId) : "", carrierId: "", carrierCost: "", carrierPlate: "", carrierDriverName: "", shipper: "", consignee: "", amount: "", components: [], taxCodeId: "", commission: "", tripCustody: "", weight: "", container: "", deliveryNote: "", customs: "", notes: "", transport: emptyTransport() };
+      return { date: prefill?.date ?? today, customerId: "", routeId: "", execution: "fleet", vehicleId: prefill ? String(prefill.vehicleId) : "", trailerId: "", driverId: prefill ? String(prefill.driverId) : "", carrierId: "", carrierCost: "", carrierPlate: "", carrierDriverName: "", shipper: "", consignee: "", amount: "", components: [], taxCodeId: "", commission: "", tripCustody: "", weight: "", container: "", deliveryNote: "", customs: "", notes: "", transport: emptyTransport(), charges: [] };
     return null;
   };
   const initial = draft();
@@ -782,6 +799,9 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
           showPrices={showPrices}
           componentKinds={componentKinds}
           taxes={taxes}
+          chargeTypes={chargeTypes}
+          brokers={brokers}
+          cashAccounts={chargeCash}
           company={company}
           template={template}
           action={saveWaybillPanel.bind(null, editing ? editId : null)}
