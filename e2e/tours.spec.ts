@@ -2,7 +2,7 @@
 // المبتدئ: تنتقل وحدها حين يملأ الخانة، و«أعرف هذا» يقفز للقسم التالي، و× يوقفها وتُستكمل لاحقاً.
 import { expect, test, type Page } from "@playwright/test";
 import { TOURS, type TourStep } from "@/data/tours";
-import { officeLogin } from "./helpers";
+import { officeLogin, sql } from "./helpers";
 
 const KEY = "alkamal-tour";
 const ring = (page: Page) => page.locator("[data-tour-ui] .ring-4");
@@ -53,8 +53,8 @@ test("جولة المركبة: تنتقل وحدها مع الكتابة، و«�
   await expect(card(page)).toContainText("اللوحة: الأحرف");
 
   // الكتابة في الخانة تنقل الجولة وحدها
-  await panel.getByRole("textbox", { name: /الأحرف/ }).fill("ا ب د");
-  await panel.getByRole("textbox", { name: /الأرقام/ }).focus();
+  await panel.locator("input[name=plateLetters]").fill("ا ب د");
+  await panel.locator("input[name=plateNumbers]").focus();
   await expect(card(page)).toContainText("اللوحة: الأرقام", { timeout: 3000 });
 
   // «أعرف هذا» يقفز لأول خطوة بعد «البيانات الأساسية»
@@ -67,9 +67,9 @@ test("جولة المركبة: تنتقل وحدها مع الكتابة، و«�
   await expect(card(page)).toContainText("حساب الأصل");
   expect(Date.now() - t0).toBeLessThan(1500);
 
-  // Esc مع النافذة المفتوحة يغلقها هي، والجولة تبقى
+  // Esc والنافذة مفتوحة لا يوقف الجولة (Esc للنافذة نفسها)
   await page.keyboard.press("Escape");
-  await expect(page.locator("[data-tour-ui]").first()).toBeVisible();
+  await expect(card(page)).toBeVisible();
 
   // × يوقف الجولة، وصفحة الدليل تعرض «استكمل»
   await page.locator("[data-tour-ui]").getByRole("button", { name: "إيقاف الجولة" }).first().click();
@@ -87,4 +87,17 @@ test("زر «كيف أعمل هذا؟» يبدأ جولة الشاشة من مك
   await expect(ring(page)).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.locator("[data-tour-ui]")).toHaveCount(0);
+});
+
+test("جولة الشحنة: تضيء «العمليات» ثم بند القائمة المنسدلة نفسه", async ({ page }) => {
+  await officeLogin(page);
+  const [w] = await sql`select id from waybills order by id desc limit 1`;
+  test.skip(!w, "لا توجد شحنة");
+  const i = TOURS.find((t) => t.id === "shipment")!.steps.findIndex((s) => s.title === "العمليات");
+  await setTour(page, "shipment", i);
+  await page.goto(`/waybills?open=${w.id}`);
+  await expect(ring(page)).toBeVisible();
+  await page.getByRole("button", { name: "العمليات ▼" }).click();
+  await expect(card(page)).toContainText("إرسال للسائق");
+  await expect(ring(page)).toBeVisible();
 });

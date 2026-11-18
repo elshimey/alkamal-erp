@@ -74,6 +74,8 @@ const visible = (el: Element) => {
   return r.width > 0 && r.height > 0;
 };
 const clean = (s: string | null | undefined) => (s ?? "").replace(/[*\s]+/g, " ").trim();
+/** للمقارنة بالنص: دون مسافات (الأيقونات والأسهم تفصلها عناصر) */
+const squash = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, "");
 
 /** يبحث عن البند داخل الطبقة الظاهرة: خانة بعنوانها، أو قسم، أو محدد CSS، أو أقصر عنصر يحوي النص. */
 export function resolveTarget(target: TourTarget, root: ParentNode = topLayer()): HTMLElement | null {
@@ -87,10 +89,11 @@ export function resolveTarget(target: TourTarget, root: ParentNode = topLayer())
     const s = sums.find((e) => clean(e.querySelector("span")?.textContent) === target.section) ?? sums.find((e) => clean(e.textContent).includes(target.section!));
     el = (s?.closest("details") as HTMLElement | null) ?? null;
   } else if (target.css) {
+    if (root instanceof HTMLElement && root.matches(target.css)) return root;
     el = (Array.from(root.querySelectorAll(target.css)).find((e) => visible(e) && !e.closest("[data-tour-ui]")) as HTMLElement | undefined) ?? null;
   } else if (target.text) {
     const matches = Array.from(root.querySelectorAll<HTMLElement>(target.tag ?? "button,a,summary,h2"))
-      .filter((e) => visible(e) && !e.closest("[data-tour-ui]") && clean(e.textContent).includes(target.text!))
+      .filter((e) => visible(e) && !e.closest("[data-tour-ui]") && squash(e.textContent).includes(squash(target.text)))
       .sort((a, b) => (a.textContent ?? "").length - (b.textContent ?? "").length);
     el = matches[0] ?? null;
   }
