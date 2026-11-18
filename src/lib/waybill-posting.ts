@@ -35,11 +35,43 @@ export interface PostingFuel {
 export interface PostingExpense {
   costAccountId: number | null;
   label: string;
-  payer: "driver_custody" | "customs_broker";
+  payer: "driver_custody" | "customs_broker" | "cash";
   partyId: number | null;
+  cashAccountId?: number | null;
+  // على العميل: مدين «مصاريف مستردة من العملاء» 1114 بدل تكلفة المركبة (يُقفل عند الفوترة)
+  billToCustomer?: boolean;
   amount: number;
   currencyCode: string;
   exchangeRate: number;
+}
+
+/** قيود مصاريف الرحلة: مع قيد الاعتماد، أو قيداً مستقلاً لمصروف أُضيف بعده. */
+export function waybillExpenseLines(
+  w: Pick<PostingWaybill, "id" | "number" | "costCenterId" | "driverId" | "driverCustodyAccountId">,
+  expenses: PostingExpense[],
+  account: Pick<Record<WaybillAccountKey, number>, "tripExpenses" | "customsBrokers" | "rechargeable">,
+): LineInput[] {
+  const lines: LineInput[] = [];
+  for (const e of expenses) {
+    const fx = { currencyCode: e.currencyCode, exchangeRate: e.exchangeRate };
+    if (e.payer === "customs_broker" && !e.partyId) throw new Error(`المصروف «${e.label}»: اختر المخلص`);
+    if (e.payer === "cash" && !e.cashAccountId) throw new Error(`المصروف «${e.label}»: اختر الصندوق أو البنك`);
+    if (e.payer === "driver_custody" && !w.driverCustodyAccountId) throw new Error("الدفع من عهدة السائق يحتاج سائقاً من الأسطول");
+    const description = `${e.label} – ${w.number}`;
+    const debit: LineInput = e.billToCustomer
+      ? { accountId: account.rechargeable, ...fx, driverId: w.driverId, waybillId: w.id, description: `على العميل: ${description}`, debit: e.amount }
+      : { accountId: e.costAccountId ?? account.tripExpenses, ...fx, costCenterId: w.costCenterId, driverId: w.driverId, waybillId: w.id, description, debit: e.amount };
+    lines.push(debit, {
+      accountId: e.payer === "driver_custody" ? w.driverCustodyAccountId! : e.payer === "cash" ? e.cashAccountId! : account.customsBrokers,
+      ...fx,
+      partyId: e.payer === "customs_broker" ? e.partyId : null,
+      driverId: w.driverId,
+      waybillId: w.id,
+      description,
+      credit: e.amount,
+    });
+  }
+  return lines;
 }
 
 export function waybillPostingLines(
@@ -80,22 +112,7 @@ export function waybillPostingLines(
     );
   }
 
-  for (const e of expenses) {
-    const fx = { currencyCode: e.currencyCode, exchangeRate: e.exchangeRate };
-    if (e.payer === "customs_broker" && !e.partyId) throw new Error(`المصروف «${e.label}»: اختر المخلص`);
-    pair(
-      { accountId: e.costAccountId ?? account.tripExpenses, ...fx, ...dims, description: `${e.label} – ${w.number}` },
-      {
-        accountId: e.payer === "driver_custody" ? custody() : account.customsBrokers,
-        ...fx,
-        partyId: e.payer === "customs_broker" ? e.partyId : null,
-        driverId: w.driverId,
-        waybillId: w.id,
-        description: `${e.label} – ${w.number}`,
-      },
-      e.amount,
-    );
-  }
+  lines.push(...waybillExpenseLines(w, expenses, account));
 
   if (w.execution === "carrier") {
     if (!w.carrierId || !(w.carrierCost > 0)) throw new Error("أدخل الناقل وتكلفة النقل");

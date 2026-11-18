@@ -82,9 +82,16 @@ function buyerOf(p: typeof s.parties.$inferSelect): ZatcaParty {
   };
 }
 
-function lineOf(name: string, quantity: number, net: number, vatRate: number, taxCode: string | null): ZatcaLine {
+type TaxInfo = { category: string | null; exemptionCode: string | null; exemptionReason: string | null } | null;
+
+/** فئة السطر وسبب إعفائه من نوع الضريبة (أسماء وافق)؛ وبلا نوع: الصفر نقل دولي. */
+function lineOf(name: string, quantity: number, net: number, vatRate: number, tax: TaxInfo): ZatcaLine {
   if (vatRate > 0) return { name, quantity, net, vatRate, category: "S" };
-  if (taxCode === "EXEMPT") return { name, quantity, net, vatRate: 0, category: "O", exemptionCode: OUT_OF_SCOPE.code, exemptionReason: OUT_OF_SCOPE.reason };
+  const cat = tax?.category;
+  if ((cat === "Z" || cat === "E" || cat === "O") && tax?.exemptionCode) {
+    return { name, quantity, net, vatRate: 0, category: cat, exemptionCode: tax.exemptionCode, exemptionReason: tax.exemptionReason ?? undefined };
+  }
+  if (cat === "O") return { name, quantity, net, vatRate: 0, category: "O", exemptionCode: OUT_OF_SCOPE.code, exemptionReason: OUT_OF_SCOPE.reason };
   return { name, quantity, net, vatRate: 0, category: "Z", exemptionCode: ZERO.code, exemptionReason: ZERO.reason };
 }
 
@@ -98,7 +105,7 @@ async function sourceDoc(db: Db, src: Source) {
     if (!row) throw new Error("الفاتورة غير موجودة");
     if (row.i.status !== "issued") throw new Error("تُرسل الفاتورة للهيئة بعد إصدارها");
     const lines = await db
-      .select({ l: s.salesInvoiceLines, code: s.taxCodes.code })
+      .select({ l: s.salesInvoiceLines, category: s.taxCodes.category, exemptionCode: s.taxCodes.exemptionCode, exemptionReason: s.taxCodes.exemptionReason })
       .from(s.salesInvoiceLines)
       .leftJoin(s.taxCodes, eq(s.taxCodes.id, s.salesInvoiceLines.taxCodeId))
       .where(eq(s.salesInvoiceLines.invoiceId, src.invoiceId))
@@ -116,7 +123,7 @@ async function sourceDoc(db: Db, src: Source) {
         rate: Number(row.i.exchangeRate),
         seller: sellerOf(company),
         buyer: buyerOf(row.p),
-        lines: lines.map(({ l, code }) => lineOf(l.description, Number(l.quantity ?? 1) || 1, Number(l.amount), Number(l.vatRate), code)),
+        lines: lines.map(({ l, ...tax }) => lineOf(l.description, Number(l.quantity ?? 1) || 1, Number(l.amount), Number(l.vatRate), tax)),
       },
     };
   }
@@ -130,7 +137,12 @@ async function sourceDoc(db: Db, src: Source) {
   if (row.n.kind !== "sales_credit" && row.n.kind !== "sales_debit") throw new Error("تُرسل للهيئة إشعارات العملاء فقط");
   if (row.n.status !== "posted") throw new Error("يُرسل الإشعار للهيئة بعد ترحيله");
   if (!row.invoice) throw new Error("اربط الإشعار بفاتورته الأصلية؛ الهيئة تشترط رقم الفاتورة في الإشعار");
-  const lines = await db.select().from(s.adjustmentNoteLines).where(eq(s.adjustmentNoteLines.noteId, src.noteId)).orderBy(asc(s.adjustmentNoteLines.lineNo));
+  const lines = await db
+    .select({ l: s.adjustmentNoteLines, category: s.taxCodes.category, exemptionCode: s.taxCodes.exemptionCode, exemptionReason: s.taxCodes.exemptionReason })
+    .from(s.adjustmentNoteLines)
+    .leftJoin(s.taxCodes, eq(s.taxCodes.id, s.adjustmentNoteLines.taxCodeId))
+    .where(eq(s.adjustmentNoteLines.noteId, src.noteId))
+    .orderBy(asc(s.adjustmentNoteLines.lineNo));
   const when = riyadhParts(row.n.updatedAt);
   return {
     company,
@@ -146,7 +158,7 @@ async function sourceDoc(db: Db, src: Source) {
       reason: row.n.reason,
       seller: sellerOf(company),
       buyer: buyerOf(row.p),
-      lines: lines.map((l) => lineOf(l.description, 1, Number(l.amount), Number(l.vatRate), null)),
+      lines: lines.map(({ l, ...tax }) => lineOf(l.description, 1, Number(l.amount), Number(l.vatRate), tax)),
     },
   };
 }
@@ -185,7 +197,7 @@ function sampleDocs(company: Awaited<ReturnType<typeof getCompany>>): DocData[] 
     rate: 1,
     seller: sellerOf(company),
     buyer: { name: "عميل تجريبي للامتثال", vatNumber: "300000000000003", street: "طريق الملك فهد", buildingNo: "1234", district: "العليا", city: "الرياض", postalCode: "12211", country: "SA" },
-    lines: [lineOf("نقل بضائع الدمام ← الرياض", 1, 1000, 15, "VAT15-OUT")],
+    lines: [lineOf("نقل بضائع الدمام ← الرياض", 1, 1000, 15, null)],
   };
   return [
     { ...base, kind: "invoice", number: "COMPLIANCE-INV-1" },

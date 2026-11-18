@@ -7,6 +7,7 @@ export const ENTRY_SOURCES: Record<string, { label: string; href?: (id: number) 
   expense: { label: "مصروف", href: () => "/expenses" },
   payment: { label: "سند صرف", href: () => "/payments" },
   waybill: { label: "شحنة", href: (id) => `/waybills/${id}` },
+  waybill_charge: { label: "مصروف على شحنة" },
   maintenance_order: { label: "أمر صيانة", href: (id) => `/maintenance/${id}` },
   payroll_run: { label: "مسير رواتب", href: (id) => `/payroll/${id}` },
   payroll_payment: { label: "صرف رواتب", href: (id) => `/payroll/${id}` },

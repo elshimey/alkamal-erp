@@ -36,6 +36,7 @@ export async function saveExpenses(rows: SheetRow[]) {
       vatAmount: cell.number(r.vat, "الضريبة") ?? 0,
       vendorName: cell.text(r.vendor),
       reference: cell.text(r.reference),
+      billToCustomer: r.billTo === "customer" || r.billTo === "نعم، يُفوتر",
       approve,
       userId: user.id,
     });
@@ -66,6 +67,7 @@ export async function approveReviewed(id: number, _: FormState, fd: FormData): P
       accountId: Number(fd.get("accountId")) || null,
       vatAmount: vat ? Number(vat) : 0,
       vendorName: String(fd.get("vendor") ?? ""),
+      billToCustomer: fd.get("billToCustomer") === "1",
       userId: user.id,
     });
     refresh();

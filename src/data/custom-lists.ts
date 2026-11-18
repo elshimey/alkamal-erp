@@ -31,6 +31,11 @@ export const CUSTOM_LISTS = {
     base: MAINTENANCE_TYPES as Record<string, string>,
     hint: "الأساسي يحدد حساب تكلفة الصيانة في القيد",
   },
+  price_component: {
+    label: "مكون السعر",
+    base: { extra_weight: "وزن زائد (طن)", extra_km: "كيلومترات زائدة (كم)", waiting: "انتظار (يوم)", handling: "تحميل / تنزيل", other: "إضافة أخرى", discount: "خصم" } as Record<string, string>,
+    hint: "«خصم» يُطرح من سعر الشحنة، وغيره يُضاف إليه",
+  },
   // قائمة حرة: القيمة هي الاسم نفسه
   violation_type: { label: "نوع المخالفة", base: null, hint: "" },
 } as const;

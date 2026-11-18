@@ -39,6 +39,8 @@ async function sampleInvoice() {
     vatAmount: (amount * 0.15).toFixed(2),
     accountId: 0,
     costCenterId: null,
+    details: null,
+    costAmount: null,
     groupKey: null,
   });
   return {

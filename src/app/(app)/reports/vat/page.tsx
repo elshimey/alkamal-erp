@@ -41,24 +41,19 @@ export default async function VatReport({ searchParams }: { searchParams: Promis
           <C />
           <C />
         </tr>
-        <tr>
-          <C className="ltr-nums text-gray-500">1</C>
-          <C>المبيعات الخاضعة للنسبة الأساسية 15%</C>
-          <C num>{money(v.standardSales)}</C>
-          <C num>—</C>
-          <C num>{money(v.standardSalesVat)}</C>
-        </tr>
-        <tr>
-          <C className="ltr-nums text-gray-500">2</C>
-          <C>الصادرات والنقل الدولي (نسبة صفرية)</C>
-          <C num>{money(v.zeroRatedSales)}</C>
-          <C num>—</C>
-          <C num>—</C>
-        </tr>
+        {v.sales.map((b, i) => (
+          <tr key={b.behavior}>
+            <C className="ltr-nums text-gray-500">{i + 1}</C>
+            <C>{b.label}</C>
+            <C num>{money(b.amount)}</C>
+            <C num>{b.adjust ? money(b.adjust) : "—"}</C>
+            <C num>{b.vat ? money(b.vat) : "—"}</C>
+          </tr>
+        ))}
         <tr className="font-semibold">
           <C />
           <C>إجمالي المبيعات وضريبة المخرجات</C>
-          <C num>{money(v.standardSales + v.zeroRatedSales, false)}</C>
+          <C num>{money(v.sales.reduce((a, b) => a + b.amount + b.adjust, 0), false)}</C>
           <C />
           <C num>{money(v.output, false)}</C>
         </tr>
@@ -69,17 +64,19 @@ export default async function VatReport({ searchParams }: { searchParams: Promis
           <C />
           <C />
         </tr>
-        <tr>
-          <C className="ltr-nums text-gray-500">3</C>
-          <C>المشتريات الخاضعة للنسبة الأساسية 15%</C>
-          <C num>{money(v.standardPurchases)}</C>
-          <C num>—</C>
-          <C num>{money(v.input)}</C>
-        </tr>
+        {v.purchases.map((b, i) => (
+          <tr key={b.behavior}>
+            <C className="ltr-nums text-gray-500">{v.sales.length + i + 1}</C>
+            <C>{b.label}</C>
+            <C num>{money(b.amount)}</C>
+            <C num>—</C>
+            <C num>{b.vat ? money(b.vat) : "—"}</C>
+          </tr>
+        ))}
         <tr className="font-semibold">
           <C />
           <C>إجمالي ضريبة المدخلات</C>
-          <C num>{money(v.standardPurchases, false)}</C>
+          <C num>{money(v.purchases.reduce((a, b) => a + b.amount, 0), false)}</C>
           <C />
           <C num>{money(v.input, false)}</C>
         </tr>
@@ -92,7 +89,7 @@ export default async function VatReport({ searchParams }: { searchParams: Promis
         </tr>
       </RTable>
       <p className="mt-2 text-xs text-gray-500">
-        ضريبة المخرجات من حساب ضريبة المخرجات (2109) وضريبة المدخلات من حساب ضريبة المدخلات (1108) بعد القيود المرحّلة فقط. وعاء المشتريات محسوب من الضريبة بنسبة 15%.
+        ضريبة المخرجات من حساب ضريبة المخرجات (2109) وضريبة المدخلات من حساب ضريبة المدخلات (1108) بعد القيود المرحّلة فقط. وعاء المشتريات الخاضعة محسوب من ضريبتها بنسبة 15%، والاحتساب العكسي يظهر في المخرجات والمدخلات معاً. كل نوع ضريبة في خانته حسب «يتصرف مثل».
       </p>
     </>
   );

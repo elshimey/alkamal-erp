@@ -11,6 +11,7 @@ import { expenseAccountOptions, supplierOptions } from "@/lib/purchases";
 import { NOTE_KINDS, NOTE_SIDES, type NoteKind, type NoteSide } from "@/data/sales";
 import { NoteForm } from "./form";
 import { toAccountOptions } from "@/lib/lookups";
+import { taxCodeOptions } from "@/lib/tax-codes";
 
 export default async function NewNotePage({ params, searchParams }: { params: Promise<{ side: string }>; searchParams: Promise<{ kind?: string; party?: string; invoice?: string }> }) {
   const sideKey = (await params).side;
@@ -20,7 +21,7 @@ export default async function NewNotePage({ params, searchParams }: { params: Pr
   const user = await requirePermission(cfg.entity, "create");
   const sp = await searchParams;
   const kind: NoteKind = (cfg.kinds as readonly string[]).includes(sp.kind ?? "") ? (sp.kind as NoteKind) : cfg.kinds[0];
-  const [parties, accounts, centers, currencies] = await Promise.all([
+  const [parties, accounts, centers, currencies, taxes] = await Promise.all([
     side === "sales" ? customerOptions() : supplierOptions(db),
     side === "sales"
       ? db
@@ -32,6 +33,7 @@ export default async function NewNotePage({ params, searchParams }: { params: Pr
       : expenseAccountOptions(db),
     db.select({ id: s.costCenters.id, code: s.costCenters.code, nameAr: s.costCenters.nameAr }).from(s.costCenters).where(eq(s.costCenters.isActive, true)).orderBy(asc(s.costCenters.code)),
     db.select({ code: s.currencies.code }).from(s.currencies).orderBy(asc(s.currencies.code)),
+    taxCodeOptions(db, side === "sales" ? "sales" : "purchases"),
   ]);
   return (
     <div className="animate-rise">
@@ -53,6 +55,7 @@ export default async function NewNotePage({ params, searchParams }: { params: Pr
         initialParty={sp.party ?? ""}
         initialInvoice={Number(sp.invoice) || null}
         willPost={can(user.perms, cfg.entity, "approve")}
+        taxes={taxes.filter((x) => !x.reverse)}
       />
     </div>
   );

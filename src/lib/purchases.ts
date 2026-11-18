@@ -11,6 +11,9 @@ import { docOrder, docWhere } from "@/lib/doc-query";
 import { PAYABLE_BY_ROLE, PURCHASE_ACCOUNTS, SUPPLIER_ROLES, isExpenseAccount } from "@/data/purchases";
 import { notifyDriver } from "@/lib/driver-notify";
 import { cashAccountFor } from "@/lib/banks";
+import { SALES_ACCOUNTS } from "@/data/sales";
+import { linkExpenseToWaybillTx, unlinkExpenseTx } from "@/lib/customer-charges";
+import { requireTaxCode } from "@/lib/tax-codes";
 
 // المشتريات والمصروفات وسندات الصرف. كل مستند يُرحّل قيده عند الاعتماد، وكل مدين يقابله دائن
 // بالمبلغ نفسه فيبقى القيد متوازناً بالريال مع أي سعر صرف.
@@ -52,6 +55,12 @@ export async function vehicleCostCenter(db: Db | Tx, vehicleId: number | null | 
   return v.cc;
 }
 
+/** أنواع ضريبة «الاحتساب العكسي» (الأساسي وما يتصرف مثله). */
+async function reverseTaxIds(db: Db | Tx) {
+  const rows = await db.select({ id: s.taxCodes.id }).from(s.taxCodes).where(eq(s.taxCodes.behavior, "reverse"));
+  return new Set(rows.map((r) => r.id));
+}
+
 async function inputVatTaxCode(db: Db | Tx) {
   const [t] = await db.select().from(s.taxCodes).where(eq(s.taxCodes.code, "VAT15-IN"));
   return t ?? null;
@@ -69,7 +78,8 @@ export interface PurchaseLineInput {
   costCenterId?: number | null;
   description: string;
   amount: number;
-  // نسبة الضريبة: 15 أو 0
+  // نوع الضريبة (من قائمة وافق)، أو النسبة القديمة 15 أو 0
+  taxCodeId?: number | null;
   vatRate?: number;
 }
 
@@ -86,12 +96,16 @@ export interface PurchaseInvoiceInput {
   userId?: number;
 }
 
-/** سطور قيد فاتورة المورد: مدين التكلفة وضريبة المدخلات، دائن ذمة المورد. */
+/**
+ * سطور قيد فاتورة المورد: مدين التكلفة وضريبة المدخلات، دائن ذمة المورد.
+ * الاحتساب العكسي: المورد يُقيد له الصافي فقط، والضريبة مدين 1108 ودائن 2109 معاً.
+ */
 export function purchasePostingLines(
   inv: { number: string; supplierInvoiceNo: string; supplierId: number | null; currencyCode: string; exchangeRate: number; payableAccountId: number },
-  lines: { accountId: number; costCenterId: number | null; description: string; amount: number; vatAmount: number }[],
+  lines: { accountId: number; costCenterId: number | null; description: string; amount: number; vatAmount: number; taxCodeId?: number | null; reverse?: boolean }[],
   inputVatAccountId: number,
   inputTaxCodeId: number | null,
+  outputVatAccountId?: number,
 ): LineInput[] {
   const fx = { currencyCode: inv.currencyCode, exchangeRate: inv.exchangeRate };
   const credit = (amount: number, description: string): LineInput => ({ accountId: inv.payableAccountId, credit: amount, ...fx, partyId: inv.supplierId, description });
@@ -99,10 +113,12 @@ export function purchasePostingLines(
   for (const l of lines) {
     out.push({ accountId: l.accountId, debit: l.amount, ...fx, costCenterId: l.costCenterId, partyId: inv.supplierId, description: l.description }, credit(l.amount, `فاتورة ${inv.supplierInvoiceNo} – ${l.description}`));
     if (l.vatAmount > 0) {
-      out.push(
-        { accountId: inputVatAccountId, debit: l.vatAmount, ...fx, partyId: inv.supplierId, taxCodeId: inputTaxCodeId, description: `ضريبة مدخلات – ${l.description}` },
-        credit(l.vatAmount, `ضريبة فاتورة ${inv.supplierInvoiceNo}`),
-      );
+      const taxCodeId = l.taxCodeId ?? inputTaxCodeId;
+      out.push({ accountId: inputVatAccountId, debit: l.vatAmount, ...fx, partyId: inv.supplierId, taxCodeId, description: `ضريبة مدخلات – ${l.description}` });
+      if (l.reverse) {
+        if (!outputVatAccountId) throw new Error("حساب ضريبة المخرجات غير محدد للاحتساب العكسي");
+        out.push({ accountId: outputVatAccountId, credit: l.vatAmount, ...fx, partyId: inv.supplierId, taxCodeId, description: `احتساب عكسي – ${l.description}` });
+      } else out.push(credit(l.vatAmount, `ضريبة فاتورة ${inv.supplierInvoiceNo}`));
     }
   }
   return out;
@@ -140,8 +156,9 @@ export async function createPurchaseInvoice(db: Db, input: PurchaseInvoiceInput)
       const account = stock ? (await tx.select().from(s.accounts).where(eq(s.accounts.id, accountId)))[0] : await expenseAccount(tx, accountId);
       const costCenterId = l.costCenterId ?? (await vehicleCostCenter(tx, l.vehicleId));
       if (account.requiresCostCenter && !costCenterId) throw new Error(`السطر ${i + 1}: الحساب ${account.nameAr} يتطلب مركبة أو مركز تكلفة`);
-      const vatRate = l.vatRate ?? 0;
-      if (vatRate !== 0 && vatRate !== 15) throw new Error(`السطر ${i + 1}: الضريبة 15% أو بدون`);
+      const code = l.taxCodeId ? await requireTaxCode(tx, l.taxCodeId, "purchases") : null;
+      const vatRate = code ? Number(code.rate) : (l.vatRate ?? 0);
+      if (!code && vatRate !== 0 && vatRate !== 15) throw new Error(`السطر ${i + 1}: الضريبة 15% أو بدون`);
       lines.push({
         invoiceId: 0,
         lineNo: i + 1,
@@ -152,13 +169,15 @@ export async function createPurchaseInvoice(db: Db, input: PurchaseInvoiceInput)
         quantity: l.quantity ? String(l.quantity) : null,
         description: l.description.trim() || product?.nameAr || account.nameAr,
         amount: String(round2(l.amount)),
-        taxCodeId: vatRate ? (tax?.id ?? null) : null,
+        taxCodeId: code?.id ?? (vatRate ? (tax?.id ?? null) : null),
         vatRate: String(vatRate),
         vatAmount: String(lineVat(l.amount, vatRate)),
       });
     }
     const subtotal = round2(lines.reduce((a, l) => a + num(l.amount as string), 0));
-    const vat = round2(lines.reduce((a, l) => a + num(l.vatAmount as string), 0));
+    const reverseIds = await reverseTaxIds(tx);
+    // الاحتساب العكسي لا يدخل إجمالي المورد
+    const vat = round2(lines.reduce((a, l) => a + (l.taxCodeId && reverseIds.has(l.taxCodeId) ? 0 : num(l.vatAmount as string)), 0));
     const dueDate = input.dueDate || addDays(input.invoiceDate, 30);
     if (dueDate < input.invoiceDate) throw new Error("تاريخ الاستحقاق قبل تاريخ الفاتورة");
     const number = await nextDocumentNumber(tx, "purchase_invoice", "PI", Number(input.invoiceDate.slice(0, 4)));
@@ -197,6 +216,7 @@ async function postPurchaseInvoiceTx(tx: Tx, id: number, userId?: number) {
   if (inv.status !== "draft") throw new Error(`الفاتورة ${inv.number} مرحّلة مسبقاً`);
   const lines = await tx.select().from(s.purchaseInvoiceLines).where(eq(s.purchaseInvoiceLines.invoiceId, id)).orderBy(asc(s.purchaseInvoiceLines.lineNo));
   const tax = await inputVatTaxCode(tx);
+  const reverseIds = await reverseTaxIds(tx);
   const entry = await createJournalEntryTx(tx, {
     entryDate: inv.invoiceDate,
     description: `فاتورة مورد ${inv.number} (${inv.supplierInvoiceNo})`,
@@ -205,9 +225,10 @@ async function postPurchaseInvoiceTx(tx: Tx, id: number, userId?: number) {
     userId,
     lines: purchasePostingLines(
       { ...inv, exchangeRate: num(inv.exchangeRate) },
-      lines.map((l) => ({ accountId: l.accountId, costCenterId: l.costCenterId, description: l.description, amount: num(l.amount), vatAmount: num(l.vatAmount) })),
+      lines.map((l) => ({ accountId: l.accountId, costCenterId: l.costCenterId, description: l.description, amount: num(l.amount), vatAmount: num(l.vatAmount), taxCodeId: l.taxCodeId, reverse: !!l.taxCodeId && reverseIds.has(l.taxCodeId) })),
       await accountIdByCode(tx, PURCHASE_ACCOUNTS.inputVat),
       tax?.id ?? null,
+      await accountIdByCode(tx, SALES_ACCOUNTS.outputVat),
     ),
   });
   await receivePurchaseTx(tx, inv);
@@ -348,6 +369,8 @@ export interface ExpenseInput {
   driverKind?: string | null;
   reportedPayer?: "custody" | "company" | null;
   maintenanceTypeId?: number | null;
+  // مصروف رحلة على العميل: يُقيد على 1114 ويظهر في فاتورة الشحنة
+  billToCustomer?: boolean;
 }
 
 export async function createExpense(db: Db, input: ExpenseInput) {
@@ -363,6 +386,7 @@ export async function createExpense(db: Db, input: ExpenseInput) {
       if (input.payer === "driver_custody") driverId ??= w.driverId;
     }
     if (input.payer === "driver_custody" && !driverId) throw new Error("اختر السائق صاحب العهدة");
+    if (input.billToCustomer && !input.waybillId) throw new Error("المصروف على العميل يحتاج الشحنة التي يُفوتر معها");
     if (input.payer === "cash") {
       await cashAccountFor(tx, input.cashAccountId, "اختر صندوقاً أو حساب بنك تفصيلياً");
     }
@@ -394,6 +418,7 @@ export async function createExpense(db: Db, input: ExpenseInput) {
         driverKind: input.driverKind ?? null,
         reportedPayer: input.reportedPayer ?? null,
         maintenanceTypeId: input.maintenanceTypeId ?? null,
+        billToCustomer: !!input.billToCustomer,
         createdBy: input.userId,
       })
       .returning();
@@ -424,8 +449,10 @@ async function approveExpenseTx(tx: Tx, id: number, userId?: number) {
   const credit = (amount: number): LineInput => ({ accountId: creditAccountId, credit: amount, ...fx, driverId: e.driverId, waybillId: e.waybillId, description: `${e.number} – ${e.description}` });
   const amount = num(e.amount);
   const vat = num(e.vatAmount);
+  // على العميل: ذمة مستردة 1114 بلا مركز تكلفة، تُقفل عند الفوترة
+  const debitAccount = e.billToCustomer ? await accountIdByCode(tx, SALES_ACCOUNTS.rechargeable) : e.accountId;
   const lines: LineInput[] = [
-    { accountId: e.accountId, debit: amount, ...fx, costCenterId: e.costCenterId, driverId: e.driverId, waybillId: e.waybillId, description: e.description },
+    { accountId: debitAccount, debit: amount, ...fx, costCenterId: e.billToCustomer ? null : e.costCenterId, driverId: e.driverId, waybillId: e.waybillId, description: e.billToCustomer ? `على العميل: ${e.description}` : e.description },
     credit(amount),
   ];
   if (vat > 0) {
@@ -434,6 +461,7 @@ async function approveExpenseTx(tx: Tx, id: number, userId?: number) {
   }
   const entry = await createJournalEntryTx(tx, { entryDate: e.expenseDate, description: `مصروف ${e.number}`, source: { type: "expense", id: e.id }, post: true, userId, lines });
   await tx.update(s.expenses).set({ status: "approved", rejectReason: null, journalEntryId: entry.id, approvedBy: userId ?? null }).where(eq(s.expenses.id, id));
+  if (e.billToCustomer) await linkExpenseToWaybillTx(tx, e, entry.id);
   if (e.driverKind) await notifyDriver(tx, e.driverId, { kind: "expense_approved", body: `${e.number} · ${round2(amount + vat)}`, href: "/driver/expenses" });
   return entry;
 }
@@ -444,6 +472,7 @@ export async function approveExpense(db: Db, id: number, userId?: number) {
 
 export interface ExpenseReview {
   payer: "driver_custody" | "cash";
+  billToCustomer?: boolean;
   cashAccountId?: number | null;
   accountId?: number | null;
   vatAmount?: number;
@@ -480,6 +509,7 @@ export async function approveExpenseWith(db: Db | Tx, id: number, r: ExpenseRevi
         vendorName: r.vendorName === undefined ? e.vendorName : r.vendorName?.trim() || null,
         // ما دام المعتمد حدد الدافع فقرار السائق لم يعد يمنع الاعتماد
         reportedPayer: r.payer === "cash" ? "company" : "custody",
+        billToCustomer: r.billToCustomer === undefined ? e.billToCustomer : r.billToCustomer,
       })
       .where(eq(s.expenses.id, id));
     return approveExpenseTx(tx, id, r.userId);
@@ -502,6 +532,7 @@ export async function revertExpense(db: Db, id: number) {
     const e = await lockExpense(tx, id);
     if (e.status === "pending") throw new Error("المصروف معلّق أصلاً");
     if (e.status === "voided") throw new Error("ألغاه السائق لأنه رُفع بالخطأ");
+    await unlinkExpenseTx(tx, id);
     await tx.update(s.expenses).set({ status: "pending", rejectReason: null, journalEntryId: null, maintenanceOrderId: null, approvedBy: null }).where(eq(s.expenses.id, id));
     if (e.journalEntryId) await deleteEntryTx(tx, e.journalEntryId);
     // طلب صيانة اعتُمد ديناً على ورشة: يُحذف أمر الصيانة الذي أُنشئ له وقيده

@@ -10,6 +10,7 @@ import { toAccountOptions } from "@/lib/lookups";
 
 const SOURCE: Record<string, { label: string; href?: (id: number) => string }> = {
   waybill: { label: "شحنة", href: (id) => `/waybills/${id}` },
+  waybill_charge: { label: "مصروف على شحنة" },
   sales_invoice: { label: "فاتورة", href: (id) => `/invoices/${id}` },
   receipt: { label: "سند قبض" },
   purchase_invoice: { label: "فاتورة مورد", href: (id) => `/purchases/${id}` },

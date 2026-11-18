@@ -274,6 +274,13 @@
       "when": 1793210000000,
       "tag": "0038_push_notifications",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1793220000000,
+      "tag": "0039_pricing_tax_charges",
+      "breakpoints": true
     }
   ]
 }

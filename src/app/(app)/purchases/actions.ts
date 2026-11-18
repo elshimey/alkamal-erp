@@ -48,7 +48,8 @@ export async function savePurchases(rows: SheetRow[]): Promise<SheetResult> {
           vehicleId: r.vehicleId ? Number(r.vehicleId) : null,
           description: cell.text(r.description) ?? "",
           amount,
-          vatRate: r.vat === "0" ? 0 : 15,
+          // نوع الضريبة من القائمة، والقيمة القديمة «0» تعني بدون، والفارغ ضريبة المشتريات الأساسية
+          ...(r.vat && r.vat !== "0" && r.vat !== "15" ? { taxCodeId: Number(r.vat) } : { vatRate: r.vat === "0" ? 0 : 15 }),
         };
       });
       await createPurchaseInvoice(db, {

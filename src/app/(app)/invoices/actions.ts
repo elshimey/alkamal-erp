@@ -26,6 +26,7 @@ import {
   type ManualInvoiceInput,
 } from "@/lib/invoices";
 import { lineVat, round2 } from "@/lib/invoice-posting";
+import { taxCodesFor } from "@/lib/tax-codes";
 import type { PanelResult } from "@/components/record-panel";
 import type { SheetChange, DocSheetResult } from "@/components/doc-sheet";
 import type { FormState } from "@/components/action-form";
@@ -234,8 +235,13 @@ function readTrip(fd: FormData): ManualInvoiceInput["trip"] {
 
 async function readInvoiceForm(fd: FormData): Promise<ManualInvoiceInput> {
   const rows = (JSON.parse(str(fd, "lines") || "[]") as Record<string, string>[]).filter((l) => (l.description ?? "").trim() || toNum(l.price));
-  const taxes = await db.select({ id: s.taxCodes.id, code: s.taxCodes.code }).from(s.taxCodes).where(inArray(s.taxCodes.code, ["VAT15-OUT", "ZERO"]));
+  const taxes = await taxCodesFor(db, "sales");
   const [domestic] = await db.select({ id: s.accounts.id }).from(s.accounts).where(eq(s.accounts.code, "4101"));
+  const fixed = (JSON.parse(str(fd, "fixedLines") || "[]") as { id: number; amount: string; description: string }[]).map((f) => ({
+    lineId: Number(f.id),
+    amount: toNum(f.amount),
+    description: String(f.description ?? "").trim(),
+  }));
   return {
     customerId: Number(str(fd, "customerId")) || 0,
     invoiceDate: str(fd, "invoiceDate"),
@@ -244,6 +250,7 @@ async function readInvoiceForm(fd: FormData): Promise<ManualInvoiceInput> {
     reference: str(fd, "reference") || null,
     notes: str(fd, "notes") || null,
     trip: readTrip(fd),
+    fixedEdits: fixed.length ? fixed : undefined,
     lines: rows.map((l, i) => {
       const description = (l.description ?? "").trim();
       if (!description) throw new Error(`البند ${i + 1}: اكتب الوصف`);
@@ -253,7 +260,9 @@ async function readInvoiceForm(fd: FormData): Promise<ManualInvoiceInput> {
       if (!(unitPrice > 0)) throw new Error(`البند ${i + 1}: اكتب السعر`);
       const discountPercent = Math.min(100, Math.max(0, toNum(l.discount)));
       const amount = round2(quantity * unitPrice * (1 - discountPercent / 100));
-      const vatRate = l.vatRate === "0" ? 0 : 15;
+      const tax = taxes.find((t) => String(t.id) === String(l.taxCodeId ?? "")) ?? taxes.find((t) => t.code === "VAT15-OUT");
+      if (!tax) throw new Error(`البند ${i + 1}: اختر نوع الضريبة`);
+      const vatRate = Number(tax.rate);
       return {
         description,
         quantity,
@@ -262,7 +271,7 @@ async function readInvoiceForm(fd: FormData): Promise<ManualInvoiceInput> {
         amount,
         vatRate,
         vatAmount: lineVat(amount, vatRate),
-        taxCodeId: taxes.find((t) => t.code === (vatRate ? "VAT15-OUT" : "ZERO"))?.id ?? null,
+        taxCodeId: tax.id,
         accountId: Number(l.accountId) || domestic.id,
         costCenterId: Number(l.costCenterId) || null,
       };

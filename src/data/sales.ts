@@ -34,6 +34,8 @@ export const SALES_ACCOUNTS = {
   domesticRevenue: "4101",
   internationalRevenue: "4102",
   rechargedExpenses: "4104",
+  // ما دُفع نيابة عن العميل: يُقيد عند الدفع ويُقفل عند الفوترة (لا مصروف ولا إيراد)
+  rechargeable: "1114",
   outputVat: "2109",
   customerAdvances: "2112",
   fxDifferences: "7103",

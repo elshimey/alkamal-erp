@@ -14,6 +14,14 @@ import type { CompanyProfile } from "@/lib/company";
 import type { InvoiceTemplate } from "@/lib/invoice-template";
 import type { QuickOption } from "@/lib/quick-add-types";
 
+export type TaxOption = LineOption & { rate: number };
+/** قيم البند الجديد: ضريبة أول شحنة في الفاتورة وحسابها ومركبتها */
+export interface LineDefaults {
+  taxCodeId: string;
+  accountId: string;
+  costCenterId: string;
+}
+
 export interface InvoiceDraft {
   id?: number;
   number?: string;
@@ -24,8 +32,8 @@ export interface InvoiceDraft {
   reference: string;
   notes: string;
   lines: Record<string, string>[];
-  /** سطور الشحنات في المسودة: تُعرض ولا تُعدّل هنا */
-  fixedLines: { kind: "waybill" | "expense"; description: string; amount: string; vatAmount: string; vatRate: string }[];
+  /** سطور الشحنات ومصاريفها في المسودة: يُعدَّل سعرها ووصفها هنا، وضريبتها وحسابها من الشحنة */
+  fixedLines: { id: number; kind: "waybill" | "expense"; description: string; amount: string; vatAmount: string; vatRate: string; details?: string | null; cost?: string | null; taxName?: string | null }[];
   /** رحلة السائق للفاتورة المباشرة: تظهر في تطبيقه عند الإرسال ومعها عهدتها */
   trip: { on: boolean; routeId: string; vehicleId: string; driverId: string; shipper: string; consignee: string; custody: string; number?: string; sent?: boolean };
 }
@@ -55,6 +63,8 @@ export function InvoiceEditor({
   customers,
   accounts,
   costCenters,
+  taxes,
+  lineDefaults,
   currencies,
   routes,
   vehicles,
@@ -70,6 +80,8 @@ export function InvoiceEditor({
   customers: (QuickOption & { vatNumber: string | null; days: number | null })[];
   accounts: LineOption[];
   costCenters: LineOption[];
+  taxes: TaxOption[];
+  lineDefaults: LineDefaults;
   currencies: string[];
   routes: QuickOption[];
   vehicles: QuickOption[];
@@ -86,6 +98,13 @@ export function InvoiceEditor({
   const box = useRef<HTMLDivElement>(null);
   const first = useRef(JSON.stringify(initial.lines));
   const locked = initial.fixedLines.length > 0;
+  // سعر سطور الشحنات ومصاريفها ووصفها قابلان للتعديل في المسودة
+  const [fixed, setFixed] = useState(initial.fixedLines);
+  const editFixed = (id: number, patch: { amount?: string; description?: string }) => {
+    setFixed((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+    touch();
+  };
+  const rateOf = (r: Row) => taxes.find((t) => t.value === r.taxCodeId)?.rate ?? 0;
 
   const touch = () => box.current?.dispatchEvent(new Event("input", { bubbles: true }));
   const set = <K extends keyof InvoiceDraft>(k: K, v: InvoiceDraft[K]) => {
@@ -100,29 +119,36 @@ export function InvoiceEditor({
   };
 
   const used = lines.filter((l) => (l.description ?? "").trim() || num(l.price));
-  const viewLines: Line[] = [
-    ...initial.fixedLines.map((l, i) => ({
-      ...blankLine(i),
-      kind: l.kind === "waybill" ? ("manual" as const) : ("expense" as const),
-      description: l.kind === "waybill" ? `خدمة نقل · ${l.description}` : l.description,
-      amount: l.amount,
-      vatAmount: l.vatAmount,
-      vatRate: l.vatRate,
-    })),
+  const viewLines: (Line & { taxName?: string | null })[] = [
+    ...fixed.map((l, i) => {
+      const amount = round2(num(l.amount));
+      return {
+        ...blankLine(i),
+        kind: l.kind === "waybill" ? ("manual" as const) : ("expense" as const),
+        description: l.kind === "waybill" ? `خدمة نقل · ${l.description}` : l.description,
+        details: l.details ?? null,
+        taxName: l.taxName ?? null,
+        amount: String(amount),
+        vatAmount: String(round2((amount * Number(l.vatRate)) / 100)),
+        vatRate: l.vatRate,
+      };
+    }),
     ...used.map((l, i) => {
       const qty = l.quantity === "" || l.quantity == null ? 1 : num(l.quantity);
       const price = num(l.price);
       const disc = Math.min(100, Math.max(0, num(l.discount)));
       const amount = round2(qty * price * (1 - disc / 100));
-      const rate = l.vatRate === "0" ? 0 : 15;
+      const rate = rateOf(l);
       return {
-        ...blankLine(initial.fixedLines.length + i),
+        ...blankLine(fixed.length + i),
         kind: "manual" as const,
         description: (l.description ?? "").trim() || "—",
         quantity: String(qty),
         unitPrice: String(price),
         discountPercent: disc ? String(disc) : null,
         amount: String(amount),
+        taxCodeId: Number(l.taxCodeId) || null,
+        taxName: taxes.find((x) => x.value === l.taxCodeId)?.label.replace(/\s*\([\d.]+%\)$/, "") ?? null,
         vatRate: String(rate),
         vatAmount: String(round2((amount * rate) / 100)),
       };
@@ -233,24 +259,29 @@ export function InvoiceEditor({
             </PanelField>
           </PanelSection>
 
-          {locked && (
-            <PanelSection title={`الشحنات في الفاتورة (${initial.fixedLines.filter((l) => l.kind === "waybill").length})`} hint="تُدار من صفحة الشحنات">
-              <ul className="divide-y divide-gray-100 rounded-lg border border-gray-100 text-sm">
-                {initial.fixedLines.map((l, i) => (
-                  <li key={i} className={`flex items-center gap-3 px-3 py-2 ${l.kind === "expense" ? "ps-6 text-gray-500" : ""}`}>
-                    <span className="flex-1 text-gray-700">{l.kind === "expense" ? `↳ ${l.description}` : l.description}</span>
-                    <span className="ltr-nums font-medium">{fmt(l.amount)}</span>
-                  </li>
-                ))}
-              </ul>
+          <input type="hidden" name="fixedLines" value={JSON.stringify(fixed.map((f) => ({ id: f.id, amount: f.amount, description: f.description })))} />
+          {fixed.some((l) => l.kind === "waybill") && (
+            <PanelSection title={`الشحنات في الفاتورة (${fixed.filter((l) => l.kind === "waybill").length})`} hint="السعر هنا يُحدّث سعر الشحنة نفسها، والضريبة والحساب والمركبة من الشحنة">
+              <FixedRows rows={fixed.filter((l) => l.kind === "waybill")} onEdit={editFixed} />
+            </PanelSection>
+          )}
+          {fixed.some((l) => l.kind === "expense") && (
+            <PanelSection title={`مصاريف على العميل (${fixed.filter((l) => l.kind === "expense").length})`} hint="من مصاريف الشحنة؛ تُقفل حساب المستردة 1114، وما يزيد على المدفوع إيراد">
+              <FixedRows rows={fixed.filter((l) => l.kind === "expense")} onEdit={editFixed} />
             </PanelSection>
           )}
 
-          <PanelSection title={locked ? "بنود إضافية" : "البنود"} optional={locked} open hint="الصق من Excel مباشرة">
+          <PanelSection
+            title={locked ? "بنود أخرى على الفاتورة" : "البنود"}
+            optional={locked}
+            open
+            hint={locked ? "لإضافة شيء غير الشحنات (رسوم أو خدمة). يبدأ بضريبة الشحنة وحسابها ومركبتها" : "الصق من Excel مباشرة"}
+          >
             <LinesEditor
               initial={initial.lines}
               minRows={locked ? 1 : 3}
-              totals={{ qty: "quantity", price: "price", vat: "vatRate" }}
+              totals={{ qty: "quantity", price: "price", vat: "taxCodeId" }}
+              vatRateOf={rateOf}
               onChange={(rows) => {
                 setLines(rows);
                 if (JSON.stringify(rows) !== first.current) touch();
@@ -260,19 +291,9 @@ export function InvoiceEditor({
                 { key: "quantity", label: "الكمية", type: "number", width: "4.5rem", defaultValue: "1" },
                 { key: "price", label: "السعر", type: "number", width: "6.5rem" },
                 { key: "discount", label: "خصم %", type: "number", width: "4.5rem" },
-                {
-                  key: "vatRate",
-                  label: "الضريبة",
-                  type: "select",
-                  width: "6.5rem",
-                  defaultValue: "15",
-                  options: [
-                    { value: "15", label: "15%" },
-                    { value: "0", label: "صفر (دولي)" },
-                  ],
-                },
-                { key: "accountId", label: "نوع الإيراد", type: "select", width: "12rem", defaultValue: accounts[0]?.value ?? "", options: accounts, create: "account" },
-                { key: "costCenterId", label: "المركبة", type: "select", width: "8rem", options: costCenters },
+                { key: "taxCodeId", label: "الضريبة", type: "select", width: "12rem", defaultValue: lineDefaults.taxCodeId, options: taxes },
+                { key: "accountId", label: "نوع الإيراد", type: "select", width: "12rem", defaultValue: lineDefaults.accountId || (accounts[0]?.value ?? ""), options: accounts, create: "account" },
+                { key: "costCenterId", label: "المركبة", type: "select", width: "8rem", defaultValue: lineDefaults.costCenterId, options: costCenters },
               ]}
             />
           </PanelSection>
@@ -333,6 +354,33 @@ export function InvoiceEditor({
   );
 }
 
+/** سطور الشحنات أو مصاريفها: الوصف والسعر يُعدَّلان، والضريبة تظهر باسمها. */
+function FixedRows({ rows, onEdit }: { rows: InvoiceDraft["fixedLines"]; onEdit: (id: number, patch: { amount?: string; description?: string }) => void }) {
+  return (
+    <ul className="divide-y divide-gray-100 rounded-lg border border-gray-100 text-sm">
+      {rows.map((l) => (
+        <li key={l.id} className="grid gap-2 px-3 py-2 sm:grid-cols-[minmax(0,1fr)_8rem]">
+          <span className="min-w-0">
+            <input value={l.description} onChange={(e) => onEdit(l.id, { description: e.target.value })} aria-label="الوصف" className={`${field} !py-1.5`} />
+            {l.details && <span className="mt-1 block text-xs text-gray-500">{l.details}</span>}
+            <span className="mt-1 block text-xs text-gray-500">
+              {l.taxName ?? `ضريبة ${Number(l.vatRate)}%`}
+              {l.cost != null && ` · المدفوع ${fmt(l.cost)}`}
+            </span>
+          </span>
+          <input
+            value={l.amount}
+            onChange={(e) => onEdit(l.id, { amount: e.target.value })}
+            inputMode="decimal"
+            aria-label="السعر قبل الضريبة"
+            className={`${field} ltr-nums !py-1.5 text-end font-medium`}
+          />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function blankLine(i: number): Line {
   return {
     id: -1 - i,
@@ -351,6 +399,8 @@ function blankLine(i: number): Line {
     vatAmount: "0",
     accountId: 0,
     costCenterId: null,
+    details: null,
+    costAmount: null,
     groupKey: null,
   };
 }

@@ -22,6 +22,7 @@ import { SheetEditor } from "@/components/sheet-editor";
 import { Badge, EmptyRow, LimitRow, PageHeader, Table, Td } from "@/components/ui";
 import { post, postMany, savePurchaseSheet, savePurchases } from "./actions";
 import { fmt } from "@/lib/format";
+import { taxCodeOptions } from "@/lib/tax-codes";
 
 const BASE = "/purchases";
 const POST_FORM = "post-purchases";
@@ -36,7 +37,7 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
   const filter = parseDocFilter(sp, Object.keys(STATUSES), today);
   const view = sp.view === "sheet" ? "sheet" : "table";
   const openId = view === "table" ? Number(sp.open) || null : null;
-  const [suppliers, accounts, vehicles, list, openDoc, products, warehouses] = await Promise.all([
+  const [suppliers, accounts, vehicles, list, openDoc, products, warehouses, taxes] = await Promise.all([
     canCreate ? supplierOptions(db) : Promise.resolve([]),
     canCreate ? expenseAccountOptions(db) : Promise.resolve([]),
     canCreate ? vehicleOptions() : Promise.resolve([]),
@@ -44,6 +45,7 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
     openId ? purchaseInvoiceDoc(db, openId) : Promise.resolve(null),
     canCreate ? productOptions(db).then((r) => r.map((p) => ({ value: String(p.id), label: `${p.code} ${p.nameAr}` }))) : Promise.resolve([]),
     canCreate ? db.select({ id: s.warehouses.id, nameAr: s.warehouses.nameAr }).from(s.warehouses).where(eq(s.warehouses.isActive, true)).then((r) => r.map((w) => ({ value: String(w.id), label: w.nameAr }))) : Promise.resolve([]),
+    canCreate ? taxCodeOptions(db, "purchases") : Promise.resolve([]),
   ]);
 
   const state = (i: (typeof list)[number]["i"]) => {
@@ -84,7 +86,7 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
                     { key: "vehicleId", label: "المركبة", type: "select", options: vehicles, width: "8rem", create: "vehicle" },
                     { key: "description", label: "البيان", width: "12rem" },
                     { key: "amount", label: "المبلغ قبل الضريبة", type: "number", required: true, width: "7rem" },
-                    { key: "vat", label: "الضريبة", type: "select", options: [{ value: "15", label: "15%" }, { value: "0", label: "بدون" }], width: "5rem", placeholder: "15%" },
+                    { key: "vat", label: "نوع الضريبة", type: "select", options: taxes, width: "13rem", placeholder: "ضريبة القيمة المضافة على مشتريات" },
                     { key: "dueDate", label: "الاستحقاق", type: "date", placeholder: "بعد 30 يوماً" },
                     { key: "currency", label: "العملة", type: "select", options: [{ value: "SAR", label: "SAR" }, { value: "KWD", label: "KWD" }], width: "5rem", placeholder: "SAR" },
                   ]}

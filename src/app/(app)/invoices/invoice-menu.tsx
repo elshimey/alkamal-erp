@@ -9,7 +9,7 @@ type InvoiceRow = NonNullable<Awaited<ReturnType<typeof salesInvoiceDoc>>>;
 /** عمليات الفاتورة الواحدة في قائمة «العمليات» (المعاينة وصفحة الفاتورة). */
 export function invoiceActions(
   i: InvoiceRow["i"],
-  lines: InvoiceRow["lines"],
+  lines: Omit<InvoiceRow["lines"][number], "taxName">[],
   back: string,
   p: { canUpdate: boolean; canRevert: boolean; canDelete: boolean; canSend?: boolean; editHref: string; trips?: InvoiceRow["trips"]; cashField?: ReactNode },
 ): MenuItem[] {

@@ -101,6 +101,7 @@ export const NAV: { title: string; icon: IconName; items: { href: string; label:
       { href: "/reports/ledger", label: "كشف حساب", icon: "document", entity: "financial_reports" },
       { href: "/reports/cost-centers", label: "ربحية المركبات", icon: "truck", entity: "financial_reports" },
       { href: "/reports/vat", label: "إقرار الضريبة", icon: "invoice", entity: "financial_reports" },
+      { href: "/reports/unbilled-charges", label: "مصاريف العملاء غير المفوترة", icon: "document", entity: "financial_reports" },
     ],
   },
 ];
@@ -125,6 +126,7 @@ export const EXTRA_PAGES: { href: string; label: string; group: string; entity?:
   { href: "/settings/company", label: "بيانات الشركة (الرقم الضريبي والسجل والشعار)", group: "الإعدادات", admin: true, keywords: "منشأة لوجو" },
   { href: "/settings/invoice-template", label: "تصميم قالب الفاتورة", group: "الإعدادات", admin: true, keywords: "طباعة شكل" },
   { href: "/settings/zatca", label: "الفوترة الإلكترونية (الربط مع فاتورة)", group: "الإعدادات", admin: true, keywords: "زاتكا هيئة الزكاة اعتماد المرحلة الثانية فاتورة إلكترونية" },
+  { href: "/settings/taxes", label: "أنواع الضريبة (أسماء وافق)", group: "الإعدادات", entity: "settings", keywords: "ضريبة القيمة المضافة صفر معفى صادرات احتساب عكسي جمارك" },
   { href: "/settings/driver-app", label: "رابط تطبيق السائق", group: "الإعدادات", keywords: "جوال واتساب" },
   { href: "/settings/hr", label: "إعدادات الموارد البشرية", group: "الإعدادات", entity: "employees", keywords: "إجازات تقييم" },
   { href: "/settings/subscription", label: "الاشتراك والبيانات", group: "الإعدادات", admin: true },

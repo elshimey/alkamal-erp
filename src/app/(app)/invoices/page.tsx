@@ -34,6 +34,7 @@ import { bulkInvoiceOps, invoiceAll, invoiceCustomer, issue, saveInvoicePanel, s
 import { ActionsMenu, type MenuItem } from "@/components/actions-menu";
 import { fmt } from "@/lib/format";
 import { toAccountOptions } from "@/lib/lookups";
+import { taxCodesFor } from "@/lib/tax-codes";
 
 const BASE = "/invoices";
 const BULK_FORM = "invoice-bulk";
@@ -104,6 +105,17 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
       : [[], [], [], []];
   const [tripRoutes, tripVehicles, tripDrivers, editTrip] =
     creating || editing ? await Promise.all([routeOptions(), vehicleOptions("head"), driverOptions(), editing && editId ? currentTrip(db, editId) : Promise.resolve(null)]) : [[], [], [], null];
+  const taxRows = creating || editing ? await taxCodesFor(db, "sales") : [];
+  const taxOpts = taxRows.map((x) => ({ value: String(x.id), label: `${x.nameAr} (${Number(x.rate)}%)`, rate: Number(x.rate) }));
+  const taxName = (id: number | null) => taxRows.find((x) => x.id === id)?.nameAr ?? null;
+  // البند الإضافي يبدأ بضريبة أول شحنة في الفاتورة وحسابها ومركبتها
+  const firstWaybill = editing ? editDoc?.lines.find((l) => l.kind === "waybill") : undefined;
+  const vatOut = taxRows.find((x) => x.code === "VAT15-OUT");
+  const lineDefaults = {
+    taxCodeId: String(firstWaybill?.taxCodeId ?? vatOut?.id ?? ""),
+    accountId: firstWaybill ? String(firstWaybill.accountId) : "",
+    costCenterId: firstWaybill?.costCenterId ? String(firstWaybill.costCenterId) : "",
+  };
   const terms = creating || editing ? await db.select({ customerId: s.contracts.customerId, days: s.contracts.paymentTermsDays }).from(s.contracts) : [];
   const editorInitial = (): InvoiceDraft | null => {
     if (editing && editDoc) {
@@ -124,11 +136,23 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
             quantity: String(Number(l.quantity ?? 1)),
             price: String(Number(l.unitPrice ?? l.amount)),
             discount: l.discountPercent ? String(Number(l.discountPercent)) : "",
-            vatRate: Number(l.vatRate) > 0 ? "15" : "0",
+            taxCodeId: String(l.taxCodeId ?? (Number(l.vatRate) > 0 ? (vatOut?.id ?? "") : (taxRows.find((x) => x.code === "ZERO")?.id ?? ""))),
             accountId: String(l.accountId),
             costCenterId: l.costCenterId ? String(l.costCenterId) : "",
           })),
-        fixedLines: editDoc.lines.filter((l) => l.kind !== "manual").map((l) => ({ kind: l.kind === "waybill" ? "waybill" : "expense", description: l.description, amount: l.amount, vatAmount: l.vatAmount, vatRate: l.vatRate })),
+        fixedLines: editDoc.lines
+          .filter((l) => l.kind !== "manual")
+          .map((l) => ({
+            id: l.id,
+            kind: l.kind === "waybill" ? ("waybill" as const) : ("expense" as const),
+            description: l.description,
+            amount: String(Number(l.amount)),
+            vatAmount: l.vatAmount,
+            vatRate: l.vatRate,
+            details: l.details,
+            cost: l.costAmount,
+            taxName: taxName(l.taxCodeId),
+          })),
         trip: editTrip
           ? {
               on: true,
@@ -530,6 +554,8 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
           customers={customers.map((c) => ({ value: String(c.id), label: c.nameAr, vatNumber: c.vat, days: terms.find((t) => t.customerId === c.id)?.days ?? null }))}
           accounts={await toAccountOptions([...(domestic ? [domestic] : []), ...revenue.filter((a) => a !== domestic)]).then((o) => [...o.filter((x) => x.code === domestic?.code), ...o.filter((x) => x.code !== domestic?.code)])}
           costCenters={centers.map((c) => ({ value: String(c.id), label: c.nameAr }))}
+          taxes={taxOpts}
+          lineDefaults={lineDefaults}
           currencies={currencies.map((c) => c.code)}
           routes={tripRoutes}
           vehicles={tripVehicles}

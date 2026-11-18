@@ -29,7 +29,12 @@ export interface WaybillDraft {
   carrierDriverName: string;
   shipper: string;
   consignee: string;
+  /** السعر الأساسي (من العقد أو يدوي) */
   amount: string;
+  /** مكونات السعر فوقه: النوع «الأساسي~رقم» */
+  components: PriceComponentDraft[];
+  /** فارغ = تلقائي حسب المسار */
+  taxCodeId: string;
   commission: string;
   // عهدة الرحلة تُصرف للسائق عند الإرسال؛ تُقفل بعد الإرسال
   tripCustody: string;
@@ -44,6 +49,8 @@ export interface WaybillDraft {
 }
 
 export type RouteOption = QuickOption & { international: boolean };
+export type PriceComponentDraft = { kind: string; label: string; quantity: string; unitPrice: string };
+export type TaxOption = { value: string; label: string; rate: number; code: string };
 
 const field = "w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20";
 const num = (v: string) => Number(v.replace(/[,\s]/g, "")) || 0;
@@ -65,6 +72,8 @@ export function WaybillEditor({
   contacts,
   cities,
   showPrices,
+  componentKinds,
+  taxes,
   company,
   template,
   action,
@@ -83,6 +92,8 @@ export function WaybillEditor({
   contacts: Record<string, ContactCard>;
   cities: string[];
   showPrices: boolean;
+  componentKinds: QuickOption[];
+  taxes: TaxOption[];
   company: CompanyProfile;
   template: InvoiceTemplate;
   action: (data: FormData) => Promise<PanelResult>;
@@ -109,8 +120,17 @@ export function WaybillEditor({
   const [from, to] = (route?.label ?? "— ← —").split(" ← ");
   const label = (list: QuickOption[], v: string) => list.find((o) => o.value === v)?.label ?? null;
   const fleet = d.execution === "fleet";
-  const vatRate = route ? (route.international ? 0 : 15) : null;
-  const amount = num(d.amount);
+  // نوع الضريبة: المختار، أو التلقائي (الدولية «نسبة صفر»، والداخلية الأساسية)
+  const autoTax = route ? taxes.find((x) => x.code === (route.international ? "ZERO" : "VAT15-OUT")) : undefined;
+  const tax = taxes.find((x) => x.value === d.taxCodeId) ?? autoTax;
+  const vatRate = route ? (tax?.rate ?? (route.international ? 0 : 15)) : null;
+  const compAmount = (c: PriceComponentDraft) => {
+    const v = Math.round((num(c.quantity || "1") * num(c.unitPrice)) * 100) / 100;
+    return c.kind.split("~")[0] === "discount" ? -v : v;
+  };
+  const base = num(d.amount);
+  const amount = Math.round((base + d.components.reduce((s, c) => s + compAmount(c), 0)) * 100) / 100;
+  const setComp = (i: number, patch: Partial<PriceComponentDraft>) => set("components", d.components.map((c, k) => (k === i ? { ...c, ...patch } : c)));
 
   const doc = {
     w: {
@@ -179,7 +199,7 @@ export function WaybillEditor({
               <ComboField name="routeId" options={routes} defaultValue={d.routeId} create="route" required placeholder="من ← إلى" onChange={(v) => set("routeId", v)} />
               {route && (
                 <span className={`mt-1.5 inline-flex rounded-md px-2 py-0.5 text-xs font-semibold ${route.international ? "bg-sky-50 text-sky-800" : "bg-amber-50 text-amber-800"}`}>
-                  {route.international ? "شحن دولي · ضريبة صفرية" : "شحن داخلي · ضريبة 15%"}
+                  {route.international ? "شحن دولي" : "شحن داخلي"} · {tax ? tax.label : route.international ? "ضريبة صفرية" : "ضريبة 15%"}
                 </span>
               )}
             </PanelField>
@@ -247,9 +267,41 @@ export function WaybillEditor({
 
           {showPrices && (
             <PanelSection title="السعر">
-              <PanelField label="مبلغ الشحنة" hint="فارغ = من العقد الساري">
+              <PanelField label="السعر الأساسي" hint="فارغ = من العقد الساري">
                 <input name="amount" value={d.amount} onChange={onField} inputMode="decimal" className={`${field} ltr-nums`} placeholder="من العقد" />
                 {d.priceNote && <span className="mt-1 block text-xs text-gray-500">{d.priceNote}</span>}
+              </PanelField>
+              <input type="hidden" name="components" value={JSON.stringify(d.components)} />
+              <div className="space-y-2">
+                <span className="block text-sm text-gray-700">مكونات إضافية على السعر</span>
+                {d.components.map((c, i) => (
+                  <div key={i} className="grid grid-cols-[minmax(0,1fr)_4.5rem_6rem_auto] items-center gap-2">
+                    <ComboBox value={c.kind} options={componentKinds} create="price_component" allowEmpty={false} placeholder="وزن زائد، كم، انتظار…" onChange={(v, o) => setComp(i, { kind: v, label: o?.label ?? "" })} className={field} />
+                    <input value={c.quantity} onChange={(e) => setComp(i, { quantity: e.target.value })} inputMode="decimal" placeholder="الكمية" aria-label="الكمية" className={`${field} ltr-nums`} />
+                    <input value={c.unitPrice} onChange={(e) => setComp(i, { unitPrice: e.target.value })} inputMode="decimal" placeholder="سعر الوحدة" aria-label="سعر الوحدة" className={`${field} ltr-nums`} />
+                    <button type="button" aria-label="حذف المكون" onClick={() => set("components", d.components.filter((_, k) => k !== i))} className="p-1 text-gray-400 hover:text-red-600">
+                      <Icon name="close" className="size-4" />
+                    </button>
+                  </div>
+                ))}
+                <button type="button" onClick={() => set("components", [...d.components, { kind: "", label: "", quantity: "1", unitPrice: "" }])} className="text-xs text-brand-700 hover:underline">
+                  + مكون (وزن زائد، كيلومترات، انتظار، خصم…)
+                </button>
+                {d.components.length > 0 && (
+                  <span className="block text-xs text-gray-500">
+                    سعر الشحنة = الأساسي {fmt(base)} + المكونات = <b className="ltr-nums">{fmt(amount)}</b>، ويظهر في الفاتورة سطراً واحداً وتحته التفاصيل.
+                  </span>
+                )}
+              </div>
+              <PanelField label="نوع الضريبة" hint="فارغ = حسب المسار">
+                <select name="taxCodeId" value={d.taxCodeId} onChange={(e) => set("taxCodeId", e.target.value)} className={field}>
+                  <option value="">تلقائي{autoTax ? ` (${autoTax.label})` : ""}</option>
+                  {taxes.map((x) => (
+                    <option key={x.value} value={x.value}>
+                      {x.label}
+                    </option>
+                  ))}
+                </select>
               </PanelField>
               {vatRate != null && amount > 0 && (
                 <div className="ltr-nums grid grid-cols-3 gap-2 rounded-xl bg-gray-50 px-4 py-3 text-center text-sm">

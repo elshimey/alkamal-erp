@@ -1,6 +1,7 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import * as s from "@/db/schema";
+import { TAX_BEHAVIORS, type TaxBehaviorKey } from "@/data/tax-codes";
 
 // التقارير المالية: كلها من سطور القيود المرحّلة فقط وبالريال (القرار: التقارير من القيود).
 
@@ -283,16 +284,52 @@ export async function costCenterProfit(db: Db, from: string, to: string) {
  * ملخص الإقرار: المبيعات الخاضعة بالنسبة الأساسية والصفرية من الفواتير الصادرة،
  * وضريبة المخرجات والمدخلات من القيود (رصيد 2109 و1108 خلال الفترة).
  */
+export interface VatBox {
+  behavior: string;
+  label: string;
+  amount: number;
+  adjust: number;
+  vat: number;
+}
+
+/**
+ * إقرار ضريبة القيمة المضافة بخانات الهيئة: كل نوع ضريبة (حسب «يتصرف مثل») في خانته.
+ * المبيعات من الفواتير الصادرة، وتعديلاتها من الإشعارات المرحّلة. ضريبة المشتريات الخاضعة من دفتر 1108
+ * (كل المصادر: فواتير الموردين والمصروفات والصيانة)، والمشتريات الصفرية والمعفاة من فواتير الموردين.
+ * الإجماليان (المخرجات والمدخلات) من الحسابين 2109 و1108 مباشرة.
+ */
 export async function vatReturn(db: Db, from: string, to: string) {
-  const [sales] = await rows<{ standard: string; standard_vat: string; zero: string }>(
+  const fallbackSales = sql.raw(`case when coalesce(t.behavior, '') <> '' then t.behavior when l.vat_rate > 0 then 'standard' else 'zero' end`);
+  const salesRows = await rows<{ behavior: string; amount: string; adjust: string; vat: string }>(
     db,
-    sql`select
-          coalesce(sum(case when sl.vat_rate > 0 then sl.amount * si.exchange_rate end), 0) as standard,
-          coalesce(sum(case when sl.vat_rate > 0 then sl.vat_amount * si.exchange_rate end), 0) as standard_vat,
-          coalesce(sum(case when sl.vat_rate = 0 then sl.amount * si.exchange_rate end), 0) as zero
-        from sales_invoice_lines sl
-        join sales_invoices si on si.id = sl.invoice_id
-        where si.status <> 'draft' and si.invoice_date between ${from} and ${to}`,
+    sql`select b.behavior, sum(b.amount) as amount, sum(b.adjust) as adjust, sum(b.vat) as vat from (
+          select ${fallbackSales} as behavior, l.amount * si.exchange_rate as amount, 0 as adjust, l.vat_amount * si.exchange_rate as vat
+          from sales_invoice_lines l join sales_invoices si on si.id = l.invoice_id left join tax_codes t on t.id = l.tax_code_id
+          where si.status <> 'draft' and si.invoice_date between ${from} and ${to}
+          union all
+          select ${fallbackSales}, 0, (case when n.kind = 'sales_credit' then -1 else 1 end) * l.amount * n.exchange_rate,
+                 (case when n.kind = 'sales_credit' then -1 else 1 end) * l.vat_amount * n.exchange_rate
+          from adjustment_note_lines l join adjustment_notes n on n.id = l.note_id left join tax_codes t on t.id = l.tax_code_id
+          where n.status = 'posted' and n.kind in ('sales_credit', 'sales_debit') and n.note_date between ${from} and ${to}
+        ) b group by b.behavior`,
+  );
+  // ضريبة المدخلات بنوعها من الدفتر؛ السطر دون نوع يُعد ضريبة مشتريات أساسية
+  const inputRows = await rows<{ behavior: string; vat: string }>(
+    db,
+    sql`select coalesce(nullif(t.behavior, ''), 'pur_standard') as behavior, sum(l.debit_base - l.credit_base) as vat
+        from journal_lines l
+        join journal_entries e on e.id = l.entry_id and e.status = 'posted'
+        join accounts a on a.id = l.account_id
+        left join tax_codes t on t.id = l.tax_code_id
+        where a.code like '1108%' and e.entry_date between ${from} and ${to}
+        group by 1`,
+  );
+  const zeroPurchases = await rows<{ behavior: string; amount: string }>(
+    db,
+    sql`select t.behavior, sum(l.amount * pi.exchange_rate) as amount
+        from purchase_invoice_lines l join purchase_invoices pi on pi.id = l.invoice_id join tax_codes t on t.id = l.tax_code_id
+        where pi.status = 'posted' and pi.invoice_date between ${from} and ${to} and t.behavior in ('pur_zero', 'pur_exempt', 'out_of_scope')
+        group by t.behavior`,
   );
   const [vat] = await rows<{ output: string; input: string }>(
     db,
@@ -304,12 +341,27 @@ export async function vatReturn(db: Db, from: string, to: string) {
         join accounts a on a.id = l.account_id
         where e.entry_date between ${from} and ${to}`,
   );
+  const label = (b: string) => (b in TAX_BEHAVIORS ? TAX_BEHAVIORS[b as TaxBehaviorKey].box : b);
+  const SALES_ORDER = ["standard", "zero", "export", "exempt", "out_of_scope"];
+  const sales: VatBox[] = SALES_ORDER.map((b) => {
+    const r = salesRows.find((x) => x.behavior === b);
+    return { behavior: b, label: label(b), amount: r2(n(r?.amount)), adjust: r2(n(r?.adjust)), vat: r2(n(r?.vat)) };
+  });
+  const PURCHASE_ORDER = ["pur_standard", "customs", "reverse", "pur_zero", "pur_exempt", "out_of_scope"];
+  const purchases: VatBox[] = PURCHASE_ORDER.map((b) => {
+    const vatIn = r2(n(inputRows.find((x) => x.behavior === b)?.vat));
+    const amount = vatIn ? r2(vatIn / 0.15) : r2(n(zeroPurchases.find((x) => x.behavior === b)?.amount));
+    return { behavior: b, label: label(b), amount, adjust: 0, vat: vatIn };
+  });
   const output = r2(n(vat.output));
   const input = r2(n(vat.input));
+  const std = sales.find((x) => x.behavior === "standard")!;
   return {
-    standardSales: r2(n(sales.standard)),
-    standardSalesVat: r2(n(sales.standard_vat)),
-    zeroRatedSales: r2(n(sales.zero)),
+    sales,
+    purchases,
+    standardSales: r2(std.amount + std.adjust),
+    standardSalesVat: r2(std.vat),
+    zeroRatedSales: r2(sales.filter((x) => x.behavior !== "standard").reduce((t, x) => t + x.amount + x.adjust, 0)),
     output,
     // المشتريات الخاضعة بالنسبة الأساسية مستنتجة من ضريبتها (15%)
     standardPurchases: r2(input / 0.15),
