@@ -130,16 +130,16 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
   const [contacts, cities, componentKinds, taxes, editComponents] = await Promise.all([
     creating || editing ? contactCards() : Promise.resolve({}),
     creating || editing || transportOpen ? cityNames() : Promise.resolve([] as string[]),
-    creating || editing ? customListOptions(db, "price_component") : Promise.resolve([]),
-    creating || editing ? taxCodeOptions(db, "sales") : Promise.resolve([]),
+    creating || editing || bulkAdding ? customListOptions(db, "price_component") : Promise.resolve([]),
+    creating || editing || bulkAdding ? taxCodeOptions(db, "sales") : Promise.resolve([]),
     editing && editRow ? waybillComponents(db, editRow.id) : Promise.resolve([]),
   ]);
   // مصاريف على العميل من نافذة الشحنة نفسها
   const [chargeTypes, brokers, chargeCash, savedCharges, tripExpenses] = await Promise.all([
-    creating || editing ? chargeTypeOptions() : Promise.resolve([]),
-    creating || editing ? partyOptions("customs_broker") : Promise.resolve([]),
+    creating || editing || bulkAdding ? chargeTypeOptions() : Promise.resolve([]),
+    creating || editing || bulkAdding ? partyOptions("customs_broker") : Promise.resolve([]),
     // «دفعه: الشركة» من أي حساب في الشجرة (الصناديق والبنوك أولاً في البحث)
-    creating || editing ? accountOptions(["1", "2"]).then((o) => o.filter((x) => x.code !== "1114")) : Promise.resolve([]),
+    creating || editing || bulkAdding ? accountOptions(["1", "2"]).then((o) => o.filter((x) => x.code !== "1114")) : Promise.resolve([]),
     editing && editRow
       ? db
           .select({ e: s.waybillExpenses, label: s.chargeTypes.nameAr, line: s.salesInvoiceLines.id })
@@ -411,14 +411,40 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
                 { key: "shipper", label: "المرسل", required: true, width: "10rem", suggest: shippers },
                 { key: "consignee", label: "المستلم", required: true, width: "10rem", suggest: shippers },
                 ...(showPrices ? [{ key: "amount", label: "المبلغ", type: "number" as const, width: "6rem", placeholder: "من العقد" }] : []),
+                ...(showPrices
+                  ? [1, 2, 3].flatMap((n) => [
+                      { key: `comp${n}`, label: `مكون السعر ${n}`, type: "select" as const, options: componentKinds, width: "9rem" },
+                      { key: `comp${n}Qty`, label: `كمية ${n}`, type: "number" as const, width: "4.5rem", placeholder: "1" },
+                      { key: `comp${n}Price`, label: `سعر المكون ${n}`, type: "number" as const, width: "6rem" },
+                    ])
+                  : []),
+                { key: "taxCodeId", label: "نوع الضريبة", type: "select", options: taxes, width: "12rem", placeholder: "حسب المسار" },
                 { key: "commission", label: "عمولة السائق", type: "number", width: "6rem", placeholder: "من المسار" },
+                { key: "tripCustody", label: "عهدة الرحلة", type: "number", width: "6rem" },
+                { key: "carrierPlate", label: "لوحة الناقل", width: "7rem" },
+                { key: "carrierDriver", label: "سائق الناقل", width: "8rem" },
+                { key: "deliveryAddress", label: "عنوان التسليم", width: "10rem" },
                 { key: "weight", label: "الوزن (طن)", type: "number", width: "5rem" },
                 { key: "container", label: "رقم الحاوية", ltr: true, width: "7rem" },
+                { key: "deliveryNote", label: "رقم مذكرة التسليم", ltr: true, width: "7rem" },
+                { key: "customs", label: "رقم البيان الجمركي", ltr: true, width: "7rem" },
+                // مصاريف على العميل (حتى ثلاثة): دفعتها الشركة من حساب أو المخلص؛ ما دفعه السائق من إيصاله فقط
+                ...[1, 2, 3].flatMap((n) => [
+                  { key: `charge${n}`, label: `مصروف على العميل ${n}`, type: "select" as const, options: chargeTypes, width: "9rem" },
+                  { key: `charge${n}Amount`, label: `مبلغ المصروف ${n}`, type: "number" as const, width: "6rem" },
+                  {
+                    key: `charge${n}From`,
+                    label: `دفعه ${n}`,
+                    type: "select" as const,
+                    width: "12rem",
+                    options: [...brokers.map((b) => ({ value: `b:${b.value}`, label: `المخلص: ${b.label}` })), ...chargeCash.map((a) => ({ value: `a:${a.value}`, label: a.label, code: a.code }))],
+                  },
+                ]),
                 { key: "notes", label: "ملاحظات", width: "9rem" },
               ]}
             />
             <p className="mt-2 text-xs text-gray-500">
-              اكتب أول حروف العميل أو المسار أو المركبة لتظهر النتائج، أو اختر «+ إضافة» لإضافة جديد دون مغادرة الصفحة. اترك السائق فارغاً ليؤخذ السائق المسند للمركبة في تاريخ الرحلة.
+              اكتب أول حروف العميل أو المسار أو المركبة لتظهر النتائج، أو اختر «+ إضافة» لإضافة جديد دون مغادرة الصفحة. اترك السائق فارغاً ليؤخذ السائق المسند للمركبة في تاريخ الرحلة. مصاريف العميل هنا ما دفعته الشركة أو المخلص؛ ما دفعه السائق من عهدته يُحمَّل من إيصاله.
             </p>
           </Card>
         </>

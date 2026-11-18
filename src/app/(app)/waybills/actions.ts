@@ -12,6 +12,7 @@ import { errorMessage } from "@/lib/errors";
 import { setPhotoHidden } from "@/lib/attachments";
 import { todayRiyadh } from "@/lib/dates";
 import { cell, saveSheetRows, type SheetRow } from "@/lib/sheet-server";
+import { createBulkWaybill, type BulkCharge } from "@/lib/waybill-bulk";
 import {
   addFuel,
   approveWaybill,
@@ -66,11 +67,38 @@ const refresh = (id?: number) => {
 
 const optId = (v: string | undefined) => (v && v.trim() ? Number(v) : null);
 
+/** مكونات السعر من خلايا الشيت (حتى ثلاثة). */
+function sheetComponents(r: SheetRow) {
+  return [1, 2, 3].flatMap((n) => {
+    const kind = cell.text(r[`comp${n}`]);
+    if (!kind) return [];
+    const unitPrice = cell.number(r[`comp${n}Price`], `سعر المكون ${n}`);
+    if (!unitPrice) throw new Error(`سعر المكون ${n} إلزامي`);
+    const { base, classId } = splitCustom(kind);
+    return [{ kind: base!, classId, quantity: cell.number(r[`comp${n}Qty`], `كمية المكون ${n}`) ?? 1, unitPrice }];
+  });
+}
+
+/** مصاريف على العميل من خلايا الشيت: «دفعه» قيمة a:حساب أو b:مخلص. */
+function sheetCharges(r: SheetRow): BulkCharge[] {
+  return [1, 2, 3].flatMap((n): BulkCharge[] => {
+    const type = cell.text(r[`charge${n}`]);
+    const amount = cell.number(r[`charge${n}Amount`], `مبلغ المصروف ${n}`);
+    const from = cell.text(r[`charge${n}From`]);
+    if (!type && !amount && !from) return [];
+    if (!type) throw new Error(`اختر نوع المصروف على العميل ${n}`);
+    if (!amount) throw new Error(`مبلغ المصروف ${n} إلزامي`);
+    const m = from?.match(/^([ab]):(\d+)$/);
+    if (!m) throw new Error(`اختر من دفع المصروف ${n}: حساب الشركة أو المخلص`);
+    return [m[1] === "b" ? { chargeTypeId: Number(type), amount, payer: "customs_broker", partyId: Number(m[2]) } : { chargeTypeId: Number(type), amount, payer: "cash", cashAccountId: Number(m[2]) }];
+  });
+}
+
 export async function saveWaybills(rows: SheetRow[]) {
   const user = await guard("create");
   const prices = hasSpecial(user.perms, "view_prices");
   const result = await saveSheetRows(rows, async (r) => {
-    await createWaybill(db, {
+    await createBulkWaybill(db, {
       // التاريخ الفارغ = اليوم، كما يظهر في الخلية
       waybillDate: cell.date(r.date, "التاريخ") ?? todayRiyadh(),
       customerId: Number(cell.required(r.customerId, "العميل")),
@@ -86,8 +114,16 @@ export async function saveWaybills(rows: SheetRow[]) {
       // من لا يرى الأسعار لا يُدخلها؛ تؤخذ من العقد
       amount: prices ? cell.number(r.amount, "المبلغ") : null,
       driverCommission: cell.number(r.commission, "العمولة"),
+      tripCustody: cell.number(r.tripCustody, "عهدة الرحلة"),
+      carrierDriverName: cell.text(r.carrierDriver),
+      deliveryAddress: cell.text(r.deliveryAddress),
+      priceComponents: prices ? sheetComponents(r) : undefined,
+      taxCodeId: optId(r.taxCodeId),
       weightTons: cell.number(r.weight, "الوزن"),
       containerNumber: cell.text(r.container),
+      deliveryNoteNumber: cell.text(r.deliveryNote),
+      customsDeclaration: cell.text(r.customs),
+      charges: sheetCharges(r),
       notes: cell.text(r.notes),
       userId: user.id,
     });

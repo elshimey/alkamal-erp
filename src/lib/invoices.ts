@@ -262,6 +262,8 @@ export interface ManualInvoiceInput {
   userId?: number;
   // رحلة السائق للفاتورة المباشرة؛ undefined = تبقى كما هي، null = بلا رحلة
   trip?: InvoiceTripInput | null;
+  // شحنات معتمدة غير مفوترة تدخل الفاتورة بسعرها ومصاريفها (الاستيراد برقم الشحنة)
+  waybillIds?: number[];
   // تعديل سطور الشحنات ومصاريفها في المسودة: السعر والوصف (السعر يُحدّث مبلغ الشحنة نفسها)
   fixedEdits?: { lineId: number; amount: number; description: string }[];
   lines: {
@@ -305,7 +307,7 @@ function checkHeader(input: { invoiceDate: string; dueDate: string; customerId: 
 
 /** فاتورة مسودة بسطور حرة: مباشرة من صفحة الفواتير، أو من عرض سعر، أو مستوردة من Excel أو نظام سابق. */
 export async function createManualInvoiceTx(tx: Tx, input: ManualInvoiceInput) {
-  if (!input.lines.length) throw new Error("الفاتورة بلا بنود");
+  if (!input.lines.length && !input.waybillIds?.length) throw new Error("الفاتورة بلا بنود");
   checkHeader(input);
   const reference = input.reference?.trim() || null;
   if (reference) {
@@ -330,17 +332,32 @@ export async function createManualInvoiceTx(tx: Tx, input: ManualInvoiceInput) {
     })
     .returning();
   await insertLines(tx, inv.id, manualLines(input.lines));
+  if (input.waybillIds?.length) await addWaybillLinesTx(tx, inv, input.waybillIds);
   await recomputeTotals(tx, inv.id);
+  return inv;
+}
+
+/** يضيف سطور شحنات معتمدة غير مفوترة لنفس العميل والعملة إلى مسودة (دون إعادة حساب المجاميع). */
+async function addWaybillLinesTx(tx: Tx, inv: typeof s.salesInvoices.$inferSelect, waybillIds: number[]) {
+  const ids = [...new Set(waybillIds)];
+  const ok = await tx
+    .select({ id: s.waybills.id })
+    .from(s.waybills)
+    .where(and(uninvoicedWaybills(), eq(s.waybills.customerId, inv.customerId), inArray(s.waybills.id, ids)));
+  if (ok.length !== ids.length) throw new Error("بعض الشحنات غير معتمدة أو مفوترة أو لعميل آخر");
+  await insertLines(tx, inv.id, await buildLines(tx, ids, inv.currencyCode, num(inv.exchangeRate)));
+}
+
+/** فاتورة مباشرة (ومعها رحلتها إن وُجدت) داخل معاملة قائمة. */
+export async function createDirectInvoiceTx(tx: Tx, input: ManualInvoiceInput) {
+  const inv = await createManualInvoiceTx(tx, input);
+  if (input.trip) await syncTrip(tx, inv.id, input.userId, input.trip);
   return inv;
 }
 
 /** فاتورة مباشرة من صفحة الفواتير، دون شحنة؛ تُحفظ مسودة حتى تُعتمد. */
 export async function createDirectInvoice(db: Db, input: ManualInvoiceInput) {
-  return db.transaction(async (tx) => {
-    const inv = await createManualInvoiceTx(tx, input);
-    if (input.trip) await syncTrip(tx, inv.id, input.userId, input.trip);
-    return inv;
-  });
+  return db.transaction((tx) => createDirectInvoiceTx(tx, input));
 }
 
 /** بيانات رحلة الفاتورة الحالية بصيغة الإدخال (للمحرر ولإعادة المزامنة). */
@@ -685,12 +702,7 @@ export async function addWaybillsToInvoice(db: Db, invoiceId: number, waybillIds
   return db.transaction(async (tx) => {
     const inv = await lockInvoice(tx, invoiceId);
     if (inv.status !== "draft") throw new Error("الفاتورة مُصدرة؛ أرجعها لمسودة أولاً");
-    const ok = await tx
-      .select({ id: s.waybills.id })
-      .from(s.waybills)
-      .where(and(uninvoicedWaybills(), eq(s.waybills.customerId, inv.customerId), inArray(s.waybills.id, waybillIds)));
-    if (ok.length !== waybillIds.length) throw new Error("بعض الشحنات غير معتمدة أو مفوترة أو لعميل آخر");
-    await insertLines(tx, invoiceId, await buildLines(tx, waybillIds, inv.currencyCode, num(inv.exchangeRate)));
+    await addWaybillLinesTx(tx, inv, waybillIds);
     await recomputeTotals(tx, invoiceId);
   });
 }

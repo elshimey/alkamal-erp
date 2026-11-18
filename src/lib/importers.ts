@@ -1,10 +1,11 @@
 import { and, eq, or, sql } from "drizzle-orm";
 import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
-import type { ImportSpec } from "@/data/import-specs";
-import { createManualInvoiceTx } from "@/lib/invoices";
+import { CHARGE_SLOTS, type ImportSpec } from "@/data/import-specs";
+import { addInvoiceChargesTx, createDirectInvoiceTx } from "@/lib/invoices";
+import type { InvoiceTripInput } from "@/lib/waybills";
 import { createQuotationTx } from "@/lib/quotations";
-import { createWaybillTx } from "@/lib/waybills";
+import { createBulkWaybillTx, type BulkCharge } from "@/lib/waybill-bulk";
 import { createVehicle } from "@/lib/fleet";
 import { createParty } from "@/lib/operations";
 import { createReceipt } from "@/lib/receipts";
@@ -196,7 +197,22 @@ async function importInvoice(tx: Tx, rows: ImportRow[], ctx: Ctx, userId?: numbe
   }
   const inclusive = /شامل|inc/i.test(v(head, "taxInclusive")) && !/خال|خالي|exc/i.test(v(head, "taxInclusive"));
 
-  const lines = rows.map((r) => {
+  // الصف الذي فيه رقم شحنة يُدخلها بسعرها ومصاريفها؛ خانات البند تبقى فارغة حتى لا يتضاعف الإيراد
+  const waybillIds: number[] = [];
+  for (const r of rows) {
+    const no = v(r, "waybill");
+    if (!no) continue;
+    const at = rows.length > 1 ? ` (الصف ${r.row})` : "";
+    if (v(r, "unitPrice") || v(r, "quantity")) throw new Error(`رقم الشحنة ${no}: اترك الكمية والسعر فارغين، فالشحنة تدخل بسعرها${at}`);
+    const [w] = await tx.select({ id: s.waybills.id, status: s.waybills.status, customerId: s.waybills.customerId }).from(s.waybills).where(eq(s.waybills.number, no)).limit(1);
+    if (!w) throw new Error(`رقم الشحنة «${no}» غير موجود${at}`);
+    if (w.customerId !== customerId) throw new Error(`رقم الشحنة ${no} لعميل آخر${at}`);
+    if (w.status !== "approved") throw new Error(`رقم الشحنة ${no} غير معتمدة أو مفوترة؛ اعتمدها أولاً${at}`);
+    if (waybillIds.includes(w.id)) throw new Error(`رقم الشحنة ${no} مكرر في الفاتورة${at}`);
+    waybillIds.push(w.id);
+  }
+
+  const lines = rows.filter((r) => !v(r, "waybill")).map((r) => {
     const at = rows.length > 1 ? ` (الصف ${r.row})` : "";
     const description = required(r, "description", `وصف البند${at}`);
     const quantity = toNumber(required(r, "quantity", `الكمية${at}`), `الكمية${at}`, { positive: true });
@@ -216,9 +232,39 @@ async function importInvoice(tx: Tx, rows: ImportRow[], ctx: Ctx, userId?: numbe
     const vatAmount = inclusive ? round2(net - amount) : lineVat(amount, vatRate);
     return { description, quantity, unitPrice, discountPercent, amount, vatAmount, vatRate, taxCodeId: tax?.id ?? null, accountId: account.id, costCenterId };
   });
-  if (!(lines.reduce((t, l) => t + l.amount + l.vatAmount, 0) > 0)) throw new Error(`إجمالي الفاتورة ${reference} صفر`);
-  const inv = await createManualInvoiceTx(tx, { customerId, invoiceDate, dueDate, currencyCode, reference, notes: v(head, "notes") || null, userId, lines });
-  return `${inv.number} ← ${reference}`;
+  if (!waybillIds.length && !(lines.reduce((t, l) => t + l.amount + l.vatAmount, 0) > 0)) throw new Error(`إجمالي الفاتورة ${reference} صفر`);
+
+  // رحلة الفاتورة المباشرة (من أول صف): تُنشأ للسائق كما في نافذة الفاتورة
+  const needsLook = v(head, "tripVehicle") || rows.some((r) => CHARGE_SLOTS.some((n) => v(r, `charge${n}`) || v(r, `charge${n}Amount`) || v(r, `charge${n}From`)));
+  const look = needsLook ? await wbLook(tx, ctx) : null;
+  let trip: InvoiceTripInput | null = null;
+  const tripPlate = v(head, "tripVehicle");
+  if (tripPlate) {
+    if (waybillIds.length) throw new Error("بيانات الرحلة للفاتورة المباشرة فقط؛ الشحنة المفوترة لها رحلتها");
+    const vehicleId = ctx.idx.vehicles.find(tripPlate);
+    if (vehicleId == null) throw new Error(`مركبة الرحلة «${tripPlate}» غير موجودة أو مكررة`);
+    const driverName = v(head, "tripDriver");
+    const driverId = driverName ? look!.driver.find(driverName) : null;
+    if (driverName && driverId == null) throw new Error(`سائق الرحلة «${driverName}» غير موجود أو مكرر`);
+    trip = {
+      vehicleId,
+      driverId: driverId ?? null,
+      routeId: findRoute(look!, required(head, "tripFrom", "مدينة تحميل الرحلة"), required(head, "tripTo", "مدينة تسليم الرحلة")),
+      shipper: required(head, "tripShipper", "مرسل الرحلة"),
+      consignee: required(head, "tripConsignee", "مستلم الرحلة"),
+      tripCustody: v(head, "tripCustody") ? toNumber(v(head, "tripCustody"), "عهدة الرحلة", { min: 0 }) : null,
+    };
+  } else {
+    for (const key of ["tripDriver", "tripFrom", "tripTo", "tripShipper", "tripConsignee", "tripCustody"]) {
+      if (v(head, key)) throw new Error("اكتب مركبة الرحلة مع بيانات الرحلة");
+    }
+  }
+  const charges = look ? rows.flatMap((r) => rowCharges(r, ctx, look)) : [];
+
+  const inv = await createDirectInvoiceTx(tx, { customerId, invoiceDate, dueDate, currencyCode, reference, notes: v(head, "notes") || null, userId, lines, waybillIds, trip });
+  if (charges.length) await addInvoiceChargesTx(tx, inv.id, charges.map((c) => ({ ...c, currencyCode })), userId);
+  const extra = [waybillIds.length && `${waybillIds.length} شحنة`, charges.length && `${charges.length} مصروف على العميل`, trip && "رحلة"].filter(Boolean).join("، ");
+  return `${inv.number} ← ${reference}${extra ? ` (${extra})` : ""}`;
 }
 
 // ───────────── عروض الأسعار ─────────────
@@ -260,12 +306,14 @@ async function importQuotation(tx: Tx, rows: ImportRow[], ctx: Ctx, userId?: num
 // ───────────── الشحنات ─────────────
 
 async function waybillLookups(tx: Tx) {
-  const [routes, drivers, carriers] = await Promise.all([
+  const [routes, drivers, carriers, chargeTypes, brokers] = await Promise.all([
     tx.execute(sql`select r.id, a.name_ar as "from", b.name_ar as "to", ca.name_ar as "fromCountry", cb.name_ar as "toCountry"
       from routes r join locations a on a.id = r.from_location_id join locations b on b.id = r.to_location_id
       left join locations ca on ca.id = a.parent_id left join locations cb on cb.id = b.parent_id where r.is_active`) as unknown as Promise<{ id: number; from: string; to: string; fromCountry: string | null; toCountry: string | null }[]>,
     tx.select({ id: s.drivers.id, name: s.employees.nameAr }).from(s.drivers).innerJoin(s.employees, eq(s.employees.id, s.drivers.employeeId)),
     tx.select({ id: s.parties.id, nameAr: s.parties.nameAr }).from(s.parties).innerJoin(s.partyRoles, and(eq(s.partyRoles.partyId, s.parties.id), eq(s.partyRoles.role, "carrier"))),
+    tx.select({ id: s.chargeTypes.id, nameAr: s.chargeTypes.nameAr }).from(s.chargeTypes).where(eq(s.chargeTypes.isActive, true)),
+    tx.select({ id: s.parties.id, nameAr: s.parties.nameAr }).from(s.parties).innerJoin(s.partyRoles, and(eq(s.partyRoles.partyId, s.parties.id), eq(s.partyRoles.role, "customs_broker"))),
   ]);
   const route = new Index<number>();
   for (const r of routes) {
@@ -278,43 +326,97 @@ async function waybillLookups(tx: Tx) {
   // مكونات السعر بأسمائها (الأساسية والمضافة)، والقيمة «الأساسي~رقم»
   const components = new Index<string>();
   for (const o of await customListOptions(tx, "price_component")) components.add([o.label, o.label.replace(/\s*\(.*\)\s*$/, ""), o.value.includes("~") ? null : o.value], o.value);
-  return { route, driver, carrier, components };
+  const chargeType = new Index<number>();
+  for (const c of chargeTypes) chargeType.add([c.nameAr], c.id);
+  const broker = new Index<number>();
+  for (const b of brokers) broker.add([b.nameAr], b.id);
+  return { route, driver, carrier, components, chargeType, broker };
+}
+
+type WbLook = Awaited<ReturnType<typeof waybillLookups>>;
+
+async function wbLook(tx: Tx, ctx: Ctx) {
+  const look = wbCache.get(ctx) ?? (await waybillLookups(tx));
+  wbCache.set(ctx, look);
+  return look;
+}
+
+/** المسار بمدينتي التحميل والتسليم. */
+function findRoute(look: WbLook, from: string, to: string) {
+  const routeId = look.route.find(`${from}|${to}`);
+  if (routeId === null) throw new Error(`أكثر من مسار من ${from} إلى ${to}؛ وحّد المسارات أولاً`);
+  if (routeId === undefined) throw new Error(`لا يوجد مسار من ${from} إلى ${to}؛ أضفه من المسارات أولاً`);
+  return routeId;
+}
+
+/**
+ * مصاريف على العميل من الصف (حتى ثلاثة): النوع والمبلغ ومن دفع. الشركة من حساب في الشجرة، أو المخلص باسمه.
+ * ما دفعه السائق من عهدته لا يُكتب هنا: يُحمَّل من إيصاله في التطبيق حتى لا يتكرر (قرار أحمد 2026-11-18).
+ */
+function rowCharges(r: ImportRow, ctx: Ctx, look: WbLook): BulkCharge[] {
+  return CHARGE_SLOTS.flatMap((n): BulkCharge[] => {
+    const typeRaw = v(r, `charge${n}`);
+    const amountRaw = v(r, `charge${n}Amount`);
+    const payerRaw = normText(v(r, `charge${n}Payer`));
+    const fromRaw = v(r, `charge${n}From`);
+    if (!typeRaw && !amountRaw && !payerRaw && !fromRaw) return [];
+    const chargeTypeId = look.chargeType.find(required(r, `charge${n}`, `مصروف على العميل ${n}`));
+    if (chargeTypeId == null) throw new Error(`مصروف على العميل ${n} «${typeRaw}» غير موجود في أنواع المصروفات (أضفه من «+ إضافة» في نافذة الشحنة) أو مكرر`);
+    const amount = toNumber(required(r, `charge${n}Amount`, `مبلغ المصروف ${n}`), `مبلغ المصروف ${n}`, { positive: true });
+    if (/سائق|عهد|driver|custody/.test(payerRaw)) throw new Error(`دافع المصروف ${n}: ما دفعه السائق من عهدته يُحمَّل من إيصاله في التطبيق، لا يُكتب في الملف`);
+    const from = required(r, `charge${n}From`, `حساب أو مخلص المصروف ${n}`);
+    const isBroker = /مخلص|broker/.test(payerRaw) || (!payerRaw && look.broker.find(from) != null);
+    if (payerRaw && !isBroker && !/شرك|company|صندوق|بنك|cash|bank/.test(payerRaw)) throw new Error(`دافع المصروف ${n} «${v(r, `charge${n}Payer`)}» غير معروف؛ اكتب الشركة أو المخلص`);
+    if (isBroker) {
+      const partyId = look.broker.find(from);
+      if (partyId == null) throw new Error(`حساب أو مخلص المصروف ${n}: المخلص «${from}» غير موجود في جهات الاتصال أو مكرر`);
+      return [{ chargeTypeId, amount, payer: "customs_broker" as const, partyId }];
+    }
+    const account = findAccount(ctx, from, `حساب أو مخلص المصروف ${n}`);
+    if (!/^[12]/.test(account.code) || account.code === "1114") throw new Error(`حساب أو مخلص المصروف ${n}: الحساب ${account.code} ليس صندوقاً أو بنكاً أو التزاماً (اختر حساباً من الأصول أو الالتزامات غير 1114)`);
+    return [{ chargeTypeId, amount, payer: "cash" as const, cashAccountId: account.id }];
+  });
 }
 
 const wbCache: WeakMap<Ctx, Awaited<ReturnType<typeof waybillLookups>>> = new WeakMap();
 
 async function importWaybill(tx: Tx, [r]: ImportRow[], ctx: Ctx, userId?: number) {
-  const look = wbCache.get(ctx) ?? (await waybillLookups(tx));
-  wbCache.set(ctx, look);
+  const look = await wbLook(tx, ctx);
   const customerName = required(r, "customer", "العميل");
   const customerId = resolve(ctx.idx.customers.find(customerName), customerName, "customer", "العميل");
-  const from = required(r, "from", "من");
-  const to = required(r, "to", "إلى");
-  const routeId = look.route.find(`${from}|${to}`);
-  if (routeId === null) throw new Error(`أكثر من مسار من ${from} إلى ${to}؛ وحّد المسارات أولاً`);
-  if (routeId === undefined) throw new Error(`لا يوجد مسار من ${from} إلى ${to}؛ أضفه من المسارات أولاً`);
+  const routeId = findRoute(look, required(r, "from", "من"), required(r, "to", "إلى"));
   const plate = v(r, "vehicle");
   const carrierName = v(r, "carrier");
   if (plate && carrierName) throw new Error("اكتب المركبة أو الناقل الخارجي، لا الاثنين");
   const vehicleId = plate ? ctx.idx.vehicles.find(plate) : null;
   if (plate && vehicleId == null) throw new Error(`المركبة «${plate}» غير موجودة أو مكررة`);
+  const trailerPlate = v(r, "trailer");
+  const trailerId = trailerPlate ? ctx.idx.vehicles.find(trailerPlate) : null;
+  if (trailerPlate && trailerId == null) throw new Error(`المقطورة «${trailerPlate}» غير موجودة أو مكررة`);
   const carrierId = carrierName ? look.carrier.find(carrierName) : null;
   if (carrierName && carrierId == null) throw new Error(`الناقل «${carrierName}» غير موجود أو مكرر في جهات الاتصال`);
   const driverName = v(r, "driver");
   const driverId = driverName ? look.driver.find(driverName) : null;
   if (driverName && driverId == null) throw new Error(`السائق «${driverName}» غير موجود أو مكرر`);
-  const w = await createWaybillTx(tx, {
+  const optNumber = (key: string, label: string) => (v(r, key) ? toNumber(v(r, key), label, { min: 0 }) : null);
+  const charges = rowCharges(r, ctx, look);
+  const w = await createBulkWaybillTx(tx, {
     waybillDate: toDate(required(r, "date", "التاريخ"), "التاريخ"),
     customerId,
     routeId,
     shipper: required(r, "shipper", "المرسل"),
     consignee: required(r, "consignee", "المستلم"),
     vehicleId,
+    trailerId: trailerId ?? null,
     driverId: driverId ?? null,
     carrierId: carrierId ?? null,
     carrierCost: v(r, "carrierCost") ? toNumber(v(r, "carrierCost"), "تكلفة الناقل", { positive: true }) : null,
-    amount: v(r, "amount") ? toNumber(v(r, "amount"), "المبلغ", { min: 0 }) : null,
-    priceComponents: [1, 2].flatMap((n) => {
+    carrierPlate: v(r, "carrierPlate") || null,
+    carrierDriverName: v(r, "carrierDriver") || null,
+    amount: optNumber("amount", "المبلغ"),
+    driverCommission: optNumber("commission", "عمولة السائق"),
+    tripCustody: optNumber("tripCustody", "عهدة الرحلة"),
+    priceComponents: [1, 2, 3].flatMap((n) => {
       const name = v(r, `comp${n}`);
       if (!name) return [];
       const kind = look.components.find(name);
@@ -323,12 +425,16 @@ async function importWaybill(tx: Tx, [r]: ImportRow[], ctx: Ctx, userId?: number
       return [{ kind: base!, classId, quantity: v(r, `comp${n}Qty`) ? toNumber(v(r, `comp${n}Qty`), `كمية المكون ${n}`, { positive: true }) : 1, unitPrice: toNumber(required(r, `comp${n}Price`, `سعر المكون ${n}`), `سعر المكون ${n}`, { positive: true }) }];
     }),
     taxCodeId: v(r, "taxCode") ? resolve(ctx.idx.taxCodes.find(v(r, "taxCode")), v(r, "taxCode"), "taxCode", "نوع الضريبة").id : null,
-    weightTons: v(r, "weight") ? toNumber(v(r, "weight"), "الوزن", { min: 0 }) : null,
+    weightTons: optNumber("weight", "الوزن"),
     containerNumber: v(r, "container") || null,
+    deliveryAddress: v(r, "deliveryAddress") || null,
+    deliveryNoteNumber: v(r, "deliveryNote") || null,
+    customsDeclaration: v(r, "customs") || null,
+    charges,
     notes: v(r, "notes") || null,
     userId,
   });
-  return w.number;
+  return charges.length ? `${w.number} (+${charges.length} مصروف على العميل)` : w.number;
 }
 
 // ───────────── المركبات ─────────────
@@ -653,7 +759,7 @@ function groupRows(spec: ImportSpec, rows: ImportRow[]) {
 }
 
 const DATE_KEYS = new Set(["invoiceDate", "dueDate", "date", "validUntil", "receiptDate", "entryDate", "violationDate", "orderDate", "reportDate", "lastDone"]);
-const NUMBER_KEYS = new Set(["quantity", "unitPrice", "discount", "amount", "carrierCost", "comp1Qty", "comp1Price", "comp2Qty", "comp2Price", "weight", "year", "odometer", "debit", "credit", "purchasePrice", "salePrice", "reorderLevel", "openingQty", "estimatedCost", "intervalDays"]);
+const NUMBER_KEYS = new Set(["quantity", "unitPrice", "discount", "amount", "carrierCost", "comp1Qty", "comp1Price", "comp2Qty", "comp2Price", "comp3Qty", "comp3Price", "commission", "tripCustody", "charge1Amount", "charge2Amount", "charge3Amount", "weight", "year", "odometer", "debit", "credit", "purchasePrice", "salePrice", "reorderLevel", "openingQty", "estimatedCost", "intervalDays"]);
 
 /**
  * فحص أولي لكل خانات السجل قبل حفظه، فتظهر كل أخطاء الصف معاً (لا الأول فقط) كما في وافق:
@@ -666,7 +772,7 @@ function precheck(spec: ImportSpec, group: ImportRow[]): ImportIssue[] {
       const raw = v(r, f.key);
       let message = "";
       if (!raw) {
-        if (f.required && (i === 0 || !spec.groupBy)) message = `${f.label} مطلوب`;
+        if (f.required && (i === 0 || !spec.groupBy) && !(f.requiredUnless && v(r, f.requiredUnless))) message = `${f.label} مطلوب`;
       } else {
         try {
           if (DATE_KEYS.has(f.key)) toDate(raw, f.label);
@@ -736,6 +842,21 @@ export async function templateLists(db: Db, spec: ImportSpec): Promise<TemplateL
   const ctx = await db.transaction((tx) => lookups(tx));
   const accountsOf = (type: string) => ctx.accounts.filter((a) => a.type === type).sort((a, b) => a.code.localeCompare(b.code));
   const currencies = { title: "العملات", values: ctx.currencies.map((c) => c.code) };
+  // قوائم مصاريف العميل (النوع، الدافع، الحساب أو المخلص) لقالبي الشحنات والفواتير
+  const chargeLists = async (): Promise<TemplateList[]> => {
+    const [types, brokers] = await Promise.all([
+      db.select({ n: s.chargeTypes.nameAr }).from(s.chargeTypes).where(eq(s.chargeTypes.isActive, true)),
+      db.select({ n: s.parties.nameAr }).from(s.parties).innerJoin(s.partyRoles, and(eq(s.partyRoles.partyId, s.parties.id), eq(s.partyRoles.role, "customs_broker"))),
+    ]);
+    const pay = ctx.accounts.filter((a) => /^[12]/.test(a.code) && a.code !== "1114").sort((a, b) => a.code.localeCompare(b.code));
+    return [
+      { title: "أنواع مصاريف العميل", values: types.map((x) => x.n), field: ["charge1", "charge2", "charge3"] },
+      { title: "دافع المصروف", values: ["الشركة", "المخلص"], field: ["charge1Payer", "charge2Payer", "charge3Payer"] },
+      { title: "حسابات الدفع (الرقم)", values: pay.map((a) => a.code), field: ["charge1From", "charge2From", "charge3From"] },
+      { title: "اسم حساب الدفع", values: pay.map((a) => a.nameAr) },
+      { title: "المخلصون", values: brokers.map((x) => x.n).sort((a, b) => a.localeCompare(b, "ar")) },
+    ];
+  };
   if (spec.entity === "sales-invoices") {
     const revenue = accountsOf("revenue");
     return [
@@ -747,6 +868,7 @@ export async function templateLists(db: Db, spec: ImportSpec): Promise<TemplateL
       { title: "المركبات (اللوحة)", values: ctx.vehicles.map((x) => x.plate).sort(), field: "costCenter" },
       { title: "مراكز التكلفة (الرمز)", values: ctx.costCenters.map((c) => c.code) },
       { title: "شامل/خالٍ من الضريبة", values: ["خالٍ من الضريبة", "شامل الضريبة"], field: "taxInclusive" },
+      ...(await chargeLists()),
     ];
   }
   if (spec.entity === "quotations") {
@@ -768,11 +890,12 @@ export async function templateLists(db: Db, spec: ImportSpec): Promise<TemplateL
       { title: "العملاء", values: ctx.customers.map((c) => c.nameAr).sort(), field: "customer" },
       { title: "مدن التحميل", values: sorted(cities), field: "from" },
       { title: "مدن التسليم", values: sorted(cities), field: "to" },
-      { title: "المركبات", values: ctx.vehicles.map((x) => x.plate).sort(), field: "vehicle" },
+      { title: "المركبات", values: ctx.vehicles.map((x) => x.plate).sort(), field: ["vehicle", "trailer"] },
       { title: "السائقون", values: sorted(drivers), field: "driver" },
       { title: "الناقلون", values: sorted(carriers), field: "carrier" },
-      { title: "مكونات السعر", values: (await customListOptions(db, "price_component")).map((o) => o.label), field: "comp1" },
+      { title: "مكونات السعر", values: (await customListOptions(db, "price_component")).map((o) => o.label), field: ["comp1", "comp2", "comp3"] },
       { title: "أنواع الضريبة (كما في وافق)", values: ctx.outTax.map((t) => t.nameAr), field: "taxCode" },
+      ...(await chargeLists()),
     ];
   }
   if (spec.entity === "vehicles") {
