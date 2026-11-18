@@ -9,6 +9,7 @@ import * as s from "@/db/schema";
 import { requirePermission, type CurrentUser } from "@/lib/auth";
 import { hasSpecial, scopeFor, type Action } from "@/lib/permissions";
 import { errorMessage } from "@/lib/errors";
+import { setPhotoHidden } from "@/lib/attachments";
 import { todayRiyadh } from "@/lib/dates";
 import { cell, saveSheetRows, type SheetRow } from "@/lib/sheet-server";
 import {
@@ -242,6 +243,14 @@ export async function removeItem(id: number, kind: "fuel" | "expense", itemId: n
     await deleteWaybillItem(db, id, kind, itemId);
   }
   refresh(id);
+}
+
+/** إخفاء صورة رحلة عن العميل (مستند الشحنة والفاتورة ورابطهما) أو إظهارها. لا يمس القيود، فيُسمح به في أي حالة. */
+export async function togglePhotoHidden(id: number, photoId: number, hidden: boolean) {
+  await guard("update", id);
+  await setPhotoHidden(db, id, photoId, hidden);
+  refresh(id);
+  revalidatePath("/invoices");
 }
 
 /** حفظ ورقة الشحنات: الشحنات غير المعتمدة فقط، وكل خلية تمر على قواعد تعديل الشحنة نفسها. */

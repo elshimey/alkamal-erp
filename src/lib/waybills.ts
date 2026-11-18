@@ -3,6 +3,7 @@ import { alias } from "drizzle-orm/pg-core";
 import type { Db, Tx } from "@/db";
 import { blockingDocumentIssues } from "@/lib/documents";
 import * as s from "@/db/schema";
+import { customerPhotos } from "@/lib/attachments";
 import { createJournalEntryTx, deleteEntryTx, nextDocumentNumber } from "@/lib/ledger";
 import { activeContract, contractRatesFor } from "@/lib/operations";
 import { resolvePrice } from "@/lib/pricing";
@@ -749,11 +750,12 @@ export async function waybillDoc(db: Db | Tx, id: number) {
     .leftJoin(trailer, eq(trailer.id, s.waybills.trailerId))
     .where(eq(s.waybills.id, id));
   if (!w) return null;
-  const [stages, goods] = await Promise.all([
+  const [stages, goods, photos] = await Promise.all([
     db.select().from(s.tripStages).where(eq(s.tripStages.waybillId, id)).orderBy(s.tripStages.at),
     db.select().from(s.waybillGoods).where(eq(s.waybillGoods.waybillId, id)).orderBy(s.waybillGoods.lineNo),
+    customerPhotos(db, [id]),
   ]);
-  return { ...w, stages, goods };
+  return { ...w, stages, goods, photos };
 }
 
 // ───────────── وثيقة النقل (لوجستي) ─────────────

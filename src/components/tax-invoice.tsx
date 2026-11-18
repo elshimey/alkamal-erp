@@ -6,6 +6,8 @@ import { DEFAULT_TEMPLATE, TEMPLATE_ACCENTS, formatIban, type InvoiceTemplate } 
 import { LogoMark } from "@/components/logo";
 import { fmt } from "@/lib/format";
 import { invoiceTerms } from "@/lib/invoice-terms";
+import { DocPhotos, type PhotoUrl } from "@/components/doc-photos";
+import type { CustomerPhoto } from "@/lib/attachments";
 
 type Invoice = typeof s.salesInvoices.$inferSelect;
 type Party = typeof s.parties.$inferSelect;
@@ -44,6 +46,8 @@ export function TaxInvoiceDocument({
   template: t = DEFAULT_TEMPLATE,
   lineAction,
   compact = false,
+  photos = [],
+  photoUrl,
 }: {
   company: CompanyProfile;
   invoice: Invoice;
@@ -53,6 +57,9 @@ export function TaxInvoiceDocument({
   template?: InvoiceTemplate;
   lineAction?: (line: Line) => ReactNode;
   compact?: boolean;
+  /** صور الشحنات الظاهرة للعميل: صفحة مرفقة بعد الفاتورة */
+  photos?: CustomerPhoto[];
+  photoUrl?: PhotoUrl;
 }) {
   const draft = i.status === "draft";
   const total = Number(i.total);
@@ -325,6 +332,7 @@ export function TaxInvoiceDocument({
           className="mt-4 h-1.5 rounded-full bg-[repeating-linear-gradient(90deg,var(--inv-accent)_0_18px,transparent_18px_30px)] opacity-70 print:[print-color-adjust:exact]"
         />
       )}
+      <DocPhotos photos={photos} photoUrl={photoUrl} grouped newPage />
     </article>
   );
 }

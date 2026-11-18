@@ -74,7 +74,7 @@ export default async function DriverDocuments() {
           <DField label={t.docs.number}>
             <DInput name="number" dir="ltr" />
           </DField>
-          <PhotoInput label={t.docs.photo} required />
+          <PhotoInput label={t.docs.photo} required allowFiles errorLabel={t.docs.fileError} />
           <SubmitButton pendingLabel={t.saving} className="w-full py-3 text-base">
             {t.send}
           </SubmitButton>

@@ -25,9 +25,13 @@ export default async function SubmissionsPage() {
 
       <div className="grid gap-4">
         {pending.length === 0 && <Card>لا توجد طلبات بانتظار الاعتماد.</Card>}
-        {pending.map(({ sub, type, plate, driverName, attachmentId }) => (
+        {pending.map(({ sub, type, plate, driverName, attachmentId, attachmentMime }) => (
           <section key={sub.id} className="grid gap-4 rounded-2xl border border-amber-200 bg-white p-4 shadow-sm md:grid-cols-[180px_1fr]">
-            {attachmentId ? (
+            {attachmentId && attachmentMime === "application/pdf" ? (
+              <a href={`/files/${attachmentId}`} target="_blank" rel="noreferrer" className="grid h-32 place-items-center rounded-xl border border-gray-200 bg-red-50 text-sm font-semibold text-red-700 hover:underline md:h-full" title="فتح الملف">
+                ملف PDF · فتح
+              </a>
+            ) : attachmentId ? (
               <a href={`/files/${attachmentId}`} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-xl border border-gray-200 bg-gray-50" title="فتح الصورة كاملة">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={`/files/${attachmentId}`} alt={type.nameAr} className="h-44 w-full object-cover md:h-full" />

@@ -540,6 +540,7 @@ export async function listSubmissions(db: Db | Tx, opts: { status?: (typeof s.do
       plate: s.vehicles.plate,
       driverName: s.employees.nameAr,
       attachmentId: sql<number | null>`(select a.id from attachments a where a.entity = 'document_submissions' and a.entity_id = ${s.documentSubmissions.id} order by a.id desc limit 1)`,
+      attachmentMime: sql<string | null>`(select a.mime from attachments a where a.entity = 'document_submissions' and a.entity_id = ${s.documentSubmissions.id} order by a.id desc limit 1)`,
     })
     .from(s.documentSubmissions)
     .innerJoin(s.documentTypes, eq(s.documentTypes.id, s.documentSubmissions.documentTypeId))

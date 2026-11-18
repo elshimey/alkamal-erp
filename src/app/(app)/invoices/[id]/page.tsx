@@ -19,7 +19,8 @@ import { addWaybills, issue, removeLine, sendToZatca } from "../actions";
 import { invoiceActions } from "../invoice-menu";
 import { ActionsMenu } from "@/components/actions-menu";
 import { fmt } from "@/lib/format";
-import { fundingAccounts, invoiceTrips } from "@/lib/invoices";
+import { fundingAccounts, invoiceTrips, invoiceWaybillIds } from "@/lib/invoices";
+import { customerPhotos } from "@/lib/attachments";
 import { CashAccountField } from "@/components/cash-account-field";
 
 export default async function InvoicePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ print?: string }> }) {
@@ -38,6 +39,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   const { i, customer } = row;
   const draft = i.status === "draft";
 
+  const photosP = invoiceWaybillIds(db, id).then((ids) => customerPhotos(db, ids));
   const [lines, allocations, available, company, template] = await Promise.all([
     db
       .select({ l: s.salesInvoiceLines, taxName: s.taxCodes.nameAr })
@@ -122,6 +124,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
           lines={lines}
           qrSvg={qrSvg}
           template={template}
+          photos={await photosP}
           lineAction={
             canUpdate
               ? (l) => (

@@ -71,7 +71,7 @@ import { createPurchaseOrder, createPurchaseRequest, decideRequest, orderToInvoi
 import { createQuotation, deleteQuotation, duplicateQuotation, listQuotations, parseQuoteFilter, quotationLinesFor, quotationToInvoice, setQuotationStatus, updateQuotationFromSheet } from "@/lib/quotations";
 import { setupSteps } from "@/lib/setup";
 import ExcelJS from "exceljs";
-import { getAttachment, listAttachments, saveDataUrl } from "@/lib/attachments";
+import { customerPhotos, getAttachment, listAttachments, saveDataUrl, setPhotoHidden } from "@/lib/attachments";
 import { once, onceForOp } from "@/lib/once";
 import { PAGE_SIZE, pageOf } from "@/lib/paging";
 import * as rec from "@/lib/reconciliation";
@@ -612,8 +612,35 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       const sum = await dailySummary(db, D);
       expect(sum.pending).toBe(0);
       expect(summaryText(sum, "الكمال")).toContain("ملخص الوثائق اليومي – الكمال");
+
+      // التأمين الطبي يصل للسائق ملف PDF: يُقبل ويصل للاعتماد ثم ينتقل للوثيقة
+      const pdf = `data:application/pdf;base64,${Buffer.from("%PDF-1.4 test").toString("base64")}`;
+      const med = await submitRenewal(db, me, { documentTypeId: code("d_medical_insurance"), expiryDate: `${YEAR + 1}-03-31`, photo: pdf });
+      const [medSub] = await listSubmissions(db, { status: "pending" });
+      expect(medSub).toMatchObject({ attachmentMime: "application/pdf" });
+      const medDoc = await approveSubmission(db, med.id, {});
+      expect(medDoc).toMatchObject({ driverId: driver.id, expiryDate: `${YEAR + 1}-03-31` });
+      const medRow = (await ownerDocuments(db, "driver", driver.id, D)).find((r) => r.type.code === "d_medical_insurance")!;
+      expect(medRow.current?.attachmentId).toBe(medSub.attachmentId);
+      await db.delete(s.fleetDocuments).where(eq(s.fleetDocuments.id, medDoc.id));
       await db.delete(s.documentSubmissions);
       await db.delete(s.fleetDocuments).where(eq(s.fleetDocuments.vehicleId, vehicle.id));
+    });
+
+    it("صور الرحلة: العميل يرى صور المراحل فقط، والمخفية لا تظهر", async () => {
+      const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+      const load = (await saveDataUrl(db, { entity: "waybills", entityId: firstId, kind: "other", dataUrl: png }))!;
+      const pod = (await saveDataUrl(db, { entity: "waybills", entityId: firstId, kind: "pod", dataUrl: png }))!;
+      const fuel = (await saveDataUrl(db, { entity: "waybills", entityId: firstId, kind: "fuel_receipt", dataUrl: png }))!;
+      expect((await waybillDoc(db, firstId))!.photos.map((p) => p.id)).toEqual([load, pod]);
+      await setPhotoHidden(db, firstId, pod, true);
+      expect((await customerPhotos(db, [firstId])).map((p) => p.id)).toEqual([load]);
+      // إيصال الوقود داخلي لا يُخفى ولا يظهر، وصورة شحنة أخرى لا تُعدَّل من هنا
+      await expect(setPhotoHidden(db, firstId, fuel, true)).rejects.toThrow();
+      await expect(setPhotoHidden(db, firstId + 999, load, true)).rejects.toThrow();
+      await setPhotoHidden(db, firstId, pod, false);
+      expect(await customerPhotos(db, [firstId])).toHaveLength(2);
+      await db.delete(s.attachments).where(inArray(s.attachments.id, [load, pod, fuel]));
     });
 
     it("الإرجاع لمسودة يلغي القيد", async () => {

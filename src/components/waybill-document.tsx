@@ -4,6 +4,7 @@ import type { waybillDoc } from "@/lib/waybills";
 import { DEFAULT_TEMPLATE, type InvoiceTemplate } from "@/lib/invoice-template";
 import { FREIGHT_PAYERS, GOODS_CONDITIONS, LOGISTI_STATUSES, PACKAGE_UNITS, PAYMENT_METHODS, PLATE_TYPES, TRIP_STAGES, WEIGHT_UNITS } from "@/data/waybills";
 import { Facts, Frame } from "@/components/maintenance-document";
+import { DocPhotos, type PhotoUrl } from "@/components/doc-photos";
 
 type Doc = NonNullable<Awaited<ReturnType<typeof waybillDoc>>>;
 const when = (d: Date | string) => new Date(d).toLocaleString("en-GB", { timeZone: "Asia/Riyadh", dateStyle: "short", timeStyle: "short" });
@@ -65,12 +66,15 @@ export function WaybillDocument({
   template = DEFAULT_TEMPLATE,
   compact = false,
   variant = "waybill",
+  photoUrl,
 }: {
   company: CompanyProfile;
   doc: Doc;
   template?: InvoiceTemplate;
   compact?: boolean;
   variant?: "waybill" | "transport";
+  /** رابط الصورة؛ في الرابط العام يمر عبر رمز المشاركة */
+  photoUrl?: PhotoUrl;
 }) {
   const { w } = doc;
   const fleet = w.execution === "fleet";
@@ -270,6 +274,7 @@ export function WaybillDocument({
           </ol>
         </>
       )}
+      <DocPhotos photos={doc.photos ?? []} photoUrl={photoUrl} />
       <p className="mt-6 rounded-lg bg-gray-50 px-4 py-3 text-xs text-gray-600">
         أقر المستلم باستلام الشحنة الموضحة أعلاه بحالة سليمة ومطابقة، ما لم تُذكر ملاحظة عند الاستلام.
       </p>
