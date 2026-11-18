@@ -82,7 +82,8 @@ import { createAsset, deleteAsset, disposeAsset, listAssets, runDepreciation, un
 import { IMPORT_SPECS } from "@/data/import-specs";
 import * as hr from "@/lib/hr";
 import * as platform from "@/lib/platform";
-import { recentErrors, recordError } from "@/lib/error-log";
+import { explainError, recentErrors, recordError } from "@/lib/error-log";
+import { DRIVER_DICT } from "@/data/driver-i18n";
 import { runInTenant, tenantClient } from "@/db/tenant";
 import { addExpense, addFuel, approvalIssues, approveWaybill, createWaybill, deleteWaybill, invoiceSelectedWaybills, invoiceWaybillsNow, listWaybills, parseWaybillFilter, patchWaybill, recordStage, rejectWaybill, revertWaybill, saveTransportDoc, setWaybillStatus, updateWaybill, waybillDoc } from "@/lib/waybills";
 import { sendTrip, unsendTrip, bulkTrips, invoiceTripIds } from "@/lib/trip-dispatch";
@@ -2587,6 +2588,11 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       ["خطأ آخر", 1, null],
       ["تعذّر حساب 12", 2, "/invoices"],
     ]);
+    // البريد والصفحة يذكران المستخدم، والرسائل المعروفة لها شرح وما يُفعل
+    await recordError(new Error("خطأ بمستخدم"), { sql: client, user: { name: "أحمد", login: "ahmed", roles: ["المدير"] } });
+    expect((await recentErrors(1, client))[0].stack).toMatch(/^المستخدم: أحمد \(اسم الدخول: ahmed، الدور: المدير\)/);
+    for (const d of Object.values(DRIVER_DICT)) expect(explainError(d.notLinked).bug).toBe(false);
+    expect(explainError("Cannot read properties of undefined").bug).toBe(true);
     // قفل الدخول: 10 محاولات خاطئة في 15 دقيقة توقف الاسم مؤقتاً، بلا فرق بين الحروف، والدخول الناجح يمسح العدّاد
     for (let i = 0; i < platform.LOGIN_MAX_FAILURES - 1; i++) await platform.recordLoginFailure(client, "Guess_Me");
     expect(await platform.loginThrottled(client, "guess_me")).toBe(false);
