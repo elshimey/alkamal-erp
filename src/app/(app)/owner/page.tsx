@@ -124,9 +124,10 @@ export default async function OwnerPage() {
       </Table>
       {others.length === 0 && <p className="mt-4 text-sm text-gray-500">لا توجد شركات مشتركة بعد؛ أضف أول شركة من النموذج أعلاه.</p>}
 
+      <div id="errors" className="scroll-mt-20" />
       <Card title="أخطاء البرنامج" className="mt-8">
         <p className="mb-3 text-sm text-gray-500">
-          كل خطأ غير متوقع يُسجَّل هنا مع عدد مرات تكراره في اليوم، ويصلك بريد تنبيه أول مرة يظهر فيها. أرسل لقطة منه للدعم الفني إن تكرر.
+          كل خطأ غير متوقع يُسجَّل هنا مع عدد مرات تكراره في اليوم، ويصلك بريد تنبيه أول مرة يظهر فيها لكل شركة (بالشركة ورمزها والمستخدم وشرح ما يُفعل). افتح الخطأ لترى المستخدم والتفاصيل الفنية.
         </p>
         {errors.length === 0 ? (
           <p className="text-sm text-green-700">لا أخطاء مسجلة. ✓</p>
@@ -137,7 +138,16 @@ export default async function OwnerPage() {
                 <Td className="ltr-nums whitespace-nowrap text-xs">
                   <span dir="ltr">{new Date(e.last_at).toLocaleString("en-GB", { timeZone: "Asia/Riyadh", dateStyle: "short", timeStyle: "short" })}</span>
                 </Td>
-                <Td className="text-xs">{tenants.find((t) => t.schema_name === e.schema_name)?.name ?? e.schema_name ?? "—"}</Td>
+                <Td className="text-xs">
+                  {(() => {
+                    const t = tenants.find((x) => x.schema_name === e.schema_name);
+                    return t ? (
+                      <>
+                        {t.name} <span className="text-gray-500" dir="ltr">({t.slug})</span>
+                      </>
+                    ) : (e.schema_name ?? "—");
+                  })()}
+                </Td>
                 <Td className="ltr-nums text-xs">
                   <span dir="ltr">{e.path ?? "—"}</span>
                 </Td>
