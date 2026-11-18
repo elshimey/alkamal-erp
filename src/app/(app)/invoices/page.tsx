@@ -1,6 +1,6 @@
 import { SendDocument } from "@/components/send-document";
 import Link from "next/link";
-import { and, asc, eq, inArray, like } from "drizzle-orm";
+import { and, asc, eq, inArray, like, or } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
 import { toTripExpense, tripExpensesForBilling } from "@/lib/purchases";
@@ -107,20 +107,31 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
   const [tripRoutes, tripVehicles, tripDrivers, editTrip] =
     creating || editing ? await Promise.all([routeOptions(), vehicleOptions("head"), driverOptions(), editing && editId ? currentTrip(db, editId) : Promise.resolve(null)]) : [[], [], [], null];
   const taxRows = creating || editing ? await taxCodesFor(db, "sales") : [];
-  // مصاريف على العميل تُضاف من المسودة نفسها لأي شحنة فيها
+  // مصاريف على العميل: في أي فاتورة جديدة أو مسودة؛ لشحنة فيها، أو على الفاتورة نفسها إن كانت مباشرة
   const invoiceWaybillIds = editing && editDoc ? [...new Set(editDoc.lines.filter((l) => l.kind === "waybill" && l.waybillId).map((l) => l.waybillId!))] : [];
-  const [chargeTypes, chargeBrokers, chargeCash, chargeWaybills, tripExpenses] = invoiceWaybillIds.length
+  // مصاريف الفاتورة نفسها وإيصالات رحلتها لا تثبّت العميل (ليست شحنات)
+  const ownCharges = new Set(
+    editing && editId
+      ? (
+          await db
+            .select({ id: s.waybillExpenses.id })
+            .from(s.waybillExpenses)
+            .where(or(eq(s.waybillExpenses.invoiceId, editId), editTrip ? eq(s.waybillExpenses.waybillId, editTrip.id) : undefined))
+        ).map((r) => r.id)
+      : [],
+  );
+  const [chargeTypes, chargeBrokers, chargeCash, chargeWaybills, tripExpenses] = creating || editing
     ? await Promise.all([
         chargeTypeOptions(),
         partyOptions("customs_broker"),
         accountOptions(["1", "2"]).then((o) => o.filter((x) => x.code !== "1114")),
-        db
+        invoiceWaybillIds.length ? db
           .select({ id: s.waybills.id, number: s.waybills.number, execution: s.waybills.execution })
           .from(s.waybills)
           .where(inArray(s.waybills.id, invoiceWaybillIds))
           .orderBy(asc(s.waybills.number))
-          .then((r) => r.map((w) => ({ value: String(w.id), label: `الشحنة ${w.number}`, fleet: w.execution === "fleet" }))),
-        tripExpensesForBilling(db, invoiceWaybillIds).then((r) => r.map(toTripExpense)),
+          .then((r) => r.map((w) => ({ value: String(w.id), label: `الشحنة ${w.number}`, fleet: w.execution === "fleet" }))) : Promise.resolve([]),
+        tripExpensesForBilling(db, [...invoiceWaybillIds, ...(editTrip ? [editTrip.id] : [])]).then((r) => r.map(toTripExpense)),
       ])
     : [[], [], [], [], []];
   const taxOpts = taxRows.map((x) => ({ value: String(x.id), label: `${x.nameAr} (${Number(x.rate)}%)`, rate: Number(x.rate) }));
@@ -162,6 +173,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
           .map((l) => ({
             id: l.id,
             kind: l.kind === "waybill" ? ("waybill" as const) : ("expense" as const),
+            own: l.waybillExpenseId != null && ownCharges.has(l.waybillExpenseId),
             description: l.description,
             amount: String(Number(l.amount)),
             vatAmount: l.vatAmount,

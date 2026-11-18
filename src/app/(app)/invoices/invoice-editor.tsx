@@ -34,7 +34,7 @@ export interface InvoiceDraft {
   notes: string;
   lines: Record<string, string>[];
   /** سطور الشحنات ومصاريفها في المسودة: يُعدَّل سعرها ووصفها هنا، وضريبتها وحسابها من الشحنة */
-  fixedLines: { id: number; kind: "waybill" | "expense"; description: string; amount: string; vatAmount: string; vatRate: string; details?: string | null; cost?: string | null; taxName?: string | null }[];
+  fixedLines: { id: number; kind: "waybill" | "expense"; own?: boolean; description: string; amount: string; vatAmount: string; vatRate: string; details?: string | null; cost?: string | null; taxName?: string | null }[];
   /** رحلة السائق للفاتورة المباشرة: تظهر في تطبيقه عند الإرسال ومعها عهدتها */
   trip: { on: boolean; routeId: string; vehicleId: string; driverId: string; shipper: string; consignee: string; custody: string; number?: string; sent?: boolean };
 }
@@ -101,12 +101,13 @@ export function InvoiceEditor({
   const [preview, setPreview] = useState(true);
   const box = useRef<HTMLDivElement>(null);
   const first = useRef(JSON.stringify(initial.lines));
-  const locked = initial.fixedLines.length > 0;
+  // الشحنات تثبّت العميل والعملة؛ مصاريف الفاتورة المباشرة نفسها لا
+  const locked = initial.fixedLines.some((l) => l.kind === "waybill" || !l.own);
   // سعر سطور الشحنات ومصاريفها ووصفها قابلان للتعديل في المسودة
   const [fixed, setFixed] = useState(initial.fixedLines);
   const [charges, setCharges] = useState<ChargeDraft[]>([]);
   const [billExpenses, setBillExpenses] = useState<number[]>([]);
-  const canCharge = !!initial.id && !!chargeOptions?.waybills.length;
+  const canCharge = !!chargeOptions;
   const editFixed = (id: number, patch: { amount?: string; description?: string }) => {
     setFixed((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
     touch();
@@ -293,7 +294,7 @@ export function InvoiceEditor({
                     chargeTypes={chargeOptions.chargeTypes}
                     brokers={chargeOptions.brokers}
                     cashAccounts={chargeOptions.cashAccounts}
-                    waybills={chargeOptions.waybills}
+                    waybills={chargeOptions.waybills.length ? chargeOptions.waybills : undefined}
                     fleet={false}
                     tripExpenses={chargeOptions.tripExpenses}
                     picked={billExpenses}

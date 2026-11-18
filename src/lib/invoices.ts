@@ -4,7 +4,8 @@ import * as s from "@/db/schema";
 import { customerPhotos } from "@/lib/attachments";
 import { createJournalEntryTx, deleteEntryTx, nextDocumentNumber } from "@/lib/ledger";
 import { invoicePostingLines, lineVat, round2 } from "@/lib/invoice-posting";
-import { rateOn, syncInvoiceTripTx, type InvoiceTripInput } from "@/lib/waybills";
+import { checkPayAccountTx, rateOn, syncInvoiceTripTx, waybillAccountIds, type ExpenseInput, type InvoiceTripInput } from "@/lib/waybills";
+import { todayRiyadh } from "@/lib/dates";
 import { SALES_ACCOUNTS } from "@/data/sales";
 import type { DocFilter } from "@/lib/doc-filters";
 import { docOrder, docWhere } from "@/lib/doc-query";
@@ -363,7 +364,11 @@ export async function updateDirectInvoice(db: Db, id: number, input: ManualInvoi
   return db.transaction(async (tx) => {
     const inv = await lockInvoice(tx, id);
     if (inv.status !== "draft") throw new Error(`الفاتورة ${inv.number} صادرة؛ أرجعها لمسودة لتعديلها`);
-    const fixed = await tx.select({ kind: s.salesInvoiceLines.kind }).from(s.salesInvoiceLines).where(and(eq(s.salesInvoiceLines.invoiceId, id), sql`${s.salesInvoiceLines.kind} <> 'manual'`));
+    // سطور الشحنات ومصاريفها؛ مصاريف الفاتورة نفسها لا تمنع تغيير العميل أو العملة
+    const fixed = await tx
+      .select({ kind: s.salesInvoiceLines.kind })
+      .from(s.salesInvoiceLines)
+      .where(and(eq(s.salesInvoiceLines.invoiceId, id), sql`${s.salesInvoiceLines.kind} <> 'manual'`, sql`coalesce(${s.salesInvoiceLines.waybillExpenseId} not in ${ownCharges(id)}, true)`));
     if (fixed.length && (input.customerId !== inv.customerId || input.currencyCode !== inv.currencyCode)) throw new Error("في الفاتورة شحنات؛ لا يتغير العميل ولا العملة. فك الدمج أو أخرج الشحنات أولاً");
     if (!fixed.length && !input.lines.length) throw new Error("الفاتورة بلا بنود");
     if (fixed.length && input.invoiceDate !== inv.invoiceDate) {
@@ -394,8 +399,11 @@ export async function updateDirectInvoice(db: Db, id: number, input: ManualInvoi
       await tx.delete(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, id));
       await insertLines(tx, id, await buildLines(tx, waybillIds, input.currencyCode, rate));
     }
-    await applyFixedEdits(tx, id, edits);
+    // مصاريف الفاتورة نفسها تُحوَّل لعملة الفاتورة من جديد إن تغيّر سعرها
+    if (rate !== num(inv.exchangeRate)) await tx.delete(s.salesInvoiceLines).where(and(eq(s.salesInvoiceLines.invoiceId, id), sql`${s.salesInvoiceLines.waybillExpenseId} in ${ownCharges(id)}`));
     await insertLines(tx, id, manualLines(input.lines));
+    await insertLines(tx, id, await chargeLines(tx, id));
+    await applyFixedEdits(tx, id, edits);
     await recomputeTotals(tx, id);
     // الرحلة تتبع الفاتورة (التاريخ والعميل والمبلغ)؛ بلا تغيير في بياناتها إن لم تُرسل
     const trip = input.trip !== undefined ? input.trip : await currentTrip(tx, id);
@@ -465,16 +473,30 @@ export async function setWaybillPriceTx(tx: Tx, waybillId: number, amount: numbe
 /** مصروف على العميل أُضيف لشحنة في مسودة فاتورة: يدخل الفاتورة مباشرة. */
 export async function attachChargeToDraftInvoiceTx(tx: Tx, waybillExpenseId: number) {
   const [e] = await tx.select().from(s.waybillExpenses).where(eq(s.waybillExpenses.id, waybillExpenseId));
-  if (!e || e.billTo !== "customer") return null;
+  if (!e || e.billTo !== "customer" || e.waybillId == null) return null;
+  const waybillId = e.waybillId;
   const [line] = await tx
     .select({ invoiceId: s.salesInvoiceLines.invoiceId, status: s.salesInvoices.status, number: s.salesInvoices.number, currency: s.salesInvoices.currencyCode, rate: s.salesInvoices.exchangeRate })
     .from(s.salesInvoiceLines)
     .innerJoin(s.salesInvoices, eq(s.salesInvoices.id, s.salesInvoiceLines.invoiceId))
-    .where(and(eq(s.salesInvoiceLines.waybillId, e.waybillId), eq(s.salesInvoiceLines.kind, "waybill")));
-  if (!line) return null;
+    .where(and(eq(s.salesInvoiceLines.waybillId, waybillId), eq(s.salesInvoiceLines.kind, "waybill")));
+  if (!line) {
+    // رحلة الفاتورة المباشرة: إيصال سائقها يدخل فاتورتها نفسها
+    const [trip] = await tx
+      .select({ invoiceId: s.salesInvoices.id, status: s.salesInvoices.status, number: s.salesInvoices.number })
+      .from(s.waybills)
+      .innerJoin(s.salesInvoices, eq(s.salesInvoices.id, s.waybills.sourceInvoiceId))
+      .where(eq(s.waybills.id, waybillId));
+    if (!trip) return null;
+    if (trip.status !== "draft") throw new Error(`رحلة الفاتورة الصادرة ${trip.number}؛ حمّل المصروف بإشعار مدين مربوط بها`);
+    await lockInvoice(tx, trip.invoiceId);
+    await insertLines(tx, trip.invoiceId, await chargeLines(tx, trip.invoiceId, [e.id]));
+    await recomputeTotals(tx, trip.invoiceId);
+    return trip.number;
+  }
   if (line.status !== "draft") throw new Error(`الشحنة على الفاتورة الصادرة ${line.number}؛ حمّل المصروف بإشعار مدين مربوط بها`);
   await lockInvoice(tx, line.invoiceId);
-  await insertLines(tx, line.invoiceId, await buildLines(tx, [e.waybillId], line.currency, num(line.rate), [e.id]));
+  await insertLines(tx, line.invoiceId, await buildLines(tx, [waybillId], line.currency, num(line.rate), [e.id]));
   await recomputeTotals(tx, line.invoiceId);
   return line.number;
 }
@@ -491,6 +513,156 @@ export async function detachChargeTx(tx: Tx, waybillExpenseId: number) {
   await lockInvoice(tx, line.invoiceId);
   await tx.delete(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.id, line.id));
   await recomputeTotals(tx, line.invoiceId);
+}
+
+// ───────────── مصاريف على العميل في الفاتورة المباشرة ─────────────
+// تُقيد عند الحفظ مدين 1114 دائن من دفع، وتظهر سطراً مستقلاً يُقفل 1114 عند الإصدار (مثل الشحنة تماماً).
+
+/** مصاريف الفاتورة المباشرة: المسجلة عليها، وإيصالات رحلتها المحمّلة على العميل. */
+const ownCharges = (invoiceId: number) =>
+  sql`(select e.id from waybill_expenses e where e.invoice_id = ${invoiceId} or e.waybill_id in (select w.id from waybills w where w.source_invoice_id = ${invoiceId}))`;
+
+/** سطور مصاريف الفاتورة نفسها (أو إيصالات رحلتها) بعملة الفاتورة؛ الضريبة من أول بند، والمدفوع باسم العميل «غير خاضع». */
+async function chargeLines(tx: Tx, invoiceId: number, only?: number[]) {
+  const [inv] = await tx.select().from(s.salesInvoices).where(eq(s.salesInvoices.id, invoiceId));
+  const rows = await tx
+    .select({ e: s.waybillExpenses, type: s.chargeTypes.nameAr, onBehalf: s.chargeTypes.onBehalf, waybill: s.waybills.number })
+    .from(s.waybillExpenses)
+    .innerJoin(s.chargeTypes, eq(s.chargeTypes.id, s.waybillExpenses.chargeTypeId))
+    .leftJoin(s.waybills, eq(s.waybills.id, s.waybillExpenses.waybillId))
+    .where(
+      and(
+        eq(s.waybillExpenses.billTo, "customer"),
+        only ? inArray(s.waybillExpenses.id, only) : sql`${s.waybillExpenses.id} in ${ownCharges(invoiceId)}`,
+        sql`not exists (select 1 from sales_invoice_lines l where l.waybill_expense_id = ${s.waybillExpenses.id})`,
+      ),
+    )
+    .orderBy(asc(s.waybillExpenses.id));
+  if (!rows.length) return [];
+  const [oos] = await tx.select({ id: s.taxCodes.id }).from(s.taxCodes).where(eq(s.taxCodes.code, "OOS"));
+  const [main] = await tx
+    .select({ taxCodeId: s.salesInvoiceLines.taxCodeId, vatRate: s.salesInvoiceLines.vatRate })
+    .from(s.salesInvoiceLines)
+    .where(and(eq(s.salesInvoiceLines.invoiceId, invoiceId), sql`${s.salesInvoiceLines.kind} <> 'expense'`))
+    .orderBy(asc(s.salesInvoiceLines.lineNo))
+    .limit(1);
+  const [vatOut] = main ? [] : await tx.select({ id: s.taxCodes.id, rate: s.taxCodes.rate }).from(s.taxCodes).where(eq(s.taxCodes.code, "VAT15-OUT"));
+  const tax = main ?? { taxCodeId: vatOut?.id ?? null, vatRate: vatOut?.rate ?? "0" };
+  const rechargeable = await accountId(tx, SALES_ACCOUNTS.rechargeable);
+  const rate = num(inv.exchangeRate);
+  return rows.map(({ e, type, onBehalf, waybill }) => {
+    const converted = round2((num(e.amount) * num(e.exchangeRate)) / rate);
+    const behalf = onBehalf && oos;
+    const vatRate = behalf ? 0 : num(tax.vatRate);
+    return {
+      lineNo: 0,
+      invoiceId: 0,
+      kind: "expense" as const,
+      // بلا شحنة على السطر: رحلة الفاتورة المباشرة إيرادها في الفاتورة نفسها ولا تصبح «مفوترة»
+      waybillId: null,
+      waybillExpenseId: e.id,
+      description: `${type}${e.note ? ` (${e.note})` : ""}${waybill ? ` – ${waybill}` : ""}`,
+      amount: String(converted),
+      costAmount: String(converted),
+      vatRate: String(vatRate),
+      vatAmount: String(lineVat(converted, vatRate)),
+      taxCodeId: behalf ? oos.id : tax.taxCodeId,
+      accountId: rechargeable,
+      costCenterId: null,
+    };
+  });
+}
+
+/** يضيف سطور مصاريف الفاتورة التي ليس لها سطر (بعد الحفظ أو إعادة بناء السطور بسعر صرف جديد). */
+async function syncInvoiceChargeLinesTx(tx: Tx, invoiceId: number) {
+  const lines = await chargeLines(tx, invoiceId);
+  if (!lines.length) return;
+  await insertLines(tx, invoiceId, lines);
+  await recomputeTotals(tx, invoiceId);
+}
+
+/** مصاريف على العميل في فاتورة مباشرة (مسودة): قيد 1114 فوراً، وسطر مستقل في الفاتورة. كلها أو لا شيء. */
+export async function addInvoiceChargesTx(tx: Tx, invoiceId: number, charges: ExpenseInput[], userId?: number) {
+  if (!charges.length) return [];
+  const inv = await lockInvoice(tx, invoiceId);
+  if (inv.status !== "draft") throw new Error(`الفاتورة ${inv.number} صادرة؛ حمّل المصروف بإشعار مدين مربوط بها`);
+  const acc = await waybillAccountIds(tx);
+  const today = todayRiyadh();
+  const out = [];
+  for (const c of charges) {
+    const payer = c.payer === "customs_broker" ? "customs_broker" : c.payer === "cash" ? "cash" : null;
+    if (!payer) throw new Error("ما دفعه السائق من عهدته يُحمَّل من إيصاله في التطبيق، لا يُكتب يدوياً");
+    if (payer === "cash") {
+      if (!c.cashAccountId) throw new Error("اختر الحساب الذي دفعت منه الشركة");
+      await checkPayAccountTx(tx, c.cashAccountId);
+    }
+    if (payer === "customs_broker" && !c.partyId) throw new Error("اختر المخلص");
+    if (!(c.amount > 0)) throw new Error("المبلغ إلزامي");
+    const currency = c.currencyCode ?? "SAR";
+    const exchangeRate = c.exchangeRate ?? (await rateOn(tx, currency, inv.invoiceDate));
+    const [type] = await tx.select({ name: s.chargeTypes.nameAr }).from(s.chargeTypes).where(eq(s.chargeTypes.id, c.chargeTypeId));
+    if (!type) throw new Error("نوع المصروف غير موجود");
+    const [row] = await tx
+      .insert(s.waybillExpenses)
+      .values({
+        invoiceId,
+        chargeTypeId: c.chargeTypeId,
+        amount: String(c.amount),
+        currencyCode: currency,
+        exchangeRate: String(exchangeRate),
+        billTo: "customer",
+        payer,
+        partyId: payer === "customs_broker" ? c.partyId! : null,
+        cashAccountId: payer === "cash" ? c.cashAccountId! : null,
+        note: c.note || null,
+      })
+      .returning();
+    const fx = { currencyCode: currency, exchangeRate };
+    const description = `${type.name} – ${inv.number}`;
+    const entry = await createJournalEntryTx(tx, {
+      entryDate: today > inv.invoiceDate ? today : inv.invoiceDate,
+      description: `مصروف على العميل في الفاتورة ${inv.number}: ${type.name}`,
+      source: { type: "invoice_charge", id: row.id },
+      post: true,
+      userId,
+      lines: [
+        { accountId: acc.rechargeable, ...fx, description: `على العميل: ${description}`, debit: c.amount },
+        { accountId: payer === "cash" ? c.cashAccountId! : acc.customsBrokers, ...fx, partyId: payer === "customs_broker" ? c.partyId : null, description, credit: c.amount },
+      ],
+    });
+    await tx.update(s.waybillExpenses).set({ journalEntryId: entry.id }).where(eq(s.waybillExpenses.id, row.id));
+    out.push(row);
+  }
+  await syncInvoiceChargeLinesTx(tx, invoiceId);
+  return out;
+}
+
+export async function addInvoiceCharges(db: Db | Tx, invoiceId: number, charges: ExpenseInput[], userId?: number) {
+  return (db as Db).transaction((tx) => addInvoiceChargesTx(tx, invoiceId, charges, userId));
+}
+
+async function isInvoiceCharge(tx: Tx, chargeId: number) {
+  const [r] = await tx.select({ invoiceId: s.waybillExpenses.invoiceId }).from(s.waybillExpenses).where(eq(s.waybillExpenses.id, chargeId));
+  return r?.invoiceId != null;
+}
+
+/** يحذف مصاريف الفاتورة نفسها: سطرها ثم المصروف ثم قيده. */
+async function dropInvoiceChargesTx(tx: Tx, chargeIds: number[]) {
+  if (!chargeIds.length) return;
+  const rows = await tx.select().from(s.waybillExpenses).where(and(inArray(s.waybillExpenses.id, chargeIds), sql`${s.waybillExpenses.invoiceId} is not null`));
+  if (!rows.length) return;
+  const ids = rows.map((r) => r.id);
+  await tx.delete(s.salesInvoiceLines).where(inArray(s.salesInvoiceLines.waybillExpenseId, ids));
+  await tx.delete(s.waybillExpenses).where(inArray(s.waybillExpenses.id, ids));
+  for (const r of rows) if (r.journalEntryId) await deleteEntryTx(tx, r.journalEntryId);
+}
+
+/** مصاريف الفاتورة تتبع سطورها بعد الدمج أو فك الدمج. */
+async function followChargeLinesTx(tx: Tx) {
+  await tx.execute(sql`
+    update waybill_expenses e set invoice_id = l.invoice_id
+    from sales_invoice_lines l
+    where l.waybill_expense_id = e.id and e.invoice_id is not null and e.invoice_id <> l.invoice_id`);
 }
 
 /** فوترة الكل: فاتورة لكل عميل وعملة بكل شحناته المعتمدة غير المفوترة. */
@@ -535,6 +707,9 @@ export async function removeInvoiceLine(db: Db, invoiceId: number, lineId: numbe
     if (!line) return;
     if (line.kind === "waybill") {
       await tx.delete(s.salesInvoiceLines).where(and(eq(s.salesInvoiceLines.invoiceId, invoiceId), eq(s.salesInvoiceLines.waybillId, line.waybillId!)));
+    } else if (line.kind === "expense" && (await isInvoiceCharge(tx, line.waybillExpenseId!))) {
+      // مصروف الفاتورة نفسها: يُحذف مع قيده حتى لا يبقى معلّقاً على 1114
+      await dropInvoiceChargesTx(tx, [line.waybillExpenseId!]);
     } else {
       await tx.delete(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.id, lineId));
     }
@@ -619,7 +794,9 @@ export async function deleteInvoice(db: Db, invoiceId: number, opts: { reason: s
     if (hasOfficialNumber(inv)) throw new Error(`الفاتورة ${inv.number} أُصدرت سابقاً وأخذت رقماً رسمياً، فلا تُحذف حفاظاً على تسلسل الفواتير. عدّلها وأعد إصدارها، أو ألغها بإشعار دائن بعد إصدارها`);
     await syncInvoiceTripTx(tx, { ...inv, userId: opts.userId }, null);
     const lines = await tx.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, invoiceId));
-    await tx.insert(s.deletionLog).values({ entity: "sales_invoice", entityId: String(invoiceId), snapshot: { invoice: inv, lines }, reason: opts.reason.trim(), userId: opts.userId });
+    const charges = await tx.select().from(s.waybillExpenses).where(eq(s.waybillExpenses.invoiceId, invoiceId));
+    await tx.insert(s.deletionLog).values({ entity: "sales_invoice", entityId: String(invoiceId), snapshot: { invoice: inv, lines, charges }, reason: opts.reason.trim(), userId: opts.userId });
+    await dropInvoiceChargesTx(tx, charges.map((c) => c.id));
     await tx.delete(s.salesInvoices).where(eq(s.salesInvoices.id, invoiceId));
   });
 }
@@ -679,6 +856,7 @@ export async function unmergeInvoice(db: Db, invoiceId: number, userId?: number)
       created.push(number);
     }
     await tx.update(s.salesInvoiceLines).set({ groupKey: null }).where(inArray(s.salesInvoiceLines.id, keep[1].map((l) => l.id)));
+    await followChargeLinesTx(tx);
     await renumberLines(tx, invoiceId);
     await recomputeTotals(tx, invoiceId);
     return { number: inv.number, created };
@@ -717,12 +895,13 @@ export async function mergeInvoices(db: Db, ids: number[], userId?: number) {
     for (const o of others) {
       await tx.execute(sql`
         update sales_invoice_lines set invoice_id = ${host.id}, line_no = line_no + 1000,
-          group_key = case when kind = 'manual' then coalesce(group_key, ${o.id}) else group_key end
+          group_key = case when waybill_id is null then coalesce(group_key, ${o.id}) else group_key end
         where invoice_id = ${o.id}`);
       const notes = o.notes && o.notes !== host.notes ? o.notes : null;
       if (notes) await tx.update(s.salesInvoices).set({ notes: [host.notes, notes].filter(Boolean).join(" · ") }).where(eq(s.salesInvoices.id, host.id));
       // رحلات الفواتير المدمجة تتبع الفاتورة الباقية
       await tx.update(s.waybills).set({ sourceInvoiceId: host.id }).where(eq(s.waybills.sourceInvoiceId, o.id));
+      await followChargeLinesTx(tx);
       await tx.delete(s.salesInvoices).where(eq(s.salesInvoices.id, o.id));
     }
     await renumberLines(tx, host.id);
