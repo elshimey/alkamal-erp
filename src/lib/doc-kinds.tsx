@@ -25,19 +25,22 @@ import { ViolationDocument } from "@/components/violation-document";
 import { BreakdownRequestDocument, MaintenanceOrderDocument } from "@/components/maintenance-document";
 import { CustodyDocument } from "@/components/custody-document";
 import { WaybillDocument } from "@/components/waybill-document";
+import type { PhotoUrl } from "@/components/doc-photos";
 import { PurchaseOrderDocument, QuotationDocument } from "@/components/commercial-documents";
 
 type Company = Awaited<ReturnType<typeof getCompany>>;
 type Template = Awaited<ReturnType<typeof getInvoiceTemplate>>;
-export type DocKind = { title: string; entity: Entity; render: (id: number, c: Company, t: Template) => Promise<{ name: string; node: ReactNode } | null> };
+/** photoUrl: رابط صور الرحلة؛ الافتراضي /files للمكتب، والرابط العام يمرّرها عبر رمز المشاركة. */
+type RenderOpts = { photoUrl?: PhotoUrl };
+export type DocKind = { title: string; entity: Entity; render: (id: number, c: Company, t: Template, o?: RenderOpts) => Promise<{ name: string; node: ReactNode } | null> };
 
 export const DOC_KINDS: Record<string, DocKind> = {
   waybills: {
     title: "بوالص الشحن",
     entity: "waybills",
-    render: async (id, c, t) => {
+    render: async (id, c, t, o) => {
       const d = await waybillDoc(db, id);
-      return d && { name: d.w.number, node: <WaybillDocument company={c} doc={d} template={t} /> };
+      return d && { name: d.w.number, node: <WaybillDocument company={c} doc={d} template={t} photoUrl={o?.photoUrl} /> };
     },
   },
   transport: {
@@ -51,11 +54,14 @@ export const DOC_KINDS: Record<string, DocKind> = {
   invoices: {
     title: "فواتير المبيعات",
     entity: "sales_invoices",
-    render: async (id, c, t) => {
+    render: async (id, c, t, o) => {
       const d = await salesInvoiceDoc(db, id);
       if (!d) return null;
       const qr = await invoiceQrSvg(c, d.i, await clearedQr(db, d.i.id));
-      return { name: d.i.number, node: <TaxInvoiceDocument company={c} invoice={d.i} customer={d.customer} lines={d.lines} qrSvg={qr} template={t} /> };
+      return {
+        name: d.i.number,
+        node: <TaxInvoiceDocument company={c} invoice={d.i} customer={d.customer} lines={d.lines} qrSvg={qr} template={t} photos={d.photos} photoUrl={o?.photoUrl} />,
+      };
     },
   },
   purchases: {

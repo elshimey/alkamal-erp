@@ -2129,6 +2129,8 @@ export const attachments = pgTable(
     mime: varchar("mime", { length: 40 }).notNull(),
     size: integer("size").notNull(),
     data: bytea("data").notNull(),
+    // صور الرحلة تظهر للعميل في مستند الشحنة والفاتورة ورابطهما، إلا ما يخفيه المكتب
+    hiddenFromCustomer: boolean("hidden_from_customer").notNull().default(false),
     createdBy: ref("created_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: createdAt(),
   },

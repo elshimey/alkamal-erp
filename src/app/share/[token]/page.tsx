@@ -11,12 +11,14 @@ export const metadata: Metadata = { robots: { index: false, follow: false } };
 
 /** صفحة عامة لمستند أُرسل للعميل: يطّلع عليه ويحمّله PDF أو يطبعه، دون دخول. */
 export default async function SharedDocPage({ params }: { params: Promise<{ token: string }> }) {
-  const share = await resolveShare((await params).token);
+  const token = (await params).token;
+  const share = await resolveShare(token);
   const kind = share && DOC_KINDS[share.kind];
   if (!share || !kind) notFound();
   const doc = await runInTenant(share.schema, async () => {
     const [company, template] = await Promise.all([getCompany(db), getInvoiceTemplate(db)]);
-    const d = await kind.render(share.id, company, template);
+    // صور الرحلة تمر عبر رمز المشاركة نفسه، فيراها العميل دون دخول
+    const d = await kind.render(share.id, company, template, { photoUrl: (id) => `/share/${token}/photo/${id}` });
     return d && { ...d, company: company.nameAr };
   });
   if (!doc) notFound();

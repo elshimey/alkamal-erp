@@ -15,9 +15,9 @@ import { SheetEditor } from "@/components/sheet-editor";
 import { Icon } from "@/components/icons";
 import { SendDocument } from "@/components/send-document";
 import { getBrand } from "@/lib/brand";
-import { ATTACHMENT_KINDS, listAttachments, type AttachmentKind } from "@/lib/attachments";
+import { ATTACHMENT_KINDS, isCustomerPhoto, listAttachments, type AttachmentKind } from "@/lib/attachments";
 import { Badge, Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
-import { addStage, approveOne, deleteOne, removeItem, revertOne, saveExpenses, saveFuel, saveWaybillDetails } from "../actions";
+import { addStage, approveOne, deleteOne, removeItem, revertOne, saveExpenses, saveFuel, saveWaybillDetails, togglePhotoHidden } from "../actions";
 
 const fmt = (v: string | number | null | undefined) =>
   v == null ? "—" : Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -95,6 +95,8 @@ export default async function WaybillPage({ params }: { params: Promise<{ id: st
   const showPrices = hasSpecial(user.perms, "view_prices");
   const editable = ["draft", "in_transit", "delivered", "rejected"].includes(w.status);
   const canUpdate = editable && can(user.perms, "waybills", "update");
+  // إخفاء صورة عن العميل لا يمس القيود، فيُسمح به في أي حالة
+  const canHidePhotos = can(user.perms, "waybills", "update");
   // المصاريف تُضاف أيضاً بعد الاعتماد (بقيد مستقل) حتى إصدار الفاتورة
   const canCharge = (editable || w.status === "approved") && can(user.perms, "waybills", "update");
   const canApprove = ["draft", "in_transit", "delivered"].includes(w.status) && can(user.perms, "waybills", "approve");
@@ -245,15 +247,30 @@ export default async function WaybillPage({ params }: { params: Promise<{ id: st
 
       {photos.length > 0 && (
         <Card title={`صور الرحلة من السائق (${photos.length})`} className="mb-6">
+          <p className="mb-3 text-xs text-gray-500">صور التحميل والطريق والتسليم تظهر للعميل في مستند الشحنة والفاتورة ورابطهما، إلا ما تخفيه. فواتير الديزل وإيصالات المصروفات داخلية لا يراها العميل.</p>
           <div className="grid grid-cols-3 gap-3 sm:grid-cols-6">
-            {photos.map((ph) => (
-              <a key={ph.id} href={`/files/${ph.id}`} target="_blank" rel="noreferrer" className="group block text-center">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={`/files/${ph.id}`} alt={ATTACHMENT_KINDS[ph.kind as AttachmentKind] ?? "صورة"} loading="lazy" className="aspect-square w-full rounded-lg object-cover ring-1 ring-black/10 transition group-hover:ring-brand-500" />
-                <span className="mt-1 block text-xs text-gray-600">{ATTACHMENT_KINDS[ph.kind as AttachmentKind] ?? "صورة"}</span>
-                <span className="ltr-nums block text-[10px] text-gray-400">{ph.createdAt.toLocaleString("en-GB", { timeZone: "Asia/Riyadh", dateStyle: "short", timeStyle: "short" })}</span>
-              </a>
-            ))}
+            {photos.map((ph) => {
+              const forCustomer = isCustomerPhoto(ph.kind);
+              return (
+                <div key={ph.id} className="text-center">
+                  <a href={`/files/${ph.id}`} target="_blank" rel="noreferrer" className="group block">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={`/files/${ph.id}`} alt={ATTACHMENT_KINDS[ph.kind as AttachmentKind] ?? "صورة"} loading="lazy" className={`aspect-square w-full rounded-lg object-cover ring-1 ring-black/10 transition group-hover:ring-brand-500 ${forCustomer && ph.hiddenFromCustomer ? "opacity-40" : ""}`} />
+                    <span className="mt-1 block text-xs text-gray-600">{ATTACHMENT_KINDS[ph.kind as AttachmentKind] ?? "صورة"}</span>
+                    <span className="ltr-nums block text-[10px] text-gray-400">{ph.createdAt.toLocaleString("en-GB", { timeZone: "Asia/Riyadh", dateStyle: "short", timeStyle: "short" })}</span>
+                  </a>
+                  {!forCustomer ? (
+                    <span className="mt-1 block text-[10px] text-gray-400">داخلية</span>
+                  ) : canHidePhotos ? (
+                    <form action={togglePhotoHidden.bind(null, id, ph.id, !ph.hiddenFromCustomer)}>
+                      <button className={`mt-1 text-[11px] hover:underline ${ph.hiddenFromCustomer ? "text-brand-700" : "text-gray-500"}`}>{ph.hiddenFromCustomer ? "إظهار للعميل" : "إخفاء عن العميل"}</button>
+                    </form>
+                  ) : (
+                    ph.hiddenFromCustomer && <span className="mt-1 block text-[10px] text-gray-400">مخفية عن العميل</span>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </Card>
       )}

@@ -281,6 +281,13 @@
       "when": 1793220000000,
       "tag": "0039_pricing_tax_charges",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1793230000000,
+      "tag": "0040_customer_photos",
+      "breakpoints": true
     }
   ]
 }

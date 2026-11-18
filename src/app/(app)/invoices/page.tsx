@@ -380,7 +380,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
             <div className="p-4 sm:p-6">
               <div className="mx-auto max-w-3xl">
                 {openDoc.i.status === "issued" && <ZatcaPanel doc={zatcaDoc} connected={!!zatca?.token} blocker={blocker} partyHref={`/records/parties/${openDoc.i.customerId}`} send={canIssue ? sendToZatca.bind(null, openDoc.i.id) : undefined} />}
-                <TaxInvoiceDocument company={company} invoice={openDoc.i} customer={openDoc.customer} lines={openDoc.lines} qrSvg={qrSvg} template={template} compact />
+                <TaxInvoiceDocument company={company} invoice={openDoc.i} customer={openDoc.customer} lines={openDoc.lines} qrSvg={qrSvg} template={template} photos={openDoc.photos} compact />
               </div>
             </div>
           </section>

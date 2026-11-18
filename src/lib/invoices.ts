@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray, isNull, lte, sql, type SQL } from "drizzle-orm";
 import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
+import { customerPhotos } from "@/lib/attachments";
 import { createJournalEntryTx, deleteEntryTx, nextDocumentNumber } from "@/lib/ledger";
 import { invoicePostingLines, lineVat, round2 } from "@/lib/invoice-posting";
 import { rateOn, syncInvoiceTripTx, type InvoiceTripInput } from "@/lib/waybills";
@@ -835,7 +836,17 @@ export async function salesInvoiceDoc(db: Db | Tx, id: number) {
       .orderBy(asc(s.salesInvoiceLines.lineNo)),
     invoiceTrips(db, id),
   ]);
-  return { ...row, lines: lines.map(({ l, taxName }) => ({ ...l, taxName })), trips };
+  const photos = await customerPhotos(db, await invoiceWaybillIds(db, id));
+  return { ...row, lines: lines.map(({ l, taxName }) => ({ ...l, taxName })), trips, photos };
+}
+
+/** شحنات الفاتورة (سطورها، والرحلة المنشأة منها مباشرة). */
+export async function invoiceWaybillIds(db: Db | Tx, id: number) {
+  const rows = await db
+    .select({ id: s.waybills.id })
+    .from(s.waybills)
+    .where(sql`(${s.waybills.sourceInvoiceId} = ${id} or "waybills"."id" in (select waybill_id from sales_invoice_lines where invoice_id = ${id} and kind = 'waybill'))`);
+  return rows.map((r) => r.id);
 }
 
 /** رحلات السائقين في الفاتورة (رحلتها المباشرة والشحنات التي فيها) وحالة إرسالها. */

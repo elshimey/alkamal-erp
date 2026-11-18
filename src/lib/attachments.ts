@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
 
@@ -37,7 +37,7 @@ export async function saveDataUrl(db: Db | Tx, input: { entity: string; entityId
 export async function listAttachments(db: Db | Tx, entity: string, ids: number[]) {
   if (!ids.length) return [];
   return db
-    .select({ id: s.attachments.id, entityId: s.attachments.entityId, kind: s.attachments.kind, size: s.attachments.size, createdAt: s.attachments.createdAt })
+    .select({ id: s.attachments.id, entityId: s.attachments.entityId, kind: s.attachments.kind, mime: s.attachments.mime, size: s.attachments.size, hiddenFromCustomer: s.attachments.hiddenFromCustomer, createdAt: s.attachments.createdAt })
     .from(s.attachments)
     .where(and(eq(s.attachments.entity, entity), inArray(s.attachments.entityId, ids)))
     .orderBy(desc(s.attachments.createdAt));
@@ -46,4 +46,40 @@ export async function listAttachments(db: Db | Tx, entity: string, ids: number[]
 export async function getAttachment(db: Db | Tx, id: number) {
   const [row] = await db.select().from(s.attachments).where(eq(s.attachments.id, id));
   return row ?? null;
+}
+
+// ───────────── صور الرحلة للعميل ─────────────
+
+/** صور مراحل الرحلة (التحميل والطريق والتسليم) هي ما يراه العميل؛ فواتير الديزل وإيصالات المصروفات داخلية. */
+export const CUSTOMER_PHOTO_KINDS = ["other", "pod"] as const;
+export const isCustomerPhoto = (kind: string) => (CUSTOMER_PHOTO_KINDS as readonly string[]).includes(kind);
+
+export type CustomerPhoto = { id: number; waybillId: number; waybillNumber: string; kind: string; createdAt: Date };
+
+/** صور الرحلة الظاهرة للعميل لشحنة أو عدة شحنات، بترتيب الشحنة ثم وقت الالتقاط. */
+export async function customerPhotos(db: Db | Tx, waybillIds: number[]): Promise<CustomerPhoto[]> {
+  if (!waybillIds.length) return [];
+  return db
+    .select({ id: s.attachments.id, waybillId: s.attachments.entityId, waybillNumber: s.waybills.number, kind: s.attachments.kind, createdAt: s.attachments.createdAt })
+    .from(s.attachments)
+    .innerJoin(s.waybills, eq(s.waybills.id, s.attachments.entityId))
+    .where(
+      and(
+        eq(s.attachments.entity, "waybills"),
+        inArray(s.attachments.entityId, waybillIds),
+        inArray(s.attachments.kind, [...CUSTOMER_PHOTO_KINDS]),
+        eq(s.attachments.hiddenFromCustomer, false),
+      ),
+    )
+    .orderBy(asc(s.attachments.entityId), asc(s.attachments.createdAt), asc(s.attachments.id));
+}
+
+/** إخفاء صورة رحلة عن العميل أو إظهارها (صور مراحل الشحنة فقط). */
+export async function setPhotoHidden(db: Db | Tx, waybillId: number, id: number, hidden: boolean) {
+  const rows = await db
+    .update(s.attachments)
+    .set({ hiddenFromCustomer: hidden })
+    .where(and(eq(s.attachments.id, id), eq(s.attachments.entity, "waybills"), eq(s.attachments.entityId, waybillId), inArray(s.attachments.kind, [...CUSTOMER_PHOTO_KINDS])))
+    .returning({ id: s.attachments.id });
+  if (!rows.length) throw new Error("الصورة غير موجودة في هذه الشحنة");
 }

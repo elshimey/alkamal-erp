@@ -201,10 +201,37 @@ export function ClearDriverPages() {
   return null;
 }
 
-/** التقاط صورة بكاميرا الجوال وضغطها قبل الإرسال (تُحفظ كنص في حقل مخفي). */
-export function PhotoInput({ name = "photo", label, required = false }: { name?: string; label: string; required?: boolean }) {
+/** يقرأ الملف كما هو (لملفات PDF). */
+const readDataUrl = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result));
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(file);
+  });
+
+/** يصغّر الصورة إلى 1280 بكسل بجودة 70% (نحو 200 كيلوبايت). */
+async function compressImage(file: File) {
+  const bmp = await createImageBitmap(file);
+  const scale = Math.min(1, 1280 / Math.max(bmp.width, bmp.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(bmp.width * scale);
+  canvas.height = Math.round(bmp.height * scale);
+  canvas.getContext("2d")!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", 0.7);
+}
+
+const MAX_PDF_BYTES = 5_000_000;
+
+/**
+ * التقاط صورة بكاميرا الجوال وضغطها قبل الإرسال (تُحفظ كنص في حقل مخفي).
+ * allowFiles (للوثائق): يفتح اختيار الكاميرا أو المعرض أو الملفات، ويقبل PDF كما هو حتى 5 ميجابايت،
+ * لأن وثائق مثل التأمين الطبي تصل للسائق ملفاً أو لقطة شاشة لا يمكن تصويرها.
+ */
+export function PhotoInput({ name = "photo", label, required = false, allowFiles = false, errorLabel }: { name?: string; label: string; required?: boolean; allowFiles?: boolean; errorLabel?: string }) {
   const [data, setData] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(false);
   const hidden = useRef<HTMLInputElement>(null);
   // بعد الحفظ يُفرَّغ النموذج، فتُمسح الصورة المختارة أيضاً حتى لا تُرسل مع العملية التالية
   useEffect(() => {
@@ -217,30 +244,44 @@ export function PhotoInput({ name = "photo", label, required = false }: { name?:
   const pick = async (file: File | undefined) => {
     if (!file) return;
     setBusy(true);
+    setError(false);
     try {
-      const bmp = await createImageBitmap(file);
-      const scale = Math.min(1, 1280 / Math.max(bmp.width, bmp.height));
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.round(bmp.width * scale);
-      canvas.height = Math.round(bmp.height * scale);
-      canvas.getContext("2d")!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
-      setData(canvas.toDataURL("image/jpeg", 0.7));
+      if (allowFiles && file.type === "application/pdf") {
+        if (file.size > MAX_PDF_BYTES) throw new Error("too big");
+        setData(await readDataUrl(file));
+      } else {
+        setData(await compressImage(file));
+      }
+    } catch {
+      setData("");
+      setError(true);
     } finally {
       setBusy(false);
     }
   };
+  const pdf = data.startsWith("data:application/pdf");
   return (
+    <div>
     <div className="flex items-center gap-3">
       <label className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 px-3 py-3 text-sm font-medium text-gray-700 active:scale-[0.99]">
-        <span aria-hidden>📷</span>
+        <span aria-hidden>{allowFiles ? "📎" : "📷"}</span>
         {busy ? "…" : label}
-        <input type="file" accept="image/*" capture="environment" className="sr-only" required={required && !data} onChange={(e) => void pick(e.target.files?.[0])} />
+        {allowFiles ? (
+          <input type="file" accept="image/*,application/pdf" className="sr-only" required={required && !data} onChange={(e) => void pick(e.target.files?.[0])} />
+        ) : (
+          <input type="file" accept="image/*" capture="environment" className="sr-only" required={required && !data} onChange={(e) => void pick(e.target.files?.[0])} />
+        )}
       </label>
-      {data && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={data} alt="" className="size-14 rounded-lg object-cover ring-1 ring-black/10" />
-      )}
+      {data &&
+        (pdf ? (
+          <span className="grid size-14 place-items-center rounded-lg bg-red-50 text-xs font-bold text-red-700 ring-1 ring-black/10">PDF</span>
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={data} alt="" className="size-14 rounded-lg object-cover ring-1 ring-black/10" />
+        ))}
       <input ref={hidden} type="hidden" name={name} value={data} />
+    </div>
+    {error && errorLabel && <p className="mt-1 text-xs text-red-600">{errorLabel}</p>}
     </div>
   );
 }
