@@ -13,7 +13,10 @@ import { fundingAccounts } from "@/lib/invoices";
 import { listHref, type DocListParams } from "@/lib/doc-filters";
 import { PAGE_SIZE, pageOf } from "@/lib/paging";
 import { fmt } from "@/lib/format";
-import { EDITABLE, listWaybills, parseWaybillFilter, waybillDoc } from "@/lib/waybills";
+import { EDITABLE, listWaybills, parseWaybillFilter, waybillComponents, waybillDoc } from "@/lib/waybills";
+import { customListOptions } from "@/lib/custom-lists";
+import { joinCustom } from "@/data/custom-lists";
+import { taxCodeOptions } from "@/lib/tax-codes";
 import { WAYBILL_SORTS, WAYBILL_STATUS, type WaybillStatus } from "@/data/waybills";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { ConfirmSubmit } from "@/components/confirm-submit";
@@ -119,9 +122,12 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
   const transportOpen = !!transportDoc && transportDoc.w.status !== "rejected";
   const editing = !!editRow && EDITABLE.includes(editRow.status);
   const needOptions = view === "sheet" || creating || editing || bulkAdding;
-  const [contacts, cities] = await Promise.all([
+  const [contacts, cities, componentKinds, taxes, editComponents] = await Promise.all([
     creating || editing ? contactCards() : Promise.resolve({}),
     creating || editing || transportOpen ? cityNames() : Promise.resolve([] as string[]),
+    creating || editing ? customListOptions(db, "price_component") : Promise.resolve([]),
+    creating || editing ? taxCodeOptions(db, "sales") : Promise.resolve([]),
+    editing && editRow ? waybillComponents(db, editRow.id) : Promise.resolve([]),
   ]);
   const [customers, routeRows, locs, vehicles, trailers, drivers, carriers, shippers] = needOptions
     ? await Promise.all([
@@ -315,7 +321,10 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
         carrierDriverName: str(w.carrierDriverName),
         shipper: w.shipper,
         consignee: w.consignee,
-        amount: showPrices ? String(Number(w.amount)) : "",
+        // السعر الأساسي، والمكونات تُضاف إليه
+        amount: showPrices ? String(Number(w.baseAmount ?? w.amount)) : "",
+        components: editComponents.map((c) => ({ kind: joinCustom(c.kind, c.classId), label: c.label, quantity: String(Number(c.quantity)), unitPrice: String(Number(c.unitPrice)) })),
+        taxCodeId: str(w.taxCodeId),
         commission: String(Number(w.driverCommission)),
         tripCustody: Number(w.tripCustody) ? String(Number(w.tripCustody)) : "",
         sent: !!w.sentToDriverAt,
@@ -329,7 +338,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
       };
     }
     if (creating)
-      return { date: today, customerId: "", routeId: "", execution: "fleet", vehicleId: "", trailerId: "", driverId: "", carrierId: "", carrierCost: "", carrierPlate: "", carrierDriverName: "", shipper: "", consignee: "", amount: "", commission: "", tripCustody: "", weight: "", container: "", deliveryNote: "", customs: "", notes: "", transport: emptyTransport() };
+      return { date: today, customerId: "", routeId: "", execution: "fleet", vehicleId: "", trailerId: "", driverId: "", carrierId: "", carrierCost: "", carrierPlate: "", carrierDriverName: "", shipper: "", consignee: "", amount: "", components: [], taxCodeId: "", commission: "", tripCustody: "", weight: "", container: "", deliveryNote: "", customs: "", notes: "", transport: emptyTransport() };
     return null;
   };
   const initial = draft();
@@ -761,6 +770,8 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
           contacts={contacts}
           cities={cities}
           showPrices={showPrices}
+          componentKinds={componentKinds}
+          taxes={taxes}
           company={company}
           template={template}
           action={saveWaybillPanel.bind(null, editing ? editId : null)}

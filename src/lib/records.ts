@@ -535,6 +535,8 @@ export const RECORDS: Record<string, RecordDef> = {
     heading: (r) => String(r.nameAr),
     fields: [
       { key: "nameAr", label: "الاسم", required: true },
+      // رسوم تُدفع باسم العميل (جمارك، رسوم ميناء) تُفوتر «غير خاضع للضريبة»
+      { key: "onBehalf", label: "يُدفع باسم العميل (غير خاضع للضريبة)", ...yesNo },
       { key: "isActive", label: "نشط", ...yesNo },
     ],
     instead: "ألغِ علامة «نشط»",

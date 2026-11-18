@@ -1185,6 +1185,8 @@ export async function syncInvoiceTripTx(
     await tx.delete(s.waybills).where(eq(s.waybills.id, existing.id));
     return null;
   }
+  // رحلة الفاتورة المباشرة سعرها من الفاتورة، بلا مكونات
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { components: _c, ...values } = await resolveWaybill(tx, {
     waybillDate: inv.invoiceDate,
     customerId: inv.customerId,

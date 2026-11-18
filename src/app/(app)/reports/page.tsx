@@ -9,7 +9,8 @@ const REPORTS: { href: string; title: string; description: string; icon: IconNam
   { href: "/reports/balance-sheet", title: "قائمة المركز المالي", description: "الأصول والالتزامات وحقوق الملكية في أي تاريخ، مع ربح السنة الجارية.", icon: "tree" },
   { href: "/reports/ledger", title: "كشف حساب", description: "حركة أي حساب أو مجموعة حسابات برصيد متحرك، ويمكن تصفيته بمركز تكلفة.", icon: "document" },
   { href: "/reports/cost-centers", title: "ربحية مراكز التكلفة", description: "إيراد وتكلفة وربح كل مركبة ومركز تكلفة، وهامش الربح.", icon: "truck" },
-  { href: "/reports/vat", title: "إقرار ضريبة القيمة المضافة", description: "المبيعات الخاضعة والصفرية، وضريبة المخرجات والمدخلات، وصافي المستحق للهيئة.", icon: "invoice" },
+  { href: "/reports/vat", title: "إقرار ضريبة القيمة المضافة", description: "كل نوع ضريبة في خانته: الأساسية والصفرية والصادرات والمعفاة والمشتريات والجمارك والاحتساب العكسي.", icon: "invoice" },
+  { href: "/reports/unbilled-charges", title: "مصاريف على العملاء لم تُفوتر", description: "ما دُفع على العملاء (الحساب 1114) ولم يدخل فاتورة صادرة، حسب العميل والشحنة.", icon: "document" },
 ];
 
 export default async function ReportsPage() {

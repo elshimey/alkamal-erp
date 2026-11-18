@@ -40,7 +40,8 @@ async function postChargeTx(tx: Tx, w: typeof s.waybills.$inferSelect, rowId: nu
   const entry = await createJournalEntryTx(tx, {
     entryDate: today > w.waybillDate ? today : w.waybillDate,
     description: `مصروف الشحنة ${w.number}: ${row.label}`,
-    source: { type: "waybill", id: w.id },
+    // مصدر مستقل لكل مصروف (للشحنة قيد واحد عند الاعتماد)
+    source: { type: "waybill_charge", id: rowId },
     lines,
     post: true,
     userId,

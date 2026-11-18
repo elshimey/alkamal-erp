@@ -20,6 +20,8 @@ import { plateKey } from "@/lib/plates";
 import { normText, type ImportIssue, type ImportReport } from "@/lib/import-match";
 import type { TemplateList } from "@/lib/xlsx";
 import { normalizeTaxName } from "@/data/tax-codes";
+import { splitCustom } from "@/data/custom-lists";
+import { customListOptions } from "@/lib/custom-lists";
 
 // تنفيذ الاستيراد: كل سجل (فاتورة بكل بنودها، أو مركبة، أو عميل) في نقطة حفظ مستقلة داخل
 // معاملة واحدة، فيُرفض السجل الخاطئ وحده. في وضع «التحقق» تُلغى المعاملة كلها في النهاية.
@@ -254,7 +256,10 @@ async function waybillLookups(tx: Tx) {
   for (const d of drivers) driver.add([d.name], d.id);
   const carrier = new Index<number>();
   for (const c of carriers) carrier.add([c.nameAr], c.id);
-  return { route, driver, carrier };
+  // مكونات السعر بأسمائها (الأساسية والمضافة)، والقيمة «الأساسي~رقم»
+  const components = new Index<string>();
+  for (const o of await customListOptions(tx, "price_component")) components.add([o.label, o.value.includes("~") ? null : o.value], o.value);
+  return { route, driver, carrier, components };
 }
 
 const wbCache: WeakMap<Ctx, Awaited<ReturnType<typeof waybillLookups>>> = new WeakMap();
@@ -290,6 +295,15 @@ async function importWaybill(tx: Tx, [r]: ImportRow[], ctx: Ctx, userId?: number
     carrierId: carrierId ?? null,
     carrierCost: v(r, "carrierCost") ? toNumber(v(r, "carrierCost"), "تكلفة الناقل", { positive: true }) : null,
     amount: v(r, "amount") ? toNumber(v(r, "amount"), "المبلغ", { min: 0 }) : null,
+    priceComponents: [1, 2].flatMap((n) => {
+      const name = v(r, `comp${n}`);
+      if (!name) return [];
+      const kind = look.components.find(name);
+      if (!kind) throw new Error(`مكون السعر «${name}» غير موجود في القائمة`);
+      const { base, classId } = splitCustom(kind);
+      return [{ kind: base!, classId, quantity: v(r, `comp${n}Qty`) ? toNumber(v(r, `comp${n}Qty`), `كمية المكون ${n}`, { positive: true }) : 1, unitPrice: toNumber(required(r, `comp${n}Price`, `سعر المكون ${n}`), `سعر المكون ${n}`, { positive: true }) }];
+    }),
+    taxCodeId: v(r, "taxCode") ? resolve(ctx.idx.taxCodes.find(v(r, "taxCode")), v(r, "taxCode"), "taxCode", "نوع الضريبة").id : null,
     weightTons: v(r, "weight") ? toNumber(v(r, "weight"), "الوزن", { min: 0 }) : null,
     containerNumber: v(r, "container") || null,
     notes: v(r, "notes") || null,
@@ -669,6 +683,8 @@ export async function templateLists(db: Db, spec: ImportSpec): Promise<TemplateL
       { title: "المركبات", values: ctx.vehicles.map((x) => x.plate).sort(), field: "vehicle" },
       { title: "السائقون", values: sorted(drivers), field: "driver" },
       { title: "الناقلون", values: sorted(carriers), field: "carrier" },
+      { title: "مكونات السعر", values: (await customListOptions(db, "price_component")).map((o) => o.label), field: "comp1" },
+      { title: "أنواع الضريبة (كما في وافق)", values: ctx.outTax.map((t) => t.nameAr), field: "taxCode" },
     ];
   }
   if (spec.entity === "vehicles") {

@@ -6,9 +6,9 @@ import { db } from "@/db";
 import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { can, hasSpecial, scopeFor } from "@/lib/permissions";
-import { cashAccounts } from "@/lib/invoices";
+import { cashAccounts, priceDetails } from "@/lib/invoices";
 import { chargeTypeOptions, partyOptions, routeOptions, vehicleOptions } from "@/lib/lookups";
-import { approvalIssues } from "@/lib/waybills";
+import { approvalIssues, waybillComponents } from "@/lib/waybills";
 import { EXPENSE_BILL_TO, EXPENSE_PAYERS, FUEL_SOURCES, TRIP_STAGES, WAYBILL_STATUS } from "@/data/waybills";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { SheetEditor } from "@/components/sheet-editor";
@@ -58,6 +58,7 @@ export default async function WaybillPage({ params }: { params: Promise<{ id: st
   if (!row) notFound();
   if (scopeFor(user.perms, "waybills", "view") === "own" && row.driverUserId !== user.id) redirect("/?denied=1");
   const { w, customerMobile, customerEmail } = row;
+  const priceText = hasSpecial(user.perms, "view_prices") ? priceDetails(w.baseAmount, await waybillComponents(db, w.id)) : null;
   const brand = await getBrand();
 
   const station = alias(s.parties, "station");
@@ -113,7 +114,7 @@ export default async function WaybillPage({ params }: { params: Promise<{ id: st
     ["المسافة", w.distanceKm != null ? `${w.distanceKm} كم` : "—"],
     ["العداد", km != null ? `${w.odometerStart} ← ${w.odometerEnd} (${km} كم)` : (w.odometerStart ?? "—")],
     ["الوزن / الحاوية", `${w.weightTons ?? "—"} طن / ${w.containerNumber ?? "—"}`],
-    ...(showPrices ? ([["المبلغ", <span key="a" className="ltr-nums">{`${fmt(w.amount)} ${w.currencyCode}`}</span>]] as [string, React.ReactNode][]) : []),
+    ...(showPrices ? ([["المبلغ", <span key="a" className="ltr-nums">{`${fmt(w.amount)} ${w.currencyCode}`}{priceText && <span className="block text-xs text-gray-500">{priceText}</span>}</span>]] as [string, React.ReactNode][]) : []),
     ["عمولة السائق", <span key="c" className="ltr-nums">{fmt(w.driverCommission)}</span>],
     ...(row.rep ? ([["المندوب", `${row.rep} · ${fmt(w.salesRepCommission)}`]] as [string, React.ReactNode][]) : []),
     ...(fleet ? [] : ([["تكلفة الناقل", <span key="k" className="ltr-nums">{fmt(w.carrierCost)}</span>]] as [string, React.ReactNode][])),

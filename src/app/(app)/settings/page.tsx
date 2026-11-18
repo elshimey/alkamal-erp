@@ -37,6 +37,7 @@ const SECTIONS: { title: string; items: Item[] }[] = [
     items: [
       { href: "/accounts", title: "شجرة الحسابات", description: "الحسابات الرئيسية والفرعية وأرصدتها.", icon: "tree", entity: "accounts" },
       { href: "/cost-centers", title: "مراكز التكلفة", description: "مركز لكل مركبة، ومراكز الإدارة والورشة.", icon: "target", entity: "cost_centers" },
+      { href: "/settings/taxes", title: "أنواع الضريبة", description: "أسماء الضرائب كما في وافق، والنسبة وخانة الإقرار، وإضافة نوع «يتصرف مثل».", icon: "document", entity: "settings" },
       { href: "/exchange-rates", title: "العملات وأسعار الصرف", description: "سعر الدينار الكويتي وغيره مقابل الريال.", icon: "exchange", entity: "accounts" },
     ],
   },

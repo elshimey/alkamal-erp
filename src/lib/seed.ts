@@ -121,6 +121,11 @@ export async function seedReferenceData(db: Db, year = new Date().getFullYear())
       })),
     )
     .onConflictDoNothing({ target: s.chargeTypes.nameAr });
+  // رسوم تُدفع باسم العميل وتُفوتر «غير خاضع للضريبة»
+  await db
+    .insert(s.chargeTypes)
+    .values({ nameAr: "رسوم جمركية باسم العميل", onBehalf: true, revenueAccountId: byCode.get("4103"), costAccountId: byCode.get("5104") })
+    .onConflictDoNothing({ target: s.chargeTypes.nameAr });
 
   await seedCoreRoles(db);
 }

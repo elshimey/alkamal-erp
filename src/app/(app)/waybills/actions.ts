@@ -35,6 +35,8 @@ import { parseTransport } from "@/lib/transport-draft";
 import type { PanelResult } from "@/components/record-panel";
 import { removeWaybillsFromDrafts } from "@/lib/invoices";
 import { addWaybillCharge, removeWaybillCharge } from "@/lib/customer-charges";
+import { splitCustom } from "@/data/custom-lists";
+import type { PriceComponentInput } from "@/lib/waybills";
 import { bulkTrips, sendTrip, unsendTrip } from "@/lib/trip-dispatch";
 import { autoSubmit } from "@/lib/zatca/service";
 import type { FormState } from "@/components/action-form";
@@ -301,6 +303,28 @@ const numOrNull = (fd: FormData, k: string, label: string) => {
   return x;
 };
 
+/** مكونات السعر من النموذج (JSON): النوع «الأساسي~رقم»، والكمية، وسعر الوحدة. */
+function readComponents(raw: string): PriceComponentInput[] {
+  let rows: { kind?: string; label?: string; quantity?: string; unitPrice?: string }[] = [];
+  try {
+    rows = JSON.parse(raw || "[]");
+  } catch {
+    throw new Error("مكونات السعر غير صالحة");
+  }
+  return rows
+    .filter((r) => r.kind || r.unitPrice)
+    .map((r, i) => {
+      const { base, classId } = splitCustom(r.kind);
+      return {
+        kind: base ?? "",
+        classId,
+        label: r.label ?? null,
+        quantity: cell.number(r.quantity, `مكون السعر ${i + 1}: الكمية`) ?? 1,
+        unitPrice: cell.number(r.unitPrice, `مكون السعر ${i + 1}: السعر`) ?? 0,
+      };
+    });
+}
+
 function readWaybillForm(fd: FormData, prices: boolean) {
   const carrier = str(fd, "execution") === "carrier";
   return {
@@ -318,6 +342,8 @@ function readWaybillForm(fd: FormData, prices: boolean) {
     carrierDriverName: carrier ? str(fd, "carrierDriverName") : null,
     // من لا يرى الأسعار لا يُدخلها؛ الفارغ يُحسب من العقد
     amount: prices ? numOrNull(fd, "amount", "المبلغ") : undefined,
+    priceComponents: prices && fd.has("components") ? readComponents(str(fd, "components")) : undefined,
+    taxCodeId: fd.has("taxCodeId") ? optId(str(fd, "taxCodeId")) : undefined,
     driverCommission: carrier ? null : numOrNull(fd, "commission", "العمولة"),
     tripCustody: carrier ? 0 : (numOrNull(fd, "tripCustody", "عهدة الرحلة") ?? 0),
     weightTons: numOrNull(fd, "weight", "الوزن"),
