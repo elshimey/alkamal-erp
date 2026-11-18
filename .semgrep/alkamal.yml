@@ -20,6 +20,7 @@ rules:
         - /src/lib/banks.ts
         - /src/db/tenant.ts
         - /tests/
+        - /e2e/
         - /scripts/
     metadata:
       category: security
