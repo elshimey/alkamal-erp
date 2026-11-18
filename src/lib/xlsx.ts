@@ -15,7 +15,7 @@ export interface TemplateList {
   title: string;
   values: string[];
   // الحقل الذي تُقترح قيمه من هذه القائمة في ورقة البيانات
-  field?: string;
+  field?: string | string[];
 }
 
 export async function buildTemplate(spec: ImportSpec, lists: TemplateList[]) {
@@ -56,8 +56,9 @@ export async function buildTemplate(spec: ImportSpec, lists: TemplateList[]) {
     head.font = { bold: true, color: { argb: "FFFFFFFF" } };
     head.fill = { type: "pattern", pattern: "solid", fgColor: { argb: DARK } };
     list.values.forEach((v, r) => (ls.getCell(r + 2, i + 1).value = v));
-    const fieldIdx = list.field ? spec.fields.findIndex((f) => f.key === list.field) : -1;
-    if (fieldIdx >= 0 && list.values.length) {
+    // القائمة الواحدة قد تخدم عدة أعمدة (مصروف 1 و2 و3)
+    const fieldIdxs = (Array.isArray(list.field) ? list.field : list.field ? [list.field] : []).map((k) => spec.fields.findIndex((f) => f.key === k)).filter((x) => x >= 0);
+    for (const fieldIdx of list.values.length ? fieldIdxs : []) {
       const letter = col.letter;
       const formula = `'${LIST_SHEET}'!$${letter}$2:$${letter}$${list.values.length + 1}`;
       for (let r = 4 + spec.samples.length; r <= 500; r++) {

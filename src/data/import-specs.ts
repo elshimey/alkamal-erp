@@ -8,6 +8,8 @@ export interface ImportField {
   label: string;
   en: string;
   required?: boolean;
+  // المطلوب يُعفى منه الصف الذي فيه قيمة في هذا العمود (بند الفاتورة مع رقم الشحنة)
+  requiredUnless?: string;
   // شرط القيمة كما يظهر في صف «قواعد التحقق» بالقالب
   rule?: string;
   // أسماء أخرى للعمود تُطابق تلقائياً (من وافق أو أنظمة أخرى)
@@ -31,6 +33,16 @@ export interface ImportSpec {
 
 const MUST_MATCH = "يجب أن يطابق تماماً الموجود في النظام (انظر ورقة «القوائم»)";
 
+/** مصاريف على العميل: ثلاثة في الصف (قرار أحمد 2026-11-18)، تُقيد على 1114 وتُفوتر مع المستند. */
+export const CHARGE_SLOTS = [1, 2, 3] as const;
+const chargeFields = (where: string): ImportField[] =>
+  CHARGE_SLOTS.flatMap((n) => [
+    { key: `charge${n}`, label: `مصروف على العميل ${n}`, en: `Customer charge ${n}`, rule: n === 1 ? `اختياري: نوع المصروف كما في القائمة (جمارك، تخليص، أرضيات…)، يُضاف ل${where} ويُفوتر للعميل` : undefined, aliases: n === 1 ? ["مصروف على العميل", "مصاريف على العميل"] : undefined, width: 16 },
+    { key: `charge${n}Amount`, label: `مبلغ المصروف ${n}`, en: `Charge amount ${n}`, rule: n === 1 ? `بعملة ${where}` : undefined, width: 11 },
+    { key: `charge${n}Payer`, label: `دافع المصروف ${n}`, en: `Paid by ${n}`, rule: n === 1 ? "الشركة أو المخلص؛ فارغ = حسب الخانة التالية. ما دفعه السائق يُحمَّل من إيصاله في التطبيق" : undefined, width: 11 },
+    { key: `charge${n}From`, label: `حساب أو مخلص المصروف ${n}`, en: `Paid from ${n}`, rule: n === 1 ? "مع الشركة: رقم أو اسم الحساب (صندوق، بنك، عهدة…)؛ مع المخلص: اسمه في جهات الاتصال" : undefined, width: 20 },
+  ]);
+
 export const IMPORT_SPECS: Record<string, ImportSpec> = {
   "sales-invoices": {
     entity: "sales-invoices",
@@ -38,7 +50,7 @@ export const IMPORT_SPECS: Record<string, ImportSpec> = {
     noun: "فاتورة",
     permission: "sales_invoices",
     backHref: "/invoices",
-    intro: "كل صف بند واحد. الفاتورة ذات عدة بنود تُكرر صفوفها بنفس رقم الفاتورة. تُستورد الفواتير مسودات لتراجعها ثم تصدرها.",
+    intro: "كل صف بند واحد. الفاتورة ذات عدة بنود تُكرر صفوفها بنفس رقم الفاتورة. الصف الذي فيه «رقم الشحنة» يُدخل شحنة معتمدة بسعرها ومصاريفها دون وصف أو سعر. بيانات الرحلة تُكتب في أول صف للفاتورة المباشرة التي ينفذها سائق من الأسطول. تُستورد الفواتير مسودات لتراجعها ثم تصدرها.",
     groupBy: "reference",
     fields: [
       { key: "customer", label: "اسم العميل", en: "Customer name", required: true, rule: MUST_MATCH, aliases: ["العميل", "customer"], width: 26 },
@@ -48,13 +60,22 @@ export const IMPORT_SPECS: Record<string, ImportSpec> = {
       { key: "dueDate", label: "تاريخ الاستحقاق", en: "Due date", rule: "فارغ = بعد 30 يوماً من التاريخ", aliases: ["تاريخ الإستحقاق"], width: 13 },
       { key: "taxInclusive", label: "الأسعار شاملة أو خالية من الضريبة", en: "Price is inc. or exc. tax", rule: "شامل الضريبة أو خالٍ من الضريبة (inc. tax / exc. tax)، فارغ = خالٍ", width: 16 },
       { key: "notes", label: "ملاحظات", en: "Notes", width: 24 },
-      { key: "description", label: "وصف البند", en: "Item description", required: true, aliases: ["وصف المنتج", "الوصف"], width: 30 },
-      { key: "quantity", label: "الكمية", en: "Item qty", required: true, rule: "رقم أكبر من صفر", aliases: ["كمية المنتج"], width: 9 },
-      { key: "unitPrice", label: "السعر", en: "Item Price", required: true, rule: "سعر الوحدة بعملة الفاتورة", aliases: ["سعر المنتج"], width: 12 },
-      { key: "account", label: "حساب البند", en: "Item Account", required: true, rule: "رقم أو اسم حساب إيراد في شجرة الحسابات", aliases: ["حساب المنتج", "الحساب"], width: 24 },
+      { key: "waybill", label: "رقم الشحنة", en: "Shipment number", rule: "اختياري: رقم شحنة معتمدة غير مفوترة لنفس العميل؛ تدخل بسعرها ومصاريفها، وتُترك خانات البند فارغة", aliases: ["الشحنة", "shipment no", "waybill"], width: 14 },
+      { key: "description", label: "وصف البند", en: "Item description", required: true, requiredUnless: "waybill", rule: "مطلوب إلا مع رقم الشحنة", aliases: ["وصف المنتج", "الوصف"], width: 30 },
+      { key: "quantity", label: "الكمية", en: "Item qty", required: true, requiredUnless: "waybill", rule: "رقم أكبر من صفر", aliases: ["كمية المنتج"], width: 9 },
+      { key: "unitPrice", label: "السعر", en: "Item Price", required: true, requiredUnless: "waybill", rule: "سعر الوحدة بعملة الفاتورة", aliases: ["سعر المنتج"], width: 12 },
+      { key: "account", label: "حساب البند", en: "Item Account", required: true, requiredUnless: "waybill", rule: "رقم أو اسم حساب إيراد في شجرة الحسابات", aliases: ["حساب المنتج", "الحساب"], width: 24 },
       { key: "taxCode", label: "معدل الضريبة", en: "Item tax rate name", rule: "اسم نوع الضريبة كما في وافق (انظر «القوائم»)، أو 15% أو صفر أو معفى؛ فارغ = 15%", aliases: ["إسم معدل الضريبة للمنتج", "اسم معدل الضريبة للمنتج", "الضريبة"], width: 14 },
       { key: "costCenter", label: "مركز التكلفة أو المركبة", en: "Item Cost Center", rule: "رقم لوحة المركبة أو رمز/اسم مركز التكلفة", aliases: ["مركز تكلفة المنتج", "مركز التكلفة", "المركبة"], width: 18 },
       { key: "discount", label: "الخصم %", en: "Item discount (%)", rule: "نسبة من 0 إلى 100", aliases: ["الخصم على المنتج"], width: 9 },
+      { key: "tripVehicle", label: "مركبة الرحلة", en: "Trip vehicle", rule: "اختياري للفاتورة المباشرة: لوحة المركبة فتُنشأ رحلة للسائق (لا مع رقم الشحنة)", width: 12 },
+      { key: "tripDriver", label: "سائق الرحلة", en: "Trip driver", rule: "فارغ = المسند للمركبة", width: 16 },
+      { key: "tripFrom", label: "مدينة تحميل الرحلة", en: "Trip from", rule: "مطلوبة مع مركبة الرحلة، كما في المسارات", width: 14 },
+      { key: "tripTo", label: "مدينة تسليم الرحلة", en: "Trip to", rule: "مطلوبة مع مركبة الرحلة", width: 14 },
+      { key: "tripShipper", label: "مرسل الرحلة", en: "Trip shipper", rule: "مطلوب مع مركبة الرحلة", width: 16 },
+      { key: "tripConsignee", label: "مستلم الرحلة", en: "Trip consignee", rule: "مطلوب مع مركبة الرحلة", width: 16 },
+      { key: "tripCustody", label: "عهدة الرحلة", en: "Trip custody", rule: "تُصرف للسائق عند الإرسال", width: 10 },
+      ...chargeFields("الفاتورة"),
     ],
     samples: [
       { customer: "شركة مثال للتجارة", reference: "INV-001", currency: "SAR", invoiceDate: "2026-10-01", dueDate: "2026-10-31", taxInclusive: "خالٍ من الضريبة", description: "نقل حاوية الرياض ← الدمام", quantity: "2", unitPrice: "1500", account: "4101", taxCode: "ضريبة القيمة المضافة على الإيرادات", costCenter: "", discount: "" },
@@ -105,11 +126,17 @@ export const IMPORT_SPECS: Record<string, ImportSpec> = {
       { key: "from", label: "من", en: "From", required: true, rule: "مدينة التحميل كما في المسارات", aliases: ["مدينة التحميل", "من مدينة"], width: 14 },
       { key: "to", label: "إلى", en: "To", required: true, rule: "مدينة أو دولة التسليم كما في المسارات", aliases: ["مدينة التسليم", "إلى مدينة", "الوجهة"], width: 14 },
       { key: "vehicle", label: "المركبة", en: "Plate", rule: "لوحة مركبة من الأسطول، أو اترك فارغاً واكتب الناقل", aliases: ["اللوحة", "رقم اللوحة"], width: 12 },
+      { key: "trailer", label: "المقطورة", en: "Trailer", rule: "لوحة المقطورة (السطحة) إن وُجدت", aliases: ["السطحة", "لوحة المقطورة"], width: 12 },
       { key: "driver", label: "السائق", en: "Driver", rule: "فارغ = المسند للمركبة في التاريخ", width: 16 },
+      { key: "commission", label: "عمولة السائق", en: "Driver commission", rule: "فارغ = من المسار", aliases: ["العمولة"], width: 11 },
+      { key: "tripCustody", label: "عهدة الرحلة", en: "Trip custody", rule: "تُصرف للسائق عند الإرسال", aliases: ["العهدة"], width: 10 },
       { key: "carrier", label: "الناقل الخارجي", en: "Carrier", rule: "بدل المركبة عند النقل بناقل خارجي", aliases: ["الناقل"], width: 18 },
       { key: "carrierCost", label: "تكلفة الناقل", en: "Carrier cost", rule: "إلزامية مع الناقل الخارجي", width: 12 },
+      { key: "carrierPlate", label: "لوحة الناقل", en: "Carrier plate", width: 12 },
+      { key: "carrierDriver", label: "سائق الناقل", en: "Carrier driver", width: 16 },
       { key: "shipper", label: "المرسل", en: "Shipper", required: true, aliases: ["الشاحن"], width: 18 },
       { key: "consignee", label: "المستلم", en: "Consignee", required: true, aliases: ["المرسل إليه"], width: 18 },
+      { key: "deliveryAddress", label: "عنوان التسليم", en: "Delivery address", width: 22 },
       { key: "amount", label: "المبلغ", en: "Amount", rule: "السعر الأساسي قبل الضريبة؛ فارغ = من العقد", width: 12 },
       { key: "comp1", label: "مكون السعر 1", en: "Price item 1", rule: "اختياري: وزن زائد، كيلومترات زائدة، انتظار، خصم… أو ما أضفته", aliases: ["مكون السعر"], width: 16 },
       { key: "comp1Qty", label: "كمية المكون 1", en: "Qty 1", rule: "فارغ = 1", width: 10 },
@@ -117,13 +144,19 @@ export const IMPORT_SPECS: Record<string, ImportSpec> = {
       { key: "comp2", label: "مكون السعر 2", en: "Price item 2", width: 16 },
       { key: "comp2Qty", label: "كمية المكون 2", en: "Qty 2", width: 10 },
       { key: "comp2Price", label: "سعر المكون 2", en: "Price 2", width: 10 },
+      { key: "comp3", label: "مكون السعر 3", en: "Price item 3", width: 16 },
+      { key: "comp3Qty", label: "كمية المكون 3", en: "Qty 3", width: 10 },
+      { key: "comp3Price", label: "سعر المكون 3", en: "Price 3", width: 10 },
       { key: "taxCode", label: "نوع الضريبة", en: "Tax", rule: "فارغ = حسب المسار؛ أو الاسم كما في وافق", aliases: ["الضريبة", "معدل الضريبة"], width: 22 },
       { key: "weight", label: "الوزن (طن)", en: "Weight", width: 10 },
       { key: "container", label: "رقم الحاوية", en: "Container", width: 14 },
+      { key: "deliveryNote", label: "رقم مذكرة التسليم", en: "Delivery note", aliases: ["مذكرة التسليم"], width: 14 },
+      { key: "customs", label: "رقم البيان الجمركي", en: "Customs declaration", aliases: ["البيان الجمركي"], width: 14 },
+      ...chargeFields("الشحنة"),
       { key: "notes", label: "ملاحظات", en: "Notes", width: 22 },
     ],
     samples: [
-      { date: "2026-10-01", customer: "شركة مثال للتجارة", from: "الدمام", to: "الكويت", vehicle: "أ ب ج 1234", driver: "", carrier: "", carrierCost: "", shipper: "مصنع المثال", consignee: "مستودع الكويت", amount: "", weight: "24", container: "MSCU1234567", notes: "" },
+      { date: "2026-10-01", customer: "شركة مثال للتجارة", from: "الدمام", to: "الكويت", vehicle: "أ ب ج 1234", driver: "", carrier: "", carrierCost: "", shipper: "مصنع المثال", consignee: "مستودع الكويت", amount: "", weight: "24", container: "MSCU1234567", charge1: "رسوم جمركية", charge1Amount: "350", charge1Payer: "الشركة", charge1From: "110101", notes: "" },
     ],
   },
 

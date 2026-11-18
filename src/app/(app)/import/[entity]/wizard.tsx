@@ -61,7 +61,8 @@ export function ImportWizard({ spec }: { spec: ImportSpec }) {
   const fieldOf = useMemo(() => Object.fromEntries(spec.fields.map((f) => [f.key, f])), [spec]);
   const active = mapping.map((m, i) => (enabled[i] ? m : null));
   const mappedKeys = new Set(active.filter(Boolean) as string[]);
-  const missingRequired = spec.fields.filter((f) => f.required && !mappedKeys.has(f.key));
+  // المطلوب إلا مع عمود آخر (بند الفاتورة مع رقم الشحنة) لا يُشترط إن رُبط ذلك العمود
+  const missingRequired = spec.fields.filter((f) => f.required && !mappedKeys.has(f.key) && !(f.requiredUnless && mappedKeys.has(f.requiredUnless)));
   const step = report ? 2 : parsed ? 1 : 0;
 
   const upload = (file: File | undefined) => {

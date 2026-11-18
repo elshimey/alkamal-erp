@@ -3331,6 +3331,87 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect([nl.taxCodeId, Number(nl.vatRate), Number(nl.vatAmount)]).toEqual([(await tax("ZERO")).id, 0, 0]);
       expect((await vatReturn(db, D, D)).sales.find((b) => b.behavior === "zero")?.adjust).toBe(100);
     });
+    it("الاستيراد الجماعي: الشحنة بكل حقولها وثلاثة مصاريف على العميل، والفاتورة برقم الشحنة وبرحلتها ومصاريفها", async () => {
+      const broker = await createParty(db, { nameAr: "مخلص الاستيراد", roles: ["customs_broker"] });
+      const base = { date: D, customer: "شركة الكثبان", from: "تبوك", to: "حائل", vehicle: "ك ث ب 4411", shipper: "مرسل الملف", consignee: "مستلم الملف", amount: "1000" };
+      const rows = [
+        {
+          ...base,
+          commission: "150",
+          tripCustody: "400",
+          deliveryAddress: "حائل الصناعية",
+          deliveryNote: "DN-77",
+          customs: "CUS-88",
+          comp3: "انتظار",
+          comp3Qty: "2",
+          comp3Price: "50",
+          charge1: "رسوم جمركية باسم العميل",
+          charge1Amount: "350",
+          charge1Payer: "الشركة",
+          charge1From: "110101",
+          // الدافع الفارغ يُعرف من الاسم
+          charge2: "انتظار",
+          charge2Amount: "25",
+          charge2From: "مخلص الاستيراد",
+        },
+        { ...base, shipper: "مرسل مرفوض", charge1: "انتظار", charge1Amount: "10", charge1Payer: "السائق", charge1From: "110101" },
+        { ...base, shipper: "مرسل مرفوض", charge1: "انتظار", charge1Amount: "10", charge1From: "4101" },
+        { ...base, shipper: "مرسل مرفوض", charge1: "نوع غير موجود", charge1Amount: "10", charge1From: "110101", charge2Amount: "" },
+      ].map((values, i) => ({ row: i + 5, values: values as Record<string, string> }));
+      const report = await runImport(db, IMPORT_SPECS.waybills, rows, { dryRun: false });
+      expect(report).toMatchObject({ total: 4, ok: 1 });
+      expect(report.issues.map((i) => [i.rows[0], i.field])).toEqual([
+        [6, "charge1Payer"],
+        [7, "charge1From"],
+        [8, "charge1"],
+      ]);
+      expect(report.issues[0].message).toContain("إيصاله");
+      const [w] = await db.select().from(s.waybills).where(eq(s.waybills.shipper, "مرسل الملف"));
+      expect([w.status, Number(w.amount), Number(w.driverCommission), Number(w.tripCustody), w.deliveryAddress, w.deliveryNoteNumber, w.customsDeclaration]).toEqual(["draft", 1100, 150, 400, "حائل الصناعية", "DN-77", "CUS-88"]);
+      const charges = await db.select().from(s.waybillExpenses).where(eq(s.waybillExpenses.waybillId, w.id)).orderBy(s.waybillExpenses.id);
+      expect(charges.map((c) => [c.billTo, c.payer, Number(c.amount), c.cashAccountId, c.partyId])).toEqual([
+        ["customer", "cash", 350, acc["110101"], null],
+        ["customer", "customs_broker", 25, null, broker.id],
+      ]);
+      // عند الاعتماد تُقيد على 1114
+      const { entry } = await approveWaybill(db, w.id, { canOverride: true, overrideReason: "تجربة" });
+      expect((await entryLines(entry!.id)).filter((l) => l.code === "1114").reduce((t, l) => t + l.debit, 0)).toBe(375);
+
+      // الفاتورة: صف برقم الشحنة (دون سعر) وصف بند عادي ومصروف على الفاتورة
+      const inv = (values: Record<string, string>, i: number) => ({ row: i + 5, values: { customer: "شركة الكثبان", currency: "SAR", invoiceDate: D, ...values } });
+      const bad = await runImport(
+        db,
+        IMPORT_SPECS["sales-invoices"],
+        [inv({ reference: "IMP-B1", waybill: w.number, unitPrice: "5" }, 0), inv({ reference: "IMP-B2", waybill: "WB-لا يوجد" }, 1), inv({ reference: "IMP-B3", waybill: w.number, tripVehicle: "ك ث ب 4411", tripFrom: "تبوك", tripTo: "حائل", tripShipper: "أ", tripConsignee: "ب" }, 2)],
+        { dryRun: true },
+      );
+      expect(bad.issues.map((i) => i.message)).toEqual([expect.stringContaining("اترك الكمية والسعر"), expect.stringContaining("غير موجود"), expect.stringContaining("للفاتورة المباشرة فقط")]);
+      const ok = await runImport(
+        db,
+        IMPORT_SPECS["sales-invoices"],
+        [
+          inv({ reference: "IMP-W1", waybill: w.number, charge1: "رسوم جمركية باسم العميل", charge1Amount: "60", charge1From: "مخلص الاستيراد" }, 0),
+          inv({ reference: "IMP-W1", description: "تحميل إضافي", quantity: "1", unitPrice: "200", account: "4101" }, 1),
+          inv({ reference: "IMP-T1", description: "نقل مباشر", quantity: "1", unitPrice: "900", account: "4101", tripVehicle: "ك ث ب 4411", tripFrom: "تبوك", tripTo: "حائل", tripShipper: "مرسل الرحلة", tripConsignee: "مستلم الرحلة", tripCustody: "100" }, 2),
+        ],
+        { dryRun: false },
+      );
+      expect(ok).toMatchObject({ total: 2, ok: 2, issues: [] });
+      const [i1] = await db.select().from(s.salesInvoices).where(eq(s.salesInvoices.reference, "IMP-W1"));
+      const l1 = await db.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, i1.id));
+      expect(l1.filter((l) => l.kind === "waybill").map((l) => [l.waybillId, Number(l.amount)])).toEqual([[w.id, 1100]]);
+      expect(l1.filter((l) => l.kind === "manual").map((l) => Number(l.amount))).toEqual([200]);
+      // مصاريف الشحنة (375) ومصروف الفاتورة (60) كلها سطور تُقفل 1114
+      expect(l1.filter((l) => l.kind === "expense").reduce((t, l) => t + Number(l.amount), 0)).toBe(435);
+      const [invCharge] = await db.select().from(s.waybillExpenses).where(eq(s.waybillExpenses.invoiceId, i1.id));
+      expect([Number(invCharge.amount), invCharge.payer, invCharge.partyId]).toEqual([60, "customs_broker", broker.id]);
+      const [i2] = await db.select().from(s.salesInvoices).where(eq(s.salesInvoices.reference, "IMP-T1"));
+      const [trip] = await db.select().from(s.waybills).where(eq(s.waybills.sourceInvoiceId, i2.id));
+      expect([trip.vehicleId, trip.shipper, trip.consignee, Number(trip.tripCustody), trip.driverId]).toEqual([vehicle.id, "مرسل الرحلة", "مستلم الرحلة", 100, driverId]);
+      // الشحنة نفسها لا تُفوتر مرتين
+      const again = await runImport(db, IMPORT_SPECS["sales-invoices"], [inv({ reference: "IMP-W2", waybill: w.number }, 0)], { dryRun: true });
+      expect(again.issues[0].message).toContain("غير معتمدة أو مفوترة");
+    });
   });
 
   describe("رحلة يبدؤها السائق (الخطوة 6)", () => {
