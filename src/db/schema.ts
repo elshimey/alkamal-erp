@@ -865,6 +865,45 @@ export const tripStages = pgTable(
   (t) => [index("trip_stages_waybill_idx").on(t.waybillId, t.at)],
 );
 
+// رحلة يبدؤها السائق من التطبيق (قواعد الدورات، القسم 10): صورة فاتورة الطرف الأول، والمركبة من إسناده،
+// والوقت والموقع تلقائياً. يسجل التحميل والتسليم قبل أن يحوّلها المكتب لشحنة (جديدة أو موجودة لنفس السائق).
+// لا قيد ولا عهدة رحلة قبل التحويل؛ وعند التحويل تنتقل المراحل والصور للشحنة.
+export const tripRequestStatus = pgEnum("trip_request_status", ["pending", "converted", "rejected", "cancelled"]);
+
+export const driverTripRequests = pgTable(
+  "driver_trip_requests",
+  {
+    id: id(),
+    driverId: ref("driver_id").notNull().references(() => drivers.id),
+    vehicleId: ref("vehicle_id").notNull().references(() => vehicles.id),
+    requestedAt: timestamp("requested_at", { withTimezone: true }).notNull().defaultNow(),
+    latitude: numeric("latitude", { precision: 9, scale: 6 }),
+    longitude: numeric("longitude", { precision: 9, scale: 6 }),
+    status: tripRequestStatus("status").notNull().default("pending"),
+    waybillId: ref("waybill_id").references(() => waybills.id, { onDelete: "set null" }),
+    rejectionReason: text("rejection_reason"),
+    decidedBy: ref("decided_by").references(() => users.id, { onDelete: "set null" }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    createdBy: ref("created_by").references(() => users.id, { onDelete: "set null" }),
+  },
+  (t) => [index("driver_trip_requests_status_idx").on(t.status, t.requestedAt), index("driver_trip_requests_driver_idx").on(t.driverId, t.requestedAt)],
+);
+
+export const driverTripRequestStages = pgTable(
+  "driver_trip_request_stages",
+  {
+    id: id(),
+    requestId: ref("request_id").notNull().references(() => driverTripRequests.id, { onDelete: "cascade" }),
+    stage: tripStageType("stage").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    latitude: numeric("latitude", { precision: 9, scale: 6 }),
+    longitude: numeric("longitude", { precision: 9, scale: 6 }),
+    odometer: integer("odometer"),
+    createdBy: ref("created_by").references(() => users.id, { onDelete: "set null" }),
+  },
+  (t) => [index("driver_trip_request_stages_idx").on(t.requestId, t.at)],
+);
+
 // الديزل يُقيد حسب مصدره الفعلي (القرار 4)
 export const fuelSource = pgEnum("fuel_source", ["custody", "fuel_card", "station_credit"]);
 

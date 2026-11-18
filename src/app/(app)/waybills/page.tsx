@@ -38,6 +38,7 @@ import { WaybillDocument } from "@/components/waybill-document";
 import { bulkWaybillOps, copyWaybill, invoiceOne, issueOne, unmergeOne, removeWaybillAction, saveTransportPanel, saveWaybillPanel, saveWaybills, saveWaybillSheet, sendToDriverAction, unsendFromDriverAction, waybillToStatus } from "./actions";
 import { TransportPanel } from "./transport-panel";
 import { WaybillEditor, type RouteOption, type WaybillDraft } from "./waybill-editor";
+import { pendingTripRequestsCount, requestPrefill } from "@/lib/driver-trip-requests";
 
 const BASE = "/waybills";
 const BULK_FORM = "waybill-bulk";
@@ -79,7 +80,7 @@ const whatsappLink = (mobile: string, text: string) => {
   return `https://wa.me/${digits.startsWith("05") ? `966${digits.slice(1)}` : digits}?text=${encodeURIComponent(text)}`;
 };
 
-type Params = DocListParams & { new?: string; add?: string; edit?: string; transport?: string; doc?: string };
+type Params = DocListParams & { new?: string; add?: string; edit?: string; transport?: string; doc?: string; fromRequest?: string };
 
 export default async function WaybillsPage({ searchParams }: { searchParams: Promise<Params> }) {
   const user = await requirePermission("waybills", "view");
@@ -98,7 +99,9 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
   const lp: DocListParams = { q: sp.q, status: sp.status, period: sp.period, sort: sp.sort, view: sp.view, page: sp.page };
   const { page, offset } = pageOf(sp.page);
   const bulkAdding = sp.add === "1" && canCreate;
-  const creating = sp.new === "1" && canCreate;
+  // «تحويل لشحنة» من رحلة بدأها السائق: نافذة الشحنة الجديدة نفسها معبأة بالسائق والمركبة والتاريخ
+  const prefill = canCreate && sp.fromRequest ? await requestPrefill(db, Number(sp.fromRequest)) : null;
+  const creating = (sp.new === "1" || !!prefill) && canCreate;
   const openId = view === "table" ? Number(sp.open) || null : null;
   const editId = canUpdate ? Number(sp.edit) || null : null;
   const transportId = canUpdate ? Number(sp.transport) || null : null;
@@ -118,6 +121,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
     getInvoiceTemplate(db),
   ]);
   const cashOpts = canUpdate ? await fundingAccounts(db) : [];
+  const pendingRequests = canCreate ? await pendingTripRequestsCount(db) : 0;
   const cashField = <CashAccountField options={cashOpts} />;
   const transportOpen = !!transportDoc && transportDoc.w.status !== "rejected";
   const editing = !!editRow && EDITABLE.includes(editRow.status);
@@ -338,7 +342,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
       };
     }
     if (creating)
-      return { date: today, customerId: "", routeId: "", execution: "fleet", vehicleId: "", trailerId: "", driverId: "", carrierId: "", carrierCost: "", carrierPlate: "", carrierDriverName: "", shipper: "", consignee: "", amount: "", components: [], taxCodeId: "", commission: "", tripCustody: "", weight: "", container: "", deliveryNote: "", customs: "", notes: "", transport: emptyTransport() };
+      return { date: prefill?.date ?? today, customerId: "", routeId: "", execution: "fleet", vehicleId: prefill ? String(prefill.vehicleId) : "", trailerId: "", driverId: prefill ? String(prefill.driverId) : "", carrierId: "", carrierCost: "", carrierPlate: "", carrierDriverName: "", shipper: "", consignee: "", amount: "", components: [], taxCodeId: "", commission: "", tripCustody: "", weight: "", container: "", deliveryNote: "", customs: "", notes: "", transport: emptyTransport() };
     return null;
   };
   const initial = draft();
@@ -352,6 +356,12 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
   return (
     <>
       <PageHeader title="الشحنات" description="كل شحنة رحلة واحدة. السعر من العقد الساري والعمولة من المسار تلقائياً، والضريبة من المسار (الدولي صفري والداخلي 15%)، والقيد يُرحّل عند الاعتماد.">
+        {canCreate && !bulkAdding && (
+          <Link href="/waybills/driver-requests" className="flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
+            رحلات بدأها السائقون
+            {pendingRequests > 0 && <span className="ltr-nums rounded-full bg-amber-100 px-1.5 text-xs font-semibold text-amber-900">{pendingRequests}</span>}
+          </Link>
+        )}
         {canCreate && !bulkAdding && (
           <Link href={withParam(listUrl(), "new", "1")} scroll={false} className="rounded-lg bg-brand-600 px-5 py-2 text-sm font-semibold text-brand-900 shadow-sm transition hover:bg-brand-500">
             + إنشاء
@@ -775,8 +785,9 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
           company={company}
           template={template}
           action={saveWaybillPanel.bind(null, editing ? editId : null)}
-          closeHref={back}
+          closeHref={prefill ? "/waybills/driver-requests" : back}
           savedHref={returnTo}
+          fromRequest={prefill ? { id: prefill.id, driver: prefill.driver, canFinish: canApprove && canIssueInvoice } : undefined}
         />
       )}
       {transportOpen && transportDoc && (

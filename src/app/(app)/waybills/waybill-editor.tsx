@@ -79,6 +79,7 @@ export function WaybillEditor({
   action,
   closeHref,
   savedHref,
+  fromRequest,
 }: {
   title: string;
   initial: WaybillDraft;
@@ -99,6 +100,8 @@ export function WaybillEditor({
   action: (data: FormData) => Promise<PanelResult>;
   closeHref: string;
   savedHref: string;
+  /** تحويل رحلة بدأها السائق: تنتقل مراحلها وصورها للشحنة عند الحفظ */
+  fromRequest?: { id: number; driver: string; canFinish: boolean };
 }) {
   const [d, setD] = useState(initial);
   const [preview, setPreview] = useState(true);
@@ -179,6 +182,7 @@ export function WaybillEditor({
       action={action}
       creating={false}
       wide
+      altSubmit={fromRequest?.canFinish ? { label: "حفظ واعتماد وإصدار فاتورة فوراً", name: "finishNow" } : undefined}
       toolbar={
         <button type="button" onClick={() => setPreview((p) => !p)} aria-label={preview ? "إخفاء المعاينة" : "إظهار المعاينة"} className="flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
           <Icon name="document" className="size-4" />
@@ -188,6 +192,12 @@ export function WaybillEditor({
     >
       <div ref={box} className={`grid items-start gap-6 ${preview ? "xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]" : ""}`}>
         <div className="min-w-0">
+          {fromRequest && (
+            <p className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <input type="hidden" name="driverRequestId" value={fromRequest.id} />
+              تحويل رحلة بدأها السائق <b>{fromRequest.driver}</b> من التطبيق: أكمل العميل والمسار والسعر. عند الحفظ تنتقل مراحل الرحلة وصورها إلى الشحنة.
+            </p>
+          )}
           <PanelSection title="بيانات الشحنة">
             <PanelField label="التاريخ" required>
               <DateInput name="date" required value={d.date} onChange={(e) => set("date", e.target.value)} className={field} />

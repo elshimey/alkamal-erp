@@ -53,9 +53,10 @@ import { createViolation, deleteViolation, listViolations, payViolations, revert
 import { computePayrollLine } from "@/data/payroll";
 import { accountLedger, balanceSheet, costCenterProfit, incomeStatement, previousRange, trialBalance, vatReturn } from "@/lib/reports";
 import { alertCounts, cashFlow, financials, operations, periodRange, receivablesAging, vehicleProfit } from "@/lib/dashboard";
-import { acceptTrip, createDriverExpense, createDriverLogin, linkUserToDriver, removeDriverLogin, resetDriverPassword, driverBalances, driverBreakdowns, driverForUser, driverTrips, isDriverOnly, nextStages, recordDriverStage, reportBreakdown, startTrip, tripDetail, tripCustodySummary, undoDriverStage, updateDriverExpense, voidDriverExpense, driverExpenses } from "@/lib/driver-app";
+import { acceptTrip, createDriverExpense, createDriverLogin, linkUserToDriver, removeDriverLogin, resetDriverPassword, driverBalances, driverBreakdowns, driverForUser, driverTrips, isDriverOnly, nextStages, recordDriverStage, reportBreakdown, tripDetail, tripCustodySummary, undoDriverStage, updateDriverExpense, voidDriverExpense, driverExpenses } from "@/lib/driver-app";
 import { driverNotifications, driverPulse, unreadCount, markNotificationsRead } from "@/lib/driver-notify";
 import { lastOfficeEventId, officeEvents } from "@/lib/office-notify";
+import { cancelTripRequest, convertTripRequestTx, driverTripRequest, driverTripRequests, linkTripRequest, linkableWaybills, listTripRequests, recordRequestStage, rejectTripRequest, startTripRequest, undoRequestStage } from "@/lib/driver-trip-requests";
 import { removePushSubscription, savePushSubscription, usersWithPermission } from "@/lib/push";
 import { runImport } from "@/lib/importers";
 import { applyAdvance, customerCredit, postReceipt } from "@/lib/receipts";
@@ -1320,7 +1321,8 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     });
 
     it("الرحلة تبدأ بالتحميل وتمشي بالمراحل حتى التسليم، والحدود للدولي فقط", async () => {
-      const w = await startTrip(db, me, { date: D, customerId, routeId, shipper: "مصنع", consignee: "مستودع", odometer: 10100, userId });
+      const w = await createWaybill(db, { waybillDate: D, customerId, routeId, shipper: "مصنع", consignee: "مستودع", vehicleId: me.vehicle!.id, driverId: me.id, userId });
+      await recordStage(db, w.id, "loading", { odometer: 10100, userId });
       expect(w.amount).toBe("1800.000");
       let d = await tripDetail(db, me.id, w.id);
       expect(d.trip.status).toBe("in_transit");
@@ -3152,6 +3154,114 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       const [nl] = await db.select().from(s.adjustmentNoteLines).where(eq(s.adjustmentNoteLines.noteId, note.id));
       expect([nl.taxCodeId, Number(nl.vatRate), Number(nl.vatAmount)]).toEqual([(await tax("ZERO")).id, 0, 0]);
       expect((await vatReturn(db, D, D)).sales.find((b) => b.behavior === "zero")?.adjust).toBe(100);
+    });
+  });
+
+  describe("رحلة يبدؤها السائق (الخطوة 6)", () => {
+    const D = `${YEAR}-11-05`;
+    const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    let customerId: number;
+    let routeId: number;
+    let userId: number;
+    let me: NonNullable<Awaited<ReturnType<typeof driverForUser>>>;
+
+    beforeAll(async () => {
+      const [sa] = await db.select().from(s.locations).where(eq(s.locations.countryCode, "SA"));
+      const a = await createLocation(db, { parentId: sa.id, nameAr: "ينبع" });
+      const b = await createLocation(db, { parentId: sa.id, nameAr: "رابغ" });
+      routeId = (await createRoute(db, { fromLocationId: a.id, toLocationId: b.id, distanceKm: 200, driverCommission: 90 })).id;
+      customerId = (await createParty(db, { nameAr: "عميل رحلات السائق", roles: ["customer"] })).id;
+      const c = await createContract(db, { customerId, number: "C-REQ", fromDate: `${YEAR}-01-01`, toDate: `${YEAR}-12-31` });
+      await db.insert(s.contractRates).values({ contractId: c.id, method: "route_fixed", routeId, price: "2000" });
+      await setContractStatus(db, c.id, "active");
+      const v = await createVehicle(db, { plate: "ر ح ل 606", chassis: "CH-REQ", odometer: 50000 });
+      const d = await createDriver(db, { nameAr: "سائق يبدأ الرحلة", mobile: "0555000606" });
+      await assignVehicle(db, { vehicleId: v.id, driverId: d.id, fromDate: `${YEAR}-10-01` });
+      userId = (await createDriverLogin(db, { driverId: d.id, login: "0555000606", password: "driver-pass-1" })).id;
+      me = (await driverForUser(db, userId))!;
+    });
+
+    it("السائق يبدأ بصورة فاتورة الطرف الأول، ويسجل التحميل والتسليم، ويتراجع ويلغي قبل التحويل، بلا أي قيد", async () => {
+      const entries = async () => (await db.select({ n: sql<number>`count(*)::int` }).from(s.journalEntries))[0].n;
+      const before = await entries();
+      await expect(startTripRequest(db, me, { photos: [], userId })).rejects.toThrow("إجبارية");
+      await expect(startTripRequest(db, { ...me, vehicle: null }, { photos: [png], userId })).rejects.toThrow("مركبة");
+      const r = await startTripRequest(db, me, { photos: [png, png], latitude: 24.7136, longitude: 46.6753, userId });
+      expect([r.vehicleId, r.status, r.latitude]).toEqual([me.vehicle!.id, "pending", "24.713600"]);
+      const ops = { isAdmin: false, rows: [{ entity: "waybills", action: "create", scope: "all" as const }] };
+      expect((await officeEvents(db, ops, 1))[0]).toMatchObject({ href: `/waybills/driver-requests?open=${r.id}` });
+      const pics = await listAttachments(db, "driver_trip_requests", [r.id]);
+      expect(pics.map((p) => p.kind)).toEqual(["first_party_invoice", "first_party_invoice"]);
+
+      await expect(recordRequestStage(db, me, r.id, "delivery", { photos: [png], userId })).rejects.toThrow("غير متاحة");
+      await expect(recordRequestStage(db, me, r.id, "loading", { photos: [], userId })).rejects.toThrow("إجبارية");
+      await recordRequestStage(db, me, r.id, "loading", { photos: [png], odometer: 50100, userId });
+      expect((await driverTripRequest(db, me.id, r.id)).next).toBe("delivery");
+      await undoRequestStage(db, me.id, r.id);
+      expect((await driverTripRequest(db, me.id, r.id)).next).toBe("loading");
+      await expect(driverTripRequest(db, me.id + 9999, r.id)).rejects.toThrow("ليست لك");
+
+      const mistake = await startTripRequest(db, me, { photos: [png], userId });
+      await cancelTripRequest(db, me.id, mistake.id);
+      expect((await driverTripRequests(db, me.id)).map((x) => x.id)).toEqual([r.id]);
+      await expect(recordRequestStage(db, me, mistake.id, "loading", { photos: [png], userId })).rejects.toThrow("أغلقها");
+      expect(await entries()).toBe(before);
+    });
+
+    it("التحويل لشحنة جديدة ينقل المراحل والصور، وفاتورة الطرف الأول لا تظهر للعميل، ثم الاعتماد والفوترة كأي شحنة", async () => {
+      const r = await startTripRequest(db, me, { photos: [png], userId });
+      await recordRequestStage(db, me, r.id, "loading", { photos: [png], odometer: 50200, userId });
+      await recordRequestStage(db, me, r.id, "delivery", { photos: [png, png], odometer: 50400, userId });
+      const w = await db.transaction(async (tx) => {
+        const { createWaybillTx } = await import("@/lib/waybills");
+        const created = await createWaybillTx(tx, { waybillDate: D, customerId, routeId, shipper: "مصنع ينبع", consignee: "مستودع رابغ", vehicleId: me.vehicle!.id, driverId: me.id, userId });
+        await convertTripRequestTx(tx, r.id, created.id, userId);
+        return created;
+      });
+      const [row] = await db.select().from(s.waybills).where(eq(s.waybills.id, w.id));
+      expect([row.status, row.odometerStart, row.odometerEnd, row.amount]).toEqual(["delivered", 50200, 50400, "2000.000"]);
+      expect(row.notes).toContain("رحلة بدأها السائق");
+      // تظهر في تطبيق السائق بمراحله، والطلب مغلق
+      const d = await tripDetail(db, me.id, w.id);
+      expect(d.stages.map((x) => x.stage)).toEqual(["loading", "delivery"]);
+      expect((await driverTripRequests(db, me.id)).some((x) => x.id === r.id)).toBe(false);
+      const [n] = await driverNotifications(db, me.id);
+      expect(n).toMatchObject({ kind: "request_accepted", body: row.number, href: `/driver/trips/${w.id}` });
+      const pics = await listAttachments(db, "waybills", [w.id]);
+      expect(pics.map((p) => p.kind).sort()).toEqual(["first_party_invoice", "other", "pod", "pod"]);
+      expect((await customerPhotos(db, [w.id])).map((p) => p.kind).sort()).toEqual(["other", "pod", "pod"]);
+      await expect(linkTripRequest(db, r.id, w.id)).rejects.toThrow("مسبقاً");
+      // ثم الدورة العادية: اعتماد (قيد التكلفة والعمولة) وفاتورة فورية (قيد الإيراد)
+      await approveWaybill(db, w.id);
+      const res = await invoiceWaybillsNow(db, [w.id], { invoiceDate: D });
+      expect(res.issued).toHaveLength(1);
+    });
+
+    it("الربط بشحنة أنشأها المكتب لنفس السائق والمركبة، والرفض يصل للسائق بسببه", async () => {
+      const office = await createWaybill(db, { waybillDate: D, customerId, routeId, shipper: "مصنع", consignee: "مستودع", vehicleId: me.vehicle!.id, driverId: me.id, userId });
+      const r = await startTripRequest(db, me, { photos: [png], userId });
+      await recordRequestStage(db, me, r.id, "loading", { photos: [png], userId });
+      expect((await linkableWaybills(db, r.id)).map((x) => x.id)).toContain(office.id);
+      const other = await createDriver(db, { nameAr: "سائق ثالث" });
+      const v2 = await createVehicle(db, { plate: "ث ل ث 303", chassis: "CH-3", odometer: 1 });
+      const foreign = await createWaybill(db, { waybillDate: D, customerId, routeId, shipper: "م", consignee: "م", vehicleId: v2.id, driverId: other.id, userId });
+      await expect(linkTripRequest(db, r.id, foreign.id)).rejects.toThrow("لسائق آخر");
+      await linkTripRequest(db, r.id, office.id, userId);
+      const [row] = await db.select().from(s.waybills).where(eq(s.waybills.id, office.id));
+      expect(row.status).toBe("in_transit");
+      expect((await driverTrips(db, me.id, { open: true })).map((x) => x.id)).toContain(office.id);
+      expect((await linkableWaybills(db, r.id)).map((x) => x.id)).not.toContain(office.id);
+
+      const bad = await startTripRequest(db, me, { photos: [png], userId });
+      await expect(rejectTripRequest(db, bad.id, " ")).rejects.toThrow("سبب");
+      await rejectTripRequest(db, bad.id, "رحلة مكررة", userId);
+      const [n] = await driverNotifications(db, me.id);
+      expect(n).toMatchObject({ kind: "request_rejected", body: "رحلة مكررة" });
+      expect((await driverTripRequests(db, me.id)).find((x) => x.id === bad.id)?.status).toBe("rejected");
+      const { counts } = await listTripRequests(db);
+      expect(counts.converted).toBe(2);
+      expect(counts.rejected).toBe(1);
+      expect(counts.cancelled).toBe(1);
     });
   });
 });

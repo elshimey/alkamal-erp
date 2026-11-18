@@ -3,11 +3,11 @@
 import { useRouter } from "next/navigation";
 import { startTransition, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { PendingContext, type FormState } from "@/components/action-form";
-import { acceptTripAction, breakdownAction, documentAction, expenseAction, fuelAction, stageAction, tripExpenseAction } from "./actions";
+import { acceptTripAction, breakdownAction, documentAction, expenseAction, fuelAction, requestStageAction, stageAction, tripExpenseAction, tripRequestAction } from "./actions";
 
 // العمل دون إنترنت: ما يُدخله السائق بلا شبكة يُحفظ في الجوال (IndexedDB) ويُرسل تلقائياً عند عودتها.
 // كل عملية تحمل معرّفاً (_op) فلا تتكرر في الخادم إن أُرسلت مرتين.
-const ACTIONS = { accept: acceptTripAction, stage: stageAction, fuel: fuelAction, tripExpense: tripExpenseAction, expense: expenseAction, breakdown: breakdownAction, document: documentAction } as const;
+const ACTIONS = { accept: acceptTripAction, stage: stageAction, fuel: fuelAction, tripExpense: tripExpenseAction, expense: expenseAction, breakdown: breakdownAction, document: documentAction, tripRequest: tripRequestAction, requestStage: requestStageAction } as const;
 export type OfflineActionKey = keyof typeof ACTIONS;
 // owner = الشركة والسائق صاحب العملية؛ لا تُرسل إلا وهو الداخل، فلا تُسجَّل على سائق آخر يستخدم الجوال نفسه
 type Queued = { id: string; key: OfflineActionKey; fields: [string, string][]; at: number; owner?: string };
@@ -49,7 +49,7 @@ const toFormData = (fields: [string, string][]) => {
 const isNetworkError = (err: unknown) => err instanceof TypeError || (err instanceof Error && /fetch|network|load failed/i.test(err.message));
 
 /** نموذج في تطبيق السائق يُرسل فوراً، أو يُحفظ في الجوال إن لم توجد شبكة. */
-export function DriverForm({ actionKey, children, className = "", savedOffline }: { actionKey: OfflineActionKey; children: ReactNode; className?: string; savedOffline: string }) {
+export function DriverForm({ actionKey, children, className = "", savedOffline, doneHref }: { actionKey: OfflineActionKey; children: ReactNode; className?: string; savedOffline: string; /** بعد النجاح ينتقل لهذه الصفحة */ doneHref?: string }) {
   const router = useRouter();
   const [state, setState] = useState<FormState>();
   const [pending, setPending] = useState(false);
@@ -80,7 +80,8 @@ export function DriverForm({ actionKey, children, className = "", savedOffline }
               setState(res);
               if (res?.ok) {
                 form.current?.reset();
-                router.refresh();
+                if (doneHref) router.push(doneHref);
+                else router.refresh();
               }
             } catch (err) {
               if (isNetworkError(err)) await queue(fields);
@@ -283,5 +284,24 @@ export function PhotoInput({ name = "photo", label, required = false, allowFiles
     </div>
     {error && errorLabel && <p className="mt-1 text-xs text-red-600">{errorLabel}</p>}
     </div>
+  );
+}
+
+/** موقع الجوال يُلتقط تلقائياً في حقلين مخفيين (lat, lng) إن سمح السائق؛ رفضه لا يمنع الحفظ. */
+export function GeoFields() {
+  const [pos, setPos] = useState<{ lat: string; lng: string }>();
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (p) => setPos({ lat: p.coords.latitude.toFixed(6), lng: p.coords.longitude.toFixed(6) }),
+      () => {},
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 120000 },
+    );
+  }, []);
+  return (
+    <>
+      <input type="hidden" name="lat" value={pos?.lat ?? ""} />
+      <input type="hidden" name="lng" value={pos?.lng ?? ""} />
+    </>
   );
 }

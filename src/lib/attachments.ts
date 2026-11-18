@@ -12,6 +12,8 @@ export const ATTACHMENT_KINDS = {
   fuel_receipt: "فاتورة الوقود",
   expense_receipt: "إيصال المصروف",
   document: "صورة الوثيقة",
+  // فاتورة الطرف الأول في رحلة بدأها السائق: داخلية للمكتب لا يراها العميل (قرار أحمد 2026-11-18)
+  first_party_invoice: "فاتورة الطرف الأول",
   other: "صورة",
 } as const;
 export type AttachmentKind = keyof typeof ATTACHMENT_KINDS;

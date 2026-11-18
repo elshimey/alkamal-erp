@@ -2,6 +2,7 @@ import Link from "next/link";
 import { db } from "@/db";
 import { getDriverContext } from "@/lib/driver-auth";
 import { driverTrips } from "@/lib/driver-app";
+import { driverTripRequests } from "@/lib/driver-trip-requests";
 import { ownerDocuments } from "@/lib/documents";
 import { todayRiyadh } from "@/lib/dates";
 import { Icon } from "@/components/icons";
@@ -13,11 +14,13 @@ export default async function DriverHome() {
   const arrow = isRtl(lang) ? "←" : "→";
   if (!driver) return null;
   const today = todayRiyadh();
-  const [open, past, docs] = await Promise.all([
+  const [open, past, docs, requests] = await Promise.all([
     driverTrips(db, driver.id, { open: true }),
     driverTrips(db, driver.id, { open: false, limit: 10 }),
     Promise.all([ownerDocuments(db, "driver", driver.id, today), driver.vehicle ? ownerDocuments(db, "vehicle", driver.vehicle.id, today) : []]).then(([a, b]) => [...a, ...b]),
+    driverTripRequests(db, driver.id),
   ]);
+  const time = (at: Date) => at.toLocaleString("en-GB", { timeZone: "Asia/Riyadh", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
   const expired = docs.filter((d) => d.state === "expired").length;
   const soon = docs.filter((d) => d.state === "soon").length;
 
@@ -39,6 +42,41 @@ export default async function DriverHome() {
           <span>{arrow}</span>
         </span>
       </Link>
+
+      {driver.vehicle && (
+        <Link href="/driver/trips/new" className="mb-4 flex items-center justify-center gap-2 rounded-2xl bg-asphalt-900 p-4 text-base font-semibold text-brand-500 shadow-sm transition active:scale-[0.99]">
+          <span aria-hidden>🚚</span>
+          {t.req.start}
+        </Link>
+      )}
+
+      {requests.length > 0 && (
+        <Section title={t.req.title}>
+          <ul className="space-y-3">
+            {requests.map((r) => (
+              <li key={r.id}>
+                <Link href={`/driver/requests/${r.id}`} className={`block rounded-xl border p-3 transition active:bg-gray-50 ${r.status === "pending" ? "border-amber-300 bg-amber-50/50" : "border-red-200 bg-red-50/50"}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="ltr-nums text-xs text-gray-500">{time(r.requestedAt)}</span>
+                    {r.status === "pending" ? <Pill tone="amber">{t.req.waiting}</Pill> : <Pill tone="red">{t.req.rejected}</Pill>}
+                  </div>
+                  {r.status === "rejected" && r.rejectionReason && <div className="mt-1 text-sm text-red-700">{r.rejectionReason}</div>}
+                  {r.status === "pending" && (
+                    <div className="mt-3 flex gap-1">
+                      {(["loading", "delivery"] as const).map((st) => (
+                        <div key={st} className="flex-1">
+                          <div className={`h-1.5 rounded-full ${r.stages.includes(st) ? "bg-brand-600" : "bg-gray-200"}`} />
+                          <div className={`mt-1 text-center text-[10px] ${r.stages.includes(st) ? "text-asphalt-900" : "text-gray-400"}`}>{t.flow.steps[st]}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
 
       <Section title={t.activeTrips}>
         {open.length === 0 && <p className="py-3 text-center text-sm text-gray-500">{t.noTrips}</p>}

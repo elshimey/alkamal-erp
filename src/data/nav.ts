@@ -111,6 +111,7 @@ export const NAV: { title: string; icon: IconName; items: { href: string; label:
 export const EXTRA_PAGES: { href: string; label: string; group: string; entity?: Entity; admin?: boolean; keywords?: string }[] = [
   { href: "/notifications", label: "كل التنبيهات", group: "عام", keywords: "جرس إشعارات" },
   { href: "/waybills", label: "إضافة شحنة جديدة", group: "إنشاء", entity: "waybills", keywords: "بوليصة رحلة" },
+  { href: "/waybills/driver-requests", label: "رحلات بدأها السائقون", group: "إنشاء", entity: "waybills", keywords: "طلب رحلة سائق تحويل لشحنة فاتورة الطرف الأول" },
   { href: "/invoices", label: "فاتورة مبيعات جديدة", group: "إنشاء", entity: "sales_invoices", keywords: "فوترة" },
   { href: "/receipts/new", label: "سند قبض جديد", group: "إنشاء", entity: "receipts", keywords: "تحصيل" },
   { href: "/notes/sales/new", label: "إشعار دائن أو مدين لعميل", group: "إنشاء", entity: "sales_invoices", keywords: "مرتجع خصم" },

@@ -14,6 +14,7 @@ export const OFFICE_KINDS = {
   trip_delivered: { entity: "waybills", action: "update", icon: "waybill", tone: "amber" },
   trip_undo: { entity: "waybills", action: "update", icon: "waybill", tone: "amber" },
   trip_started: { entity: "waybills", action: "create", icon: "truck", tone: "amber" },
+  request_stage: { entity: "waybills", action: "create", icon: "truck", tone: "blue" },
   driver_expense: { entity: "expenses", action: "approve", icon: "fuel", tone: "amber" },
   driver_maintenance: { entity: "maintenance", action: "approve", icon: "wrench", tone: "amber" },
   breakdown_reported: { entity: "maintenance", action: "update", icon: "wrench", tone: "red" },
