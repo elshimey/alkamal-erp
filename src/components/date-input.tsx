@@ -185,6 +185,9 @@ export function DateInput({ value, defaultValue, onChange, name, required, min, 
 function Calendar({ anchor: anchorRef, value, min, max, onPick, onClose }: { anchor: RefObject<HTMLSpanElement | null>; value: string; min?: string; max?: string; onPick: (iso: string) => void; onClose: () => void }) {
   const start = value || todayIso();
   const [view, setView] = useState({ y: Number(start.slice(0, 4)), m: Number(start.slice(5, 7)) - 1 });
+  // days: أيام الشهر، months: اختيار الشهر، years: اختيار السنة (بالنقر على اسم الشهر أو السنة)
+  const [mode, setMode] = useState<"days" | "months" | "years">("days");
+  const [yearPage, setYearPage] = useState(Number(start.slice(0, 4)) - 5);
   const [pos, setPos] = useState<{ top: number; left: number; host: HTMLElement; fixed: boolean } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -242,7 +245,23 @@ function Calendar({ anchor: anchorRef, value, min, max, onPick, onClose }: { anc
   const today = todayIso();
   const shift = (n: number) => setView((v) => ({ y: v.y + Math.floor((v.m + n) / 12), m: (((v.m + n) % 12) + 12) % 12 }));
   const allowed = (d: string) => (!min || d >= min) && (!max || d <= max);
-  const years = Array.from({ length: 21 }, (_, i) => view.y - 10 + i);
+  // السهمان: شهر في عرض الأيام، سنة في عرض الشهور، 12 سنة في عرض السنوات
+  const step = (dir: 1 | -1) => {
+    if (mode === "days") shift(dir);
+    else if (mode === "months") setView((v) => ({ ...v, y: v.y + dir }));
+    else setYearPage((p) => p + dir * 12);
+  };
+  const years = Array.from({ length: 12 }, (_, i) => yearPage + i);
+  const curY = Number(today.slice(0, 4));
+  const curM = Number(today.slice(5, 7)) - 1;
+  const pickBtn = (active: boolean, current: boolean) =>
+    `ltr-nums grid h-10 place-items-center rounded-lg text-sm transition ${active ? "bg-brand-600 font-bold text-brand-900" : current ? "font-bold text-brand-800 ring-1 ring-brand-400 ring-inset hover:bg-brand-50" : "hover:bg-brand-50"}`;
+  const headBtn = (on: boolean) => `flex items-center whitespace-nowrap gap-1 rounded-lg border px-2 py-1 transition ${on ? "border-brand-400 bg-brand-50 text-brand-900" : "border-gray-200 hover:border-brand-300 hover:bg-gray-50"}`;
+  const caret = (on: boolean) => (
+    <svg viewBox="0 0 24 24" className={`size-3.5 text-gray-500 transition-transform ${on ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth={2.5} aria-hidden>
+      <path d="m6 9 6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
 
   return createPortal(
     <div
@@ -256,29 +275,71 @@ function Calendar({ anchor: anchorRef, value, min, max, onPick, onClose }: { anc
       className="animate-fade-in z-[96] rounded-2xl border border-gray-200 bg-white p-3 text-sm text-gray-800 shadow-xl"
     >
       <div className="mb-2 flex items-center justify-between gap-1">
-        <button type="button" onClick={() => shift(-1)} aria-label="الشهر السابق" className="grid size-8 place-items-center rounded-lg text-gray-500 transition hover:bg-gray-100 hover:text-gray-800">
+        <button type="button" onClick={() => step(-1)} aria-label={mode === "days" ? "الشهر السابق" : mode === "months" ? "السنة السابقة" : "السنوات السابقة"} className="grid size-8 place-items-center rounded-lg text-lg text-gray-500 transition hover:bg-gray-100 hover:text-gray-800">
           ›
         </button>
         <div className="flex items-center gap-1 font-display font-semibold text-brand-900">
-          <select value={view.m} onChange={(e) => setView((v) => ({ ...v, m: Number(e.target.value) }))} aria-label="الشهر" className="rounded-md bg-transparent px-1 py-0.5 hover:bg-gray-100">
-            {MONTHS.map((n, i) => (
-              <option key={n} value={i}>
-                {n}
-              </option>
-            ))}
-          </select>
-          <select value={view.y} onChange={(e) => setView((v) => ({ ...v, y: Number(e.target.value) }))} aria-label="السنة" className="ltr-nums rounded-md bg-transparent px-1 py-0.5 hover:bg-gray-100">
-            {years.map((y) => (
-              <option key={y} value={y}>
-                {y}
-              </option>
-            ))}
-          </select>
+          <button type="button" onClick={() => setMode((m) => (m === "months" ? "days" : "months"))} aria-label="اختر الشهر" aria-expanded={mode === "months"} className={headBtn(mode === "months")}>
+            {MONTHS[view.m]}
+            {caret(mode === "months")}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setYearPage(view.y - 5);
+              setMode((m) => (m === "years" ? "days" : "years"));
+            }}
+            aria-label="اختر السنة"
+            aria-expanded={mode === "years"}
+            className={`ltr-nums ${headBtn(mode === "years")}`}
+          >
+            {mode === "years" ? `${years[0]}–${years[years.length - 1]}` : view.y}
+            {caret(mode === "years")}
+          </button>
         </div>
-        <button type="button" onClick={() => shift(1)} aria-label="الشهر التالي" className="grid size-8 place-items-center rounded-lg text-gray-500 transition hover:bg-gray-100 hover:text-gray-800">
+        <button type="button" onClick={() => step(1)} aria-label={mode === "days" ? "الشهر التالي" : mode === "months" ? "السنة التالية" : "السنوات التالية"} className="grid size-8 place-items-center rounded-lg text-lg text-gray-500 transition hover:bg-gray-100 hover:text-gray-800">
           ‹
         </button>
       </div>
+      {mode === "months" && (
+        <div className="grid grid-cols-3 gap-1.5 py-1" role="listbox" aria-label="الشهور">
+          {MONTHS.map((n, i) => (
+            <button
+              key={n}
+              type="button"
+              role="option"
+              aria-selected={i === view.m}
+              onClick={() => {
+                setView((v) => ({ ...v, m: i }));
+                setMode("days");
+              }}
+              className={pickBtn(i === view.m, i === curM && view.y === curY)}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
+      )}
+      {mode === "years" && (
+        <div className="grid grid-cols-4 gap-1.5 py-1" role="listbox" aria-label="السنوات">
+          {years.map((y) => (
+            <button
+              key={y}
+              type="button"
+              role="option"
+              aria-selected={y === view.y}
+              onClick={() => {
+                setView((v) => ({ ...v, y }));
+                setMode("months");
+              }}
+              className={pickBtn(y === view.y, y === curY)}
+            >
+              {y}
+            </button>
+          ))}
+        </div>
+      )}
+      {mode === "days" && (
       <div className="grid grid-cols-7 gap-0.5 text-center">
         {DAYS.map((d) => (
           <span key={d} className="py-1 text-[10px] font-semibold text-gray-400">
@@ -305,6 +366,7 @@ function Calendar({ anchor: anchorRef, value, min, max, onPick, onClose }: { anc
           );
         })}
       </div>
+      )}
       <div className="mt-2 flex items-center justify-between border-t border-gray-100 pt-2 text-xs">
         <button type="button" disabled={!allowed(today)} onClick={() => onPick(today)} className="rounded-lg px-2 py-1 font-semibold text-brand-800 transition hover:bg-brand-50 disabled:opacity-40">
           اليوم

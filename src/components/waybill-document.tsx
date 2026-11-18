@@ -220,7 +220,7 @@ export function WaybillDocument({
       ]}
       signatures={["توقيع السائق", "اسم المستلم وتوقيعه", "الختم وتاريخ الاستلام"]}
     >
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 @xl:grid-cols-2">
         <Facts
           rows={[
             ["العميل", doc.customer],
@@ -257,7 +257,7 @@ export function WaybillDocument({
       {doc.stages.length > 0 && (
         <>
           <h3 className="mt-6 mb-2 text-sm font-semibold text-[var(--inv-dark)]">مراحل الرحلة</h3>
-          <ol className="grid gap-2 text-xs sm:grid-cols-4">
+          <ol className="grid grid-cols-2 gap-2 text-xs @xl:grid-cols-4">
             {doc.stages.map((st) => (
               <li key={st.id} className="rounded-lg border border-gray-200 px-3 py-2">
                 <div className="font-semibold">{TRIP_STAGES[st.stage]}</div>

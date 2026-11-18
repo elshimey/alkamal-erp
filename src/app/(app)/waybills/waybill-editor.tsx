@@ -160,13 +160,13 @@ export function WaybillEditor({
       creating={false}
       wide
       toolbar={
-        <button type="button" onClick={() => setPreview((p) => !p)} className="hidden items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50 lg:flex">
+        <button type="button" onClick={() => setPreview((p) => !p)} aria-label={preview ? "إخفاء المعاينة" : "إظهار المعاينة"} className="flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
           <Icon name="document" className="size-4" />
-          {preview ? "إخفاء المعاينة" : "إظهار المعاينة"}
+          <span className="hidden sm:inline">{preview ? "إخفاء المعاينة" : "إظهار المعاينة"}</span>
         </button>
       }
     >
-      <div ref={box} className={`grid items-start gap-6 ${preview ? "lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]" : ""}`}>
+      <div ref={box} className={`grid items-start gap-6 ${preview ? "xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]" : ""}`}>
         <div className="min-w-0">
           <PanelSection title="بيانات الشحنة">
             <PanelField label="التاريخ" required>
@@ -292,12 +292,12 @@ export function WaybillEditor({
         </div>
 
         {preview && (
-          <aside className="sticky top-0 hidden min-w-0 lg:block" aria-label="معاينة البوليصة">
+          <aside className="min-w-0 xl:sticky xl:top-0" aria-label="معاينة البوليصة">
             <div className="mb-2 flex items-center gap-2 text-xs text-gray-500">
               <span className="size-2 animate-pulse rounded-full bg-green-500" />
               معاينة مباشرة كما ستُطبع البوليصة
             </div>
-            <div className="max-h-[calc(100vh-9rem)] overflow-y-auto rounded-2xl bg-[repeating-linear-gradient(0deg,transparent,transparent_23px,rgba(0,0,0,0.03)_24px),repeating-linear-gradient(90deg,transparent,transparent_23px,rgba(0,0,0,0.03)_24px)] p-3">
+            <div className="rounded-2xl xl:max-h-[calc(100vh-9rem)] xl:overflow-y-auto bg-[repeating-linear-gradient(0deg,transparent,transparent_23px,rgba(0,0,0,0.03)_24px),repeating-linear-gradient(90deg,transparent,transparent_23px,rgba(0,0,0,0.03)_24px)] p-3">
               <WaybillDocument company={company} doc={doc} template={template} compact />
             </div>
           </aside>

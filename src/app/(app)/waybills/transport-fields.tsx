@@ -31,15 +31,16 @@ export function TransportFields({ value: t, onChange, cities, open = false }: { 
       </datalist>
 
       <PanelSection title="المرسل والمرسل إليه" optional open={open || hasParty} hint="جوال ومدينة وعنوان كل طرف">
-        <div className="grid gap-x-6 gap-y-3 lg:grid-cols-2">
-          <div className="flex flex-col gap-3">
+        {/* عمودان للطرفين حين يتسع القسم فقط، وإلا تحت بعض فلا تضيق الخانات */}
+        <div className="grid gap-x-6 gap-y-3 @3xl:grid-cols-2">
+          <div className="@container flex flex-col gap-3">
             <div className="text-xs font-semibold text-gray-500">المرسل</div>
             <PanelField label="الجوال">{text("shipperPhone", { ltr: true, placeholder: "05XXXXXXXX" })}</PanelField>
             <PanelField label="المدينة">{text("shipperCity", { list: "transport-cities" })}</PanelField>
             <PanelField label="العنوان">{text("shipperAddress")}</PanelField>
             <PanelField label="ملاحظات">{text("shipperNotes")}</PanelField>
           </div>
-          <div className="flex flex-col gap-3">
+          <div className="@container flex flex-col gap-3">
             <div className="text-xs font-semibold text-gray-500">المرسل إليه</div>
             <PanelField label="الجوال">{text("consigneePhone", { ltr: true, placeholder: "05XXXXXXXX" })}</PanelField>
             <PanelField label="المدينة">{text("consigneeCity", { list: "transport-cities" })}</PanelField>

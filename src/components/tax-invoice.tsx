@@ -69,7 +69,7 @@ export function TaxInvoiceDocument({
   const pad = compact ? "p-6" : "p-8 sm:p-10";
 
   return (
-    <article style={vars} className={`relative overflow-hidden rounded-2xl border border-black/[0.06] bg-white text-gray-800 shadow-[0_4px_16px_-8px_rgba(27,33,38,0.08)] print:rounded-none print:border-0 print:shadow-none ${pad}`}>
+    <article style={vars} className={`@container relative overflow-hidden rounded-2xl border border-black/[0.06] bg-white text-gray-800 shadow-[0_4px_16px_-8px_rgba(27,33,38,0.08)] print:rounded-none print:border-0 print:shadow-none ${pad}`}>
       {draft && (
         <div aria-hidden className="pointer-events-none absolute inset-0 flex items-center justify-center">
           <span className="-rotate-[24deg] font-display text-[7rem] font-bold text-gray-900/[0.04] select-none">مسودة</span>
@@ -130,8 +130,8 @@ export function TaxInvoiceDocument({
       </div>
 
       {/* العميل وبيانات الفاتورة */}
-      <section className="grid gap-x-6 rounded-xl border border-gray-200 text-xs sm:grid-cols-2">
-        <dl className="divide-y divide-gray-100 border-gray-200 sm:border-e">
+      <section className="grid gap-x-6 rounded-xl border border-gray-200 text-xs @xl:grid-cols-2">
+        <dl className="divide-y divide-gray-100 border-gray-200 @xl:border-e">
           {(
             [
               ["العميل", "Customer", customer.nameAr, false],
@@ -294,7 +294,7 @@ export function TaxInvoiceDocument({
       {i.notes && <p className="mt-4 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600">{i.notes}</p>}
 
       {(t.showBank || t.terms) && (
-        <section className="mt-4 grid gap-3 text-xs sm:grid-cols-2">
+        <section className="mt-4 grid gap-3 text-xs @xl:grid-cols-2">
           {t.showBank && t.iban && (
             <div className="rounded-lg border border-gray-200 px-3 py-2">
               <div className="mb-1 font-semibold text-[var(--inv-dark)]">
@@ -307,7 +307,7 @@ export function TaxInvoiceDocument({
             </div>
           )}
           {t.terms && (
-            <div className={`rounded-lg border border-gray-200 px-3 py-2 ${t.showBank && t.iban ? "" : "sm:col-span-2"}`}>
+            <div className={`rounded-lg border border-gray-200 px-3 py-2 ${t.showBank && t.iban ? "" : "@xl:col-span-2"}`}>
               <div className="mb-1 font-semibold text-[var(--inv-dark)]">
                 الشروط والأحكام
                 {en("Terms")}

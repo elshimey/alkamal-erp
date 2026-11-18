@@ -33,7 +33,7 @@ export function NoteDocument({
   const vars = { "--inv-accent": accent.main, "--inv-dark": accent.dark } as CSSProperties;
   const invoiceId = n.salesInvoiceId ?? n.purchaseInvoiceId;
   return (
-    <article style={vars} className={`relative overflow-hidden rounded-2xl border border-black/[0.06] bg-white text-gray-800 shadow-[0_4px_16px_-8px_rgba(27,33,38,0.08)] print:rounded-none print:border-0 print:shadow-none ${compact ? "p-6" : "p-8 sm:p-10"}`}>
+    <article style={vars} className={`@container relative overflow-hidden rounded-2xl border border-black/[0.06] bg-white text-gray-800 shadow-[0_4px_16px_-8px_rgba(27,33,38,0.08)] print:rounded-none print:border-0 print:shadow-none ${compact ? "p-6" : "p-8 sm:p-10"}`}>
       {n.status === "draft" && (
         <div aria-hidden className="pointer-events-none absolute inset-0 flex items-center justify-center">
           <span className="-rotate-[24deg] font-display text-[7rem] font-bold text-gray-900/[0.04] select-none">مسودة</span>

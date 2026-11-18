@@ -131,16 +131,19 @@ export function LinesEditor({
     });
   };
 
+  // أقل عرض للجدول = مجموع أعمدته (والوصف 10rem على الأقل)، فإن ضاق المكان يُمرَّر الجدول أفقياً بدل أن تنضغط الخانات
+  const minRem = 4 + (totals ? 7 : 0) + columns.reduce((sum, c) => sum + (c.width?.endsWith("rem") ? parseFloat(c.width) : 10), 0);
+
   return (
     <div>
       <input ref={hidden} type="hidden" name={name} value={json} />
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[44rem] text-sm">
+        <table className="w-full text-sm" style={{ minWidth: `${Math.max(44, minRem)}rem` }}>
           <thead className="border-b border-gray-200 text-xs text-gray-500">
             <tr>
               <th className="w-8 py-2" />
               {columns.map((c) => (
-                <th key={c.key} className="px-1 py-2 text-start font-medium" style={c.width ? { width: c.width } : undefined}>
+                <th key={c.key} className="px-1 py-2 text-start font-medium" style={c.width ? { width: c.width } : { minWidth: "10rem" }}>
                   {c.label}
                   {c.required && <span className="text-red-500">*</span>}
                 </th>
