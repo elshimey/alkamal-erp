@@ -14,7 +14,7 @@ export function Frame({ company, template: t, compact, title, en, meta, children
   const accent = TEMPLATE_ACCENTS[t.accent];
   const vars = { "--inv-accent": accent.main, "--inv-dark": accent.dark } as CSSProperties;
   return (
-    <article style={vars} className={`relative overflow-hidden rounded-2xl border border-black/[0.06] bg-white text-gray-800 shadow-[0_4px_16px_-8px_rgba(27,33,38,0.08)] print:rounded-none print:border-0 print:shadow-none ${compact ? "p-6" : "p-8 sm:p-10"}`}>
+    <article style={vars} className={`@container relative overflow-hidden rounded-2xl border border-black/[0.06] bg-white text-gray-800 shadow-[0_4px_16px_-8px_rgba(27,33,38,0.08)] print:rounded-none print:border-0 print:shadow-none ${compact ? "p-6" : "p-8 sm:p-10"}`}>
       <header className="flex items-start justify-between gap-4 border-b-2 border-[var(--inv-accent)] pb-4">
         <div className="font-display text-lg font-semibold text-[var(--inv-dark)]">{company.nameAr}</div>
         {t.showLogo &&
@@ -53,13 +53,14 @@ export function Frame({ company, template: t, compact, title, en, meta, children
 
 export function Facts({ rows }: { rows: [string, ReactNode][] }) {
   return (
-    <dl className="divide-y divide-gray-100 rounded-xl border border-gray-200 text-sm">
+    // العنوان بجانب القيمة حين يتسع المكان، وفوقها في المعاينة الضيقة والجوال فلا تتداخل الكلمات
+    <dl className="@container min-w-0 divide-y divide-gray-100 rounded-xl border border-gray-200 text-sm">
       {rows
         .filter((r) => r[1])
         .map(([k, val]) => (
-          <div key={k} className="grid grid-cols-[9rem_1fr] gap-3 px-4 py-2">
-            <dt className="text-gray-500">{k}</dt>
-            <dd>
+          <div key={k} className="grid gap-0.5 px-4 py-2 @[20rem]:grid-cols-[minmax(5rem,9rem)_minmax(0,1fr)] @[20rem]:gap-3">
+            <dt className="text-gray-500 @max-[20rem]:text-xs">{k}</dt>
+            <dd className="min-w-0 break-words">
               <bdi>{val}</bdi>
             </dd>
           </div>

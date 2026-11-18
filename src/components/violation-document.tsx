@@ -26,7 +26,7 @@ export function ViolationDocument({ company, doc, template: t = DEFAULT_TEMPLATE
     ["ملاحظات", v.notes],
   ];
   return (
-    <article style={vars} className={`relative overflow-hidden rounded-2xl border border-black/[0.06] bg-white text-gray-800 shadow-[0_4px_16px_-8px_rgba(27,33,38,0.08)] print:rounded-none print:border-0 print:shadow-none ${compact ? "p-6" : "p-8 sm:p-10"}`}>
+    <article style={vars} className={`@container relative overflow-hidden rounded-2xl border border-black/[0.06] bg-white text-gray-800 shadow-[0_4px_16px_-8px_rgba(27,33,38,0.08)] print:rounded-none print:border-0 print:shadow-none ${compact ? "p-6" : "p-8 sm:p-10"}`}>
       <header className="flex items-start justify-between gap-4 border-b-2 border-[var(--inv-accent)] pb-4">
         <div className="font-display text-lg font-semibold text-[var(--inv-dark)]">{company.nameAr}</div>
         {t.showLogo &&
@@ -48,7 +48,7 @@ export function ViolationDocument({ company, doc, template: t = DEFAULT_TEMPLATE
           <dd className="ltr-nums">{v.violationDate}</dd>
         </dl>
       </div>
-      <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
+      <div className="grid gap-4 @lg:grid-cols-[1fr_auto]">
         <dl className="divide-y divide-gray-100 rounded-xl border border-gray-200 text-sm">
           {rows
             .filter((r) => r[1])

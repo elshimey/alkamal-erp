@@ -169,7 +169,7 @@ export function RecordPanel({
           }}
           onInput={() => setDirty(true)}
           onChange={() => setDirty(true)}
-          className={`mx-auto w-full px-4 py-6 sm:px-6 ${wide ? "max-w-[96rem]" : "max-w-4xl"}`}
+          className={`@container mx-auto w-full px-4 py-6 sm:px-6 ${wide ? "max-w-[120rem]" : "max-w-4xl"}`}
         >
           {error && (
             <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm whitespace-pre-line text-red-800">

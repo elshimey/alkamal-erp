@@ -14,21 +14,22 @@ export function PanelSection({ title, optional = false, open, children, hint }: 
           <path d="m6 9 6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </summary>
-      <div className="flex flex-col gap-3 px-5 py-4">{children}</div>
+      <div className="@container flex flex-col gap-3 px-5 py-4">{children}</div>
     </details>
   );
 }
 
-/** حقل بعنوانه في عمود جانبي (على الجوال فوقه). */
+/** حقل بعنوانه في عمود جانبي حين يتسع القسم، وفوقه حين يضيق (الجوال، نصف الشاشة، بجانب المعاينة). */
 export function PanelField({ label, required, hint, children }: { label: string; required?: boolean; hint?: string; children: ReactNode }) {
   return (
-    <label className="grid items-center gap-1.5 text-sm sm:grid-cols-[11rem_1fr] sm:gap-4">
+    <label className="grid items-center gap-1.5 text-sm @md:grid-cols-[11rem_minmax(0,1fr)] @md:gap-4">
       <span className="font-medium text-gray-700">
         {label}
         {required && <span className="text-red-600">*</span>}
         {hint && <span className="block text-[11px] font-normal text-gray-400">{hint}</span>}
       </span>
-      <span className="min-w-0">{children}</span>
+      {/* الخانة لا تتجاوز عرض الشاشة على الجوال */}
+      <span className="min-w-0 [&>input]:max-w-full [&>select]:max-w-full [&>textarea]:max-w-full">{children}</span>
     </label>
   );
 }
