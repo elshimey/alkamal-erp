@@ -7,13 +7,17 @@ import { todayRiyadh } from "@/lib/dates";
 import { headers } from "next/headers";
 import { markAlertsRead, userAlerts, withReadState } from "@/lib/alerts";
 import { lastOfficeEventId } from "@/lib/office-notify";
+import { scheduleDailyDocumentAlerts } from "@/lib/doc-alerts";
 import { savePushSubscription, vapidPublicKey, type PushSubscriptionInput } from "@/lib/push";
 
 /** حالة الجرس: التنبيهات بحالة القراءة، غير المقروء أولاً. */
 export async function bellState() {
   const user = await requireUser();
+  await scheduleDailyDocumentAlerts(todayRiyadh());
   const list = await withReadState(db, user.id, await userAlerts(db, user, todayRiyadh()));
-  return { unread: list.filter((a) => !a.read).length, items: [...list.filter((a) => !a.read), ...list.filter((a) => a.read)] };
+  const items = [...list.filter((a) => !a.read), ...list.filter((a) => a.read)];
+  const unreadOf = (g: "ops" | "docs") => list.filter((a) => !a.read && a.group === g).length;
+  return { unread: list.filter((a) => !a.read).length, unreadOps: unreadOf("ops"), unreadDocs: unreadOf("docs"), items };
 }
 
 export async function markRead(key: string) {

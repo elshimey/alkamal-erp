@@ -3,10 +3,11 @@ import type { CSSProperties, ReactNode } from "react";
 import { db } from "@/db";
 import { requireUser } from "@/lib/auth";
 import { can, scopeFor } from "@/lib/permissions";
-import { todayRiyadh } from "@/lib/dates";
+import { daysBetween, todayRiyadh } from "@/lib/dates";
 import { setupSteps } from "@/lib/setup";
 import { buildAlerts } from "@/lib/alerts";
-import { alertKindsFor } from "@/lib/documents";
+import { alertKindsFor, expiringDocuments } from "@/lib/documents";
+import { days, ownerShort } from "@/lib/doc-alerts";
 import { PERIODS, alertCounts, cashFlow, balances, collected, financials, fleetStatus, monthlyTrend, operations, receivablesAging, resolvePeriod, topCustomers, unbilledTrips, vehicleProfit, type Period } from "@/lib/dashboard";
 import { incomeStatement } from "@/lib/reports";
 import type { Entity } from "@/lib/permissions";
@@ -112,8 +113,11 @@ export default async function Dashboard({
   const setup = user.perms.isAdmin ? await setupSteps(db) : [];
   const setupDone = setup.filter((x) => x.done).length;
 
-  // التنبيهات: ما يحتاج تدخلاً، كل واحد يفتح القسم المعني (نفسها في جرس التنبيهات)
-  const activeAlerts = buildAlerts(user, alerts, bal, today);
+  // التنبيهات: ما يحتاج تدخلاً، كل واحد يفتح القسم المعني (نفسها في جرس التنبيهات).
+  // تنبيهات الوثائق لها قسم «الوثائق والامتثال» الثابت أعلى الصفحة، فلوحة التنبيهات للتشغيل فقط.
+  const activeAlerts = buildAlerts(user, alerts, bal, today).filter((a) => a.group === "ops");
+  const docKinds = alertKindsFor(user.perms);
+  const compliance = docKinds.length ? await expiringDocuments(db, today, docKinds) : null;
 
   const cur = fin?.current;
   const prev = fin?.previous;
@@ -170,6 +174,8 @@ export default async function Dashboard({
           <span className="text-sm font-semibold text-brand-700">متابعة الإعداد ←</span>
         </Link>
       )}
+
+      {compliance && <CompliancePanel docs={compliance} today={today} uploads={alerts.pendingDocUploads} />}
 
       {canFinance && (
         <nav className="mb-6 flex gap-1 overflow-x-auto rounded-xl border border-black/[0.06] bg-white p-1 shadow-sm">
@@ -568,6 +574,71 @@ function Tile({ label, value, of, tone, href }: { label: string; value: number; 
       </div>
       <div className="text-xs">{label}</div>
     </Link>
+  );
+}
+
+/**
+ * الوثائق والامتثال (قرار أحمد 2026-11-19): ثابت أعلى الرئيسية لا يُغلق، بأسماء الوثائق والأيام الباقية،
+ * منفصل عن تنبيهات التشغيل. وثائقنا الداخلية فقط (الأسطول والسائقون والموظفون والشركة)، الأقرب انتهاءً أولاً.
+ */
+function CompliancePanel({ docs, today, uploads }: { docs: Awaited<ReturnType<typeof expiringDocuments>>; today: string; uploads: number }) {
+  const expired = docs.filter((d) => d.doc.expiryDate! < today).length;
+  const shown = docs.slice(0, 8);
+  return (
+    <section className={`mb-6 rounded-2xl border bg-white p-5 shadow-sm ${expired ? "border-red-300" : docs.length ? "border-brand-500/60" : "border-emerald-200"}`}>
+      <header className="mb-3 flex flex-wrap items-center gap-2">
+        <span className={`flex size-8 items-center justify-center rounded-lg ${expired ? "bg-red-600 text-white" : "bg-asphalt-900 text-brand-500"}`}>
+          <Icon name="shield" className="size-4" />
+        </span>
+        <h2 className="font-semibold text-brand-900">الوثائق والامتثال</h2>
+        {docs.length > 0 && (
+          <span className="text-xs text-gray-500">
+            {expired > 0 && <b className="ltr-nums text-red-700">منتهية {expired}</b>}
+            {expired > 0 && docs.length > expired && "، "}
+            {docs.length > expired && <b className="ltr-nums text-amber-800">تقترب {docs.length - expired}</b>}
+          </span>
+        )}
+        <span className="ms-auto flex items-center gap-3 text-xs">
+          {uploads > 0 && (
+            <Link href="/fleet-documents/submissions" className="rounded-full bg-amber-100 px-2.5 py-1 font-medium text-amber-900 hover:bg-amber-200">
+              {uploads} رفعها السائقون بانتظار اعتمادك ←
+            </Link>
+          )}
+          <Link href="/fleet-documents" className="text-brand-700 hover:underline">
+            سجل الوثائق ←
+          </Link>
+        </span>
+      </header>
+      {docs.length === 0 ? (
+        <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">كل وثائق الشركة والأسطول والعاملين سارية.</p>
+      ) : (
+        <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          {shown.map((d) => {
+            const left = daysBetween(today, d.doc.expiryDate!);
+            const owner = ownerShort(d.ownerKind, d.owner);
+            return (
+              <li key={d.doc.id}>
+                <Link
+                  href={`/fleet-documents/owner/${d.ownerKind}-${d.ownerId}`}
+                  className={`flex h-full flex-col gap-0.5 rounded-xl border-s-4 px-3 py-2 text-sm transition hover:-translate-x-0.5 ${left < 0 ? "border-red-500 bg-red-50" : left <= 7 ? "border-red-400 bg-red-50/60" : "border-brand-600 bg-brand-50"}`}
+                >
+                  <span className="font-medium text-gray-900">{d.type.nameAr}</span>
+                  <span className="truncate text-xs text-gray-600">{owner}</span>
+                  <span className={`ltr-nums text-xs font-semibold ${left <= 7 ? "text-red-700" : "text-amber-800"}`}>
+                    {left < 0 ? `منتهية منذ ${days(-left)}` : left === 0 ? "تنتهي اليوم" : `باقٍ ${days(left)}`} · {d.doc.expiryDate}
+                  </span>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {docs.length > shown.length && (
+        <Link href="/fleet-documents" className="mt-3 block text-center text-sm font-medium text-brand-700 hover:underline">
+          عرض كل الوثائق ({docs.length})
+        </Link>
+      )}
+    </section>
   );
 }
 

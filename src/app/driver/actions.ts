@@ -16,6 +16,7 @@ import { errorMessage } from "@/lib/errors";
 import { saveDataUrl } from "@/lib/attachments";
 import { onceForOp } from "@/lib/once";
 import { driverPulse } from "@/lib/driver-notify";
+import { scheduleDailyDocumentAlerts } from "@/lib/doc-alerts";
 import { savePushSubscription, vapidPublicKey, type PushSubscriptionInput } from "@/lib/push";
 import { DRIVER_EXPENSE_ACCOUNTS, DRIVER_LANGS, type DriverDict, type DriverExpenseType, type DriverLang } from "@/data/driver-i18n";
 import type { FormState } from "@/components/action-form";
@@ -351,6 +352,7 @@ export async function driverLogout() {
 /** نبض الفحص الدوري (كل 15 ثانية احتياطاً لمن لم يفعّل الإشعارات). */
 export async function driverPulseAction() {
   const { driver } = await requireDriver();
+  await scheduleDailyDocumentAlerts(todayRiyadh());
   return driverPulse(db, driver.id);
 }
 

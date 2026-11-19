@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
-/** تنبيه الوثائق المنتهية والقريبة من الانتهاء أعلى الشاشة؛ يُخفى لبقية اليوم عند إغلاقه. على الجوال يظهر في لوحة القيادة فقط. */
+/** تنبيه الوثائق المنتهية والقريبة من الانتهاء أعلى الشاشة؛ يُخفى لبقية اليوم عند إغلاقه. لا يظهر في الرئيسية لأن فيها قسم «الوثائق والامتثال» الثابت، ولا على الجوال. */
 export function ExpiryBanner({ expired, soon, critical = [], today }: { expired: number; soon: number; critical?: { name: string; expiryDate: string }[]; today: string }) {
   const key = `expiry-banner-${today}-${expired}-${soon}-${critical.length}`;
   const [hidden, setHidden] = useState(true);
@@ -30,9 +30,9 @@ export function ExpiryBanner({ expired, soon, critical = [], today }: { expired:
       </div>
     );
   }
-  if (hidden || (!expired && !soon)) return null;
+  if (hidden || home || (!expired && !soon)) return null;
   return (
-    <div className={`${home ? "flex" : "hidden md:flex"} flex-wrap items-center justify-center gap-x-3 gap-y-1 border-b px-4 py-2 text-center text-xs print:hidden ${expired ? "border-red-200 bg-red-50 text-red-800" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
+    <div className={`hidden md:flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-b px-4 py-2 text-center text-xs print:hidden ${expired ? "border-red-200 bg-red-50 text-red-800" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
       <span>
         الوثائق:
         {expired > 0 && (

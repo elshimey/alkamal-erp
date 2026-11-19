@@ -302,6 +302,13 @@
       "when": 1793250000000,
       "tag": "0042_invoice_charges",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1793340000000,
+      "tag": "0043_document_alerts",
+      "breakpoints": true
     }
   ]
 }

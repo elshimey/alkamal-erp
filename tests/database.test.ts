@@ -22,9 +22,9 @@ import { getCompany, getInvoiceTemplate, invoiceReadiness, saveCompany, saveInvo
 import { assertPlateFree, assignVehicle, createDriver, deleteDriver, updateDriver, createVehicle, driverOnDate, handoverVehicle, releaseAssignment } from "@/lib/fleet";
 import { addCustomValue, checkCustomValue, customListOptions } from "@/lib/custom-lists";
 import { splitCustom } from "@/data/custom-lists";
-import { markAlertsRead, withReadState } from "@/lib/alerts";
+import { buildAlerts, markAlertsRead, withReadState } from "@/lib/alerts";
 import { joinPlate, splitPlate } from "@/lib/plates";
-import { addDocument, documentRows, saveOwnerDocumentFields, approveSubmission, blockingDocumentIssues, dailySummary, documentRegister, expiringDocuments, listSubmissions, ownerDocuments, rejectSubmission, submitRenewal, summaryText } from "@/lib/documents";
+import { addDocument, alertKindsFor, documentRows, saveOwnerDocumentFields, approveSubmission, blockingDocumentIssues, dailySummary, documentRegister, expiringDocuments, listSubmissions, ownerDocuments, rejectSubmission, submitRenewal, summaryText } from "@/lib/documents";
 import { addSubAccount } from "@/lib/accounts";
 import { activeContract, createContract, createLocation, createParty, createRoute, priceTrip, setContractStatus } from "@/lib/operations";
 import {
@@ -56,6 +56,8 @@ import { alertCounts, cashFlow, financials, operations, periodRange, receivables
 import { acceptTrip, createDriverExpense, createDriverLogin, linkUserToDriver, removeDriverLogin, resetDriverPassword, driverBalances, driverBreakdowns, driverForUser, driverTrips, isDriverOnly, nextStages, recordDriverStage, reportBreakdown, tripDetail, tripCustodySummary, undoDriverStage, updateDriverExpense, voidDriverExpense, driverExpenses } from "@/lib/driver-app";
 import { driverNotifications, driverPulse, unreadCount, markNotificationsRead } from "@/lib/driver-notify";
 import { lastOfficeEventId, officeEvents } from "@/lib/office-notify";
+import { claimDailyJob, days, pushStage, sendDocumentAlerts } from "@/lib/doc-alerts";
+
 import { cancelTripRequest, convertTripRequestTx, driverTripRequest, driverTripRequests, linkTripRequest, linkableWaybills, listTripRequests, recordRequestStage, rejectTripRequest, startTripRequest, undoRequestStage } from "@/lib/driver-trip-requests";
 import { removePushSubscription, savePushSubscription, usersWithPermission } from "@/lib/push";
 import { runImport } from "@/lib/importers";
@@ -1823,11 +1825,82 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
 
     it("التنبيه المقروء يعود غير مقروء إذا تغيّر عدده", async () => {
       const [u] = await db.select().from(s.users).limit(1);
-      const list = [{ key: "pending_expenses", tone: "amber" as const, icon: "fuel" as const, text: "3 مصروف بانتظار الاعتماد", href: "/expenses" }];
+      const list = [{ key: "pending_expenses", group: "ops" as const, tone: "amber" as const, icon: "fuel" as const, text: "3 مصروف بانتظار الاعتماد", href: "/expenses" }];
       expect((await withReadState(db, u.id, list))[0].read).toBe(false);
       await markAlertsRead(db, u.id, list);
       expect((await withReadState(db, u.id, list))[0].read).toBe(true);
       expect((await withReadState(db, u.id, [{ ...list[0], text: "4 مصروف بانتظار الاعتماد" }]))[0].read).toBe(false);
+    });
+
+    it("التنبيهات: حُذفت تنبيهات المسودات، والوثائق في مجموعتها، ووثائق العملاء والموردين لا تُنبَّه", async () => {
+      const admin = { isAdmin: true, rows: [] };
+      expect(alertKindsFor(admin)).toEqual(["vehicle", "trailer", "driver", "employee", "company"]);
+      const counts = await alertCounts(db, `${YEAR + 5}-01-01`, alertKindsFor(admin));
+      const list = buildAlerts({ perms: admin }, { ...counts, draftInvoices: 3, draftReceipts: 2, draftPurchases: 1, draftMaintenance: 1, draftPayroll: 1, openMaintenance: 2, unassigned: 4, kwdRateDate: null, docsExpired: 2, pendingDocUploads: 1 }, { cash: 10 }, `${YEAR + 5}-01-01`);
+      const keys = list.map((a) => a.key);
+      for (const k of ["draft_invoices", "draft_receipts", "draft_purchases", "draft_maintenance", "payroll_draft", "open_maintenance", "unassigned", "kwd_rate"]) expect(keys).not.toContain(k);
+      expect(list.find((a) => a.key === "docs_expired")?.group).toBe("docs");
+      expect(list.find((a) => a.key === "doc_uploads")?.group).toBe("docs");
+      expect(list.filter((a) => a.group === "docs").every((a) => a.key.startsWith("doc"))).toBe(true);
+    });
+
+    it("مراحل إشعار الوثيقة: 30 ثم 7 ثم يوم الانتهاء ثم أسبوعياً", () => {
+      const at = (left: number) => {
+        const d = new Date(`${YEAR + 1}-06-15T00:00:00Z`);
+        d.setUTCDate(d.getUTCDate() + left);
+        return pushStage(d.toISOString().slice(0, 10), `${YEAR + 1}-06-15`);
+      };
+      expect([at(31), at(30), at(8), at(7), at(1), at(0), at(-6), at(-7), at(-15)]).toEqual([null, "30", "30", "7", "7", "x0", "x0", "x1", "x2"]);
+      expect(pushStage(null, `${YEAR}-01-01`)).toBeNull();
+      expect([1, 2, 5, 10, 22].map(days)).toEqual(["يوم واحد", "يومين", "5 أيام", "10 أيام", "22 يوماً"]);
+    });
+
+    it("إشعار انتهاء الوثيقة يصل للمكتب ولسائق المركبة مرة لكل مرحلة، والمهمة اليومية مرة في اليوم", async () => {
+      const types = await db.select().from(s.documentTypes);
+      const code = (c: string) => types.find((t) => t.code === c)!.id;
+      const v = await createVehicle(db, { plate: "ت ن ب 4321" });
+      const d = await createDriver(db, { nameAr: "سائق الوثائق" });
+      await assignVehicle(db, { vehicleId: v.id, driverId: d.id, fromDate: `${YEAR}-01-02` });
+      const Y = YEAR + 3;
+      const { row: doc } = await addDocument(db, { documentTypeId: code("v_insurance"), owner: { kind: "vehicle", id: v.id }, expiryDate: `${Y}-03-21` });
+      const { row: lic } = await addDocument(db, { documentTypeId: code("d_license"), owner: { kind: "driver", id: d.id }, expiryDate: `${Y}-03-25` });
+      const stages = async (id: number) => (await db.select().from(s.documentAlertSends).where(eq(s.documentAlertSends.documentId, id))).map((r) => r.stage).sort();
+      const mine = async () => (await driverNotifications(db, d.id)).filter((n) => n.kind === "doc_expiring");
+
+      const r1 = await sendDocumentAlerts(db, `${Y}-03-01`);
+      expect(r1.office.length).toBeGreaterThan(0);
+      expect(await stages(doc.id)).toEqual(["30"]);
+      expect(await stages(lic.id)).toEqual(["30"]);
+      // وثيقته ووثيقة مركبته في إشعار واحد
+      const n1 = await mine();
+      expect(n1).toHaveLength(1);
+      expect(n1[0].body).toContain("التأمين الإلزامي");
+      expect(n1[0].body).toContain("رخصة القيادة");
+      const [ev] = await db.select().from(s.officeNotifications).where(eq(s.officeNotifications.id, r1.office[0]));
+      expect(ev.kind).toBe("doc_expiring");
+      expect((await officeEvents(db, { isAdmin: true, rows: [] })).find((e) => e.key === `ev:${ev.id}`)?.group).toBe("docs");
+
+      await sendDocumentAlerts(db, `${Y}-03-02`); // نفس المرحلة لا تتكرر
+      expect(await mine()).toHaveLength(1);
+      await sendDocumentAlerts(db, `${Y}-03-15`); // باقٍ 6 أيام للتأمين، و10 للرخصة
+      expect(await stages(doc.id)).toEqual(["30", "7"]);
+      expect(await stages(lic.id)).toEqual(["30"]);
+      await sendDocumentAlerts(db, `${Y}-03-21`);
+      expect(await stages(doc.id)).toEqual(["30", "7", "x0"]);
+      await sendDocumentAlerts(db, `${Y}-03-24`);
+      await sendDocumentAlerts(db, `${Y}-03-28`);
+      expect(await stages(doc.id)).toEqual(["30", "7", "x0", "x1"]);
+
+      // التجديد سطر جديد: لا تنبيه حتى يقترب انتهاؤه
+      await addDocument(db, { documentTypeId: code("v_insurance"), owner: { kind: "vehicle", id: v.id }, expiryDate: `${Y + 1}-03-21` });
+      const before = (await mine()).length;
+      await sendDocumentAlerts(db, `${Y}-04-10`);
+      expect((await mine()).length - before).toBe(1); // الرخصة فقط (x2)، التأمين المجدد لا شيء
+      expect((await mine())[0].body).not.toContain("التأمين");
+
+      expect(await claimDailyJob(db, "doc_alerts_test", `${Y}-05-01`)).toBe(true);
+      expect(await claimDailyJob(db, "doc_alerts_test", `${Y}-05-01`)).toBe(false);
+      expect(await claimDailyJob(db, "doc_alerts_test", `${Y}-05-02`)).toBe(true);
     });
 
     it("الإشعار الفوري: اشتراك الجهاز يُحفظ مرة لكل جهاز، ويصل حسب الصلاحية", async () => {
