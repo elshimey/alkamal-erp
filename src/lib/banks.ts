@@ -83,6 +83,21 @@ export async function cashAccountFor(db: Db | Tx, id: number | null | undefined,
   return cash;
 }
 
+/**
+ * حساب «دفعته الشركة» في المصروفات ومصاريف الرحلة: صندوق أو بنك، أو عهدة موظف مكتب (فرعي تحت 1105).
+ * عهدة السائق لا تُختار هنا لأن لها دافعاً مستقلاً «عهدة السائق» يربط المصروف بالسائق.
+ */
+export async function payFromAccountFor(db: Db | Tx, id: number | null | undefined, message: string) {
+  const [acc] = id ? await db.select().from(s.accounts).where(eq(s.accounts.id, id)) : [];
+  if (!acc || !acc.isPostable || !/^110[125]/.test(acc.code)) throw new Error(message);
+  if (!acc.isActive) throw new Error(`الحساب ${acc.code} ${acc.nameAr} موقوف؛ اختر حساباً نشطاً`);
+  if (acc.code.startsWith("1105")) {
+    const [d] = await db.select({ id: s.drivers.id }).from(s.drivers).where(eq(s.drivers.custodyAccountId, acc.id));
+    if (d) throw new Error(`${acc.nameAr} عهدة سائق؛ اختر الدافع «عهدة السائق»`);
+  }
+  return acc;
+}
+
 export async function updateBankDetails(db: Db, accountId: number, input: Omit<BankInput, "kind" | "openingBalance" | "openingDate" | "currencyCode">) {
   return db.transaction(async (tx) => {
     const [a] = await tx.select().from(s.accounts).where(eq(s.accounts.id, accountId));

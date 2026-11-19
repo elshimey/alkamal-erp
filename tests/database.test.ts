@@ -2895,6 +2895,51 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     expect(steps.find((x) => x.key === "vehicles")!.done).toBe(true);
   });
 
+  it("عهدة موظف المكتب: دافعاً للمصروف ومصروف الشحنة، وربط الحساب المفتوح يدوياً دون تكرار", async () => {
+    const { payFromAccounts } = await import("@/lib/invoices");
+    const { payFromAccountFor } = await import("@/lib/banks");
+    // فُتح الحساب يدوياً من الشجرة قبل ربطه بالموظف (كما في تشغيل العميل الأول)
+    const manual = await addSubAccount(db, acc["1105"], "عهدة - سيف  المكتب");
+    const emp = await createEmployee(db, { nameAr: "سيف المكتب", hireDate: `${YEAR}-01-01`, basicSalary: 5000 });
+    const [drv] = await db.select().from(s.drivers).limit(1);
+
+    const opts = await payFromAccounts(db);
+    expect(opts.some((a) => a.id === manual.id)).toBe(true);
+    expect(opts.some((a) => a.id === acc["110101"])).toBe(true);
+    if (drv) {
+      expect(opts.some((a) => a.id === drv.custodyAccountId)).toBe(false);
+      await expect(payFromAccountFor(db, drv.custodyAccountId, "x")).rejects.toThrow("عهدة السائق");
+      await expect(createExpense(db, { expenseDate: `${YEAR}-11-03`, payer: "cash", cashAccountId: drv.custodyAccountId, accountId: acc["6105"], description: "x", amount: 10 })).rejects.toThrow("عهدة السائق");
+    }
+    await expect(payFromAccountFor(db, acc["1103"], "اختر")).rejects.toThrow("اختر");
+
+    // المصروف من عهدة الموظف: مدين المصروف، دائن عهدته
+    const e = await createExpense(db, { expenseDate: `${YEAR}-11-03`, payer: "cash", cashAccountId: manual.id, accountId: acc["6105"], description: "رسوم بوابة", amount: 120, approve: true });
+    const [row] = await db.select().from(s.expenses).where(eq(s.expenses.id, e.id));
+    const lines = await db.select().from(s.journalLines).where(eq(s.journalLines.entryId, row.journalEntryId!));
+    expect(Number(lines.find((l) => l.accountId === manual.id)?.credit)).toBe(120);
+
+    // العهدة النقدية الافتتاحية تربط الحساب الموجود باسمه بدل فتح حساب مكرر
+    const before = (await db.select().from(s.accounts).where(sql`${s.accounts.code} like '1105%'`)).length;
+    await hr.createCustody(db, { kind: "cash", employeeId: emp.id, docDate: `${YEAR}-01-01`, description: "رصيد افتتاحي", amount: 5000, isOpening: true });
+    const [linked] = await db.select().from(s.employees).where(eq(s.employees.id, emp.id));
+    expect(linked.custodyAccountId).toBe(manual.id);
+    expect((await db.select().from(s.accounts).where(sql`${s.accounts.code} like '1105%'`)).length).toBe(before);
+    expect((await hr.unlinkedCustodyAccounts(db)).some((a) => a.id === manual.id)).toBe(false);
+
+    // الربط اليدوي: حساب مربوط بغيره مرفوض، والفارغ يفتح حساباً جديداً باسمه
+    const other = await createEmployee(db, { nameAr: "حمد الحسابات", hireDate: `${YEAR}-01-01`, basicSalary: 4000 });
+    await expect(hr.linkEmployeeCustody(db, other.id, manual.id)).rejects.toThrow("غير مربوط");
+    const opened = await hr.linkEmployeeCustody(db, other.id, null);
+    const [openedAcc] = await db.select().from(s.accounts).where(eq(s.accounts.id, opened));
+    expect(openedAcc).toMatchObject({ nameAr: "عهدة – حمد الحسابات" });
+    expect(openedAcc.code.startsWith("1105")).toBe(true);
+    if (drv) {
+      const [drvEmp] = await db.select().from(s.drivers).where(eq(s.drivers.id, drv.id));
+      await expect(hr.linkEmployeeCustody(db, drvEmp.employeeId, null)).rejects.toThrow("السائق");
+    }
+  });
+
   it("الدفعة الخامسة: التحويل بين الحسابات، مخصص الديون، بطاقات الوقود، الشراء، عروض الأسعار", async () => {
     const [admin] = await db.select({ id: s.users.id }).from(s.users).limit(1);
     await openYear(db, YEAR + 1);

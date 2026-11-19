@@ -1126,6 +1126,21 @@ export async function fundingAccounts(db: Db | Tx) {
     .orderBy(sql`case when ${s.accounts.code} like '1101%' or ${s.accounts.code} like '1102%' then 0 else 1 end`, asc(s.accounts.code));
 }
 
+/** الصناديق والبنوك ثم عُهد موظفي المكتب (1105 دون عهد السائقين): «دفعته الشركة» في المصروفات ومصاريف الرحلة. */
+export async function payFromAccounts(db: Db | Tx) {
+  return db
+    .select({ id: s.accounts.id, code: s.accounts.code, nameAr: s.accounts.nameAr, currencyCode: s.accounts.currencyCode })
+    .from(s.accounts)
+    .where(
+      and(
+        eq(s.accounts.isPostable, true),
+        eq(s.accounts.isActive, true),
+        sql`(${s.accounts.code} like '1101%' or ${s.accounts.code} like '1102%' or (${s.accounts.code} like '1105%' and not exists (select 1 from drivers d where d.custody_account_id = ${s.accounts.id})))`,
+      ),
+    )
+    .orderBy(asc(s.accounts.code));
+}
+
 export async function cashAccounts(db: Db | Tx) {
   return db
     .select({ id: s.accounts.id, code: s.accounts.code, nameAr: s.accounts.nameAr, currencyCode: s.accounts.currencyCode })

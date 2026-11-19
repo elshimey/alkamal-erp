@@ -14,7 +14,7 @@ export const EXPENSE_STATUS = {
 
 export const EXPENSE_PAYERS = {
   driver_custody: "عهدة السائق",
-  cash: "صندوق / بنك",
+  cash: "الشركة: صندوق / بنك / عهدة موظف",
 } as const;
 
 export const PAYMENT_KINDS = {

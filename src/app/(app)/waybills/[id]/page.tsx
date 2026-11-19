@@ -6,7 +6,7 @@ import { db } from "@/db";
 import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { can, hasSpecial, scopeFor } from "@/lib/permissions";
-import { cashAccounts, priceDetails } from "@/lib/invoices";
+import { payFromAccounts, priceDetails } from "@/lib/invoices";
 import { chargeTypeOptions, partyOptions, routeOptions, vehicleOptions } from "@/lib/lookups";
 import { approvalIssues, waybillComponents } from "@/lib/waybills";
 import { EXPENSE_BILL_TO, EXPENSE_PAYERS, FUEL_SOURCES, TRIP_STAGES, WAYBILL_STATUS } from "@/data/waybills";
@@ -63,14 +63,16 @@ export default async function WaybillPage({ params }: { params: Promise<{ id: st
 
   const station = alias(s.parties, "station");
   const broker = alias(s.parties, "broker");
+  const payAcc = alias(s.accounts, "pay_acc");
   const [routes, fuel, expenses, stages, lines, chargeTypes, stations, brokers, issues, photos, trailers] = await Promise.all([
     routeOptions(),
     db.select({ f: s.waybillFuel, party: station.nameAr }).from(s.waybillFuel).leftJoin(station, eq(station.id, s.waybillFuel.partyId)).where(eq(s.waybillFuel.waybillId, id)).orderBy(asc(s.waybillFuel.id)),
     db
-      .select({ e: s.waybillExpenses, type: s.chargeTypes.nameAr, party: broker.nameAr })
+      .select({ e: s.waybillExpenses, type: s.chargeTypes.nameAr, party: broker.nameAr, paidFrom: payAcc.nameAr })
       .from(s.waybillExpenses)
       .innerJoin(s.chargeTypes, eq(s.chargeTypes.id, s.waybillExpenses.chargeTypeId))
       .leftJoin(broker, eq(broker.id, s.waybillExpenses.partyId))
+      .leftJoin(payAcc, eq(payAcc.id, s.waybillExpenses.cashAccountId))
       .where(eq(s.waybillExpenses.waybillId, id))
       .orderBy(asc(s.waybillExpenses.id)),
     db.select().from(s.tripStages).where(eq(s.tripStages.waybillId, id)).orderBy(asc(s.tripStages.at)),
@@ -90,7 +92,7 @@ export default async function WaybillPage({ params }: { params: Promise<{ id: st
     listAttachments(db, "waybills", [id]),
     vehicleOptions("trailer"),
   ]);
-  const cashOpts = (await cashAccounts(db)).map((a) => ({ value: String(a.id), label: `${a.code} ${a.nameAr}` }));
+  const cashOpts = (await payFromAccounts(db)).map((a) => ({ value: String(a.id), label: `${a.code} ${a.nameAr}` }));
 
   const showPrices = hasSpecial(user.perms, "view_prices");
   const editable = ["draft", "in_transit", "delivered", "rejected"].includes(w.status);
@@ -357,13 +359,13 @@ export default async function WaybillPage({ params }: { params: Promise<{ id: st
           <Card title="مصاريف الرحلة">
             <Table head={["النوع", "المبلغ", "العملة", "على", "الدافع", "ملاحظة", ""]}>
               {expenses.length === 0 && <EmptyRow cols={7}>لا توجد مصاريف</EmptyRow>}
-              {expenses.map(({ e, type, party }) => (
+              {expenses.map(({ e, type, party, paidFrom }) => (
                 <tr key={e.id}>
                   <Td>{type}</Td>
                   <Td className="ltr-nums font-medium">{fmt(e.amount)}</Td>
                   <Td>{e.currencyCode === "SAR" ? "ريال" : `${e.currencyCode} × ${Number(e.exchangeRate)}`}</Td>
                   <Td>{EXPENSE_BILL_TO[e.billTo]}</Td>
-                  <Td>{e.payer === "customs_broker" ? `المخلص: ${party}` : EXPENSE_PAYERS[e.payer]}</Td>
+                  <Td>{e.payer === "customs_broker" ? `المخلص: ${party}` : e.payer === "cash" && paidFrom ? paidFrom : EXPENSE_PAYERS[e.payer]}</Td>
                   <Td>
                     {e.note ?? "—"}
                     {e.journalEntryId && <div className="text-[11px] text-gray-400">{e.sourceExpenseId ? "من مصروفات السائق" : "قيد مستقل بعد الاعتماد"}</div>}
@@ -393,7 +395,7 @@ export default async function WaybillPage({ params }: { params: Promise<{ id: st
                     { key: "billTo", label: "على", type: "select", options: options(EXPENSE_BILL_TO), width: "8rem" },
                     { key: "payer", label: "الدافع", type: "select", options: options(fleet ? EXPENSE_PAYERS : { customs_broker: EXPENSE_PAYERS.customs_broker, cash: EXPENSE_PAYERS.cash }), width: "8rem" },
                     { key: "partyId", label: "المخلص", type: "select", options: brokers, width: "8rem" },
-                    { key: "cashAccountId", label: "الصندوق / البنك", type: "select", options: cashOpts, width: "9rem" },
+                    { key: "cashAccountId", label: "الصندوق / البنك / عهدة موظف", type: "select", options: cashOpts, width: "11rem" },
                     { key: "note", label: "ملاحظة", width: "8rem" },
                   ]}
                 />
