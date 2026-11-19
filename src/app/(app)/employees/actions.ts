@@ -5,6 +5,9 @@ import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
 import { createEmployee } from "@/lib/payroll";
 import { cell, saveSheetRows, type SheetRow } from "@/lib/sheet-server";
+import { linkEmployeeCustody } from "@/lib/hr";
+import { errorMessage } from "@/lib/errors";
+import type { FormState } from "@/components/action-form";
 
 const yesNo = (v: string | undefined) => (v === "yes" ? true : v === "no" ? false : undefined);
 
@@ -27,4 +30,17 @@ export async function saveEmployees(rows: SheetRow[]) {
   });
   revalidatePath("/employees");
   return result;
+}
+
+/** ربط موظف المكتب بحساب عهدته: حساب موجود تحت 1105 أو فتح حساب جديد إن لم يُختر. */
+export async function linkCustody(employeeId: number, _: FormState, fd: FormData): Promise<FormState> {
+  await requirePermission("employees", "update");
+  try {
+    await linkEmployeeCustody(db, employeeId, Number(fd.get("accountId")) || null);
+    revalidatePath("/employees");
+    revalidatePath("/expenses");
+    return { ok: "رُبط حساب العهدة" };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
 }

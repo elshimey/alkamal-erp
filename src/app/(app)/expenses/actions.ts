@@ -22,7 +22,7 @@ export async function saveExpenses(rows: SheetRow[]) {
     const amount = cell.number(r.amount, "المبلغ");
     if (!amount) throw new Error("المبلغ إلزامي");
     const payer = cell.required(r.payer, "الدافع");
-    if (payer !== "driver_custody" && payer !== "cash") throw new Error("الدافع: عهدة السائق أو صندوق / بنك");
+    if (payer !== "driver_custody" && payer !== "cash") throw new Error("الدافع: عهدة السائق أو الشركة (صندوق / بنك / عهدة موظف)");
     await createExpense(db, {
       expenseDate: cell.date(r.date, "التاريخ") ?? todayRiyadh(),
       payer,

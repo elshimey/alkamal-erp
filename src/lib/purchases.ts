@@ -10,7 +10,7 @@ import type { DocFilter } from "@/lib/doc-filters";
 import { docOrder, docWhere } from "@/lib/doc-query";
 import { PAYABLE_BY_ROLE, PURCHASE_ACCOUNTS, SUPPLIER_ROLES, isExpenseAccount } from "@/data/purchases";
 import { notifyDriver } from "@/lib/driver-notify";
-import { cashAccountFor } from "@/lib/banks";
+import { payFromAccountFor } from "@/lib/banks";
 import { SALES_ACCOUNTS } from "@/data/sales";
 import { linkExpenseToWaybillTx, unlinkExpenseTx } from "@/lib/customer-charges";
 import { requireTaxCode } from "@/lib/tax-codes";
@@ -388,7 +388,7 @@ export async function createExpense(db: Db, input: ExpenseInput) {
     if (input.payer === "driver_custody" && !driverId) throw new Error("اختر السائق صاحب العهدة");
     if (input.billToCustomer && !input.waybillId) throw new Error("المصروف على العميل يحتاج الشحنة التي يُفوتر معها");
     if (input.payer === "cash") {
-      await cashAccountFor(tx, input.cashAccountId, "اختر صندوقاً أو حساب بنك تفصيلياً");
+      await payFromAccountFor(tx, input.cashAccountId, "اختر صندوقاً أو بنكاً أو عهدة موظف");
     }
     const costCenterId = await vehicleCostCenter(tx, vehicleId);
     if (account.requiresCostCenter && !costCenterId) throw new Error(`الحساب ${account.nameAr} يتطلب المركبة`);
@@ -495,7 +495,7 @@ export async function approveExpenseWith(db: Db | Tx, id: number, r: ExpenseRevi
     if (account.requiresCostCenter && !e.costCenterId) throw new Error(`الحساب ${account.nameAr} يتطلب المركبة`);
     let cashAccountId: number | null = null;
     if (r.payer === "cash") {
-      const cash = await cashAccountFor(tx, r.cashAccountId, "اختر الصندوق أو البنك الذي دفعت منه الشركة");
+      const cash = await payFromAccountFor(tx, r.cashAccountId, "اختر الصندوق أو البنك أو عهدة الموظف التي دُفع منها");
       cashAccountId = cash.id;
     } else if (!e.driverId) throw new Error("لا يوجد سائق لهذا المصروف؛ اختر صندوقاً أو بنكاً");
     await tx

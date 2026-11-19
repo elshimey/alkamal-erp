@@ -192,8 +192,8 @@ export function ReceiptForm({
           <Row label="العميل" required>
             <ComboBox value={customerId} options={customers} onChange={(v) => setCustomerId(v)} create="customer" placeholder="ابحث عن العميل…" className={inputCls} />
           </Row>
-          <Row label={kind === "refund" ? "تم الصرف من خلال" : "تم الدفع من خلال"} required hint="الصندوق أو البنك">
-            <ComboBox value={cashId} options={cash} onChange={(v) => setCashId(v)} create="account" scope="1101,1102" placeholder="ابحث باسم الحساب أو رقمه…" className={inputCls} />
+          <Row label={kind === "refund" ? "تم الصرف من خلال" : "تم الدفع من خلال"} required hint="الصندوق أو البنك أو عهدة الموظف الذي استلم">
+            <ComboBox value={cashId} options={cash} onChange={(v) => setCashId(v)} create="account" scope="1101,1102,1105" placeholder="ابحث باسم الحساب أو رقمه…" className={inputCls} />
             {cashCurrency && cashCurrency !== currency && <span className="text-xs text-red-700">الحساب بعملة {cashCurrency}</span>}
           </Row>
           <Row label="عملة الدفع" required>

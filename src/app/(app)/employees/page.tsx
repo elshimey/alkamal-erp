@@ -2,13 +2,19 @@ import Link from "next/link";
 import { EditLink } from "@/components/edit-link";
 import { AddModeBar, ListActions } from "@/components/list-actions";
 import { asc, eq } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { SheetEditor } from "@/components/sheet-editor";
 import { Badge, Card, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
-import { saveEmployees } from "./actions";
+import { linkCustody, saveEmployees } from "./actions";
+import { unlinkedCustodyAccounts } from "@/lib/hr";
+import { toAccountOptions } from "@/lib/lookups";
+import { ActionForm, SubmitButton } from "@/components/action-form";
+import { AccountField } from "@/components/account-field";
+import { DialogButton } from "@/components/dialog-button";
 
 const fmt = (v: string | number) => Number(v).toLocaleString("en", { maximumFractionDigits: 2 });
 const STATUS = { active: { label: "على رأس العمل", tone: "green" }, on_leave: { label: "إجازة", tone: "amber" }, terminated: { label: "منتهية خدمته", tone: "gray" } } as const;
@@ -21,12 +27,16 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
   const user = await requirePermission("employees", "view");
   const canCreate = can(user.perms, "employees", "create");
   const adding = (await searchParams).add === "1" && canCreate;
+  const custodyAcc = alias(s.accounts, "custody_acc");
   const rows = await db
-    .select({ e: s.employees, driverId: s.drivers.id, account: s.accounts.code })
+    .select({ e: s.employees, driverId: s.drivers.id, account: s.accounts.code, custody: custodyAcc.code })
     .from(s.employees)
     .leftJoin(s.drivers, eq(s.drivers.employeeId, s.employees.id))
     .leftJoin(s.accounts, eq(s.accounts.id, s.employees.payableAccountId))
+    .leftJoin(custodyAcc, eq(custodyAcc.id, s.employees.custodyAccountId))
     .orderBy(asc(s.employees.status), asc(s.employees.nameAr));
+  const canLink = can(user.perms, "employees", "update");
+  const freeCustody = canLink && rows.some((r) => !r.driverId && !r.e.custodyAccountId && r.e.status !== "terminated") ? await toAccountOptions(await unlinkedCustodyAccounts(db)) : [];
 
   return (
     <>
@@ -64,7 +74,7 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
       {!adding && (
       <Table head={["الموظف", "الوظيفة", "التعيين", "الأساسي", "السكن", "بدلات أخرى", "الإجمالي", "التأمينات", "الآيبان", "الحالة"]}>
         {rows.length === 0 && <EmptyRow cols={10}>لا يوجد موظفون بعد</EmptyRow>}
-        {rows.map(({ e, driverId, account }) => {
+        {rows.map(({ e, driverId, account, custody }) => {
           const total = Number(e.basicSalary) + Number(e.housingAllowance) + Number(e.allowances);
           return (
             <tr key={e.id}>
@@ -74,7 +84,21 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
                 <Link href={driverId ? `/fleet-documents/owner/driver-${driverId}` : `/fleet-documents/owner/employee-${e.id}`} className="ms-2 text-xs font-normal text-gray-500 hover:text-brand-700 hover:underline">
                   الوثائق
                 </Link>
-                <div className="ltr-nums text-xs font-normal text-gray-500">{account}</div>
+                <div className="ltr-nums text-xs font-normal text-gray-500">
+                  {account}
+                  {custody && <span className="ms-2">عهدة {custody}</span>}
+                </div>
+                {!driverId && !custody && canLink && e.status !== "terminated" && (
+                  <DialogButton label="حساب العهدة" title={`حساب عهدة ${e.nameAr}`} className="mt-1 !px-2 !py-0.5 text-xs font-normal">
+                    <ActionForm action={linkCustody.bind(null, e.id)} className="flex flex-col gap-3 text-sm">
+                      <p className="rounded-lg bg-gray-50 px-3 py-2 text-gray-700">
+                        حساب العهدة يُصرف منه ما يدفعه الموظف للرحلات والمكتب، ويُختار «دفعته الشركة» في المصروفات ومصاريف الشحنة. إن فتحته من الشجرة سابقاً فاختره هنا حتى لا يتكرر، وإلا اتركه فارغاً ليُفتح حساب جديد باسمه.
+                      </p>
+                      <AccountField name="accountId" options={freeCustody} scope="1105" placeholder="فتح حساب جديد باسمه" />
+                      <SubmitButton>ربط الحساب</SubmitButton>
+                    </ActionForm>
+                  </DialogButton>
+                )}
               </Td>
               <Td>
                 {e.jobTitle ?? "—"}

@@ -517,7 +517,7 @@ async function importReceipt(tx: Tx, [r]: ImportRow[], ctx: Ctx, userId?: number
   const amount = toNumber(required(r, "amount", "المبلغ"), "المبلغ", { positive: true });
   const cashRaw = required(r, "cashAccount", "تم الدفع من خلال");
   const cash = findAccount(ctx, cashRaw, "تم الدفع من خلال");
-  if (!/^110[12]/.test(cash.code)) throw new Error(`الحساب ${cash.code} ${cash.nameAr} ليس صندوقاً أو بنكاً`);
+  if (!/^110[125]/.test(cash.code)) throw new Error(`الحساب ${cash.code} ${cash.nameAr} ليس صندوقاً أو بنكاً أو عهدة موظف`);
   const curRaw = v(r, "currency") || "SAR";
   const currencyCode = resolve(ctx.idx.currencies.find(curRaw), curRaw, "currency", "العملة");
   const kindRaw = normText(v(r, "kind"));
@@ -908,10 +908,10 @@ export async function templateLists(db: Db, spec: ImportSpec): Promise<TemplateL
     ];
   }
   if (spec.entity === "receipts") {
-    const cash = ctx.accounts.filter((a) => /^110[12]/.test(a.code)).sort((a, b) => a.code.localeCompare(b.code));
+    const cash = ctx.accounts.filter((a) => /^110[125]/.test(a.code)).sort((a, b) => a.code.localeCompare(b.code));
     return [
       { title: "العملاء", values: ctx.customers.map((c) => c.nameAr).sort(), field: "customer" },
-      { title: "الصناديق والبنوك (الرقم)", values: cash.map((a) => a.code), field: "cashAccount" },
+      { title: "الصناديق والبنوك والعهد (الرقم)", values: cash.map((a) => a.code), field: "cashAccount" },
       { title: "اسم الحساب", values: cash.map((a) => a.nameAr) },
       { ...currencies, field: "currency" },
       { title: "النوع", values: ["دفعة عن فواتير", "دفعة مقدمة"], field: "kind" },

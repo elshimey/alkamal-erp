@@ -6,7 +6,7 @@ import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { driverOptions, vehicleOptions } from "@/lib/lookups";
-import { cashAccounts } from "@/lib/invoices";
+import { payFromAccounts } from "@/lib/invoices";
 import { custodyBalances, expenseAccountOptions } from "@/lib/purchases";
 import { todayRiyadh } from "@/lib/dates";
 import { listAttachments } from "@/lib/attachments";
@@ -38,11 +38,11 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
     expenseAccountOptions(db),
     driverOptions(),
     vehicleOptions(),
-    cashAccounts(db),
+    payFromAccounts(db),
     db
       .select({ id: s.waybills.id, number: s.waybills.number, date: s.waybills.waybillDate })
       .from(s.waybills)
-      .where(and(eq(s.waybills.execution, "fleet"), gte(s.waybills.waybillDate, since)))
+      .where(gte(s.waybills.waybillDate, since))
       .orderBy(desc(s.waybills.waybillDate)),
     can(user.perms, "drivers", "view") ? custodyBalances(db) : Promise.resolve([]),
     db
@@ -78,7 +78,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
 
   return (
     <>
-      <PageHeader title="المصروفات" description="مصروفات الطريق والمكتب المدفوعة من عهدة السائق أو من الصندوق والبنك. تُقيد على المركبة عند الاعتماد.">
+      <PageHeader title="المصروفات" description="مصروفات الطريق والمكتب المدفوعة من عهدة السائق، أو من الصندوق والبنك وعهدة موظف المكتب. تُقيد على المركبة عند الاعتماد، واختيار الشحنة يربطها بها.">
         {!adding && <ListActions addHref={can(user.perms, "expenses", "create") && "/expenses?add=1"} addLabel="إدخال مصروفات" />}
       </PageHeader>
       {adding && <AddModeBar backHref="/expenses" backLabel="المصروفات" title="إدخال مصروفات" />}
@@ -93,7 +93,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
                 { key: "date", label: "التاريخ", type: "date", placeholder: today },
                 { key: "payer", label: "الدافع", type: "select", required: true, options: Object.entries(EXPENSE_PAYERS).map(([value, label]) => ({ value, label })), width: "8rem" },
                 { key: "driverId", label: "السائق", type: "select", options: drivers, width: "9rem", create: "driver" },
-                { key: "cashAccountId", label: "أو الصندوق", type: "select", options: cashOpts, width: "11rem", create: "account" },
+                { key: "cashAccountId", label: "أو الصندوق / عهدة موظف", type: "select", options: cashOpts, width: "11rem", create: "account" },
                 { key: "accountId", label: "نوع المصروف", type: "select", required: true, options: accounts, width: "13rem", create: "account" },
                 { key: "vehicleId", label: "المركبة", type: "select", options: vehicles, width: "8rem", create: "vehicle" },
                 { key: "waybillId", label: "الشحنة", type: "select", options: waybills.map((w) => ({ value: String(w.id), label: `${w.number} · ${w.date}` })), width: "11rem" },
@@ -106,7 +106,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
               ]}
             />
             <p className="mt-2 text-xs text-gray-500">
-              اختيار الشحنة يملأ المركبة والسائق تلقائياً. «على العميل» يُقيد على 1114 ويظهر سطراً في فاتورة الشحنة. {canApprove ? "تُعتمد المصروفات فور الحفظ." : "تبقى بانتظار الاعتماد حتى يعتمدها المحاسب."}
+              اختيار الشحنة يملأ المركبة والسائق تلقائياً. ما دفعه موظف المكتب من عهدته: الدافع «الشركة» واختر عهدته في خانة الصندوق. «على العميل» يُقيد على 1114 ويظهر سطراً في فاتورة الشحنة. {canApprove ? "تُعتمد المصروفات فور الحفظ." : "تبقى بانتظار الاعتماد حتى يعتمدها المحاسب."}
             </p>
           </Card>
         )}
@@ -204,10 +204,10 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
                           <Field label="من دفع فعلاً">
                             <Select name="payer" defaultValue={e.reportedPayer === "company" ? "cash" : "driver_custody"}>
                               <option value="driver_custody">عهدة السائق {driver ?? ""} (يُخصم من عهدته)</option>
-                              <option value="cash">الشركة: صندوق أو بنك (لا يُخصم من العهدة)</option>
+                              <option value="cash">الشركة: صندوق أو بنك أو عهدة موظف (لا يُخصم من عهدة السائق)</option>
                             </Select>
                           </Field>
-                          <Field label="الصندوق أو البنك (إن دفعت الشركة)">
+                          <Field label="الصندوق أو البنك أو عهدة الموظف (إن دفعت الشركة)">
                             <AccountField name="cashAccountId" options={cashOpts} placeholder="—" />
                           </Field>
                           <Field label="حساب المصروف">

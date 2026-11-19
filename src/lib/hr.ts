@@ -141,6 +141,8 @@ export async function createCustody(db: Db | Tx, input: CustodyInput) {
   const quantity = input.quantity ?? 1;
   if (!(quantity > 0)) throw new Error("الكمية أكبر من صفر");
   await activeEmployee(db, input.employeeId);
+  // العهدة النقدية الافتتاحية: يُفتح حساب العهدة (أو يُربط الموجود) الآن ليُقيد عليه الرصيد الافتتاحي
+  if (input.isOpening && input.kind === "cash") await db.transaction((tx) => custodyAccountFor(tx, input.employeeId));
   const number = await nextDocumentNumber(db, "custody", "CUS", Number(input.docDate.slice(0, 4)));
   const [row] = await db
     .insert(s.custodyDocs)
@@ -169,14 +171,71 @@ async function lockCustody(tx: Tx, id: number) {
   return c;
 }
 
-/** حساب عهدة الموظف: للسائق حسابه، وللإداري يُفتح حساب فرعي تحت 1105 عند أول عهدة نقدية. */
+/** يوحّد اسم حساب العهدة للمقارنة: «عهدة – أحمد علي» و«عهدة-أحمد  علي» و«أحمد علي» سواء. */
+export const custodyNameKey = (name: string) =>
+  name
+    .replace(/^\s*عهد[ةه]\s*/, "")
+    .replace(/[\s\-–—ـ:]+/g, "")
+    .replace(/[أإآ]/g, "ا")
+    .replace(/ة/g, "ه")
+    .replace(/ى/g, "ي");
+
+/** حسابات العهد تحت 1105 غير المربوطة بموظف ولا سائق (فُتحت يدوياً من الشجرة مثلاً). */
+export async function unlinkedCustodyAccounts(db: Db | Tx) {
+  return db
+    .select({ id: s.accounts.id, code: s.accounts.code, nameAr: s.accounts.nameAr })
+    .from(s.accounts)
+    .where(
+      and(
+        eq(s.accounts.isPostable, true),
+        eq(s.accounts.isActive, true),
+        sql`${s.accounts.code} like '1105%'`,
+        sql`not exists (select 1 from drivers d where d.custody_account_id = ${s.accounts.id})`,
+        sql`not exists (select 1 from employees e where e.custody_account_id = ${s.accounts.id})`,
+      ),
+    )
+    .orderBy(asc(s.accounts.code));
+}
+
+/**
+ * حساب عهدة الموظف: للسائق حسابه، وللإداري حسابه المربوط. إن لم يُربط بعد يُربط حساب العهدة الموجود
+ * باسمه (فُتح يدوياً من الشجرة) حتى لا يتكرر، وإلا يُفتح حساب فرعي جديد تحت 1105.
+ */
 async function custodyAccountFor(tx: Tx, employeeId: number) {
   const emp = await activeEmployee(tx, employeeId);
   if (emp.driverCustody) return emp.driverCustody;
   if (emp.e.custodyAccountId) return emp.e.custodyAccountId;
-  const acc = await addSubAccountTx(tx, await accountIdByCode(tx, "1105"), `عهدة – ${emp.e.nameAr}`);
-  await tx.update(s.employees).set({ custodyAccountId: acc.id, updatedAt: new Date() }).where(eq(s.employees.id, employeeId));
-  return acc.id;
+  const key = custodyNameKey(emp.e.nameAr);
+  const matches = (await unlinkedCustodyAccounts(tx)).filter((a) => custodyNameKey(a.nameAr) === key);
+  const id = matches.length === 1 ? matches[0].id : (await addSubAccountTx(tx, await accountIdByCode(tx, "1105"), `عهدة – ${emp.e.nameAr}`)).id;
+  await tx.update(s.employees).set({ custodyAccountId: id, updatedAt: new Date() }).where(eq(s.employees.id, employeeId));
+  return id;
+}
+
+/**
+ * ربط موظف المكتب بحساب عهدته: حساب موجود تحت 1105 غير مربوط بأحد، أو فتح حساب جديد إن لم يُختر.
+ * يُستخدم مرة واحدة قبل أي حركة؛ تغيير حساب مربوط له حركات مرفوض حتى لا يضيع رصيده.
+ */
+export async function linkEmployeeCustody(db: Db, employeeId: number, accountId?: number | null) {
+  return db.transaction(async (tx) => {
+    const [emp] = await tx.select().from(s.employees).where(eq(s.employees.id, employeeId)).for("update");
+    if (!emp) throw new Error("الموظف غير موجود");
+    const [driver] = await tx.select({ id: s.drivers.id }).from(s.drivers).where(eq(s.drivers.employeeId, employeeId));
+    if (driver) throw new Error("السائق له حساب عهدة من شاشة السائقين");
+    if (!accountId) {
+      if (emp.custodyAccountId) return emp.custodyAccountId;
+      return custodyAccountFor(tx, employeeId);
+    }
+    if (emp.custodyAccountId === accountId) return accountId;
+    if (emp.custodyAccountId) {
+      const [{ n }] = await tx.select({ n: sql<number>`count(*)::int` }).from(s.journalLines).where(eq(s.journalLines.accountId, emp.custodyAccountId));
+      if (n > 0) throw new Error("للموظف حساب عهدة عليه حركات؛ لا يُستبدل");
+    }
+    const free = await unlinkedCustodyAccounts(tx);
+    if (!free.some((a) => a.id === accountId)) throw new Error("اختر حساب عهدة تحت 1105 غير مربوط بموظف أو سائق");
+    await tx.update(s.employees).set({ custodyAccountId: accountId, updatedAt: new Date() }).where(eq(s.employees.id, employeeId));
+    return accountId;
+  });
 }
 
 const cashAccountTx = (tx: Tx, id: number | null | undefined, what: string) => cashAccountFor(tx, id, `اختر ${what}`);
