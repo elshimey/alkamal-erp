@@ -4,7 +4,7 @@ import { db } from "@/db";
 import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
-import { cashAccounts } from "@/lib/invoices";
+import { payFromAccounts } from "@/lib/invoices";
 import { adjustmentAccounts, type ReceiptKind } from "@/lib/receipts";
 import { todayRiyadh } from "@/lib/dates";
 import { customerOptions } from "@/lib/lookups";
@@ -18,7 +18,7 @@ export default async function NewReceiptPage({ searchParams }: { searchParams: P
   const kind: ReceiptKind = sp.kind === "advance" || sp.kind === "refund" ? sp.kind : "invoice_payment";
   const [customers, cash, adjustments, currencies] = await Promise.all([
     customerOptions(),
-    cashAccounts(db),
+    payFromAccounts(db),
     adjustmentAccounts(db),
     db.select({ code: s.currencies.code }).from(s.currencies).orderBy(asc(s.currencies.code)),
   ]);

@@ -2895,7 +2895,7 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     expect(steps.find((x) => x.key === "vehicles")!.done).toBe(true);
   });
 
-  it("عهدة موظف المكتب: دافعاً للمصروف ومصروف الشحنة، وربط الحساب المفتوح يدوياً دون تكرار", async () => {
+  it("عهدة موظف المكتب: دافعاً للمصروف ومصروف الشحنة وحساب قبض في السند، وربط الحساب المفتوح يدوياً دون تكرار", async () => {
     const { payFromAccounts } = await import("@/lib/invoices");
     const { payFromAccountFor } = await import("@/lib/banks");
     // فُتح الحساب يدوياً من الشجرة قبل ربطه بالموظف (كما في تشغيل العميل الأول)
@@ -2938,6 +2938,14 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       const [drvEmp] = await db.select().from(s.drivers).where(eq(s.drivers.id, drv.id));
       await expect(hr.linkEmployeeCustody(db, drvEmp.employeeId, null)).rejects.toThrow("السائق");
     }
+
+    // سند القبض يُستلم في عهدة الموظف الذي حصّل النقد من العميل
+    const payer = await createParty(db, { nameAr: "عميل يدفع نقداً للموظف", roles: ["customer"] });
+    const rc = await createReceipt(db, { kind: "advance", receiptDate: `${YEAR}-11-04`, customerId: payer.id, amount: 700, method: "cash", cashAccountId: manual.id, post: true });
+    const [rcRow] = await db.select().from(s.receipts).where(eq(s.receipts.id, rc.id));
+    const rcLines = await db.select().from(s.journalLines).where(eq(s.journalLines.entryId, rcRow.journalEntryId!));
+    expect(Number(rcLines.find((l) => l.accountId === manual.id)?.debit)).toBe(700);
+    if (drv) await expect(createReceipt(db, { kind: "advance", receiptDate: `${YEAR}-11-04`, customerId: payer.id, amount: 1, method: "cash", cashAccountId: drv.custodyAccountId })).rejects.toThrow("عهدة السائق");
   });
 
   it("الدفعة الخامسة: التحويل بين الحسابات، مخصص الديون، بطاقات الوقود، الشراء، عروض الأسعار", async () => {
