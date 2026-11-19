@@ -152,6 +152,7 @@ const ar = {
   accountLocked: "الحساب موقوف؛ تواصل مع المكتب",
   tooManyAttempts: "محاولات خاطئة كثيرة؛ أعد المحاولة بعد 15 دقيقة",
   forgot: "نسيت كلمة المرور؟ اطلب من المكتب تغييرها.",
+  officeLogin: "موظف مكتب؟ ادخل من هنا",
   chooseLanguage: "اختر لغتك",
   docs: {
     title: "وثائقي",
@@ -321,6 +322,7 @@ const ur: DriverDict = {
   accountLocked: "اکاؤنٹ بند ہے؛ دفتر سے رابطہ کریں",
   tooManyAttempts: "بہت زیادہ غلط کوششیں؛ 15 منٹ بعد دوبارہ کوشش کریں",
   forgot: "پاس ورڈ بھول گئے؟ دفتر سے نیا لیں۔",
+  officeLogin: "دفتر کے ملازم؟ یہاں سے داخل ہوں",
   chooseLanguage: "اپنی زبان منتخب کریں",
   docs: {
     title: "میرے کاغذات",
@@ -488,6 +490,7 @@ const hi: DriverDict = {
   accountLocked: "खाता बंद है; ऑफिस से संपर्क करें",
   tooManyAttempts: "बहुत अधिक गलत प्रयास; 15 मिनट बाद फिर कोशिश करें",
   forgot: "पासवर्ड भूल गए? ऑफिस से नया लें।",
+  officeLogin: "ऑफिस कर्मचारी? यहाँ से लॉगिन करें",
   chooseLanguage: "अपनी भाषा चुनें",
   docs: {
     title: "मेरे दस्तावेज़",
@@ -655,6 +658,7 @@ const en: DriverDict = {
   accountLocked: "Account is locked; contact the office",
   tooManyAttempts: "Too many wrong attempts; try again in 15 minutes",
   forgot: "Forgot your password? Ask the office to reset it.",
+  officeLogin: "Office staff? Sign in here",
   chooseLanguage: "Choose your language",
   docs: {
     title: "My documents",
