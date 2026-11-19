@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getCurrentUser, hasDriverSession } from "@/lib/auth";
@@ -79,6 +80,11 @@ export default async function DriverLoginPage() {
           </ActionForm>
           <p className="mt-4 text-center text-xs text-gray-500">{t.forgot}</p>
         </section>
+
+        {/* حساب المكتب يدخل من هنا أيضاً ويُحوَّل للبرنامج؛ الرابط لمن يريد صفحة المكتب نفسها */}
+        <Link href="/login?office=1" className="mt-4 block text-center text-sm font-medium text-brand-800 underline-offset-4 hover:underline">
+          {t.officeLogin}
+        </Link>
 
         <section className="animate-rise stagger mt-5" style={{ "--i": 1 } as React.CSSProperties}>
           <div className="mb-2 text-center text-xs font-medium text-gray-500">{t.chooseLanguage}</div>

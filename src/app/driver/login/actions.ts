@@ -9,6 +9,7 @@ import { driverForUser, setDriverLanguage } from "@/lib/driver-app";
 import { runInTenant } from "@/db/tenant";
 import { DRIVER_DICT, DRIVER_LANG_COOKIE, DRIVER_LANGS, type DriverLang } from "@/data/driver-i18n";
 import type { FormState } from "@/components/action-form";
+import { WELCOME_COOKIE } from "@/lib/welcome";
 
 export async function driverLogin(lang: DriverLang, _: FormState, data: FormData): Promise<FormState> {
   const t = DRIVER_DICT[DRIVER_LANGS.includes(lang) ? lang : "ar"];
@@ -16,8 +17,13 @@ export async function driverLogin(lang: DriverLang, _: FormState, data: FormData
   const loginName = String(data.get("login") ?? "").trim();
   const password = String(data.get("password") ?? "");
   if (!company || !loginName || !password) return { error: t.wrongLogin };
-  const result = await signIn(company, loginName, password, "driver");
+  // صفحة واحدة تعرف الحساب: من له سجل سائق يدخل تطبيقه، وموظف المكتب يدخل البرنامج
+  const result = await signIn(company, loginName, password, "driver-app");
   if ("error" in result) return { error: result.throttled ? t.tooManyAttempts : result.locked ? t.accountLocked : t.wrongLogin };
+  if (result.surface === "office") {
+    (await cookies()).set(WELCOME_COOKIE, "1", { path: "/", maxAge: 120, sameSite: "lax" });
+    redirect("/");
+  }
 
   // اللغة التي اختارها في صفحة الدخول تصبح لغة تطبيقه
   await runInTenant(result.schema, async () => {

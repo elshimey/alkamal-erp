@@ -19,6 +19,12 @@ const SURFACES = {
   driver: { session: DRIVER_SESSION_COOKIE, tenant: DRIVER_TENANT_COOKIE, path: "/driver" },
 } as const;
 
+/**
+ * آخر واجهة دخل منها هذا الجهاز (سائق أو مكتب). ليست جلسة ولا تمنح صلاحية؛ تجعل التطبيق المثبّت
+ * يفتح على تطبيق السائق مباشرة في جوال السائق بدل صفحة دخول المكتب.
+ */
+export const LAST_SURFACE_COOKIE = "alk_last_surface";
+
 /** رمز جلسة هذا الطلب: صفحات السائق تصلها جلسة السائق إن وُجدت، وإلا جلسة المكتب. */
 async function sessionToken() {
   const c = await cookies();
@@ -52,6 +58,12 @@ export async function createSession(userId: number, surface: Surface = "office")
   store.set(c.session, token, cookieOptions(expiresAt, c.path));
   // الشركة التي ينتمي لها المستخدم؛ الجلسة نفسها محفوظة داخل مخطط الشركة فلا يفيد تزوير هذه القيمة
   store.set(c.tenant, await currentSchema(), cookieOptions(new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), c.path));
+  store.set(LAST_SURFACE_COOKIE, surface, cookieOptions(new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)));
+}
+
+/** هل آخر دخول على هذا الجهاز كان من تطبيق السائق؟ */
+export async function lastSurfaceIsDriver() {
+  return (await cookies()).get(LAST_SURFACE_COOKIE)?.value === "driver";
 }
 
 /** معرّف جلسة هذا الجهاز (مخزن مُجزّأً كما في الجدول). */
@@ -87,6 +99,7 @@ export async function moveSessionToDriver() {
   store.set(DRIVER_SESSION_COOKIE, token, cookieOptions(expires, "/driver"));
   if (tenant) store.set(DRIVER_TENANT_COOKIE, tenant, cookieOptions(new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), "/driver"));
   store.delete({ name: SESSION_COOKIE, path: "/" });
+  store.set(LAST_SURFACE_COOKIE, "driver", cookieOptions(new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)));
 }
 
 export interface CurrentUser {

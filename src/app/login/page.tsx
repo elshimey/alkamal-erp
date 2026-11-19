@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, lastSurfaceIsDriver } from "@/lib/auth";
 import { PasswordInput } from "@/components/password-input";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Field, Input } from "@/components/ui";
@@ -11,9 +11,12 @@ import { login } from "./actions";
 import { lastCompanyCode } from "./company-code";
 import { farewellMessage } from "@/lib/welcome";
 
-export default async function LoginPage({ searchParams }: { searchParams: Promise<{ reset?: string; driver?: string; bye?: string }> }) {
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ reset?: string; driver?: string; bye?: string; office?: string }> }) {
   if (await getCurrentUser()) redirect("/");
-  const bye = (await searchParams).bye?.slice(0, 40);
+  const params = await searchParams;
+  // جوال السائق: التطبيق المثبّت يفتح على تطبيق السائق مباشرة (رحلاته أو دخوله بلغته)، لا على دخول المكتب
+  if ((await lastSurfaceIsDriver()) && !params.office && !params.driver && !params.reset && !params.bye) redirect("/driver");
+  const bye = params.bye?.slice(0, 40);
   const farewell = bye ? farewellMessage(bye) : null;
   const brand = await getBrand(true);
   const code = await lastCompanyCode();
@@ -54,7 +57,18 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
             <Logo name={brand.name} logo={brand.logo} />
           </div>
           <h2 className="text-2xl font-semibold text-brand-900">تسجيل الدخول</h2>
-          <p className="mt-1 mb-7 text-sm text-gray-500">أدخل رمز شركتك واسم الدخول وكلمة المرور للمتابعة.</p>
+          <p className="mt-1 mb-5 text-sm text-gray-500">أدخل رمز شركتك واسم الدخول وكلمة المرور، والبرنامج يعرف وحده هل أنت سائق أو موظف مكتب.</p>
+          <Link
+            href="/driver/login"
+            className="mb-6 flex items-center gap-3 rounded-2xl bg-asphalt-900 px-4 py-3 text-white shadow-sm transition hover:bg-asphalt-800"
+          >
+            <Truck className="w-11 shrink-0" />
+            <span className="min-w-0 flex-1 leading-tight">
+              <span className="block font-display font-semibold text-brand-500">أنا سائق</span>
+              <span className="text-xs text-white/70">صفحة السائق بلغتك: العربية، اردو، हिन्दी، English</span>
+            </span>
+            <span aria-hidden className="text-lg text-white/60">‹</span>
+          </Link>
           {farewell && (
             <div role="status" className="animate-rise -mt-3 mb-5 flex items-center gap-3 rounded-2xl bg-asphalt-900 px-4 py-3 text-white">
               <span className="shrink-0">
