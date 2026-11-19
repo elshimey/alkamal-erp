@@ -7,7 +7,7 @@ import { queuePush } from "@/lib/push";
 // العنوان يُترجم في التطبيق حسب نوع الإشعار ولغة السائق؛ والنص رقم المستند والمبلغ أو سبب الرفض.
 // كل إشعار يصل أيضاً فوراً لجوال السائق إن فعّل الإشعارات (Web Push).
 
-export const NOTIFY_KINDS = ["trip_sent", "trip_unsent", "expense_approved", "expense_rejected", "maint_approved", "maint_rejected", "advance_approved", "advance_rejected", "trip_rejected", "doc_approved", "doc_rejected", "request_accepted", "request_rejected"] as const;
+export const NOTIFY_KINDS = ["trip_sent", "trip_unsent", "expense_approved", "expense_rejected", "maint_approved", "maint_rejected", "advance_approved", "advance_rejected", "trip_rejected", "doc_approved", "doc_rejected", "request_accepted", "request_rejected", "doc_expiring"] as const;
 export type NotifyKind = (typeof NOTIFY_KINDS)[number];
 
 const TITLE_AR: Record<NotifyKind, string> = {
@@ -24,15 +24,17 @@ const TITLE_AR: Record<NotifyKind, string> = {
   doc_rejected: "رُفضت وثيقتك",
   request_accepted: "قُبلت رحلتك",
   request_rejected: "رُفضت رحلتك",
+  doc_expiring: "وثيقة تحتاج تجديداً",
 };
 
-export async function notifyDriver(db: Db | Tx, driverId: number | null | undefined, n: { kind: NotifyKind; body?: string | null; href?: string | null }) {
-  if (!driverId) return;
+export async function notifyDriver(db: Db | Tx, driverId: number | null | undefined, n: { kind: NotifyKind; body?: string | null; href?: string | null }, opts: { push?: boolean } = {}) {
+  if (!driverId) return null;
   const [row] = await db
     .insert(s.driverNotifications)
     .values({ driverId, kind: n.kind, title: TITLE_AR[n.kind], body: n.body?.trim() || null, href: n.href ?? null })
     .returning({ id: s.driverNotifications.id });
-  await queuePush({ kind: "driver", id: row.id });
+  if (opts.push !== false) await queuePush({ kind: "driver", id: row.id });
+  return row.id;
 }
 
 export async function driverNotifications(db: Db | Tx, driverId: number, limit = 50) {

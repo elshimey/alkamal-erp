@@ -14,6 +14,8 @@ const TONE = { red: "bg-red-500", amber: "bg-amber-500", blue: "bg-sky-500" } as
 export function NotificationBell() {
   const [state, setState] = useState<State | null>(null);
   const [open, setOpen] = useState(false);
+  // تبويبان: التشغيل اليومي، والوثائق (الامتثال) منفصلة حتى لا تضيع وسط أحداث السائقين
+  const [tab, setTab] = useState<"ops" | "docs">("ops");
   const [, start] = useTransition();
   const router = useRouter();
   const pathname = usePathname();
@@ -81,6 +83,7 @@ export function NotificationBell() {
   }, [open]);
 
   const unread = state?.unread ?? 0;
+  const shown = state?.items.filter((a) => a.group === tab) ?? [];
   const go = (key: string, href: string) => {
     setOpen(false);
     start(async () => {
@@ -94,7 +97,10 @@ export function NotificationBell() {
     <div ref={box} className="relative">
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          if (!open && state && !state.unreadOps && state.unreadDocs) setTab("docs");
+          setOpen((o) => !o);
+        }}
         aria-label={unread ? `التنبيهات: ${unread} غير مقروء` : "التنبيهات"}
         aria-expanded={open}
         className="relative flex size-9 items-center justify-center rounded-full text-gray-600 transition hover:bg-gray-100 hover:text-brand-700"
@@ -124,10 +130,30 @@ export function NotificationBell() {
             </button>
           )}
           {push === "denied" && <p className="border-b border-gray-100 px-4 py-2 text-xs text-gray-500">الإشعارات الفورية محظورة في هذا المتصفح؛ اسمح بها من إعدادات الموقع (رمز القفل بجانب العنوان).</p>}
+          <div role="tablist" className="flex border-b border-gray-100 text-sm">
+            {(
+              [
+                ["ops", "التشغيل", state?.unreadOps ?? 0],
+                ["docs", "الوثائق", state?.unreadDocs ?? 0],
+              ] as const
+            ).map(([k, label, n]) => (
+              <button
+                key={k}
+                type="button"
+                role="tab"
+                aria-selected={tab === k}
+                onClick={() => setTab(k)}
+                className={`flex flex-1 items-center justify-center gap-1.5 border-b-2 py-2 font-medium transition ${tab === k ? "border-brand-600 text-gray-900" : "border-transparent text-gray-500 hover:text-gray-800"}`}
+              >
+                {label}
+                {n > 0 && <span className={`ltr-nums rounded-full px-1.5 text-[10px] leading-4 text-white ${k === "docs" ? "bg-red-600" : "bg-gray-500"}`}>{n}</span>}
+              </button>
+            ))}
+          </div>
           <ul className="max-h-96 divide-y divide-gray-50 overflow-y-auto">
             {!state && <li className="px-4 py-6 text-center text-sm text-gray-400">جارٍ التحميل…</li>}
-            {state && state.items.length === 0 && <li className="px-4 py-6 text-center text-sm text-gray-500">لا توجد تنبيهات الآن</li>}
-            {state?.items.slice(0, 8).map((a) => (
+            {state && shown.length === 0 && <li className="px-4 py-6 text-center text-sm text-gray-500">{tab === "docs" ? "لا وثائق تحتاج تجديداً" : "لا توجد تنبيهات الآن"}</li>}
+            {shown.slice(0, 8).map((a) => (
               <li key={a.key}>
                 <button type="button" onClick={() => go(a.key, a.href)} className={`flex w-full items-start gap-3 px-4 py-3 text-start text-sm transition hover:bg-gray-50 ${a.read ? "text-gray-500" : "font-medium text-gray-900"}`}>
                   <span className={`mt-1.5 size-2 shrink-0 rounded-full ${a.read ? "bg-gray-300" : TONE[a.tone]}`} />
@@ -136,8 +162,8 @@ export function NotificationBell() {
               </li>
             ))}
           </ul>
-          <Link href="/notifications" onClick={() => setOpen(false)} className="block border-t border-gray-100 px-4 py-2.5 text-center text-sm font-medium text-brand-700 hover:bg-gray-50">
-            كل التنبيهات{state && state.items.length > 8 ? ` (${state.items.length})` : ""}
+          <Link href={tab === "docs" ? "/notifications?tab=docs" : "/notifications"} onClick={() => setOpen(false)} className="block border-t border-gray-100 px-4 py-2.5 text-center text-sm font-medium text-brand-700 hover:bg-gray-50">
+            كل التنبيهات{shown.length > 8 ? ` (${shown.length})` : ""}
           </Link>
         </div>
       )}

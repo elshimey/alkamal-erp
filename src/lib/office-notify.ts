@@ -20,18 +20,25 @@ export const OFFICE_KINDS = {
   breakdown_reported: { entity: "maintenance", action: "update", icon: "wrench", tone: "red" },
   breakdown_escalated: { entity: "maintenance", action: "approve", icon: "wrench", tone: "red" },
   doc_uploaded: { entity: "fleet_documents", action: "update", icon: "document", tone: "amber" },
+  // تنبيه انتهاء الوثائق اليومي (30 و7 أيام ويوم الانتهاء ثم أسبوعياً): لكل جهة صلاحيتها
+  doc_expiring: { entity: "fleet_documents", action: "view", icon: "document", tone: "red" },
+  doc_expiring_hr: { entity: "employees", action: "view", icon: "document", tone: "red" },
+  doc_expiring_company: { entity: "settings", action: "update", icon: "shield", tone: "red" },
   advance_requested: { entity: "payroll", action: "approve", icon: "cash", tone: "amber" },
 } as const satisfies Record<string, { entity: Entity; action: Action; icon: IconName; tone: "red" | "amber" | "blue" }>;
 export type OfficeKind = keyof typeof OFFICE_KINDS;
 
-/** يسجل حدثاً للمكتب ويجدول إشعاره الفوري. */
-export async function notifyOffice(db: Db | Tx, n: { kind: OfficeKind; text: string; href: string; driverId?: number | null }) {
+/** أحداث الوثائق تظهر في تبويب «الوثائق» بالجرس، والباقي في «التشغيل». */
+export const isDocKind = (kind: string) => kind.startsWith("doc_");
+
+/** يسجل حدثاً للمكتب ويجدول إشعاره الفوري (push: false لمن يرسله بنفسه). */
+export async function notifyOffice(db: Db | Tx, n: { kind: OfficeKind; text: string; href: string; driverId?: number | null }, opts: { push?: boolean } = {}) {
   const k = OFFICE_KINDS[n.kind];
   const [row] = await db
     .insert(s.officeNotifications)
     .values({ kind: n.kind, text: n.text.trim().slice(0, 300), href: n.href, entity: k.entity, action: k.action, driverId: n.driverId ?? null })
     .returning({ id: s.officeNotifications.id });
-  await queuePush({ kind: "office", id: row.id });
+  if (opts.push !== false) await queuePush({ kind: "office", id: row.id });
   return row.id;
 }
 
@@ -52,7 +59,7 @@ export async function officeEvents(db: Db | Tx, perms: PermissionSet, limit = 30
     .slice(0, limit)
     .map((r) => {
       const k = OFFICE_KINDS[r.kind as OfficeKind];
-      return { key: `ev:${r.id}`, tone: k?.tone ?? "blue", icon: (k?.icon ?? "bell") as IconName, text: r.text, href: r.href, at: r.createdAt };
+      return { key: `ev:${r.id}`, group: isDocKind(r.kind) ? ("docs" as const) : ("ops" as const), tone: k?.tone ?? "blue", icon: (k?.icon ?? "bell") as IconName, text: r.text, href: r.href, at: r.createdAt };
     });
 }
 

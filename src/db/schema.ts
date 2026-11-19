@@ -2426,3 +2426,23 @@ export const officeNotifications = pgTable(
   },
   (t) => [index("office_notifications_created_idx").on(t.createdAt)],
 );
+
+// ───────────── تنبيه انتهاء الوثائق اليومي ─────────────
+
+// ما أُرسل من مراحل التنبيه لكل وثيقة (30، 7، ثم x0 يوم الانتهاء، x1 بعد أسبوع…)، فلا يتكرر الإشعار.
+// الوثيقة المجددة سطر جديد، فتبدأ مراحلها من جديد.
+export const documentAlertSends = pgTable(
+  "document_alert_sends",
+  {
+    documentId: ref("document_id").notNull().references(() => fleetDocuments.id, { onDelete: "cascade" }),
+    stage: varchar("stage", { length: 12 }).notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.documentId, t.stage] })],
+);
+
+// مهام يومية تعمل مرة واحدة في اليوم لكل شركة (أول استخدام للبرنامج بعد منتصف الليل بتوقيت الرياض).
+export const dailyJobs = pgTable("daily_jobs", {
+  job: varchar("job", { length: 40 }).primaryKey(),
+  lastDate: date("last_date").notNull(),
+});

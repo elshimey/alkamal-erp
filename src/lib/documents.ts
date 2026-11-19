@@ -490,10 +490,14 @@ export async function blockingDocumentIssues(
   return issues;
 }
 
-/** أصحاب الوثائق الذين ينبَّه المستخدم بوثائقهم: الأسطول والعملاء والموردون للتشغيل، والموظفون للموارد البشرية، والشركة للإدارة. */
+/**
+ * أصحاب الوثائق الذين ينبَّه المستخدم بوثائقهم (وثائقنا الداخلية فقط، قرار أحمد 2026-11-19): الأسطول للتشغيل،
+ * والموظفون للموارد البشرية، والشركة للإدارة. وثائق العملاء والموردين تبقى في سجل الوثائق دون تنبيه.
+ */
+export const ALERT_OWNER_KINDS: OwnerKind[] = ["vehicle", "trailer", "driver", "employee", "company"];
 export function alertKindsFor(perms: PermissionSet): OwnerKind[] {
   const kinds: OwnerKind[] = [];
-  if (can(perms, "fleet_documents", "view")) kinds.push("vehicle", "trailer", "driver", "customer", "supplier");
+  if (can(perms, "fleet_documents", "view")) kinds.push("vehicle", "trailer", "driver");
   if (can(perms, "fleet_documents", "view") && can(perms, "employees", "view")) kinds.push("employee");
   if (can(perms, "fleet_documents", "view") && (perms.isAdmin || can(perms, "settings", "update"))) kinds.push("company");
   return kinds;

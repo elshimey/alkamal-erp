@@ -5,6 +5,7 @@ import { driverNotifications, markNotificationsRead, type NotifyKind } from "@/l
 import { Section } from "../../driver-ui";
 
 const ICON: Record<string, string> = {
+  doc_expiring: "⏳",
   trip_sent: "🚚",
   trip_unsent: "↩️",
   expense_approved: "✅",

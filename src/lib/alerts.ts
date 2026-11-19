@@ -5,7 +5,6 @@ import type { requireUser } from "@/lib/auth";
 
 type SessionUser = Awaited<ReturnType<typeof requireUser>>;
 import { can } from "@/lib/permissions";
-import { daysBetween } from "@/lib/dates";
 import { alertKindsFor } from "@/lib/documents";
 import { alertCounts, balances } from "@/lib/dashboard";
 import type { IconName } from "@/components/icons";
@@ -15,7 +14,12 @@ import { officeEvents } from "@/lib/office-notify";
 
 const money = (v: number) => Math.round(v).toLocaleString("en");
 
-export type Alert = { key: string; tone: "red" | "amber" | "blue"; icon: IconName; text: string; href: string };
+/** «docs» تنبيهات الوثائق والامتثال (تبويب مستقل في الجرس وقسم ثابت في الرئيسية)، و«ops» تنبيهات التشغيل اليومية. */
+export type AlertGroup = "ops" | "docs";
+export type Alert = { key: string; group: AlertGroup; tone: "red" | "amber" | "blue"; icon: IconName; text: string; href: string };
+
+const DOC_KEYS = ["doc_critical", "docs_expired", "docs_expiring", "doc_uploads"];
+const groupOfKey = (key: string): AlertGroup => (DOC_KEYS.some((k) => key === k || key.startsWith(`${k}:`)) ? "docs" : "ops");
 
 export function buildAlerts(
   user: Pick<SessionUser, "perms">,
@@ -23,12 +27,10 @@ export function buildAlerts(
   bal: { cash: number } | null,
   today: string,
 ): Alert[] {
-  const canFinance = can(user.perms, "accounts", "view");
   const canOps = can(user.perms, "waybills", "view");
-  const canFleet = can(user.perms, "vehicles", "view");
   const canSales = can(user.perms, "sales_invoices", "view");
-  // التنبيهات: ما يحتاج تدخلاً، كل واحد يفتح القسم المعني
-  const kwdStale = !alerts.kwdRateDate || daysBetween(alerts.kwdRateDate, today) > 30;
+  // التنبيهات: ما يحتاج تدخلاً، كل واحد يفتح القسم المعني.
+  // حُذفت بقرار أحمد (2026-11-19) لأنها معلومة لا تحتاج تدخلاً: المسودات، ومركبة في الورشة، ومركبة بلا سائق، وسعر الدينار.
   const list: {
     key: string;
     show: boolean;
@@ -110,36 +112,12 @@ export function buildAlerts(
       href: "/waybills?status=in_transit",
     },
     {
-      key: "draft_invoices",
-      show: canSales && alerts.draftInvoices > 0,
-      tone: "blue",
-      icon: "invoice",
-      text: `${alerts.draftInvoices} فاتورة مسودة لم تُصدر`,
-      href: "/invoices",
-    },
-    {
-      key: "draft_receipts",
-      show: can(user.perms, "receipts", "approve") && alerts.draftReceipts > 0,
-      tone: "blue",
-      icon: "cash",
-      text: `${alerts.draftReceipts} سند قبض بانتظار الترحيل`,
-      href: "/receipts",
-    },
-    {
       key: "stale_drafts",
       show: canOps && alerts.staleDrafts > 0,
       tone: "blue",
       icon: "waybill",
       text: `${alerts.staleDrafts} شحنة مسودة منذ أكثر من يومين`,
       href: "/waybills?status=draft",
-    },
-    {
-      key: "kwd_rate",
-      show: canFinance && kwdStale,
-      tone: "blue",
-      icon: "exchange",
-      text: alerts.kwdRateDate ? `آخر سعر للدينار الكويتي بتاريخ ${alerts.kwdRateDate}` : "لا يوجد سعر صرف للدينار الكويتي",
-      href: "/exchange-rates",
     },
     {
       key: "purchases_overdue",
@@ -174,14 +152,6 @@ export function buildAlerts(
       href: "/expenses",
     },
     {
-      key: "draft_purchases",
-      show: can(user.perms, "purchase_invoices", "approve") && alerts.draftPurchases > 0,
-      tone: "blue",
-      icon: "invoice",
-      text: `${alerts.draftPurchases} فاتورة مورد مسودة لم تُرحّل`,
-      href: "/purchases",
-    },
-    {
       key: "breakdowns_pending",
       show: can(user.perms, "maintenance", "update") && alerts.pendingBreakdowns > 0,
       tone: "red",
@@ -214,35 +184,11 @@ export function buildAlerts(
       href: "/maintenance/plans",
     },
     {
-      key: "open_maintenance",
-      show: can(user.perms, "maintenance", "view") && alerts.openMaintenance > 0,
-      tone: "blue",
-      icon: "wrench",
-      text: `${alerts.openMaintenance} مركبة في الورشة (أمر صيانة تحت التنفيذ)`,
-      href: "/maintenance?status=approved",
-    },
-    {
-      key: "draft_maintenance",
-      show: can(user.perms, "maintenance", "approve") && alerts.draftMaintenance > 0,
-      tone: "blue",
-      icon: "wrench",
-      text: `${alerts.draftMaintenance} أمر صيانة مسودة لم يُعتمد`,
-      href: "/maintenance?status=draft",
-    },
-    {
       key: "payroll_missing",
       show: can(user.perms, "payroll", "create") && alerts.lastMonthRunMissing,
       tone: "amber",
       icon: "calendar",
       text: "لم يُنشأ مسير رواتب الشهر الماضي",
-      href: "/payroll",
-    },
-    {
-      key: "payroll_draft",
-      show: can(user.perms, "payroll", "approve") && alerts.draftPayroll > 0,
-      tone: "blue",
-      icon: "cash",
-      text: `${alerts.draftPayroll} مسير رواتب مسودة لم يُعتمد`,
       href: "/payroll",
     },
     {
@@ -269,16 +215,8 @@ export function buildAlerts(
       text: `${alerts.unpaidViolations} مخالفة مرورية لم تُسدد للمرور`,
       href: "/violations?status=posted",
     },
-    {
-      key: "unassigned",
-      show: canFleet && alerts.unassigned > 0,
-      tone: "blue",
-      icon: "handover",
-      text: `${alerts.unassigned} مركبة عاملة بلا سائق مسند`,
-      href: "/assignments",
-    },
   ];
-  return list.filter((a) => a.show).map(({ key, tone, icon, text, href }) => ({ key, tone, icon, text, href }));
+  return list.filter((a) => a.show).map(({ key, tone, icon, text, href }) => ({ key, group: groupOfKey(key), tone, icon, text, href }));
 }
 
 /** تنبيهات المستخدم الآن (للجرس وصفحة كل التنبيهات). */
@@ -286,7 +224,7 @@ export async function userAlerts(db: Db, user: Pick<SessionUser, "perms">, today
   const canFinance = can(user.perms, "accounts", "view");
   const [alerts, bal, events] = await Promise.all([alertCounts(db, today, alertKindsFor(user.perms)), canFinance ? balances(db, today) : null, officeEvents(db, user.perms)]);
   // أحداث السائقين الفورية أولاً (الأحدث فوق)، ثم العدّادات
-  return [...events.map(({ key, tone, icon, text, href }): Alert => ({ key, tone, icon, text, href })), ...buildAlerts(user, alerts, bal, today)];
+  return [...events.map(({ key, group, tone, icon, text, href }): Alert => ({ key, group, tone, icon, text, href })), ...buildAlerts(user, alerts, bal, today)];
 }
 
 // ───────────── المقروء: التنبيه يعود غير مقروء إذا تغيّر نصه (العدد) ─────────────
