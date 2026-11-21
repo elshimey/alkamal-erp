@@ -581,7 +581,8 @@ export async function deleteExpense(db: Db, id: number, opts: { reason: string; 
 export interface PaymentInput {
   paymentDate: string;
   // expense: سداد مصروف «لم يُدفع بعد» المعتمد؛ الحساب المدين هو ما قُيد عليه الالتزام
-  kind: "supplier" | "custody" | "expense";
+  // installment: سداد قسط من جدول أقساط الدائنين؛ الحساب المدين هو حساب الدائن
+  kind: "supplier" | "custody" | "expense" | "installment";
   debitAccountId?: number | null;
   partyId?: number | null;
   driverId?: number | null;
@@ -603,14 +604,15 @@ export async function createPayment(db: Db, input: PaymentInput) {
     if (!(input.amount > 0)) throw new Error("المبلغ إلزامي");
     const [cash] = await tx.select().from(s.accounts).where(eq(s.accounts.id, input.cashAccountId));
     // صرف العهدة يجوز من أي حساب أصول أو التزامات تفصيلي (خزينة فرعية، عهدة أمين الصندوق…)، وسداد المورد من صندوق أو بنك فقط
-    const anyFunding = input.kind === "custody" && !!cash && /^[12]/.test(cash.code);
+    // وسداد القسط من أي حساب يمكن السداد منه في الشجرة (قرار أحمد 2026-11-21)، عدا حساب الدائن نفسه
+    const anyFunding = (input.kind === "custody" || (input.kind === "installment" && cash?.id !== input.debitAccountId)) && !!cash && /^[12]/.test(cash.code);
     // سداد المصروف المستحق يجوز أيضاً من عهدة موظف المكتب (1105)
     const custodyFunding = input.kind === "expense" && !!cash && cash.code.startsWith("1105");
     if (!cash || !cash.isPostable || !cash.isActive || !(anyFunding || custodyFunding || /^110[12]/.test(cash.code))) throw new Error("اختر صندوقاً أو حساب بنك تفصيلياً");
     const currency = input.currencyCode ?? "SAR";
     if (cash.currencyCode && cash.currencyCode !== currency) throw new Error(`الحساب ${cash.nameAr} بعملة ${cash.currencyCode}`);
     let debitAccountId: number;
-    if (input.kind === "expense") {
+    if (input.kind === "expense" || input.kind === "installment") {
       if (!input.debitAccountId) throw new Error("حساب الالتزام مطلوب");
       debitAccountId = input.debitAccountId;
     } else if (input.kind === "supplier") {
@@ -729,6 +731,15 @@ export async function postPayment(db: Db, id: number, opts: { invoiceId?: number
 
 export async function revertPayment(db: Db, id: number) {
   return db.transaction(async (tx) => {
+    const [payoff] = await tx.select({ name: s.installmentPlans.name }).from(s.installmentPlans).where(eq(s.installmentPlans.payoffPaymentId, id));
+    if (payoff) throw new Error(`هذا سند سداد مبكر لجدول «${payoff.name}»؛ ألغِ السداد المبكر من صفحة الأقساط`);
+    return revertPaymentTx(tx, id);
+  });
+}
+
+/** يرجع سند الصرف لمسودة ويحذف قيده (سداد القسط العادي يعود مستحقاً لأن المسدد من السندات المرحّلة فقط). */
+export async function revertPaymentTx(tx: Tx, id: number) {
+  {
     const [p] = await tx.select().from(s.payments).where(eq(s.payments.id, id)).for("update");
     if (!p) throw new Error("السند غير موجود");
     if (p.status !== "posted") throw new Error("السند ليس مرحّلاً");
@@ -742,7 +753,7 @@ export async function revertPayment(db: Db, id: number) {
     await tx.delete(s.paymentAllocations).where(eq(s.paymentAllocations.paymentId, id));
     await tx.update(s.payments).set({ status: "draft", journalEntryId: null }).where(eq(s.payments.id, id));
     if (p.journalEntryId) await deleteEntryTx(tx, p.journalEntryId);
-  });
+  }
 }
 
 export async function deletePayment(db: Db, id: number, opts: { reason: string; userId?: number }) {

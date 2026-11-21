@@ -3,6 +3,11 @@ import type { Db } from "@/db";
 import { PLAN_ALERT_DAYS } from "@/data/maintenance";
 import { expiryCounts, type OwnerKind } from "@/lib/documents";
 
+// باقي القسط من سنداته المرحّلة (جدول أقساط الدائنين)
+const INSTALLMENT_REMAINING_SQL = sql.raw(
+  `(i.principal + i.cost - coalesce((select sum(p.amount) from installment_payments ip2 join payments p on p.id = ip2.payment_id and p.status = 'posted' where ip2.installment_id = i.id), 0))`,
+);
+
 // مؤشرات اللوحة الرئيسية. الأرقام المالية من القيود المرحّلة فقط (بالريال)،
 // وأرقام التشغيل من الشحنات نفسها.
 
@@ -414,6 +419,10 @@ export async function alertCounts(db: Db, today: string, docKinds?: OwnerKind[])
           (select count(*) from employee_advances where status = 'pending')::int as pending_advances,
           (select count(*) from traffic_violations where status = 'posted')::int as unpaid_violations,
           (select count(*) from document_submissions where status = 'pending')::int as pending_doc_uploads,
+          (select count(*) from installments i join installment_plans ip on ip.id = i.plan_id and ip.status = 'active'
+            where i.status = 'open' and i.due_date < ${today}::date and ${INSTALLMENT_REMAINING_SQL} > 0.004)::int as installments_overdue,
+          (select count(*) from installments i join installment_plans ip on ip.id = i.plan_id and ip.status = 'active'
+            where i.status = 'open' and i.due_date between ${today}::date and ${today}::date + 3 and ${INSTALLMENT_REMAINING_SQL} > 0.004)::int as installments_due,
           (select count(*) from payroll_runs where month = date_trunc('month', ${today}::date - interval '1 month')::date)::int as last_month_run`,
   );
   return {
@@ -445,6 +454,8 @@ export async function alertCounts(db: Db, today: string, docKinds?: OwnerKind[])
     unpaidPayroll: n(r.unpaid_payroll),
     pendingAdvances: n(r.pending_advances),
     unpaidViolations: n(r.unpaid_violations),
+    installmentsOverdue: n(r.installments_overdue),
+    installmentsDue: n(r.installments_due),
     lastMonthRunMissing: n(r.last_month_run) === 0,
   };
 }

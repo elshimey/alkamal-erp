@@ -137,9 +137,16 @@ export async function scheduleDailyDocumentAlerts(today: string) {
       try {
         const [{ db }, { deliverPush }] = await Promise.all([import("@/db"), import("@/lib/push")]);
         await runInTenant(schema, async () => {
-          if (!(await claimDailyJob(db, "doc_alerts", today))) return;
-          const sent = await sendDocumentAlerts(db, today);
-          await Promise.all([...sent.office.map((id) => deliverPush(db, { kind: "office", id })), ...sent.driver.map((id) => deliverPush(db, { kind: "driver", id }))]);
+          if (await claimDailyJob(db, "doc_alerts", today)) {
+            const sent = await sendDocumentAlerts(db, today);
+            await Promise.all([...sent.office.map((id) => deliverPush(db, { kind: "office", id })), ...sent.driver.map((id) => deliverPush(db, { kind: "driver", id }))]);
+          }
+          // جدول أقساط الدائنين: قيد تكلفة التمويل المستحقة اليوم وإشعار الأقساط
+          if (await claimDailyJob(db, "installments", today)) {
+            const { runDailyInstallments } = await import("@/lib/installments");
+            const { sent } = await runDailyInstallments(db, today);
+            await Promise.all(sent.office.map((id) => deliverPush(db, { kind: "office", id })));
+          }
         });
       } catch (e) {
         console.error("doc alerts failed", e);

@@ -19,6 +19,7 @@ import {
   smallint,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
   varchar,
@@ -1327,7 +1328,7 @@ export const expenses = pgTable(
   ],
 );
 
-export const paymentKind = pgEnum("payment_kind", ["supplier", "custody", "expense"]);
+export const paymentKind = pgEnum("payment_kind", ["supplier", "custody", "expense", "installment"]);
 
 // سند الصرف: سداد لمورد (بنفس منطق القبض) أو صرف عهدة لسائق
 export const payments = pgTable(
@@ -1372,6 +1373,72 @@ export const paymentAllocations = pgTable(
     index("payment_allocations_invoice_idx").on(t.invoiceId),
     check("payment_allocations_positive", sql`${t.amount} > 0`),
   ],
+);
+
+// ───────────── جدول أقساط الدائنين (ملاحظة التشغيل 16) ─────────────
+// خطة سداد على حساب دائن موجود في الشجرة؛ الدين نفسه مقيد من قبل (رصيد افتتاحي، قيد استلام القرض، فاتورة).
+export const installmentPlans = pgTable(
+  "installment_plans",
+  {
+    id: id(),
+    name: varchar("name", { length: 120 }).notNull(),
+    accountId: ref("account_id").notNull().references(() => accounts.id),
+    partyId: ref("party_id").references(() => parties.id),
+    // تكلفة التمويل على مركز تكلفة المركبة (تظهر في ربحيتها)
+    vehicleId: ref("vehicle_id").references(() => vehicles.id),
+    notes: text("notes"),
+    status: varchar("status", { length: 12 }).$type<"active" | "settled">().notNull().default("active"),
+    // السداد المبكر: سند الصرف وقيد فرق المبلغ المطلوب عن الباقي
+    payoffPaymentId: ref("payoff_payment_id").references(() => payments.id, { onDelete: "set null" }),
+    payoffEntryId: ref("payoff_entry_id").references(() => journalEntries.id, { onDelete: "set null" }),
+    payoffDate: date("payoff_date"),
+    createdBy: ref("created_by").references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [check("installment_plans_status", sql`${t.status} in ('active', 'settled')`)],
+);
+
+export const installments = pgTable(
+  "installments",
+  {
+    id: id(),
+    planId: ref("plan_id").notNull().references(() => installmentPlans.id, { onDelete: "cascade" }),
+    seq: integer("seq").notNull(),
+    dueDate: date("due_date").notNull(),
+    principal: money("principal").notNull(),
+    cost: money("cost").notNull().default("0"),
+    // قيد استحقاق تكلفة التمويل (مدين 7101 دائن الحساب الدائن) يوم الاستحقاق
+    costEntryId: ref("cost_entry_id").references(() => journalEntries.id, { onDelete: "set null" }),
+    // settled: أُقفل بالسداد المبكر
+    status: varchar("status", { length: 12 }).$type<"open" | "settled">().notNull().default("open"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique("installments_plan_seq").on(t.planId, t.seq),
+    index("installments_due_idx").on(t.status, t.dueDate),
+    check("installments_amounts", sql`${t.principal} >= 0 and ${t.cost} >= 0 and ${t.principal} + ${t.cost} > 0`),
+    check("installments_status", sql`${t.status} in ('open', 'settled')`),
+  ],
+);
+
+// سداد القسط: سند صرف مرحّل لكل دفعة، والمسدد = مجموع السندات المرحّلة فقط
+export const installmentPayments = pgTable(
+  "installment_payments",
+  {
+    paymentId: ref("payment_id").primaryKey().references(() => payments.id, { onDelete: "cascade" }),
+    installmentId: ref("installment_id").notNull().references(() => installments.id, { onDelete: "cascade" }),
+  },
+  (t) => [index("installment_payments_installment_idx").on(t.installmentId)],
+);
+
+export const installmentAlertSends = pgTable(
+  "installment_alert_sends",
+  {
+    installmentId: ref("installment_id").notNull().references(() => installments.id, { onDelete: "cascade" }),
+    stage: varchar("stage", { length: 12 }).notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ name: "installment_alert_sends_pk", columns: [t.installmentId, t.stage] })],
 );
 
 // ───────────── الصيانة ─────────────

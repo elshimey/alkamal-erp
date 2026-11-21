@@ -25,6 +25,8 @@ export const OFFICE_KINDS = {
   doc_expiring_hr: { entity: "employees", action: "view", icon: "document", tone: "red" },
   doc_expiring_company: { entity: "settings", action: "update", icon: "shield", tone: "red" },
   advance_requested: { entity: "payroll", action: "approve", icon: "cash", tone: "amber" },
+  // جدول أقساط الدائنين: قبل الاستحقاق بثلاثة أيام، ويومه، ثم أسبوعياً حتى السداد
+  installment_due: { entity: "payments", action: "create", icon: "cash", tone: "amber" },
 } as const satisfies Record<string, { entity: Entity; action: Action; icon: IconName; tone: "red" | "amber" | "blue" }>;
 export type OfficeKind = keyof typeof OFFICE_KINDS;
 
