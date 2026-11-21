@@ -3574,6 +3574,44 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(Array.isArray(await R.stockMovement(db, { from: yearFrom, to: D }))).toBe(true);
     });
 
+    it("ربحية المركبات والسائقين: السائق من المستند ثم الإسناد، وعمود لكل حساب 5xxx، والمصاريف الأخرى، والرحلات والمسارات (الخطوة 5)", async () => {
+      const { fleetProfitability } = await import("@/lib/reports");
+      const D2 = `${YEAR + 1}-11-20`;
+      const v = await createVehicle(db, { plate: "ر ب ح 7711" });
+      const a = await createDriver(db, { nameAr: "سائق الربحية أ" });
+      const b = await createDriver(db, { nameAr: "سائق الربحية ب" });
+      await assignVehicle(db, { vehicleId: v.id, driverId: a.id, fromDate: `${YEAR + 1}-11-01` });
+      const post = (lines: Parameters<typeof createJournalEntry>[1]["lines"]) => createJournalEntry(db, { entryDate: D2, post: true, lines });
+      // إيراد على المركبة دون سائق مسجل → السائق المسند في تاريخه (أ)
+      await post([{ accountId: acc["110101"], debit: 1000 }, { accountId: acc["4101"], credit: 1000, costCenterId: v.costCenterId }]);
+      // ديزل بسائق مسجل على المستند (ب) يغلب الإسناد
+      await post([{ accountId: acc["5101"], debit: 300, costCenterId: v.costCenterId, driverId: b.id }, { accountId: acc["110101"], credit: 300 }]);
+      // مصروف عام على مركز المركبة → «مصاريف أخرى»، ومصروف إداري بلا مركبة ولا سائق لا يدخل
+      await post([{ accountId: acc["6105"], debit: 50, costCenterId: v.costCenterId }, { accountId: acc["110101"], credit: 50 }]);
+      await post([{ accountId: acc["6105"], debit: 70 }, { accountId: acc["110101"], credit: 70 }]);
+      const w = await createWaybill(db, { waybillDate: D2, customerId, routeId: localRoute, shipper: "أ", consignee: "ب", vehicleId: v.id, driverId: a.id });
+      await db.update(s.waybills).set({ status: "delivered" }).where(eq(s.waybills.id, w.id));
+
+      const byVehicle = await fleetProfitability(db, { from: D2, to: D2, by: "vehicle", id: v.id });
+      expect(byVehicle.rows).toHaveLength(1);
+      const vr = byVehicle.rows[0];
+      expect([vr.trips, vr.revenue, vr.direct["5101"], vr.directTotal, vr.otherTotal, vr.profit, vr.margin]).toEqual([1, 1000, 300, 300, 50, 650, 65]);
+      expect(byVehicle.columns.map((c) => c.code)).toEqual(["5101"]);
+      expect(vr.other.map((o) => [o.code, o.amount])).toEqual([["6105", 50]]);
+
+      const byDriver = await fleetProfitability(db, { from: D2, to: D2, by: "driver" });
+      const ra = byDriver.rows.find((r) => r.id === a.id)!;
+      const rb = byDriver.rows.find((r) => r.id === b.id)!;
+      expect([ra.revenue, ra.directTotal, ra.otherTotal, ra.profit, ra.trips]).toEqual([1000, 0, 50, 950, 1]);
+      expect([rb.revenue, rb.direct["5101"], rb.profit, rb.trips]).toEqual([0, 300, -300, 0]);
+      expect(ra.routes).toEqual([{ name: "تبوك ← حائل", trips: 1 }]);
+      expect(ra.customers).toHaveLength(1);
+      // المصروف الإداري (70) لا يُنسب لأحد
+      expect(byDriver.rows.some((r) => r.other.some((o) => o.amount === 70))).toBe(false);
+      // فلتر سائق واحد
+      expect((await fleetProfitability(db, { from: D2, to: D2, by: "driver", id: b.id })).rows.map((r) => r.id)).toEqual([b.id]);
+    });
+
     it("فاتورة بمصاريف العميل وحدها دون بنود تُقبل وتصدر (ملاحظة التشغيل 15)", async () => {
       const { addInvoiceChargesTx } = await import("@/lib/invoices");
       const [customs] = await db.select().from(s.chargeTypes).where(eq(s.chargeTypes.nameAr, "رسوم جمركية باسم العميل"));

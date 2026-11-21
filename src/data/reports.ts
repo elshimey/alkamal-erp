@@ -18,6 +18,7 @@ export const REPORT_GROUPS: { title: string; reports: ReportLink[] }[] = [
       { href: "/reports/income", title: "قائمة الدخل", description: "الإيرادات والتكاليف وصافي الربح بتبويب الوظيفة، مع المقارنة بالفترة السابقة.", icon: "chart", keywords: "أرباح وخسائر" },
       { href: "/reports/balance-sheet", title: "قائمة المركز المالي", description: "الأصول والالتزامات وحقوق الملكية في أي تاريخ، مع ربح السنة الجارية.", icon: "tree", keywords: "ميزانية" },
       { href: "/reports/cash-flow", title: "التدفق النقدي", description: "الداخل والخارج من الصناديق والبنوك مصنّفاً بالتحصيل والسداد والرواتب والمصروفات، ورصيد كل حساب.", icon: "cash", keywords: "نقدية سيولة" },
+      { href: "/reports/fleet-profit", title: "ربحية المركبات والسائقين", description: "إيراد كل مركبة أو سائق وتكاليفه حساباً حساباً، وعدد الرحلات، ومسارات السائق وعملاؤه، مع فلتر لمركبة أو سائق واحد.", icon: "truck", keywords: "ربحية السائقين تكلفة المركبة" },
       { href: "/reports/cost-centers", title: "ربحية مراكز التكلفة", description: "إيراد وتكلفة وربح كل مركبة ومركز تكلفة، وهامش الربح.", icon: "truck", keywords: "ربحية المركبات" },
     ],
   },

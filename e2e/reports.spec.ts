@@ -16,6 +16,12 @@ test("مركز التقارير: كل تقرير يفتح بلا خطأ وجاه
     await expect(page.locator("main"), r.href).toContainText(r.title.split(" ")[0]);
   }
 
+  // ربحية السائقين: تبويب «حسب السائق» يفتح ويعرض عمود المسارات والعملاء
+  await page.goto("/reports/fleet-profit");
+  await page.getByRole("link", { name: "حسب السائق" }).click();
+  await expect(page).toHaveURL(/by=driver/);
+  await expect(page.getByRole("columnheader", { name: "المسارات والعملاء" })).toBeVisible();
+
   // التقارير العريضة تُطبع بالعرض مع ترقيم الصفحات
   await page.goto("/reports/aging?side=supplier");
   const css = await page.evaluate(() => [...document.querySelectorAll("style")].map((s) => s.textContent).join("\n"));

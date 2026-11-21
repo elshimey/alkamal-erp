@@ -103,7 +103,7 @@ export const NAV: { title: string; icon: IconName; items: { href: string; label:
       { href: "/reports/ledger", label: "كشف حساب", icon: "document", entity: "financial_reports" },
       { href: "/reports/party-balances", label: "أرصدة العملاء والموردين", icon: "people", entity: "financial_reports" },
       { href: "/reports/aging", label: "أعمار الديون", icon: "calendar", entity: "financial_reports" },
-      { href: "/reports/cost-centers", label: "ربحية المركبات", icon: "truck", entity: "financial_reports" },
+      { href: "/reports/fleet-profit", label: "ربحية المركبات والسائقين", icon: "truck", entity: "financial_reports" },
       { href: "/reports/vat", label: "إقرار الضريبة", icon: "invoice", entity: "financial_reports" },
       { href: "/reports/unbilled-charges", label: "مصاريف العملاء غير المفوترة", icon: "document", entity: "financial_reports" },
     ],
