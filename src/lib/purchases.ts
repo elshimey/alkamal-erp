@@ -358,6 +358,8 @@ export interface ExpenseInput {
   partyId?: number | null;
   accountId: number;
   vehicleId?: number | null;
+  // مركز تكلفة يدوي للمصروف غير المرتبط بمركبة (إدارة، ورشة…)؛ المركبة تحدد مركزها دائماً
+  costCenterId?: number | null;
   waybillId?: number | null;
   description: string;
   amount: number;
@@ -376,7 +378,7 @@ export interface ExpenseInput {
   billToCustomer?: boolean;
 }
 
-export async function createExpense(db: Db, input: ExpenseInput) {
+export async function createExpense(db: Db | Tx, input: ExpenseInput) {
   return db.transaction(async (tx) => {
     if (!(input.amount > 0)) throw new Error("المبلغ إلزامي");
     const account = await expenseAccount(tx, input.accountId);
@@ -386,7 +388,7 @@ export async function createExpense(db: Db, input: ExpenseInput) {
       const [w] = await tx.select().from(s.waybills).where(eq(s.waybills.id, input.waybillId));
       if (!w) throw new Error("الشحنة غير موجودة");
       vehicleId ??= w.vehicleId;
-      if (input.payer === "driver_custody") driverId ??= w.driverId;
+      driverId ??= w.driverId;
     }
     if (input.payer === "driver_custody" && !driverId) throw new Error("اختر السائق صاحب العهدة");
     if (input.billToCustomer && !input.waybillId) throw new Error("المصروف على العميل يحتاج الشحنة التي يُفوتر معها");
@@ -394,8 +396,15 @@ export async function createExpense(db: Db, input: ExpenseInput) {
       await payFromAccountFor(tx, input.cashAccountId, "اختر صندوقاً أو بنكاً أو عهدة موظف");
     }
     if (input.payer === "unpaid" && input.partyId) await payableAccountFor(tx, input.partyId);
-    const costCenterId = await vehicleCostCenter(tx, vehicleId);
-    if (account.requiresCostCenter && !costCenterId) throw new Error(`الحساب ${account.nameAr} يتطلب المركبة`);
+    const vehicleCc = await vehicleCostCenter(tx, vehicleId);
+    if (account.requiresCostCenter && !vehicleCc) throw new Error(`الحساب ${account.nameAr} يتطلب المركبة`);
+    let costCenterId = vehicleCc;
+    if (!vehicleId && input.costCenterId) {
+      const [cc] = await tx.select().from(s.costCenters).where(eq(s.costCenters.id, input.costCenterId));
+      if (!cc || !cc.isActive) throw new Error("مركز التكلفة غير موجود أو موقوف");
+      if (cc.type === "vehicle") throw new Error("مركز تكلفة المركبة يُختار باختيار المركبة نفسها");
+      costCenterId = cc.id;
+    }
     const vat = round2(input.vatAmount ?? 0);
     if (vat > round2(input.amount * 0.15) + 0.01) throw new Error("الضريبة أكبر من 15% من المبلغ");
     const currency = input.currencyCode ?? "SAR";
@@ -406,7 +415,8 @@ export async function createExpense(db: Db, input: ExpenseInput) {
         number,
         expenseDate: input.expenseDate,
         payer: input.payer,
-        driverId: input.payer === "driver_custody" ? driverId : null,
+        // السائق يُحفظ مع أي دافع لتحليل التكلفة؛ عهدته تُخصم فقط إن كان الدافع «عهدة السائق»
+        driverId,
         cashAccountId: input.payer === "cash" ? input.cashAccountId! : null,
         partyId: input.payer === "unpaid" ? (input.partyId ?? null) : null,
         accountId: account.id,

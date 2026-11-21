@@ -3464,6 +3464,29 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect((await entryLines(row2.journalEntryId!)).find((l) => l.code === "2106")?.credit).toBe(90);
     });
 
+    it("نموذج المصروف الواحد: السائق يُحفظ مع أي دافع ولا يظهر في تطبيقه، ومركز التكلفة اليدوي دون مركبة فقط", async () => {
+      const [fuel] = await db.select().from(s.accounts).where(eq(s.accounts.code, "5101"));
+      const [office] = await db.select().from(s.accounts).where(sql`${s.accounts.code} like '6%' and ${s.accounts.isPostable}`).limit(1);
+      // الشركة دفعت ديزل السائق: السائق محفوظ للتحليل، والقيد على مركز المركبة، ولا يظهر في تطبيق السائق
+      const e = await createExpense(db, { expenseDate: D, payer: "cash", cashAccountId: acc["110101"], driverId, vehicleId: vehicle.id, accountId: fuel.id, description: "ديزل", amount: 300, approve: true });
+      const [row] = await db.select().from(s.expenses).where(eq(s.expenses.id, e.id));
+      expect(row.driverId).toBe(driverId);
+      expect(row.costCenterId).toBe(vehicle.costCenterId);
+      const lines = await entryLines(row.journalEntryId!);
+      expect(lines.find((l) => l.code === "110101")?.credit).toBe(300);
+      expect((await driverExpenses(db, driverId)).some((x) => x.e.id === e.id)).toBe(false);
+      // حسابات التشغيل تشترط المركبة حتى مع مركز تكلفة يدوي
+      const [admin] = await db.insert(s.costCenters).values({ code: `ADM-${Date.now()}`, nameAr: "الإدارة", type: "admin" }).returning();
+      await expect(createExpense(db, { expenseDate: D, payer: "cash", cashAccountId: acc["110101"], costCenterId: admin.id, accountId: fuel.id, description: "ديزل", amount: 10 })).rejects.toThrow("يتطلب المركبة");
+      // مصروف إداري على مركز الإدارة
+      const e2 = await createExpense(db, { expenseDate: D, payer: "cash", cashAccountId: acc["110101"], costCenterId: admin.id, accountId: office.id, description: "قرطاسية", amount: 40, approve: true });
+      const [row2] = await db.select().from(s.expenses).where(eq(s.expenses.id, e2.id));
+      expect(row2.costCenterId).toBe(admin.id);
+      expect((await entryLines(row2.journalEntryId!)).find((l) => l.code === office.code)?.debit).toBe(40);
+      // مركز تكلفة مركبة لا يُختار يدوياً
+      await expect(createExpense(db, { expenseDate: D, payer: "cash", cashAccountId: acc["110101"], costCenterId: vehicle.costCenterId, accountId: office.id, description: "x", amount: 5 })).rejects.toThrow("باختيار المركبة");
+    });
+
     it("فاتورة بمصاريف العميل وحدها دون بنود تُقبل وتصدر (ملاحظة التشغيل 15)", async () => {
       const { addInvoiceChargesTx } = await import("@/lib/invoices");
       const [customs] = await db.select().from(s.chargeTypes).where(eq(s.chargeTypes.nameAr, "رسوم جمركية باسم العميل"));

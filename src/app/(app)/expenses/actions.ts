@@ -9,6 +9,8 @@ import { todayRiyadh } from "@/lib/dates";
 import { cell, saveSheetRows, type SheetRow } from "@/lib/sheet-server";
 import { approveExpense, approveExpenseWith, createExpense, deleteExpense, rejectExpense, revertExpense } from "@/lib/purchases";
 import type { FormState } from "@/components/action-form";
+import type { PanelResult } from "@/components/record-panel";
+import { saveDataUrl } from "@/lib/attachments";
 
 const refresh = () => {
   revalidatePath("/expenses");
@@ -44,6 +46,47 @@ export async function saveExpenses(rows: SheetRow[]) {
   });
   refresh();
   return result;
+}
+
+/** نافذة المصروف الواحد: نفس createExpense الذي يستخدمه الشيت، مع صورة الإيصال ومركز التكلفة. */
+export async function saveExpenseAction(data: FormData): Promise<PanelResult> {
+  const user = await requirePermission("expenses", "create");
+  const get = (k: string) => String(data.get(k) ?? "").trim();
+  const num = (k: string) => Number(get(k).replace(/,/g, "")) || 0;
+  const id = (k: string) => Number(get(k)) || null;
+  try {
+    const payer = get("payer");
+    if (payer !== "driver_custody" && payer !== "cash" && payer !== "unpaid") throw new Error("اختر من دفع: الشركة أو عهدة السائق أو لم يُدفع بعد");
+    if (!get("accountId")) throw new Error("اختر نوع المصروف");
+    const e = await db.transaction(async (tx) => {
+      const row = await createExpense(tx, {
+        expenseDate: get("date") || todayRiyadh(),
+        payer,
+        driverId: id("driverId"),
+        cashAccountId: payer === "cash" ? id("cashAccountId") : null,
+        partyId: payer === "unpaid" ? id("partyId") : null,
+        accountId: Number(get("accountId")),
+        vehicleId: id("vehicleId"),
+        costCenterId: id("costCenterId"),
+        waybillId: id("waybillId"),
+        description: get("description"),
+        amount: num("amount"),
+        vatAmount: num("vat"),
+        vendorName: get("vendor") || null,
+        reference: get("reference") || null,
+        billToCustomer: get("billToCustomer") === "1",
+        approve: can(user.perms, "expenses", "approve"),
+        userId: user.id,
+      });
+      await saveDataUrl(tx, { entity: "expenses", entityId: row.id, kind: "expense_receipt", dataUrl: get("file"), userId: user.id });
+      return row;
+    });
+    refresh();
+    revalidatePath("/payments/review");
+    return { ok: `سُجل المصروف ${e.number}`, id: e.id, label: e.number };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
 }
 
 export async function approve(id: number): Promise<FormState> {

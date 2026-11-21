@@ -333,7 +333,8 @@ export async function driverExpenses(db: Db | Tx, driverId: number, waybillId?: 
     .innerJoin(s.accounts, eq(s.accounts.id, s.expenses.accountId))
     .leftJoin(s.maintenanceTypes, eq(s.maintenanceTypes.id, s.expenses.maintenanceTypeId))
     .leftJoin(s.waybills, eq(s.waybills.id, s.expenses.waybillId))
-    .where(and(eq(s.expenses.driverId, driverId), waybillId ? eq(s.expenses.waybillId, waybillId) : undefined))
+    // ما سجله المكتب على السائق للتحليل فقط (دفعته الشركة) لا يظهر في تطبيقه: عهدته أو ما رفعه هو
+    .where(and(eq(s.expenses.driverId, driverId), or(eq(s.expenses.payer, "driver_custody"), isNotNull(s.expenses.driverKind)), waybillId ? eq(s.expenses.waybillId, waybillId) : undefined))
     .orderBy(desc(s.expenses.expenseDate), desc(s.expenses.id))
     .limit(50);
 }
@@ -437,7 +438,7 @@ export async function driverBalances(db: Db | Tx, driver: DriverProfile, today: 
     db
       .select({ v: sql<string>`coalesce(sum(${s.expenses.amount} + ${s.expenses.vatAmount}), 0)`, n: sql<number>`count(*)::int` })
       .from(s.expenses)
-      .where(and(eq(s.expenses.driverId, driver.id), eq(s.expenses.status, "pending"), sql`coalesce(${s.expenses.reportedPayer}, 'custody') <> 'company'`)),
+      .where(and(eq(s.expenses.driverId, driver.id), eq(s.expenses.payer, "driver_custody"), eq(s.expenses.status, "pending"), sql`coalesce(${s.expenses.reportedPayer}, 'custody') <> 'company'`)),
     db
       .select({ date: s.journalEntries.entryDate, description: sql<string>`coalesce(${s.journalLines.description}, ${s.journalEntries.description})`, debit: s.journalLines.debitBase, credit: s.journalLines.creditBase })
       .from(s.journalLines)
