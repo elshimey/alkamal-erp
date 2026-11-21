@@ -46,7 +46,7 @@ import {
   updateDraftInvoice,
 } from "@/lib/invoices";
 import { parseDocFilter } from "@/lib/doc-filters";
-import { createExpense, approveExpense, approveExpenseWith, createPayment, createPurchaseInvoice, custodyBalances, deletePurchaseInvoice, listPurchaseInvoices, postPurchaseInvoice, updateDraftPurchase, rejectExpense, revertExpense, revertPayment, revertPurchaseInvoice, supplierBalances } from "@/lib/purchases";
+import { createExpense, approveExpense, approveExpenseWith, createPayment, postPayment, createPurchaseInvoice, custodyBalances, deletePurchaseInvoice, listPurchaseInvoices, postPurchaseInvoice, updateDraftPurchase, rejectExpense, revertExpense, revertPayment, revertPurchaseInvoice, supplierBalances } from "@/lib/purchases";
 import { addMaintenanceLines, approveBreakdownRequest, approveMaintenanceOrder, completeMaintenanceOrder, createBreakdownRequest, createMaintenanceOrder, deleteMaintenanceOrder, planSchedule, rejectBreakdownRequest, revertMaintenanceOrder, reviewBreakdownRequest, savePlan, listOrders, orderDoc, updateDraftOrder, createOrdersFrom, listRequests, requestDoc, approveDriverMaintenance, driverMaintenanceRequests } from "@/lib/maintenance";
 import { adjustPayrollLines, approvePayrollRun, bankTransferRows, createAdvance, createEmployee, createPayrollRun, payAdvance, payPayrollRun, refreshPayrollRun, revertAdvance, revertPayrollPayment, revertPayrollRun, updateEmployee } from "@/lib/payroll";
 import { createViolation, deleteViolation, listViolations, payViolations, revertViolationPayment, violationSummary } from "@/lib/violations";
@@ -3610,6 +3610,98 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(byDriver.rows.some((r) => r.other.some((o) => o.amount === 70))).toBe(false);
       // فلتر سائق واحد
       expect((await fleetProfitability(db, { from: D2, to: D2, by: "driver", id: b.id })).rows.map((r) => r.id)).toEqual([b.id]);
+    });
+
+    it("جدول أقساط الدائنين: توليد ولصق، تكلفة التمويل يوم الاستحقاق، سداد كامل وجزئي ومبكر، الفرق مع الرصيد، وإعادة تصنيف 2201 (ملاحظة التشغيل 16)", async () => {
+      const ins = await import("@/lib/installments");
+      const sched = await import("@/lib/installment-schedule");
+      const Y = YEAR + 1;
+      // التوليد: يوم 31 في فبراير يصبح آخر يوم، والأصل = القسط − التكلفة
+      const gen = sched.generateSchedule({ firstDate: `${Y}-01-31`, count: 3, amount: 1100, cost: 100 });
+      expect(gen.map((r) => [r.dueDate, r.principal, r.cost])).toEqual([[`${Y}-01-31`, 1000, 100], [`${Y}-02-28`, 1000, 100], [`${Y}-03-31`, 1000, 100]]);
+      // اللصق من Excel: عناوين تُتجاهل، والتاريخ بصيغة يوم/شهر، والخطأ برقم صفه
+      const pasted = sched.parsePastedSchedule(`التاريخ\tالأصل\tالتكلفة\n05/04/${Y}\t2,000\t150\nأمس\t10\n`);
+      expect(pasted.rows).toEqual([{ dueDate: `${Y}-04-05`, principal: 2000, cost: 150 }]);
+      expect(pasted.errors).toEqual(["الصف 3: «أمس» ليس تاريخاً"]);
+      expect([sched.installmentStage(`${Y}-05-10`, `${Y}-05-06`), sched.installmentStage(`${Y}-05-10`, `${Y}-05-07`), sched.installmentStage(`${Y}-05-10`, `${Y}-05-10`), sched.installmentStage(`${Y}-05-10`, `${Y}-05-18`)]).toEqual([null, "b3", "x0", "x1"]);
+
+      // قرض طويل الأجل 2201 على مركبة: الدين مقيد من قبل (استلام القرض 3000)
+      const v = await createVehicle(db, { plate: "ق س ط 5511" });
+      await createJournalEntry(db, { entryDate: `${Y}-01-01`, post: true, lines: [{ accountId: acc["110101"], debit: 3000 }, { accountId: acc["2201"], credit: 3000 }] });
+      await expect(ins.createInstallmentPlan(db, { name: "قرض", accountId: acc["5101"], rows: gen })).rejects.toThrow("من الالتزامات");
+      const plan = await ins.createInstallmentPlan(db, { name: "قرض البنك", accountId: acc["2201"], vehicleId: v.id, rows: gen });
+      let d = (await ins.installmentPlan(db, plan.id, `${Y}-01-15`))!;
+      expect([d.balance, d.owed, d.difference, d.remaining]).toEqual([3000, 3000, 0, 3300]);
+
+      // يوم الاستحقاق: التكلفة تُقيد ولو لم يُسدد (مدين 7101 على مركز المركبة)
+      expect((await ins.accrueDueCosts(db, `${Y}-01-31`)).done).toBeGreaterThanOrEqual(1);
+      d = (await ins.installmentPlan(db, plan.id, `${Y}-02-01`))!;
+      expect([d.items[0].accrued, d.items[0].state, d.balance, d.owed, d.difference]).toEqual([true, "overdue", 3100, 3100, 0]);
+      const [costLine] = await db.select().from(s.journalLines).where(and(eq(s.journalLines.entryId, d.items[0].costEntryId!), eq(s.journalLines.accountId, acc["7101"])));
+      expect([Number(costLine.debit), costLine.costCenterId]).toEqual([100, v.costCenterId]);
+      // التنبيه: المتأخر يُرسل مرة واحدة فقط لنفس المرحلة
+      const sent = await ins.sendInstallmentAlerts(db, `${Y}-02-01`);
+      expect(sent.installments).toBe(1);
+      expect((await ins.sendInstallmentAlerts(db, `${Y}-02-01`)).installments).toBe(0);
+      expect((await alertCounts(db, `${Y}-02-01`)).installmentsOverdue).toBe(1);
+
+      // سداد جزئي يبقى باقيه على القسط، ثم الباقي
+      const cash = acc["110101"];
+      await expect(ins.payInstallment(db, { installmentId: d.items[0].id, amount: 2000, cashAccountId: cash, date: `${Y}-02-02` })).rejects.toThrow("الباقي من القسط");
+      const p1 = await ins.payInstallment(db, { installmentId: d.items[0].id, amount: 600, cashAccountId: cash, date: `${Y}-02-02` });
+      expect(p1.remaining).toBe(500);
+      const [pv] = await db.select().from(s.payments).where(eq(s.payments.id, p1.id));
+      expect([pv.kind, pv.status, pv.debitAccountId]).toEqual(["installment", "posted", acc["2201"]]);
+      await ins.payInstallment(db, { installmentId: d.items[0].id, cashAccountId: cash, date: `${Y}-02-03` });
+      d = (await ins.installmentPlan(db, plan.id, `${Y}-02-03`))!;
+      expect([d.items[0].state, d.balance, d.owed, d.difference]).toEqual(["paid", 2000, 2000, 0]);
+      // إرجاع سند القسط العادي يعيده مستحقاً
+      await revertPayment(db, p1.id);
+      expect((await ins.installmentPlan(db, plan.id, `${Y}-02-03`))!.items[0].remaining).toBe(600);
+      await postPayment(db, p1.id);
+
+      // سداد قبل الاستحقاق: التكلفة تُقيد بتاريخ السداد
+      await ins.payInstallment(db, { installmentId: d.items[1].id, cashAccountId: cash, date: `${Y}-02-10` });
+      const [e2] = await db.select().from(s.journalEntries).where(eq(s.journalEntries.id, (await db.select().from(s.installments).where(eq(s.installments.id, d.items[1].id)))[0].costEntryId!));
+      expect(e2.entryDate).toBe(`${Y}-02-10`);
+
+      // إعادة تصنيف الجزء المتداول: كل الباقي (1000) خلال 12 شهراً، بقيد يُعكس اليوم التالي
+      const rc = await ins.reclassifyCurrentPortion(db, { planId: plan.id, date: `${Y}-02-28` });
+      expect(rc.amount).toBe(1000);
+      await expect(ins.reclassifyCurrentPortion(db, { planId: plan.id, date: `${Y}-02-28` })).rejects.toThrow("أُعيد التصنيف");
+      const [rcLine] = await db.select().from(s.journalLines).where(and(eq(s.journalLines.entryId, rc.entry.id), eq(s.journalLines.accountId, acc["2114"])));
+      expect(Number(rcLine.credit)).toBe(1000);
+      expect((await db.select().from(s.journalEntries).where(eq(s.journalEntries.id, rc.reversal.id)))[0].entryDate).toBe(`${Y}-03-01`);
+      expect((await ins.installmentPlan(db, plan.id, `${Y}-03-02`))!.difference).toBe(0);
+      await ins.undoReclassification(db, plan.id, `${Y}-02-28`);
+      expect(await ins.reclassEntries(db, plan.id)).toHaveLength(0);
+
+      // السداد المبكر: الدائن يطلب 1050 عن باقٍ 1000 (قبل تكلفة القسط الثالث) → 50 على 7101، والقسط يُقفل
+      const po = await ins.payoffPlan(db, { planId: plan.id, amount: 1050, cashAccountId: cash, date: `${Y}-03-05` });
+      expect([po.owed, po.diff, po.cancelled]).toEqual([1000, 50, 1]);
+      d = (await ins.installmentPlan(db, plan.id, `${Y}-03-05`))!;
+      expect([d.status, d.balance, d.remaining, d.items[2].state]).toEqual(["settled", 0, 0, "settled"]);
+      await expect(revertPayment(db, po.payment.id)).rejects.toThrow("سند سداد مبكر");
+      // الجدول المسدد لا يقيد تكلفة أقساطه الملغاة
+      expect((await ins.accrueDueCosts(db, `${Y}-04-30`, { planId: plan.id })).done).toBe(0);
+      await ins.undoPayoff(db, plan.id);
+      d = (await ins.installmentPlan(db, plan.id, `${Y}-03-05`))!;
+      expect([d.status, d.balance, d.items[2].state, d.difference]).toEqual(["active", 1000, "due", 0]);
+      expect(await db.select().from(s.payments).where(eq(s.payments.id, po.payment.id))).toHaveLength(0);
+
+      // تعديل قسط لم يُسدد، والحذف ممنوع ما دام عليه سداد
+      await ins.updateInstallment(db, { id: d.items[2].id, dueDate: `${Y}-04-15`, principal: 1000, cost: 80 });
+      expect((await ins.installmentPlan(db, plan.id, `${Y}-03-05`))!.items[2].total).toBe(1080);
+      await expect(ins.updateInstallment(db, { id: d.items[0].id, dueDate: `${Y}-01-31`, principal: 900, cost: 100 })).rejects.toThrow("عليه سداد");
+      await expect(ins.deleteInstallmentPlan(db, plan.id, { reason: "خطأ" })).rejects.toThrow("سندات سداد");
+
+      // دين لمورد على 2101 دون تكلفة: الرصيد للجهة نفسها، والفرق يظهر إن لم يُقيد الدين
+      const sup = await createParty(db, { nameAr: "دائن الأقساط", roles: ["supplier"] });
+      const sp = await ins.createInstallmentPlan(db, { name: "أقساط المورد", accountId: acc["2101"], partyId: sup.id, rows: [{ dueDate: `${Y}-06-01`, principal: 500, cost: 0 }] });
+      const sd = (await ins.installmentPlan(db, sp.id, `${Y}-05-01`))!;
+      expect([sd.balance, sd.owed, sd.difference]).toEqual([0, 500, -500]);
+      await ins.deleteInstallmentPlan(db, sp.id, { reason: "تجربة" });
+      expect(await ins.installmentPlan(db, sp.id)).toBeNull();
     });
 
     it("فاتورة بمصاريف العميل وحدها دون بنود تُقبل وتصدر (ملاحظة التشغيل 15)", async () => {

@@ -22,6 +22,7 @@ export const PAYMENT_KINDS = {
   supplier: "سداد لمورد",
   custody: "صرف عهدة لسائق",
   expense: "سداد مصروف مستحق",
+  installment: "سداد قسط",
 } as const;
 
 // حساب الذمة حسب دور الجهة؛ عند تعدد الأدوار يؤخذ الأول بهذا الترتيب

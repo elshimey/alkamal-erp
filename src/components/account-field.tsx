@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import type { QuickOption } from "@/lib/quick-add-types";
 import { FormCombo } from "./form-combo";
 
@@ -18,6 +19,7 @@ export function AccountField({
   onChange,
   className = "",
   keepOnReset,
+  moreOptions,
 }: {
   name: string;
   options: QuickOption[];
@@ -29,10 +31,19 @@ export function AccountField({
   className?: string;
   /** تبقى بعد الحفظ وتفريغ النموذج */
   keepOnReset?: boolean;
+  /** باقي الشجرة: زر «عرض كل الشجرة» يضيفها بعد الخيارات المقترحة (السداد من أي حساب) */
+  moreOptions?: QuickOption[];
 }) {
+  const [all, setAll] = useState(false);
+  const extra = moreOptions?.filter((o) => !options.some((x) => x.value === o.value)) ?? [];
   return (
     <div className={className}>
-      <FormCombo name={name} options={options} defaultValue={defaultValue == null ? "" : String(defaultValue)} create="account" scope={scope} required={required} placeholder={placeholder} onChange={onChange} keepOnReset={keepOnReset} />
+      <FormCombo name={name} options={all ? [...options, ...extra] : options} defaultValue={defaultValue == null ? "" : String(defaultValue)} create="account" scope={scope} required={required} placeholder={placeholder} onChange={onChange} keepOnReset={keepOnReset} />
+      {extra.length > 0 && (
+        <button type="button" onClick={() => setAll((v) => !v)} className="mt-1 text-xs text-brand-700 hover:underline">
+          {all ? "المقترحة فقط" : "عرض كل الشجرة"}
+        </button>
+      )}
     </div>
   );
 }

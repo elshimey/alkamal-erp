@@ -208,6 +208,22 @@ export function buildAlerts(
       href: "/payroll/advances",
     },
     {
+      key: "installments_overdue",
+      show: can(user.perms, "payments", "view") && alerts.installmentsOverdue > 0,
+      tone: "red",
+      icon: "cash",
+      text: `${alerts.installmentsOverdue} قسط دائن متأخر لم يُسدد`,
+      href: "/payments/installments",
+    },
+    {
+      key: "installments_due",
+      show: can(user.perms, "payments", "view") && alerts.installmentsDue > 0,
+      tone: "amber",
+      icon: "cash",
+      text: `${alerts.installmentsDue} قسط دائن يستحق خلال 3 أيام`,
+      href: "/payments/installments",
+    },
+    {
       key: "violations_unpaid",
       show: can(user.perms, "violations", "approve") && alerts.unpaidViolations > 0,
       tone: "amber",
