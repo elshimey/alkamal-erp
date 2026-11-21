@@ -25,6 +25,8 @@ export const EXPENSE_PAYERS = {
   driver_custody: "عهدة السائق",
   customs_broker: "المخلص",
   cash: "الشركة (صندوق / بنك / عهدة موظف)",
+  // يُعتمد ويُسدد من «سندات صرف تحت المراجعة»
+  unpaid: "لم يُدفع بعد",
 } as const;
 
 export const EXPENSE_BILL_TO = {

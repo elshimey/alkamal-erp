@@ -7,7 +7,7 @@ import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { driverOptions, vehicleOptions } from "@/lib/lookups";
 import { payFromAccounts } from "@/lib/invoices";
-import { custodyBalances, expenseAccountOptions } from "@/lib/purchases";
+import { custodyBalances, expenseAccountOptions, supplierOptions } from "@/lib/purchases";
 import { todayRiyadh } from "@/lib/dates";
 import { listAttachments } from "@/lib/attachments";
 import { EXPENSE_PAYERS, EXPENSE_STATUS } from "@/data/purchases";
@@ -34,7 +34,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
   const where: SQL[] = [];
   if (status) where.push(eq(s.expenses.status, status));
 
-  const [accounts, drivers, vehicles, cashes, waybills, custody, list] = await Promise.all([
+  const [accounts, drivers, vehicles, cashes, waybills, custody, list, payees] = await Promise.all([
     expenseAccountOptions(db),
     driverOptions(),
     vehicleOptions(),
@@ -69,6 +69,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
       .where(where.length ? and(...where) : undefined)
       .orderBy(desc(s.expenses.expenseDate), desc(s.expenses.id))
       .limit(300),
+    adding ? supplierOptions(db) : Promise.resolve([]),
   ]);
   const cashOpts = await toAccountOptions(cashes);
   const photos = new Map((await listAttachments(db, "expenses", list.map((r) => r.e.id))).map((a) => [a.entityId, a.id]));
@@ -94,6 +95,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
                 { key: "payer", label: "الدافع", type: "select", required: true, options: Object.entries(EXPENSE_PAYERS).map(([value, label]) => ({ value, label })), width: "8rem" },
                 { key: "driverId", label: "السائق", type: "select", options: drivers, width: "9rem", create: "driver", autoVehicle: { key: "vehicleId", dateKey: "date" } },
                 { key: "cashAccountId", label: "أو الصندوق / عهدة موظف", type: "select", options: cashOpts, width: "11rem", create: "account" },
+                { key: "partyId", label: "المستفيد (لم يُدفع)", type: "select", options: payees, width: "10rem", create: "supplier" },
                 { key: "accountId", label: "نوع المصروف", type: "select", required: true, options: accounts, width: "13rem", create: "account" },
                 { key: "vehicleId", label: "المركبة", type: "select", options: vehicles, width: "8rem", create: "vehicle" },
                 { key: "waybillId", label: "الشحنة", type: "select", options: waybills.map((w) => ({ value: String(w.id), label: `${w.number} · ${w.date}` })), width: "11rem" },
@@ -106,7 +108,11 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
               ]}
             />
             <p className="mt-2 text-xs text-gray-500">
-              اختيار الشحنة يملأ المركبة والسائق تلقائياً. ما دفعه موظف المكتب من عهدته: الدافع «الشركة» واختر عهدته في خانة الصندوق. «على العميل» يُقيد على 1114 ويظهر سطراً في فاتورة الشحنة. {canApprove ? "تُعتمد المصروفات فور الحفظ." : "تبقى بانتظار الاعتماد حتى يعتمدها المحاسب."}
+              اختيار الشحنة يملأ المركبة والسائق تلقائياً. ما دفعه موظف المكتب من عهدته: الدافع «الشركة» واختر عهدته في خانة الصندوق. «على العميل» يُقيد على 1114 ويظهر سطراً في فاتورة الشحنة. «لم يُدفع بعد»: اختر المستفيد إن عُرف (وإلا يُقيد على المصروفات المستحقة 2106)، ويُسدد من{" "}
+              <Link href="/payments/review?tab=expenses" className="text-brand-700 underline">
+                سندات صرف تحت المراجعة
+              </Link>
+              . {canApprove ? "تُعتمد المصروفات فور الحفظ." : "تبقى بانتظار الاعتماد حتى يعتمدها المحاسب."}
             </p>
           </Card>
         )}
@@ -173,7 +179,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
             </Td>
             <Td>{plate ?? "—"}</Td>
             <Td className="text-xs">
-              {e.payer === "driver_custody" ? `عهدة ${driver ?? ""}` : box}
+              {e.payer === "driver_custody" ? `عهدة ${driver ?? ""}` : e.payer === "unpaid" ? (e.paymentId ? "سُدد بسند صرف" : "لم يُدفع بعد") : box}
               {e.status === "pending" && e.reportedPayer === "company" && <div className="font-medium text-amber-700">السائق: دفعت الشركة</div>}
             </Td>
             <Td className="ltr-nums font-semibold">{fmt(e.amount)}</Td>

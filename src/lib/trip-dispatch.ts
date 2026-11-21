@@ -31,6 +31,8 @@ export async function driverActivity(db: Db | Tx, waybillId: number) {
 export interface SendOptions {
   // الصندوق أو البنك الذي تُصرف منه عهدة الرحلة
   cashAccountId?: number | null;
+  // «لم تُصرف بعد»: تُرسل الرحلة دون سند عهدة، وتُصرف لاحقاً من «سندات صرف تحت المراجعة»
+  deferCustody?: boolean;
   date?: string;
   userId?: number;
 }
@@ -48,16 +50,11 @@ export async function sendTrip(db: Db, id: number, opts: SendOptions = {}) {
   if (t.execution !== "fleet" || !t.driverId) throw new Error(`${t.number}: منفذة بناقل خارجي؛ لا يوجد سائق في التطبيق`);
   if (t.sentToDriverAt) throw new Error(`${t.number}: أُرسلت للسائق من قبل`);
   if (t.status === "rejected") throw new Error(`${t.number}: مرفوضة`);
-  const custody = Number(t.tripCustody);
+  const custody = opts.deferCustody ? 0 : Number(t.tripCustody);
   let paymentId: number | null = null;
   let paymentNumber: string | null = null;
   let acc: { code: string } | undefined;
-  if (custody > 0) {
-    if (!opts.cashAccountId) throw new Error(`${t.number}: اختر الصندوق أو البنك الذي تُصرف منه عهدة الرحلة`);
-    [acc] = await db.select({ code: s.accounts.code }).from(s.accounts).where(eq(s.accounts.id, opts.cashAccountId));
-    const [own] = await db.select({ custody: s.drivers.custodyAccountId }).from(s.drivers).where(eq(s.drivers.id, t.driverId));
-    if (own?.custody === opts.cashAccountId) throw new Error(`${t.number}: لا تُصرف عهدة السائق من حساب عهدته نفسه؛ اختر صندوقاً أو حساباً آخر`);
-  }
+  if (custody > 0) acc = await checkCustodySource(db, t.number, t.driverId, opts.cashAccountId);
   // حجز الإرسال أولاً: إن ضغط موظفان «إرسال» معاً ينجح واحد فقط، فلا يُصرف سند عهدة مرتين
   const [claimed] = await db
     .update(s.waybills)
@@ -96,6 +93,44 @@ export async function sendTrip(db: Db, id: number, opts: SendOptions = {}) {
   }
   await notifyDriver(db, t.driverId, { kind: "trip_sent", body: custody > 0 ? `${t.number} · ${custody}` : t.number, href: `/driver/trips/${id}` });
   return { number: t.number, driver: w.driver, mobile: w.mobile, custody, paymentNumber };
+}
+
+/** الحساب الذي تُصرف منه عهدة الرحلة: مطلوب، وليس حساب عهدة السائق نفسه. */
+async function checkCustodySource(db: Db | Tx, number: string, driverId: number, cashAccountId?: number | null) {
+  if (!cashAccountId) throw new Error(`${number}: اختر الصندوق أو البنك الذي تُصرف منه عهدة الرحلة`);
+  const [acc] = await db.select({ code: s.accounts.code }).from(s.accounts).where(eq(s.accounts.id, cashAccountId));
+  const [own] = await db.select({ custody: s.drivers.custodyAccountId }).from(s.drivers).where(eq(s.drivers.id, driverId));
+  if (own?.custody === cashAccountId) throw new Error(`${number}: لا تُصرف عهدة السائق من حساب عهدته نفسه؛ اختر صندوقاً أو حساباً آخر`);
+  return acc;
+}
+
+/** صرف عهدة رحلة أُرسلت «لم تُصرف بعد»: سند عهدة مرحّل على السائق، مرة واحدة. */
+export async function disburseTripCustody(db: Db, id: number, opts: { cashAccountId?: number | null; date?: string; userId?: number }) {
+  return db.transaction(async (tx) => {
+    const [t] = await tx.select().from(s.waybills).where(eq(s.waybills.id, id)).for("update");
+    if (!t) throw new Error("الشحنة غير موجودة");
+    const custody = Number(t.tripCustody);
+    if (!t.sentToDriverAt || !t.driverId) throw new Error(`${t.number}: لم تُرسل للسائق بعد؛ تُصرف العهدة مع الإرسال`);
+    if (t.custodyPaymentId) throw new Error(`${t.number}: صُرفت عهدة الرحلة من قبل`);
+    if (!(custody > 0)) throw new Error(`${t.number}: لا توجد عهدة رحلة عليها`);
+    if (t.status === "rejected") throw new Error(`${t.number}: مرفوضة`);
+    const acc = await checkCustodySource(tx, t.number, t.driverId, opts.cashAccountId);
+    const p = await createPayment(tx as unknown as Db, {
+      paymentDate: opts.date ?? todayRiyadh(),
+      kind: "custody",
+      driverId: t.driverId,
+      amount: custody,
+      method: acc?.code.startsWith("1102") ? "transfer" : "cash",
+      cashAccountId: opts.cashAccountId!,
+      reference: t.number,
+      notes: `عهدة رحلة الشحنة ${t.number}`,
+      post: true,
+      userId: opts.userId,
+    });
+    await tx.update(s.waybills).set({ custodyPaymentId: p.id, updatedAt: new Date() }).where(eq(s.waybills.id, id));
+    await notifyDriver(tx, t.driverId, { kind: "trip_sent", body: `${t.number} · ${custody}`, href: `/driver/trips/${id}` });
+    return { number: t.number, custody, paymentNumber: p.number };
+  });
 }
 
 async function dropPayment(db: Db, id: number, reason: string, userId?: number) {

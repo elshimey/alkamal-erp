@@ -3,7 +3,7 @@ import Link from "next/link";
 import { and, asc, eq, inArray, like, or } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
-import { toTripExpense, tripExpensesForBilling } from "@/lib/purchases";
+import { supplierOptions, toTripExpense, tripExpensesForBilling } from "@/lib/purchases";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { fundingAccounts, currentTrip, invoicingQueue, listSalesInvoices, salesInvoiceDoc, summarizeSalesInvoices } from "@/lib/invoices";
@@ -120,7 +120,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
         ).map((r) => r.id)
       : [],
   );
-  const [chargeTypes, chargeBrokers, chargeCash, chargeWaybills, tripExpenses] = creating || editing
+  const [chargeTypes, chargeBrokers, chargeCash, chargeWaybills, tripExpenses, chargePayees] = creating || editing
     ? await Promise.all([
         chargeTypeOptions(),
         partyOptions("customs_broker"),
@@ -132,8 +132,9 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
           .orderBy(asc(s.waybills.number))
           .then((r) => r.map((w) => ({ value: String(w.id), label: `الشحنة ${w.number}`, fleet: w.execution === "fleet" }))) : Promise.resolve([]),
         tripExpensesForBilling(db, [...invoiceWaybillIds, ...(editTrip ? [editTrip.id] : [])]).then((r) => r.map(toTripExpense)),
+        supplierOptions(db),
       ])
-    : [[], [], [], [], []];
+    : [[], [], [], [], [], []];
   const taxOpts = taxRows.map((x) => ({ value: String(x.id), label: `${x.nameAr} (${Number(x.rate)}%)`, rate: Number(x.rate) }));
   const taxName = (id: number | null) => taxRows.find((x) => x.id === id)?.nameAr ?? null;
   // البند الإضافي يبدأ بضريبة أول شحنة في الفاتورة وحسابها ومركبتها
@@ -585,7 +586,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
           costCenters={centers.map((c) => ({ value: String(c.id), label: c.nameAr }))}
           taxes={taxOpts}
           lineDefaults={lineDefaults}
-          chargeOptions={{ chargeTypes, brokers: chargeBrokers, cashAccounts: chargeCash, waybills: chargeWaybills, tripExpenses }}
+          chargeOptions={{ chargeTypes, brokers: chargeBrokers, payees: chargePayees, cashAccounts: chargeCash, waybills: chargeWaybills, tripExpenses }}
           currencies={currencies.map((c) => c.code)}
           routes={tripRoutes}
           vehicles={tripVehicles}

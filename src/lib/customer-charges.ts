@@ -11,8 +11,11 @@ import { attachChargeToDraftInvoiceTx, detachChargeTx } from "@/lib/invoices";
 // وما يكون على العميل يُقيد على 1114 ويدخل مسودة فاتورة الشحنة إن وُجدت.
 // بعد إصدار الفاتورة يُحمَّل المصروف بإشعار مدين مربوط بها (القرار السابق).
 
-/** قيد مستقل لمصروف أُضيف بعد اعتماد الشحنة، بتاريخ اليوم (أو تاريخ الشحنة إن كان أحدث). */
-async function postChargeTx(tx: Tx, w: typeof s.waybills.$inferSelect, rowId: number, userId?: number) {
+/**
+ * قيد مستقل لمصروف أُضيف بعد اعتماد الشحنة، أو لمصروف «لم يُدفع بعد» عند اعتماده
+ * (دائن ذمة المستفيد أو 2106)، بتاريخ اليوم (أو تاريخ الشحنة إن كان أحدث).
+ */
+export async function postChargeTx(tx: Tx, w: typeof s.waybills.$inferSelect, rowId: number, userId?: number, payableAccountId?: number | null) {
   const [row] = await tx
     .select({ e: s.waybillExpenses, label: s.chargeTypes.nameAr, costAccountId: s.chargeTypes.costAccountId })
     .from(s.waybillExpenses)
@@ -28,6 +31,7 @@ async function postChargeTx(tx: Tx, w: typeof s.waybills.$inferSelect, rowId: nu
         payer: row.e.payer,
         partyId: row.e.partyId,
         cashAccountId: row.e.cashAccountId,
+        payableAccountId,
         billToCustomer: row.e.billTo === "customer",
         amount: Number(row.e.amount),
         currencyCode: row.e.currencyCode,
@@ -57,7 +61,8 @@ export async function addWaybillChargeTx(tx: Tx, waybillId: number, e: ExpenseIn
   if (w.status === "rejected" && e.billTo === "customer") throw new Error(`الشحنة ${w.number} مرفوضة؛ لا يُحمَّل عليها مصروف للعميل`);
   const row = await insertExpenseTx(tx, w, e);
   if (EDITABLE.includes(w.status)) return { row, invoice: null };
-  await postChargeTx(tx, w, row.id, userId);
+  // لم يُدفع بعد: يدخل مسودة الفاتورة، ويُقيد عند اعتماده (والإصدار ينتظر الاعتماد)
+  if (row.payer !== "unpaid") await postChargeTx(tx, w, row.id, userId);
   const invoice = await attachChargeToDraftInvoiceTx(tx, row.id);
   return { row, invoice };
 }
@@ -86,8 +91,9 @@ export async function removeWaybillCharge(db: Db, waybillId: number, itemId: num
     const [e] = await tx.select().from(s.waybillExpenses).where(and(eq(s.waybillExpenses.id, itemId), eq(s.waybillExpenses.waybillId, waybillId)));
     if (!e) return;
     if (e.sourceExpenseId) throw new Error("هذا المصروف من مصروفات السائق؛ يُرجَع من شاشة المصروفات");
-    // مصروف قُيد مع اعتماد الشحنة لا يُحذف إلا بإرجاعها
-    if (!e.journalEntryId && !EDITABLE.includes(w.status)) throw new Error(`قُيد المصروف مع اعتماد الشحنة ${w.number}؛ أرجعها لمسودة أولاً`);
+    if (e.paymentId) throw new Error("المصروف سُدد بسند صرف؛ احذف السند أو أرجعه أولاً");
+    // مصروف قُيد مع اعتماد الشحنة لا يُحذف إلا بإرجاعها («لم يُدفع بعد» لا يدخل قيد الشحنة)
+    if (!e.journalEntryId && e.payer !== "unpaid" && !EDITABLE.includes(w.status)) throw new Error(`قُيد المصروف مع اعتماد الشحنة ${w.number}؛ أرجعها لمسودة أولاً`);
     await detachChargeTx(tx, e.id);
     await tx.delete(s.waybillExpenses).where(eq(s.waybillExpenses.id, e.id));
     if (e.journalEntryId) await deleteEntryTx(tx, e.journalEntryId);
@@ -118,7 +124,8 @@ export async function linkExpenseToWaybillTx(tx: Tx, expense: typeof s.expenses.
     exchangeRate: Number(expense.exchangeRate),
     billTo: "customer",
     // الدفع الفعلي مسجّل في قيد المصروف؛ هنا للعرض فقط
-    payer: expense.payer === "cash" ? "cash" : "driver_custody",
+    payer: expense.payer,
+    partyId: expense.partyId,
     cashAccountId: expense.cashAccountId,
     note: `${expense.number} – ${expense.description}`,
     journalEntryId,
@@ -191,7 +198,7 @@ export function parseChargeRows(json: string, fallbackWaybillId?: number, opts?:
     if (!(amount > 0)) throw new Error(`${n}: اكتب المبلغ`);
     const waybillId = Number(r.waybillId) || fallbackWaybillId || 0;
     if (!waybillId && !opts?.invoiceLevel) throw new Error(`${n}: اختر الشحنة`);
-    const payer = r.payer === "customs_broker" || r.payer === "cash" ? r.payer : "driver_custody";
+    const payer = r.payer === "customs_broker" || r.payer === "cash" || r.payer === "unpaid" ? r.payer : "driver_custody";
     if (payer === "cash" && !Number(r.cashAccountId)) throw new Error(`${n}: اختر الحساب الذي دفعت منه الشركة`);
     if (payer === "customs_broker" && !Number(r.partyId)) throw new Error(`${n}: اختر المخلص`);
     out.push({

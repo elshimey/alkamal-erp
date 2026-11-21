@@ -15,11 +15,13 @@ export const EXPENSE_STATUS = {
 export const EXPENSE_PAYERS = {
   driver_custody: "عهدة السائق",
   cash: "الشركة: صندوق / بنك / عهدة موظف",
+  unpaid: "لم يُدفع بعد",
 } as const;
 
 export const PAYMENT_KINDS = {
   supplier: "سداد لمورد",
   custody: "صرف عهدة لسائق",
+  expense: "سداد مصروف مستحق",
 } as const;
 
 // حساب الذمة حسب دور الجهة؛ عند تعدد الأدوار يؤخذ الأول بهذا الترتيب

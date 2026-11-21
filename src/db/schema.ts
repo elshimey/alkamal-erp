@@ -933,7 +933,7 @@ export const waybillFuel = pgTable(
 );
 
 export const expenseBillTo = pgEnum("expense_bill_to", ["company", "customer"]);
-export const expensePayer = pgEnum("expense_payer", ["driver_custody", "customs_broker", "cash"]);
+export const expensePayer = pgEnum("expense_payer", ["driver_custody", "customs_broker", "cash", "unpaid"]);
 
 // مصاريف الحدود والطريق على الشحنة؛ ما يكون على العميل يُسحب للفاتورة كرسوم
 export const waybillExpenses = pgTable(
@@ -957,6 +957,10 @@ export const waybillExpenses = pgTable(
     // قيد المصروف المضاف بعد اعتماد الشحنة، أو قيد مصروف السائق الذي جاء منه
     journalEntryId: ref("journal_entry_id").references(() => journalEntries.id),
     sourceExpenseId: ref("source_expense_id").references((): AnyPgColumn => expenses.id, { onDelete: "cascade" }),
+    // «لم يُدفع بعد»: يُعتمد من «سندات صرف تحت المراجعة» (قيد الالتزام)، ثم يُسدد بسند صرف
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    approvedBy: ref("approved_by").references(() => users.id),
+    paymentId: ref("payment_id").references((): AnyPgColumn => payments.id, { onDelete: "set null" }),
     createdAt: createdAt(),
   },
   (t) => [
@@ -1269,7 +1273,7 @@ export const adjustmentNoteLines = pgTable(
   (t) => [index("adjustment_note_lines_note_idx").on(t.noteId), check("adjustment_note_lines_amounts", sql`${t.amount} > 0 and ${t.vatAmount} >= 0`)],
 );
 
-export const directExpensePayer = pgEnum("direct_expense_payer", ["driver_custody", "cash"]);
+export const directExpensePayer = pgEnum("direct_expense_payer", ["driver_custody", "cash", "unpaid"]);
 export const expenseStatus = pgEnum("expense_status", ["pending", "approved", "rejected", "voided"]);
 
 // المصروف المباشر: من عهدة سائق أو من صندوق/بنك، ويُقيد عند الاعتماد
@@ -1306,6 +1310,9 @@ export const expenses = pgTable(
     journalEntryId: ref("journal_entry_id").references(() => journalEntries.id),
     // طلب صيانة السائق المعتمد ديناً على ورشة: قيده في أمر الصيانة لا في المصروف
     maintenanceOrderId: ref("maintenance_order_id").references((): AnyPgColumn => maintenanceOrders.id),
+    // «لم يُدفع بعد»: المستفيد (مورد أو ورشة…) إن عُرف، وإلا يُقيد على 2106؛ وسند الصرف الذي سدده
+    partyId: ref("party_id").references(() => parties.id),
+    paymentId: ref("payment_id").references((): AnyPgColumn => payments.id, { onDelete: "set null" }),
     approvedBy: ref("approved_by").references(() => users.id),
     createdBy: ref("created_by").references(() => users.id),
     createdAt: createdAt(),
@@ -1320,7 +1327,7 @@ export const expenses = pgTable(
   ],
 );
 
-export const paymentKind = pgEnum("payment_kind", ["supplier", "custody"]);
+export const paymentKind = pgEnum("payment_kind", ["supplier", "custody", "expense"]);
 
 // سند الصرف: سداد لمورد (بنفس منطق القبض) أو صرف عهدة لسائق
 export const payments = pgTable(

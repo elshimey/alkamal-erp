@@ -475,10 +475,12 @@ export async function saveTransportPanel(id: number, fd: FormData): Promise<Pane
 export async function sendToDriverAction(id: number, fd?: FormData): Promise<FormState> {
   const user = await guard("update", id);
   try {
-    const r = await sendTrip(db, id, { cashAccountId: fd ? optId(str(fd, "cashAccountId")) : null, userId: user.id });
+    const defer = fd?.get("deferCustody") === "1";
+    const r = await sendTrip(db, id, { cashAccountId: fd ? optId(str(fd, "cashAccountId")) : null, deferCustody: defer, userId: user.id });
     refresh(id);
     revalidatePath("/invoices");
-    const custody = r.custody > 0 ? `، وصُرفت له عهدة الرحلة ${r.custody.toLocaleString("en")} بالسند ${r.paymentNumber}` : "";
+    revalidatePath("/payments/review");
+    const custody = r.custody > 0 ? `، وصُرفت له عهدة الرحلة ${r.custody.toLocaleString("en")} بالسند ${r.paymentNumber}` : defer ? "، وعهدتها في «سندات صرف تحت المراجعة» حتى تُصرف" : "";
     return { ok: `أُرسلت الشحنة ${r.number} إلى ${r.driver ?? "السائق"}${custody}` };
   } catch (err) {
     return { error: errorMessage(err) };
@@ -646,9 +648,10 @@ export async function bulkWaybillOps(_: FormState, fd: FormData): Promise<FormSt
   if (op === "send_driver" || op === "unsend_driver") {
     const user = await guard("update");
     for (const id of ids) await guard("update", id);
-    const res = await bulkTrips(db, ids, op === "send_driver" ? "send" : "unsend", { cashAccountId: optId(str(fd, "cashAccountId")), userId: user.id });
+    const res = await bulkTrips(db, ids, op === "send_driver" ? "send" : "unsend", { cashAccountId: optId(str(fd, "cashAccountId")), deferCustody: fd.get("deferCustody") === "1", userId: user.id });
     refresh();
     revalidatePath("/invoices");
+    revalidatePath("/payments/review");
     const what = op === "send_driver" ? `أُرسلت ${res.done.length} شحنة للسائقين؛ تظهر في تطبيقاتهم` : `أُلغي إرسال ${res.done.length} شحنة وسُحبت من تطبيق السائق`;
     if (!res.done.length) return { error: res.skipped.join("\n") };
     return res.skipped.length ? { error: `${what}، ولم يُنفذ على ${res.skipped.length}:\n${res.skipped.join("\n")}` } : { ok: what };

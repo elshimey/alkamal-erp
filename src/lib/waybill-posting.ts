@@ -35,9 +35,11 @@ export interface PostingFuel {
 export interface PostingExpense {
   costAccountId: number | null;
   label: string;
-  payer: "driver_custody" | "customs_broker" | "cash";
+  payer: "driver_custody" | "customs_broker" | "cash" | "unpaid";
   partyId: number | null;
   cashAccountId?: number | null;
+  // لم يُدفع بعد: ذمة المستفيد (مورد، ورشة…) أو «مصروفات مستحقة» 2106 إن لم يُعرف
+  payableAccountId?: number | null;
   // على العميل: مدين «مصاريف مستردة من العملاء» 1114 بدل تكلفة المركبة (يُقفل عند الفوترة)
   billToCustomer?: boolean;
   amount: number;
@@ -49,7 +51,7 @@ export interface PostingExpense {
 export function waybillExpenseLines(
   w: Pick<PostingWaybill, "id" | "number" | "costCenterId" | "driverId" | "driverCustodyAccountId">,
   expenses: PostingExpense[],
-  account: Pick<Record<WaybillAccountKey, number>, "tripExpenses" | "customsBrokers" | "rechargeable">,
+  account: Pick<Record<WaybillAccountKey, number>, "tripExpenses" | "customsBrokers" | "rechargeable" | "accrued">,
 ): LineInput[] {
   const lines: LineInput[] = [];
   for (const e of expenses) {
@@ -62,9 +64,10 @@ export function waybillExpenseLines(
       ? { accountId: account.rechargeable, ...fx, driverId: w.driverId, waybillId: w.id, description: `على العميل: ${description}`, debit: e.amount }
       : { accountId: e.costAccountId ?? account.tripExpenses, ...fx, costCenterId: w.costCenterId, driverId: w.driverId, waybillId: w.id, description, debit: e.amount };
     lines.push(debit, {
-      accountId: e.payer === "driver_custody" ? w.driverCustodyAccountId! : e.payer === "cash" ? e.cashAccountId! : account.customsBrokers,
+      accountId:
+        e.payer === "driver_custody" ? w.driverCustodyAccountId! : e.payer === "cash" ? e.cashAccountId! : e.payer === "unpaid" ? (e.payableAccountId ?? account.accrued) : account.customsBrokers,
       ...fx,
-      partyId: e.payer === "customs_broker" ? e.partyId : null,
+      partyId: e.payer === "customs_broker" || e.payer === "unpaid" ? e.partyId : null,
       driverId: w.driverId,
       waybillId: w.id,
       description,

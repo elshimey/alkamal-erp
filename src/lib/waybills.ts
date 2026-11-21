@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, ilike, inArray, isNull, like, lte, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, isNull, like, ne, lte, or, sql, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { Db, Tx } from "@/db";
 import { blockingDocumentIssues } from "@/lib/documents";
@@ -385,7 +385,8 @@ export interface ExpenseInput {
   currencyCode?: string;
   exchangeRate?: number | null;
   billTo?: "company" | "customer";
-  payer?: "driver_custody" | "customs_broker" | "cash";
+  payer?: "driver_custody" | "customs_broker" | "cash" | "unpaid";
+  // المخلص، أو المستفيد في «لم يُدفع بعد» (اختياري)
   partyId?: number | null;
   cashAccountId?: number | null;
   note?: string | null;
@@ -424,7 +425,7 @@ export async function insertExpenseTx(tx: Tx, w: typeof s.waybills.$inferSelect,
       exchangeRate: String(e.exchangeRate ?? (await rateOn(tx, currency, w.waybillDate))),
       billTo: e.billTo ?? "company",
       payer,
-      partyId: payer === "customs_broker" ? (e.partyId ?? null) : null,
+      partyId: payer === "customs_broker" || payer === "unpaid" ? (e.partyId ?? null) : null,
       cashAccountId: payer === "cash" ? (e.cashAccountId ?? null) : null,
       note: e.note || null,
       journalEntryId: e.journalEntryId ?? null,
@@ -452,12 +453,17 @@ export { accountIds as waybillAccountIds };
 export async function deleteWaybillItem(db: Db, waybillId: number, kind: "fuel" | "expense", itemId: number) {
   return db.transaction(async (tx) => {
     assertEditable(await lockWaybill(tx, waybillId));
+    let entryId: number | null = null;
     if (kind === "expense") {
-      const [e] = await tx.select({ source: s.waybillExpenses.sourceExpenseId }).from(s.waybillExpenses).where(and(eq(s.waybillExpenses.id, itemId), eq(s.waybillExpenses.waybillId, waybillId)));
-      if (e?.source) throw new Error("هذا المصروف من مصروفات السائق؛ يُعدَّل من شاشة المصروفات");
+      const [e] = await tx.select().from(s.waybillExpenses).where(and(eq(s.waybillExpenses.id, itemId), eq(s.waybillExpenses.waybillId, waybillId)));
+      if (e?.sourceExpenseId) throw new Error("هذا المصروف من مصروفات السائق؛ يُعدَّل من شاشة المصروفات");
+      if (e?.paymentId) throw new Error("المصروف سُدد بسند صرف؛ احذف السند أو أرجعه أولاً");
+      // «لم يُدفع بعد» المعتمد له قيد التزام مستقل يُحذف معه
+      entryId = e?.journalEntryId ?? null;
     }
     const table = kind === "fuel" ? s.waybillFuel : s.waybillExpenses;
     await tx.delete(table).where(and(eq(table.id, itemId), eq(table.waybillId, waybillId)));
+    if (entryId) await deleteEntryTx(tx, entryId);
   });
 }
 
@@ -600,7 +606,8 @@ export async function approveWaybill(
       .from(s.waybillExpenses)
       .innerJoin(s.chargeTypes, eq(s.chargeTypes.id, s.waybillExpenses.chargeTypeId))
       // ما له قيد مستقل (أُضيف بعد الاعتماد، أو من مصروف السائق) لا يُقيد مرة ثانية
-      .where(and(eq(s.waybillExpenses.waybillId, id), isNull(s.waybillExpenses.journalEntryId)));
+      // و«لم يُدفع بعد» يُقيد عند اعتماده من «سندات صرف تحت المراجعة»
+      .where(and(eq(s.waybillExpenses.waybillId, id), isNull(s.waybillExpenses.journalEntryId), ne(s.waybillExpenses.payer, "unpaid")));
     const [vatIn] = await tx.select({ id: s.taxCodes.id }).from(s.taxCodes).where(eq(s.taxCodes.code, "VAT15-IN"));
 
     const lines = waybillPostingLines(
