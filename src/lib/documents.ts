@@ -508,20 +508,21 @@ export function alertKindsFor(perms: PermissionSet): OwnerKind[] {
 /** يرفع السائق صورة وثيقة مجدَّدة له أو لمركبته المسندة؛ تبقى بانتظار اعتماد المكتب. */
 export async function submitRenewal(
   db: Db,
-  driver: { id: number; vehicle: { id: number } | null },
+  driver: { id: number; vehicle: { id: number } | null; trailer?: { id: number } | null },
   input: { documentTypeId: number; number?: string | null; expiryDate?: string | null; note?: string | null; photo: string | null; userId?: number },
 ) {
   return db.transaction(async (tx) => {
     const [type] = await tx.select().from(s.documentTypes).where(eq(s.documentTypes.id, input.documentTypeId));
-    if (!type || (type.ownerKind !== "driver" && type.ownerKind !== "vehicle")) throw new Error("اختر الوثيقة");
+    if (!type || (type.ownerKind !== "driver" && type.ownerKind !== "vehicle" && type.ownerKind !== "trailer")) throw new Error("اختر الوثيقة");
     if (type.ownerKind === "vehicle" && !driver.vehicle) throw new Error("لا توجد مركبة مسندة لك");
+    if (type.ownerKind === "trailer" && !driver.trailer) throw new Error("لا توجد مقطورة في رحلاتك");
     if (!input.photo) throw new Error("صورة الوثيقة إلزامية");
     const [row] = await tx
       .insert(s.documentSubmissions)
       .values({
         documentTypeId: type.id,
         driverId: driver.id,
-        vehicleId: type.ownerKind === "vehicle" ? driver.vehicle!.id : null,
+        vehicleId: type.ownerKind === "vehicle" ? driver.vehicle!.id : type.ownerKind === "trailer" ? driver.trailer!.id : null,
         number: input.number || null,
         expiryDate: input.expiryDate || null,
         note: input.note || null,
@@ -571,7 +572,8 @@ export async function approveSubmission(
     const [sub] = await tx.select().from(s.documentSubmissions).where(eq(s.documentSubmissions.id, id)).for("update");
     if (!sub) throw new Error("الطلب غير موجود");
     if (sub.status !== "pending") throw new Error("الطلب رُوجع مسبقاً");
-    const owner = sub.vehicleId ? { kind: "vehicle" as const, id: sub.vehicleId } : { kind: "driver" as const, id: sub.driverId };
+    const [type] = await tx.select({ kind: s.documentTypes.ownerKind }).from(s.documentTypes).where(eq(s.documentTypes.id, sub.documentTypeId));
+    const owner = sub.vehicleId ? { kind: type?.kind === "trailer" ? ("trailer" as const) : ("vehicle" as const), id: sub.vehicleId } : { kind: "driver" as const, id: sub.driverId };
     const { row } = await addDocument(tx, {
       documentTypeId: sub.documentTypeId,
       owner,

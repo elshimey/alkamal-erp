@@ -58,6 +58,7 @@ import { driverNotifications, driverPulse, unreadCount, markNotificationsRead } 
 import { lastOfficeEventId, officeEvents } from "@/lib/office-notify";
 import { claimDailyJob, days, pushStage, sendDocumentAlerts } from "@/lib/doc-alerts";
 
+import { driverCanSeeDocument, driverDocuments, driverTrailer } from "@/lib/driver-docs";
 import { cancelTripRequest, convertTripRequestTx, driverTripRequest, driverTripRequests, linkTripRequest, linkableWaybills, listTripRequests, recordRequestStage, rejectTripRequest, startTripRequest, undoRequestStage } from "@/lib/driver-trip-requests";
 import { removePushSubscription, savePushSubscription, usersWithPermission } from "@/lib/push";
 import { runImport } from "@/lib/importers";
@@ -1321,6 +1322,42 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(isDriverOnly([{ key: "driver" }, { key: "accountant" }])).toBe(false);
       await expect(createDriverLogin(db, { driverId: me.id, login: "x-other", password: "driver-pass-1" })).rejects.toThrow("مسبقاً");
       await expect(createDriverLogin(db, { driverId: otherDriverId, login: "0555000777", password: "driver-pass-1" })).rejects.toThrow("مستخدم");
+    });
+
+    it("«وثائقي»: يرى السائق وثائقه ووثائق مركبته ومقطورة آخر رحلة، ويفتح ملفاتها وحده، ويجدد وثيقة المقطورة", async () => {
+      const types = await db.select().from(s.documentTypes);
+      const code = (c: string) => types.find((t) => t.code === c)!.id;
+      const photo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+      const trailer = await createVehicle(db, { plate: "ق ط ر 555", assetKind: "trailer" });
+      expect(await driverTrailer(db, me.id)).toBeNull();
+      const w = await createWaybill(db, { waybillDate: D, customerId, routeId, shipper: "أ", consignee: "ب", vehicleId: me.vehicle!.id, trailerId: trailer.id, driverId: me.id, userId });
+      expect(await driverTrailer(db, me.id)).toEqual({ id: trailer.id, plate: "ق ط ر 555" });
+
+      const tReg = await addDocument(db, { documentTypeId: code("t_registration"), owner: { kind: "trailer", id: trailer.id }, number: "T-1", expiryDate: "2026-10-15" });
+      const mine = await addDocument(db, { documentTypeId: code("d_license"), owner: { kind: "driver", id: me.id }, expiryDate: "2026-09-30" });
+      const other = await addDocument(db, { documentTypeId: code("d_license"), owner: { kind: "driver", id: otherDriverId }, expiryDate: "2027-01-01" });
+      const fileId = await saveDataUrl(db, { entity: "fleet_documents", entityId: tReg.row.id, kind: "document", dataUrl: photo, userId });
+
+      const docs = await driverDocuments(db, me, D);
+      const reg = docs.trailerDocs.find((r) => r.typeId === code("t_registration"))!;
+      expect(reg).toMatchObject({ number: "T-1", state: "soon", days: 10, fileId: fileId!, isPdf: false });
+      expect(docs.mine.find((r) => r.typeId === code("d_license"))).toMatchObject({ state: "expired", days: -5 });
+      expect(docs.trailer?.plate).toBe("ق ط ر 555");
+
+      expect(await driverCanSeeDocument(db, me.id, tReg.row.id)).toBe(true);
+      expect(await driverCanSeeDocument(db, me.id, mine.row.id)).toBe(true);
+      expect(await driverCanSeeDocument(db, me.id, other.row.id)).toBe(false);
+      expect(await driverCanSeeDocument(db, otherDriverId, tReg.row.id)).toBe(false);
+
+      // تجديد وثيقة المقطورة من التطبيق يُعتمد على المقطورة نفسها
+      await expect(submitRenewal(db, { id: me.id, vehicle: me.vehicle, trailer: null }, { documentTypeId: code("t_registration"), photo })).rejects.toThrow("مقطورة");
+      const sub = await submitRenewal(db, { id: me.id, vehicle: me.vehicle, trailer }, { documentTypeId: code("t_registration"), expiryDate: "2027-10-15", photo, userId });
+      const renewed = await approveSubmission(db, sub.id, {});
+      expect(renewed).toMatchObject({ vehicleId: trailer.id, expiryDate: "2027-10-15" });
+
+      await deleteWaybill(db, w.id, { reason: "اختبار" });
+      await db.delete(s.documentSubmissions).where(eq(s.documentSubmissions.id, sub.id));
+      await db.delete(s.fleetDocuments).where(inArray(s.fleetDocuments.id, [tReg.row.id, mine.row.id, other.row.id, renewed.id]));
     });
 
     it("الرحلة تبدأ بالتحميل وتمشي بالمراحل حتى التسليم، والحدود للدولي فقط", async () => {

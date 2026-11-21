@@ -10,6 +10,7 @@ import { acceptTrip, createDriverExpense, isDriverOnly, ownTrip, recordDriverSta
 import { requestCommissionAdvance } from "@/lib/hr";
 import { cancelTripRequest, recordRequestStage, startTripRequest, undoRequestStage } from "@/lib/driver-trip-requests";
 import { submitRenewal } from "@/lib/documents";
+import { driverTrailer } from "@/lib/driver-docs";
 import { addExpense, addFuel, deleteWaybillItem } from "@/lib/waybills";
 import { todayRiyadh } from "@/lib/dates";
 import { errorMessage } from "@/lib/errors";
@@ -300,7 +301,7 @@ export async function documentAction(_: FormState, data: FormData): Promise<Form
     const expiry = str(data, "expiryDate");
     if (expiry && !/^\d{4}-\d{2}-\d{2}$/.test(expiry)) throw new Error("تاريخ غير صحيح");
     await onceForOp(db, op(data), async () => {
-      await submitRenewal(db, driver, {
+      await submitRenewal(db, { ...driver, trailer: await driverTrailer(db, driver.id) }, {
         documentTypeId: Number(str(data, "documentTypeId")),
         number: str(data, "number"),
         expiryDate: expiry || null,
