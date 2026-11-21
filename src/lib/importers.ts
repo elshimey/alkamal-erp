@@ -12,6 +12,7 @@ import { createReceipt } from "@/lib/receipts";
 import { createManualEntry } from "@/lib/journal";
 import { createViolation } from "@/lib/violations";
 import { createProduct, openingStockTx } from "@/lib/inventory";
+import { createAsset } from "@/lib/assets";
 import { addMaintenanceLines, createBreakdownRequest, createMaintenanceOrder, savePlan } from "@/lib/maintenance";
 import { MAINTENANCE_TYPES, type MaintenanceType } from "@/data/maintenance";
 import { lineVat, round2 } from "@/lib/invoice-posting";
@@ -640,6 +641,43 @@ async function importProduct(tx: Tx, [r]: ImportRow[], _ctx: Ctx, userId?: numbe
   return product.code;
 }
 
+/** الأصل الثابت (ملاحظة التشغيل 9): الإهلاك على مركز المركبة أو المركز المكتوب، ولا يُستورد مرتين (الاسم وتاريخ الاقتناء). */
+async function importFixedAsset(tx: Tx, [r]: ImportRow[], ctx: Ctx, userId?: number) {
+  const nameAr = required(r, "nameAr", "اسم الأصل");
+  const category = required(r, "category", "الفئة");
+  const asset = findAccount(ctx, category, "الفئة");
+  if (!asset.code.startsWith("12") || asset.code.startsWith("1202")) throw new Error(`الفئة «${category}» ليست حساب أصل ثابت (1201…)`);
+  const plate = v(r, "vehicle");
+  const vehicleId = plate ? resolve(ctx.idx.vehicles.find(plate), plate, "costCenter", "المركبة") : null;
+  const ccRaw = v(r, "costCenter");
+  if (plate && ccRaw) throw new Error("اكتب المركبة أو مركز التكلفة، لا الاثنين: المركبة تحدد مركزها");
+  const costCenterId = ccRaw ? resolve(ctx.idx.costCenters.find(ccRaw), ccRaw, "costCenter", "مركز التكلفة") : null;
+  const acquisitionDate = toDate(required(r, "acquisitionDate", "تاريخ الاقتناء"), "تاريخ الاقتناء");
+  const [dup] = await tx
+    .select({ number: s.fixedAssets.number })
+    .from(s.fixedAssets)
+    .where(and(eq(s.fixedAssets.nameAr, nameAr), eq(s.fixedAssets.acquisitionDate, acquisitionDate)));
+  if (dup) throw new Error(`الأصل «${nameAr}» بتاريخ الاقتناء نفسه مسجل مسبقاً برقم ${dup.number}`);
+  const num = (key: string, label: string) => (v(r, key) ? toNumber(v(r, key), label, { min: 0 }) : 0);
+  const offset = v(r, "offsetAccount");
+  const row = await createAsset(tx, {
+    nameAr,
+    assetAccountId: asset.id,
+    vehicleId,
+    costCenterId,
+    acquisitionDate,
+    depreciationStart: v(r, "depreciationStart") ? toDate(v(r, "depreciationStart"), "بداية الإهلاك") : null,
+    cost: toNumber(required(r, "cost", "التكلفة"), "التكلفة", { positive: true }),
+    salvageValue: num("salvageValue", "قيمة الخردة"),
+    usefulLifeMonths: Math.round(toNumber(required(r, "lifeYears", "العمر الإنتاجي"), "العمر الإنتاجي", { positive: true }) * 12),
+    openingDepreciation: num("openingDepreciation", "إهلاك سابق"),
+    offsetAccountId: offset ? findAccount(ctx, offset, "قيد الاقتناء مقابل").id : null,
+    notes: v(r, "notes") || null,
+    userId,
+  });
+  return row.number;
+}
+
 /** نوع الصيانة بالاسم العربي (أو جزء منه) أو بالمفتاح. */
 function maintenanceType(raw: string): MaintenanceType {
   const t = normText(raw);
@@ -740,6 +778,7 @@ const IMPORTERS: Record<string, (tx: Tx, rows: ImportRow[], ctx: Ctx, userId?: n
   "journal-entries": importJournal,
   violations: importViolation,
   products: importProduct,
+  "fixed-assets": importFixedAsset,
   "maintenance-orders": importMaintenanceOrder,
   "breakdown-requests": importBreakdown,
   "maintenance-plans": importPlan,
@@ -758,8 +797,8 @@ function groupRows(spec: ImportSpec, rows: ImportRow[]) {
   return [...groups.values(), ...loose];
 }
 
-const DATE_KEYS = new Set(["invoiceDate", "dueDate", "date", "validUntil", "receiptDate", "entryDate", "violationDate", "orderDate", "reportDate", "lastDone"]);
-const NUMBER_KEYS = new Set(["quantity", "unitPrice", "discount", "amount", "carrierCost", "comp1Qty", "comp1Price", "comp2Qty", "comp2Price", "comp3Qty", "comp3Price", "commission", "tripCustody", "charge1Amount", "charge2Amount", "charge3Amount", "weight", "year", "odometer", "debit", "credit", "purchasePrice", "salePrice", "reorderLevel", "openingQty", "estimatedCost", "intervalDays"]);
+const DATE_KEYS = new Set(["invoiceDate", "dueDate", "date", "validUntil", "receiptDate", "entryDate", "violationDate", "orderDate", "reportDate", "lastDone", "acquisitionDate", "depreciationStart"]);
+const NUMBER_KEYS = new Set(["quantity", "unitPrice", "discount", "amount", "carrierCost", "comp1Qty", "comp1Price", "comp2Qty", "comp2Price", "comp3Qty", "comp3Price", "commission", "tripCustody", "charge1Amount", "charge2Amount", "charge3Amount", "weight", "year", "odometer", "debit", "credit", "purchasePrice", "salePrice", "reorderLevel", "openingQty", "estimatedCost", "intervalDays", "cost", "salvageValue", "lifeYears", "openingDepreciation"]);
 
 /**
  * فحص أولي لكل خانات السجل قبل حفظه، فتظهر كل أخطاء الصف معاً (لا الأول فقط) كما في وافق:
@@ -931,6 +970,18 @@ export async function templateLists(db: Db, spec: ImportSpec): Promise<TemplateL
     return [
       { title: "المركبات (اللوحة)", values: ctx.vehicles.map((x) => x.plate).sort(), field: "vehicle" },
       { title: "على من", values: ["السائق", "الشركة"], field: "chargeTo" },
+    ];
+  }
+  if (spec.entity === "fixed-assets") {
+    const assets = ctx.accounts.filter((a) => a.code.startsWith("12") && !a.code.startsWith("1202")).sort((a, b) => a.code.localeCompare(b.code));
+    const offsets = ctx.accounts.filter((a) => /^(1101|1102|21|3104)/.test(a.code)).sort((a, b) => a.code.localeCompare(b.code));
+    return [
+      { title: "فئات الأصول (الرقم)", values: assets.map((a) => a.code), field: "category" },
+      { title: "اسم الفئة", values: assets.map((a) => a.nameAr) },
+      { title: "المركبات (اللوحة)", values: ctx.vehicles.map((x) => x.plate).sort(), field: "vehicle" },
+      { title: "مراكز التكلفة", values: ctx.costCenters.filter((c) => c.type !== "vehicle" && c.isActive).map((c) => c.nameAr), field: "costCenter" },
+      { title: "حسابات قيد الاقتناء (الرقم)", values: offsets.map((a) => a.code), field: "offsetAccount" },
+      { title: "اسم الحساب", values: offsets.map((a) => a.nameAr) },
     ];
   }
   if (spec.entity === "products") {

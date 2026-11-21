@@ -2,7 +2,7 @@
 // والإغلاق مع تعديلات غير محفوظة يسأل بنافذة البرنامج لا بتأكيد المتصفح.
 import { expect, test } from "@playwright/test";
 import { E2E } from "./data";
-import { officeLogin, pick } from "./helpers";
+import { officeLogin, pick, sql } from "./helpers";
 
 test("اختيار السائق في الشحنة يملأ المركبة المسندة له", async ({ page }) => {
   await officeLogin(page);
@@ -58,4 +58,30 @@ test("العملاء والموردون: الزر الرئيسي يضيف جهة
   await page.getByRole("button", { name: "حفظ", exact: true }).click();
   await expect(page.getByRole("heading", { name: "إضافة جهة" })).toBeHidden();
   await expect(page.getByRole("link", { name: /مخلص الاختبار/ }).first()).toBeVisible();
+});
+
+test("مركز تكلفة «المقطورات» من الشاشة، ثم أصل سطحة عليه، والفئة تبقى بعد الحفظ", async ({ page }) => {
+  await officeLogin(page);
+  await page.goto("/cost-centers");
+  await page.getByRole("button", { name: "+ مركز تكلفة" }).click();
+  const dlg = page.getByRole("dialog");
+  await dlg.getByRole("textbox", { name: "الاسم" }).fill("المقطورات E2E");
+  await dlg.getByRole("button", { name: "إضافة المركز" }).click();
+  await expect(dlg.getByRole("status")).toContainText("المقطورات E2E");
+  await page.keyboard.press("Escape");
+  await expect(dlg).toBeHidden();
+  await expect(page.getByRole("cell", { name: "المقطورات E2E" })).toBeVisible();
+
+  await page.goto("/fixed-assets");
+  const form = page.locator("form").filter({ has: page.getByRole("button", { name: "إضافة الأصل" }) });
+  await form.locator("input[name=nameAr]").fill("سطحة E2E");
+  await pick(page, form, /^الفئة/, "120102");
+  await form.locator("select[name=costCenterId]").selectOption({ label: "المقطورات E2E" });
+  await form.locator("input[name=cost]").fill("90000");
+  await form.getByRole("button", { name: "إضافة الأصل" }).click();
+  await expect(form.getByRole("status")).toContainText("أُضيف الأصل");
+  await expect(form.locator("input[name=nameAr]")).toHaveValue("");
+  await expect(form.locator("input[type=hidden][name=assetAccountId]")).not.toHaveValue("");
+  const [a] = await sql`select c.name_ar from fixed_assets f join cost_centers c on c.id = f.cost_center_id where f.name_ar = 'سطحة E2E'`;
+  expect(a.name_ar).toBe("المقطورات E2E");
 });

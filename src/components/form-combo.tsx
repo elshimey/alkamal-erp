@@ -18,6 +18,7 @@ export function FormCombo({
   placeholder = "اكتب للبحث…",
   onChange,
   autoVehicle,
+  keepOnReset,
 }: {
   name: string;
   options: QuickOption[];
@@ -29,6 +30,8 @@ export function FormCombo({
   onChange?: (value: string) => void;
   /** خانة السائق: اختياره يملأ خانة المركبة بالمسندة له في تاريخ المستند */
   autoVehicle?: AutoVehicle;
+  /** تبقى القيمة المختارة بعد الحفظ وتفريغ النموذج (فئة الأصل عند إدخال أصول متتالية) */
+  keepOnReset?: boolean;
 }) {
   const [value, setValue] = useState(defaultValue);
   const hidden = useRef<HTMLInputElement>(null);
@@ -41,13 +44,14 @@ export function FormCombo({
 
   useEffect(() => {
     const form = hidden.current?.form;
+    if (keepOnReset) return;
     const reset = () => {
       setValue(defaultValue);
       onChange?.(defaultValue);
     };
     form?.addEventListener("reset", reset);
     return () => form?.removeEventListener("reset", reset);
-  }, [defaultValue, onChange]);
+  }, [defaultValue, onChange, keepOnReset]);
 
   return (
     <>
