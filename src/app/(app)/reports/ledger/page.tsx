@@ -4,23 +4,9 @@ import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { todayRiyadh } from "@/lib/dates";
 import { accountLedger } from "@/lib/reports";
-import { C, money, param, PeriodFilter, periodFrom, ReportHeader, RTable } from "../report-ui";
+import { C, money, param, PeriodFilter, periodFrom, ReportHeader, RTable, SourceLink } from "../report-ui";
 import { FormCombo } from "@/components/form-combo";
 import { toAccountOptions } from "@/lib/lookups";
-
-const SOURCE: Record<string, { label: string; href?: (id: number) => string }> = {
-  waybill: { label: "شحنة", href: (id) => `/waybills/${id}` },
-  waybill_charge: { label: "مصروف على شحنة" },
-  sales_invoice: { label: "فاتورة", href: (id) => `/invoices/${id}` },
-  receipt: { label: "سند قبض" },
-  purchase_invoice: { label: "فاتورة مورد", href: (id) => `/purchases/${id}` },
-  expense: { label: "مصروف" },
-  payment: { label: "سند صرف" },
-  maintenance_order: { label: "أمر صيانة", href: (id) => `/maintenance/${id}` },
-  payroll_run: { label: "مسير", href: (id) => `/payroll/${id}` },
-  payroll_payment: { label: "صرف رواتب", href: (id) => `/payroll/${id}` },
-  employee_advance: { label: "سلفة" },
-};
 
 export default async function LedgerPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   await requirePermission("financial_reports", "view");
@@ -94,19 +80,12 @@ export default async function LedgerPage({ searchParams }: { searchParams: Promi
               <C num>{money(ledger.opening, false)}</C>
             </tr>
             {ledger.lines.map((l, i) => {
-              const src = l.source_type ? SOURCE[l.source_type] : undefined;
               return (
                 <tr key={i}>
                   <C className="ltr-nums whitespace-nowrap">{l.entry_date}</C>
                   <C className="ltr-nums text-xs whitespace-nowrap text-gray-500">{l.number}</C>
                   <C className="text-xs whitespace-nowrap">
-                    {src?.href && l.source_id ? (
-                      <a href={src.href(Number(l.source_id))} className="text-brand-700 hover:underline">
-                        {src.label}
-                      </a>
-                    ) : (
-                      (src?.label ?? "قيد يدوي")
-                    )}
+                    <SourceLink type={l.source_type} id={l.source_id} />
                   </C>
                   {multi && <C className="text-xs">{l.account_name}</C>}
                   <C className="max-w-sm">

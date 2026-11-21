@@ -397,3 +397,215 @@ export function previousRange(from: string, to: string) {
   const days = Math.round((t.getTime() - f.getTime()) / 86_400_000) + 1;
   return { from: iso(new Date(f.getTime() - days * 86_400_000)), to: iso(new Date(f.getTime() - 86_400_000)) };
 }
+
+// ───────────── مركز التقارير (الخطوة 4ب، تقسيم وافق) ─────────────
+
+/**
+ * الأستاذ العام: كل حساب تفصيلي تحرّك في الفترة (أو له رصيد افتتاحي) برصيده الافتتاحي وحركاته ورصيده الختامي.
+ * prefix يحصره في مجموعة (مثل 5 أو 1101).
+ */
+export async function generalLedger(db: Db, opts: { from: string; to: string; prefix?: string | null; costCenterId?: number | null }) {
+  const cc = opts.costCenterId ? sql`and l.cost_center_id = ${opts.costCenterId}` : sql``;
+  const pre = opts.prefix ? sql`and a.code like ${opts.prefix + "%"}` : sql``;
+  const [openings, lines] = await Promise.all([
+    rows<{ account_id: number; opening: string }>(
+      db,
+      sql`select l.account_id, sum(l.debit_base - l.credit_base) as opening
+          from journal_lines l join journal_entries e on e.id = l.entry_id and e.status = 'posted' join accounts a on a.id = l.account_id
+          where e.entry_date < ${opts.from} ${pre} ${cc} group by l.account_id`,
+    ),
+    rows<{ account_id: number; entry_id: number; number: string; entry_date: string; source_type: string | null; source_id: number | null; description: string | null; cost_center: string | null; debit: string; credit: string }>(
+      db,
+      sql`select l.account_id, e.id as entry_id, e.number, to_char(e.entry_date, 'YYYY-MM-DD') as entry_date, e.source_type, e.source_id,
+            coalesce(l.description, e.description) as description, cc.name_ar as cost_center, l.debit_base as debit, l.credit_base as credit
+          from journal_lines l join journal_entries e on e.id = l.entry_id and e.status = 'posted' join accounts a on a.id = l.account_id
+          left join cost_centers cc on cc.id = l.cost_center_id
+          where e.entry_date between ${opts.from} and ${opts.to} ${pre} ${cc}
+          order by a.code, e.entry_date, e.id, l.line_no`,
+    ),
+  ]);
+  const ids = new Set([...openings.filter((o) => Math.abs(n(o.opening)) > 0.005).map((o) => Number(o.account_id)), ...lines.map((l) => Number(l.account_id))]);
+  if (!ids.size) return [];
+  const accounts = await db.select().from(s.accounts).where(sql`${s.accounts.id} in (${sql.join([...ids].map((i) => sql`${i}`), sql`, `)})`).orderBy(asc(s.accounts.code));
+  const openOf = new Map(openings.map((o) => [Number(o.account_id), r2(n(o.opening))]));
+  return accounts.map((account) => {
+    let balance = openOf.get(account.id) ?? 0;
+    const opening = balance;
+    const out = lines
+      .filter((l) => Number(l.account_id) === account.id)
+      .map((l) => {
+        balance = r2(balance + n(l.debit) - n(l.credit));
+        return { ...l, debit: n(l.debit), credit: n(l.credit), balance };
+      });
+    return { account, opening, lines: out, debit: r2(out.reduce((t, l) => t + l.debit, 0)), credit: r2(out.reduce((t, l) => t + l.credit, 0)), closing: balance };
+  });
+}
+
+export type PartySide = "customer" | "supplier";
+const RECEIVABLE = "1103";
+const PAYABLES = ["2101", "2102", "2103", "2104", "2105"];
+/** حسابات الجهة: العملاء على 1103، والموردون على 2101–2105 (لا 2109 الضريبة)، كما في بطاقة جهة الاتصال. */
+const sideAccounts = (side: PartySide) => (side === "customer" ? sql`a.code = ${RECEIVABLE}` : sql`a.code in (${sql.join(PAYABLES.map((c) => sql`${c}`), sql`, `)})`);
+/** العميل رصيده مدين والمورد رصيده دائن: الإشارة تجعل «ما له أو عليه» موجباً في الحالتين. */
+const sign = (side: PartySide) => (side === "customer" ? 1 : -1);
+
+/** أرصدة العملاء أو الموردين: الافتتاحي والمدين والدائن والختامي لكل جهة في الفترة، من القيود المرحّلة. */
+export async function partyBalances(db: Db, opts: { side: PartySide; from: string; to: string }) {
+  const r = await rows<{ id: number; name: string; opening: string; debit: string; credit: string }>(
+    db,
+    sql`select p.id, p.name_ar as name,
+          coalesce(sum(l.debit_base - l.credit_base) filter (where e.entry_date < ${opts.from}), 0) as opening,
+          coalesce(sum(l.debit_base) filter (where e.entry_date >= ${opts.from}), 0) as debit,
+          coalesce(sum(l.credit_base) filter (where e.entry_date >= ${opts.from}), 0) as credit
+        from journal_lines l
+        join journal_entries e on e.id = l.entry_id and e.status = 'posted'
+        join accounts a on a.id = l.account_id
+        join parties p on p.id = l.party_id
+        where ${sideAccounts(opts.side)} and e.entry_date <= ${opts.to}
+        group by p.id, p.name_ar
+        order by p.name_ar`,
+  );
+  const k = sign(opts.side);
+  return r
+    .map((x) => {
+      const opening = r2(n(x.opening) * k);
+      const debit = r2(n(x.debit));
+      const credit = r2(n(x.credit));
+      return { id: Number(x.id), name: x.name, opening, debit, credit, closing: r2(opening + (debit - credit) * k) };
+    })
+    .filter((x) => x.opening || x.debit || x.credit);
+}
+
+/**
+ * أعمار الديون المدينة أو الدائنة في تاريخ: الفواتير المفتوحة (العملاء من فواتير المبيعات، والموردون من فواتير الموردين)
+ * حسب أيام التأخير عن الاستحقاق، وبجانبها رصيد الدفتر؛ والفرق «غير مربوط بفاتورة» (دفعات مقدمة أو أرصدة افتتاحية أو قيود يدوية).
+ */
+export async function partyAging(db: Db, opts: { side: PartySide; asOf: string }) {
+  const docs = opts.side === "customer" ? sql`sales_invoices` : sql`purchase_invoices`;
+  const partyCol = opts.side === "customer" ? sql`customer_id` : sql`supplier_id`;
+  const status = opts.side === "customer" ? sql`status = 'issued'` : sql`status = 'posted'`;
+  const [aging, ledger] = await Promise.all([
+    rows<{ id: number; name: string; current: string; d30: string; d60: string; d90: string; over: string; count: number }>(
+      db,
+      sql`select p.id, p.name_ar as name, count(*)::int as count,
+            coalesce(sum(o) filter (where due_date >= ${opts.asOf}), 0) as current,
+            coalesce(sum(o) filter (where ${opts.asOf}::date - due_date between 1 and 30), 0) as d30,
+            coalesce(sum(o) filter (where ${opts.asOf}::date - due_date between 31 and 60), 0) as d60,
+            coalesce(sum(o) filter (where ${opts.asOf}::date - due_date between 61 and 90), 0) as d90,
+            coalesce(sum(o) filter (where ${opts.asOf}::date - due_date > 90), 0) as over
+          from (select ${partyCol} as party_id, due_date, (total - paid_amount) * exchange_rate as o from ${docs}
+                where ${status} and paid_amount < total and invoice_date <= ${opts.asOf}) x
+          join parties p on p.id = x.party_id
+          group by p.id, p.name_ar`,
+    ),
+    partyBalances(db, { side: opts.side, from: opts.asOf, to: opts.asOf }),
+  ]);
+  const byId = new Map(aging.map((a) => [Number(a.id), a]));
+  const ids = new Set([...aging.map((a) => Number(a.id)), ...ledger.map((l) => l.id)]);
+  const names = new Map([...aging.map((a) => [Number(a.id), a.name] as const), ...ledger.map((l) => [l.id, l.name] as const)]);
+  const balance = new Map(ledger.map((l) => [l.id, l.closing]));
+  return [...ids]
+    .map((id) => {
+      const a = byId.get(id);
+      const buckets = { current: r2(n(a?.current)), d30: r2(n(a?.d30)), d60: r2(n(a?.d60)), d90: r2(n(a?.d90)), over: r2(n(a?.over)) };
+      const open = r2(buckets.current + buckets.d30 + buckets.d60 + buckets.d90 + buckets.over);
+      const ledgerBalance = balance.get(id) ?? 0;
+      return { id, name: names.get(id) ?? "", count: Number(a?.count ?? 0), ...buckets, open, ledger: ledgerBalance, unlinked: r2(ledgerBalance - open) };
+    })
+    .filter((x) => x.open || x.ledger)
+    .sort((a, b) => b.ledger - a.ledger);
+}
+
+/**
+ * المبيعات حسب العميل من القيود المرحّلة: الإيراد (4xxx) والمصاريف المستردة (1114) والضريبة (2109) على سطور العميل.
+ * المشتريات حسب المورد: ما قُيد دائناً على ذمته (عدا السداد) والضريبة (1108) على سطوره.
+ */
+export async function salesByCustomer(db: Db, from: string, to: string) {
+  const r = await rows<{ id: number; name: string; revenue: string; recharged: string; vat: string; invoices: number }>(
+    db,
+    sql`select p.id, p.name_ar as name,
+          coalesce(sum(l.credit_base - l.debit_base) filter (where a.code like '4%'), 0) as revenue,
+          coalesce(sum(l.credit_base - l.debit_base) filter (where a.code = '1114'), 0) as recharged,
+          coalesce(sum(l.credit_base - l.debit_base) filter (where a.code = '2109'), 0) as vat,
+          count(distinct e.id) filter (where e.source_type = 'sales_invoice')::int as invoices
+        from journal_lines l
+        join journal_entries e on e.id = l.entry_id and e.status = 'posted' and e.source_type is distinct from 'year_close'
+        join accounts a on a.id = l.account_id
+        join parties p on p.id = l.party_id
+        where e.entry_date between ${from} and ${to} and (a.code like '4%' or a.code in ('1114', '2109'))
+          and exists (select 1 from journal_lines x join accounts xa on xa.id = x.account_id where x.entry_id = e.id and xa.code = ${RECEIVABLE})
+        group by p.id, p.name_ar`,
+  );
+  return r
+    .map((x) => {
+      const revenue = r2(n(x.revenue));
+      const recharged = r2(n(x.recharged));
+      const vat = r2(n(x.vat));
+      return { id: Number(x.id), name: x.name, invoices: Number(x.invoices), revenue, recharged, vat, total: r2(revenue + recharged + vat) };
+    })
+    .filter((x) => x.revenue || x.recharged || x.vat)
+    .sort((a, b) => b.total - a.total);
+}
+
+export async function purchasesBySupplier(db: Db, from: string, to: string) {
+  const r = await rows<{ id: number; name: string; gross: string; vat: string; bills: number }>(
+    db,
+    sql`select p.id, p.name_ar as name,
+          coalesce(sum(l.credit_base - l.debit_base) filter (where ${sideAccounts("supplier")}), 0) as gross,
+          coalesce(sum(l.debit_base - l.credit_base) filter (where a.code = '1108'), 0) as vat,
+          count(distinct e.id) filter (where e.source_type = 'purchase_invoice')::int as bills
+        from journal_lines l
+        join journal_entries e on e.id = l.entry_id and e.status = 'posted' and e.source_type is distinct from 'year_close'
+          and e.source_type is distinct from 'payment'
+        join accounts a on a.id = l.account_id
+        join parties p on p.id = l.party_id
+        where e.entry_date between ${from} and ${to} and (${sideAccounts("supplier")} or a.code = '1108')
+        group by p.id, p.name_ar`,
+  );
+  return r
+    .map((x) => {
+      const gross = r2(n(x.gross));
+      const vat = r2(n(x.vat));
+      return { id: Number(x.id), name: x.name, bills: Number(x.bills), net: r2(gross - vat), vat, total: gross };
+    })
+    .filter((x) => x.total || x.vat)
+    .sort((a, b) => b.total - a.total);
+}
+
+/** سجل التدقيق: كل إنشاء وتعديل وحذف مع المستخدم والوقت (من مشغّل audit_row في قاعدة البيانات). */
+export async function auditTrail(db: Db, opts: { from: string; to: string; userId?: number | null; entity?: string | null; limit?: number }) {
+  const where = [sql`${s.auditLog.at} >= ${opts.from}::date`, sql`${s.auditLog.at} < ${opts.to}::date + 1`];
+  if (opts.userId) where.push(eq(s.auditLog.userId, opts.userId));
+  if (opts.entity) where.push(eq(s.auditLog.entity, opts.entity));
+  return db
+    .select({ id: s.auditLog.id, entity: s.auditLog.entity, entityId: s.auditLog.entityId, action: s.auditLog.action, changes: s.auditLog.changes, at: s.auditLog.at, user: s.users.name })
+    .from(s.auditLog)
+    .leftJoin(s.users, eq(s.users.id, s.auditLog.userId))
+    .where(sql.join(where, sql` and `))
+    .orderBy(sql`${s.auditLog.at} desc, ${s.auditLog.id} desc`)
+    .limit(opts.limit ?? 1000);
+}
+
+/** حركة المخزون لكل صنف في الفترة: الافتتاحي والوارد والصادر والختامي كمية وقيمة (متوسط مرجّح من حركات المخزون). */
+export async function stockMovement(db: Db, opts: { from: string; to: string; warehouseId?: number | null }) {
+  const wh = opts.warehouseId ? sql`and m.warehouse_id = ${opts.warehouseId}` : sql``;
+  const r = await rows<{ id: number; code: string; name: string; unit: string | null; oq: string; ov: string; iq: string; iv: string; xq: string; xv: string }>(
+    db,
+    sql`select p.id, p.code, p.name_ar as name, p.unit,
+          coalesce(sum(m.quantity) filter (where m.move_date < ${opts.from}), 0) as oq,
+          coalesce(sum(m.value) filter (where m.move_date < ${opts.from}), 0) as ov,
+          coalesce(sum(m.quantity) filter (where m.move_date >= ${opts.from} and m.quantity > 0), 0) as iq,
+          coalesce(sum(m.value) filter (where m.move_date >= ${opts.from} and m.quantity > 0), 0) as iv,
+          coalesce(sum(-m.quantity) filter (where m.move_date >= ${opts.from} and m.quantity < 0), 0) as xq,
+          coalesce(sum(-m.value) filter (where m.move_date >= ${opts.from} and m.quantity < 0), 0) as xv
+        from stock_moves m join products p on p.id = m.product_id
+        where m.move_date <= ${opts.to} ${wh}
+        group by p.id order by p.code`,
+  );
+  const q3 = (v: number) => Math.round(v * 1000) / 1000 + 0;
+  return r.map((x) => {
+    const [oq, iq, xq] = [q3(n(x.oq)), q3(n(x.iq)), q3(n(x.xq))];
+    const [ov, iv, xv] = [r2(n(x.ov)), r2(n(x.iv)), r2(n(x.xv))];
+    return { id: Number(x.id), code: x.code, name: x.name, unit: x.unit, openingQty: oq, openingValue: ov, inQty: iq, inValue: iv, outQty: xq, outValue: xv, closingQty: q3(oq + iq - xq), closingValue: r2(ov + iv - xv) };
+  });
+}

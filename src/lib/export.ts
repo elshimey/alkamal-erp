@@ -7,7 +7,7 @@ import type { Db } from "@/db";
 const DARK = "FF1B2126";
 
 // ترتيب الأوراق وأسماؤها؛ ما لم يُذكر هنا لا يُصدَّر (جداول داخلية كالجلسات والصور)
-const TABLES: [string, string][] = [
+export const TABLES: [string, string][] = [
   ["company_profile", "بيانات المنشأة"],
   ["accounts", "شجرة الحسابات"],
   ["cost_centers", "مراكز التكلفة"],
