@@ -17,6 +17,7 @@ export function AccountField({
   placeholder = "ابحث باسم الحساب أو رقمه…",
   onChange,
   className = "",
+  keepOnReset,
 }: {
   name: string;
   options: QuickOption[];
@@ -26,10 +27,12 @@ export function AccountField({
   placeholder?: string;
   onChange?: (value: string) => void;
   className?: string;
+  /** تبقى بعد الحفظ وتفريغ النموذج */
+  keepOnReset?: boolean;
 }) {
   return (
     <div className={className}>
-      <FormCombo name={name} options={options} defaultValue={defaultValue == null ? "" : String(defaultValue)} create="account" scope={scope} required={required} placeholder={placeholder} onChange={onChange} />
+      <FormCombo name={name} options={options} defaultValue={defaultValue == null ? "" : String(defaultValue)} create="account" scope={scope} required={required} placeholder={placeholder} onChange={onChange} keepOnReset={keepOnReset} />
     </div>
   );
 }

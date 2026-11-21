@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { and, asc, eq, like, or } from "drizzle-orm";
+import { and, asc, eq, like, ne, or } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
@@ -25,7 +25,8 @@ export default async function FixedAssetsPage({ searchParams }: { searchParams: 
     listAssets(db),
     db.select().from(s.accounts).where(postable("1201")).orderBy(asc(s.accounts.code)),
     db.select({ id: s.vehicles.id, plate: s.vehicles.plate }).from(s.vehicles).orderBy(asc(s.vehicles.plate)),
-    db.select({ id: s.costCenters.id, nameAr: s.costCenters.nameAr }).from(s.costCenters).orderBy(asc(s.costCenters.code)),
+    // المركبة تحدد مركزها بنفسها، فالقائمة للمراكز اليدوية (المقطورات، الإدارة، الورشة…)
+    db.select({ id: s.costCenters.id, nameAr: s.costCenters.nameAr }).from(s.costCenters).where(and(eq(s.costCenters.isActive, true), ne(s.costCenters.type, "vehicle"))).orderBy(asc(s.costCenters.code)),
     db.select().from(s.accounts).where(or(postable("1101"), postable("1102"), postable("21"), postable("3104"))).orderBy(asc(s.accounts.code)),
     db.select().from(s.accounts).where(or(postable("1101"), postable("1102"), postable("1103"))).orderBy(asc(s.accounts.code)),
   ]);
@@ -44,23 +45,30 @@ export default async function FixedAssetsPage({ searchParams }: { searchParams: 
   return (
     <>
       <PageHeader title="الأصول الثابتة" description="سجل الأصول وإهلاكها الشهري بالقسط الثابت. قيد الإهلاك يُحمّل على مركز تكلفة الأصل (المركبة) فيظهر في ربحيتها.">
-        {canRun && (
-          <div className="flex flex-wrap items-end gap-2">
-            <ActionForm action={depreciate} resetOnSuccess={false} className="flex flex-wrap items-end gap-2">
-              <Field label="إهلاك حتى شهر">
-                <Input type="month" name="upTo" defaultValue={today.slice(0, 7)} className="w-40" />
-              </Field>
-              <SubmitButton pendingLabel="جارٍ الإهلاك…">تشغيل الإهلاك</SubmitButton>
-            </ActionForm>
-            {lastRun && (
-              <ActionForm action={undoDepreciation} resetOnSuccess={false}>
-                <SubmitButton variant="secondary" pendingLabel="جارٍ الإلغاء…">
-                  إلغاء إهلاك {lastRun.slice(0, 7)}
-                </SubmitButton>
+        <div className="flex flex-wrap items-end gap-2">
+          {canCreate && (
+            <Link href="/import/fixed-assets" className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 transition hover:bg-gray-50">
+              استيراد الأصول من Excel
+            </Link>
+          )}
+          {canRun && (
+            <div className="flex flex-wrap items-end gap-2">
+              <ActionForm action={depreciate} resetOnSuccess={false} className="flex flex-wrap items-end gap-2">
+                <Field label="إهلاك حتى شهر">
+                  <Input type="month" name="upTo" defaultValue={today.slice(0, 7)} className="w-40" />
+                </Field>
+                <SubmitButton pendingLabel="جارٍ الإهلاك…">تشغيل الإهلاك</SubmitButton>
               </ActionForm>
-            )}
-          </div>
-        )}
+              {lastRun && (
+                <ActionForm action={undoDepreciation} resetOnSuccess={false}>
+                  <SubmitButton variant="secondary" pendingLabel="جارٍ الإلغاء…">
+                    إلغاء إهلاك {lastRun.slice(0, 7)}
+                  </SubmitButton>
+                </ActionForm>
+              )}
+            </div>
+          )}
+        </div>
       </PageHeader>
 
       <div className="mb-6 grid gap-3 sm:grid-cols-4">
@@ -199,7 +207,7 @@ export default async function FixedAssetsPage({ searchParams }: { searchParams: 
               <Input name="nameAr" required placeholder="مثل: شاحنة مرسيدس أكتروس 2024" />
             </Field>
             <Field label="الفئة">
-              <AccountField name="assetAccountId" required options={categoryOpts} scope="1201" placeholder="اختر الفئة" />
+              <AccountField name="assetAccountId" required options={categoryOpts} scope="1201" placeholder="اختر الفئة" keepOnReset />
             </Field>
             <Field label="المركبة" hint="للشاحنات والمقطورات؛ الإهلاك على مركزها">
               <Select name="vehicleId" defaultValue="">
@@ -211,7 +219,7 @@ export default async function FixedAssetsPage({ searchParams }: { searchParams: 
                 ))}
               </Select>
             </Field>
-            <Field label="أو مركز التكلفة">
+            <Field label="أو مركز التكلفة" hint="للمقطورات وأصول الإدارة؛ يُضاف من مراكز التكلفة">
               <Select name="costCenterId" defaultValue="">
                 <option value="">—</option>
                 {centers.map((c) => (

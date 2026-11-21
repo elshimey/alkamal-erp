@@ -3487,6 +3487,45 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       await expect(createExpense(db, { expenseDate: D, payer: "cash", cashAccountId: acc["110101"], costCenterId: vehicle.costCenterId, accountId: office.id, description: "x", amount: 5 })).rejects.toThrow("باختيار المركبة");
     });
 
+    it("مركز تكلفة يدوي (المقطورات) واستيراد الأصول الثابتة من Excel (ملاحظات التشغيل 9 و10 و11 و17)", async () => {
+      const { createCostCenter } = await import("@/lib/cost-centers");
+      const trailers = await createCostCenter(db, { nameAr: "المقطورات اختبار" });
+      expect([trailers.type, trailers.code.startsWith("CC-")]).toEqual(["other", true]);
+      await expect(createCostCenter(db, { nameAr: "المقطورات  اختبار" })).rejects.toThrow("موجود");
+      await expect(createCostCenter(db, { nameAr: "س", code: trailers.code })).rejects.toThrow("مستخدم");
+      await expect(createCostCenter(db, { nameAr: "ص", code: "v-1" })).rejects.toThrow("محجوز");
+      await expect(createCostCenter(db, { nameAr: "ع", type: "vehicle" })).rejects.toThrow("نوع المركز");
+      const ws = await createCostCenter(db, { nameAr: "ورشة الدمام اختبار", code: "wsd", type: "workshop" });
+      expect([ws.code, ws.type]).toEqual(["WSD", "workshop"]);
+
+      const [{ plate }] = await db.select({ plate: s.vehicles.plate }).from(s.vehicles).where(eq(s.vehicles.id, vehicle.id));
+      const data: Record<string, string>[] = [
+        { nameAr: "سطحة اختبار 1", category: "120102", costCenter: "المقطورات اختبار", acquisitionDate: "01/06/2023", cost: "95,000", lifeYears: "8", openingDepreciation: "29687.5", depreciationStart: "2026-01-01" },
+        { nameAr: "رأس اختبار", category: "الشاحنات (الرؤوس)", vehicle: plate, acquisitionDate: "2022-01-10", cost: "420000", salvageValue: "40000", lifeYears: "10" },
+        { nameAr: "خطأ الفئة", category: "1201", costCenter: "المقطورات اختبار", acquisitionDate: "2023-01-01", cost: "10", lifeYears: "1" },
+        { nameAr: "خطأ الاثنين", category: "120102", vehicle: plate, costCenter: "المقطورات اختبار", acquisitionDate: "2023-01-01", cost: "10", lifeYears: "1" },
+        { nameAr: "", category: "120102", acquisitionDate: "x", cost: "a", lifeYears: "1" },
+      ];
+      const rows = data.map((values, i) => ({ row: i + 5, values }));
+      const spec = IMPORT_SPECS["fixed-assets"];
+      const dry = await runImport(db, spec, rows, { dryRun: true });
+      expect(dry.ok).toBe(2);
+      // كل أخطاء الصف الأخير معاً
+      expect(dry.issues.filter((i) => i.rows.includes(9)).map((i) => i.field)).toEqual(["nameAr", "acquisitionDate", "cost"]);
+      expect(dry.issues.find((i) => i.rows.includes(7))?.message).toContain("فرعياً");
+      expect(dry.issues.find((i) => i.rows.includes(8))?.message).toContain("لا الاثنين");
+      const report = await runImport(db, spec, rows, { dryRun: false });
+      expect(report.ok).toBe(2);
+      const assets = await db.select().from(s.fixedAssets).where(inArray(s.fixedAssets.nameAr, ["سطحة اختبار 1", "رأس اختبار"]));
+      const trl = assets.find((a) => a.nameAr === "سطحة اختبار 1")!;
+      const head = assets.find((a) => a.nameAr === "رأس اختبار")!;
+      expect([trl.costCenterId, trl.vehicleId, Number(trl.cost), Number(trl.openingDepreciation), trl.usefulLifeMonths, trl.acquisitionDate, trl.depreciationStart]).toEqual([trailers.id, null, 95000, 29687.5, 96, "2023-06-01", "2026-01-01"]);
+      expect([head.costCenterId, head.vehicleId, Number(head.salvageValue), head.usefulLifeMonths]).toEqual([vehicle.costCenterId, vehicle.id, 40000, 120]);
+      // لا يُستورد مرتين
+      const again = await runImport(db, spec, rows.slice(0, 1), { dryRun: false });
+      expect([again.ok, again.issues[0]?.message]).toEqual([0, expect.stringContaining("مسجل مسبقاً")]);
+    });
+
     it("فاتورة بمصاريف العميل وحدها دون بنود تُقبل وتصدر (ملاحظة التشغيل 15)", async () => {
       const { addInvoiceChargesTx } = await import("@/lib/invoices");
       const [customs] = await db.select().from(s.chargeTypes).where(eq(s.chargeTypes.nameAr, "رسوم جمركية باسم العميل"));
