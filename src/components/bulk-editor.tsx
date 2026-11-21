@@ -137,8 +137,8 @@ export function BulkEditor({
     });
   };
 
-  const cancel = () => {
-    if (!confirmDiscard(true, "تجاهل كل التعديلات غير المحفوظة والعودة للبيانات كما كانت؟")) return;
+  const cancel = async () => {
+    if (!(await confirmDiscard(true, "تجاهل كل التعديلات غير المحفوظة والعودة للبيانات كما كانت؟"))) return;
     history.reset(original.map((r) => ({ ...r })));
     setDeleted(new Set());
     setErrors({});

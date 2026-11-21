@@ -92,7 +92,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
               columns={[
                 { key: "date", label: "التاريخ", type: "date", placeholder: today },
                 { key: "payer", label: "الدافع", type: "select", required: true, options: Object.entries(EXPENSE_PAYERS).map(([value, label]) => ({ value, label })), width: "8rem" },
-                { key: "driverId", label: "السائق", type: "select", options: drivers, width: "9rem", create: "driver" },
+                { key: "driverId", label: "السائق", type: "select", options: drivers, width: "9rem", create: "driver", autoVehicle: { key: "vehicleId", dateKey: "date" } },
                 { key: "cashAccountId", label: "أو الصندوق / عهدة موظف", type: "select", options: cashOpts, width: "11rem", create: "account" },
                 { key: "accountId", label: "نوع المصروف", type: "select", required: true, options: accounts, width: "13rem", create: "account" },
                 { key: "vehicleId", label: "المركبة", type: "select", options: vehicles, width: "8rem", create: "vehicle" },

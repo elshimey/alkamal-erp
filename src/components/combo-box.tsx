@@ -15,12 +15,14 @@ import {
   type InputHTMLAttributes,
   type KeyboardEvent,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
 import type { QuickKind, QuickOption } from "@/lib/quick-add-types";
 import { QuickAddDialog } from "./quick-add-dialog";
 import { AccountAddDialog } from "./account-add-dialog";
 import { filterOptions, norm } from "@/lib/filter-options";
+import { vehicleOnDate } from "@/lib/driver-vehicle";
 
 // ما يُضاف في هذه الصفحة يظهر فوراً في كل القوائم من النوع نفسه (كل صفوف الشيت)
 const created = new Map<QuickKind, QuickOption[]>();
@@ -117,6 +119,16 @@ export function ComboBox({
   const listRef = useRef<HTMLUListElement>(null);
   const [query, setQuery] = useState<string | null>(null);
   const [open, setOpen] = useState(autoOpen);
+  // قائمة واحدة مفتوحة في كل مرة (قاعدة الواجهة): فتح هذه يغلق أي قائمة أخرى مفتوحة (بعد Ctrl+D مثلاً)
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    closeOpenCombo?.();
+    closeOpenCombo = close;
+    return () => {
+      if (closeOpenCombo === close) closeOpenCombo = null;
+    };
+  }, [open]);
   // فُتحت القائمة بنقرة الماوس التي أنشأت الحقل؛ تلك النقرة نفسها لا تغلقها
   const skipClick = useRef(autoOpen);
   useEffect(() => {
@@ -426,6 +438,37 @@ export function ComboBox({
   );
 }
 
+let closeOpenCombo: (() => void) | null = null;
+
+/** اسم خانة المركبة التي يملؤها اختيار السائق، واسم خانة تاريخ المستند في النموذج نفسه. */
+export type AutoVehicle = { name: string; dateName?: string };
+
+/**
+ * يربط حقل القائمة المخفي بباقي النموذج: يستقبل قيمة من خانة أخرى (الحدث combo:set)،
+ * ويملأ المركبة المسندة للسائق المختار في تاريخ المستند عبر الحدث نفسه.
+ */
+export function useComboLink(hidden: RefObject<HTMLInputElement | null>, apply: (v: string) => void) {
+  const applyRef = useRef(apply);
+  useEffect(() => {
+    applyRef.current = apply;
+  });
+  useEffect(() => {
+    const el = hidden.current;
+    if (!el) return;
+    const on = (e: Event) => applyRef.current(String((e as CustomEvent).detail ?? ""));
+    el.addEventListener("combo:set", on);
+    return () => el.removeEventListener("combo:set", on);
+  }, [hidden]);
+  return (option: QuickOption | undefined, auto: AutoVehicle | undefined) => {
+    const el = hidden.current;
+    if (!auto || !el || !option?.periods) return;
+    const scope: ParentNode = el.form ?? el.closest("[data-combo-scope]") ?? document;
+    const date = auto.dateName ? scope.querySelector<HTMLInputElement>(`[name="${auto.dateName}"]`)?.value : null;
+    const v = vehicleOnDate(option.periods, date);
+    if (v) scope.querySelector(`input[type="hidden"][name="${auto.name}"]`)?.dispatchEvent(new CustomEvent("combo:set", { detail: v }));
+  };
+}
+
 /** حقل نموذج بالبحث وزر الإضافة؛ القيمة تُرسل في حقل مخفي بالاسم المعطى. */
 export function ComboField({
   name,
@@ -435,6 +478,7 @@ export function ComboField({
   required,
   placeholder,
   onChange,
+  autoVehicle,
 }: {
   name: string;
   options: QuickOption[];
@@ -443,19 +487,27 @@ export function ComboField({
   required?: boolean;
   placeholder?: string;
   onChange?: (value: string) => void;
+  /** خانة السائق: اختياره يملأ خانة المركبة بالمسندة له في تاريخ المستند */
+  autoVehicle?: AutoVehicle;
 }) {
   const [value, setValue] = useState(defaultValue);
+  const hidden = useRef<HTMLInputElement>(null);
+  const link = useComboLink(hidden, (v) => {
+    setValue(v);
+    onChange?.(v);
+  });
   return (
     <div className="relative">
-      <input type="hidden" name={name} value={value} />
+      <input ref={hidden} type="hidden" name={name} value={value} />
       <ComboBox
         value={value}
         options={options}
         create={create}
         placeholder={placeholder ?? "ابحث أو اختر…"}
-        onChange={(v) => {
+        onChange={(v, o) => {
           setValue(v);
           onChange?.(v);
+          link(o ?? options.find((x) => x.value === v), autoVehicle);
         }}
         inputProps={{ required: required && !value, "aria-required": required }}
         className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"

@@ -3,7 +3,7 @@
 import { localPath } from "@/lib/safe-path";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
@@ -125,8 +125,16 @@ export async function remove(id: number, _: FormState, fd: FormData): Promise<Fo
 /** إصدار مجموعة مسودات من الجدول؛ كل فاتورة بقيدها، وما فشل يُذكر سببه. */
 export async function issueMany(_: FormState, fd: FormData): Promise<FormState> {
   const user = await requirePermission("sales_invoices", "approve");
-  const ids = fd.getAll("ids").map(Number).filter(Number.isInteger);
-  if (!ids.length) return { error: "حدد الفواتير المراد إصدارها" };
+  const picked = fd.getAll("ids").map(Number).filter(Number.isInteger);
+  if (!picked.length) return { error: "حدد الفواتير المراد إصدارها" };
+  // الترقيم الرسمي يتبع تاريخ الفاتورة ثم رقم المسودة، أياً كان ترتيب العرض (ملاحظة التشغيل 14)
+  const ids = (
+    await db
+      .select({ id: s.salesInvoices.id })
+      .from(s.salesInvoices)
+      .where(inArray(s.salesInvoices.id, picked))
+      .orderBy(asc(s.salesInvoices.invoiceDate), asc(s.salesInvoices.id))
+  ).map((r) => r.id);
   const done: string[] = [];
   const errors: string[] = [];
   for (const id of ids) {
@@ -298,6 +306,7 @@ export async function saveInvoicePanel(id: number | null, fd: FormData): Promise
     if (charges.some((c) => c.waybillId && !own.includes(c.waybillId))) throw new Error("المصروف لشحنة ليست في هذه الفاتورة");
     if (charges.length || billIds.length) await requirePermission("waybills", "update");
     const trip = id ? await currentTrip(db, id) : null;
+    input.hasCharges = charges.some((c) => !c.waybillId) || billIds.length > 0;
     const inv = await db.transaction(async (tx) => {
       const saved = id ? await updateDirectInvoice(tx as unknown as typeof db, id, input) : await createDirectInvoice(tx as unknown as typeof db, { ...input, userId: user.id });
       if (billIds.length) await billTripExpensesToCustomer(tx, billIds, [...own, ...(trip ? [trip.id] : [])], user.id);

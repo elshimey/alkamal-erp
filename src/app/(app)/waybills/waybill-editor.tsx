@@ -262,7 +262,7 @@ export function WaybillEditor({
                   </PanelField>
                 )}
                 <PanelField label="السائق" hint="فارغ = المسند للمركبة">
-                  <ComboField name="driverId" options={drivers} defaultValue={d.driverId} create="driver" placeholder="السائق المسند تلقائياً" onChange={(v) => set("driverId", v)} />
+                  <ComboField name="driverId" options={drivers} defaultValue={d.driverId} create="driver" placeholder="السائق المسند تلقائياً" onChange={(v) => set("driverId", v)} autoVehicle={{ name: "vehicleId", dateName: "date" }} />
                 </PanelField>
                 <PanelField label="عمولة السائق" hint="فارغ = من المسار">
                   <input name="commission" value={d.commission} onChange={onField} inputMode="decimal" className={`${field} ltr-nums`} placeholder="من المسار" />

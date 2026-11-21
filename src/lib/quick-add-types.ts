@@ -1,3 +1,4 @@
+import type { VehiclePeriod } from "@/lib/driver-vehicle";
 // أنواع نافذة «الإضافة السريعة» المشتركة بين الخادم والمتصفح.
 
 export const QUICK_KINDS = [
@@ -39,6 +40,8 @@ export interface QuickOption {
   /** رقم الحساب الأب الذي يظهر بجانب عنوان المجموعة */
   groupCode?: string;
   fill?: Record<string, string>;
+  /** فترات إسناد السائق للمركبات: اختياره يملأ مركبته في تاريخ المستند */
+  periods?: VehiclePeriod[];
 }
 
 export interface QuickField {

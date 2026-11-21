@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { QuickKind, QuickOption } from "@/lib/quick-add-types";
-import { ComboBox } from "./combo-box";
+import { ComboBox, useComboLink, type AutoVehicle } from "./combo-box";
 
 /**
  * قائمة بحث داخل نموذج عادي: القيمة في حقل مخفي باسم name، و«+ إضافة» للنوع إن وُجد.
@@ -17,6 +17,7 @@ export function FormCombo({
   required,
   placeholder = "اكتب للبحث…",
   onChange,
+  autoVehicle,
 }: {
   name: string;
   options: QuickOption[];
@@ -26,9 +27,17 @@ export function FormCombo({
   required?: boolean;
   placeholder?: string;
   onChange?: (value: string) => void;
+  /** خانة السائق: اختياره يملأ خانة المركبة بالمسندة له في تاريخ المستند */
+  autoVehicle?: AutoVehicle;
 }) {
   const [value, setValue] = useState(defaultValue);
   const hidden = useRef<HTMLInputElement>(null);
+  const notify = () => queueMicrotask(() => hidden.current?.dispatchEvent(new Event("change", { bubbles: true })));
+  const link = useComboLink(hidden, (v) => {
+    setValue(v);
+    onChange?.(v);
+    notify();
+  });
 
   useEffect(() => {
     const form = hidden.current?.form;
@@ -52,11 +61,12 @@ export function FormCombo({
         allowEmpty={!required}
         inputProps={{ required, "aria-required": required ? "true" : undefined } as never}
         className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
-        onChange={(v) => {
+        onChange={(v, o) => {
           setValue(v);
           onChange?.(v);
           // تحديث القيمة المخفية لا يُطلق حدث تغيير؛ نُبلغ النموذج (مؤشر «تعديلات لم تُحفظ» وغيره)
-          queueMicrotask(() => hidden.current?.dispatchEvent(new Event("change", { bubbles: true })));
+          notify();
+          link(o ?? options.find((x) => x.value === v), autoVehicle);
         }}
       />
     </>

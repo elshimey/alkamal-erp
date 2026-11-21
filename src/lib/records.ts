@@ -12,6 +12,7 @@ import { deleteDriver, updateDriver } from "@/lib/fleet";
 import { OWNER_KINDS } from "@/lib/documents";
 import { accountOptions } from "@/lib/lookups";
 import { assertPlateFree, createVehicle } from "@/lib/fleet";
+import { normalizePlate } from "@/lib/plates";
 import { checkCustomValue, customListOptions } from "@/lib/custom-lists";
 import { joinCustom, splitCustom, type CustomList } from "@/data/custom-lists";
 import type { QuickKind } from "@/lib/quick-add-types";
@@ -149,7 +150,13 @@ export const RECORDS: Record<string, RecordDef> = {
     ],
     create: (v) => db.transaction((tx) => insertVehicle(tx, v)),
     after: async (tx, id, v, before) => {
-      await assertPlateFree(tx, String(v.plate), id);
+      // اللوحة تُحفظ بالصيغة الموحدة «ا ب ج 1234» مهما كُتبت في النافذة أو الشيت
+      const plate = normalizePlate(String(v.plate));
+      if (plate !== v.plate) {
+        await tx.update(s.vehicles).set({ plate }).where(eq(s.vehicles.id, id));
+        v.plate = plate;
+      }
+      await assertPlateFree(tx, plate, id);
       for (const f of RECORDS.vehicles.fields) if (f.custom) await checkCustomValue(tx, f.custom.list, v[f.key] as string | null, v[f.custom.classKey] as number | null);
       if (v.assetKind !== before.assetKind) {
         const [doc] = await tx

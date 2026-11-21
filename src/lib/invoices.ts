@@ -264,6 +264,8 @@ export interface ManualInvoiceInput {
   trip?: InvoiceTripInput | null;
   // شحنات معتمدة غير مفوترة تدخل الفاتورة بسعرها ومصاريفها (الاستيراد برقم الشحنة)
   waybillIds?: number[];
+  // فيها «مصاريف على العميل» تُضاف معها: تكفي وحدها بنداً (تخليص دفعه موظف لعميل بلا رحلة، ملاحظة التشغيل 15)
+  hasCharges?: boolean;
   // تعديل سطور الشحنات ومصاريفها في المسودة: السعر والوصف (السعر يُحدّث مبلغ الشحنة نفسها)
   fixedEdits?: { lineId: number; amount: number; description: string }[];
   lines: {
@@ -307,7 +309,7 @@ function checkHeader(input: { invoiceDate: string; dueDate: string; customerId: 
 
 /** فاتورة مسودة بسطور حرة: مباشرة من صفحة الفواتير، أو من عرض سعر، أو مستوردة من Excel أو نظام سابق. */
 export async function createManualInvoiceTx(tx: Tx, input: ManualInvoiceInput) {
-  if (!input.lines.length && !input.waybillIds?.length) throw new Error("الفاتورة بلا بنود");
+  if (!input.lines.length && !input.waybillIds?.length && !input.hasCharges) throw new Error("الفاتورة بلا بنود");
   checkHeader(input);
   const reference = input.reference?.trim() || null;
   if (reference) {
@@ -387,7 +389,10 @@ export async function updateDirectInvoice(db: Db, id: number, input: ManualInvoi
       .from(s.salesInvoiceLines)
       .where(and(eq(s.salesInvoiceLines.invoiceId, id), sql`${s.salesInvoiceLines.kind} <> 'manual'`, sql`coalesce(${s.salesInvoiceLines.waybillExpenseId} not in ${ownCharges(id)}, true)`));
     if (fixed.length && (input.customerId !== inv.customerId || input.currencyCode !== inv.currencyCode)) throw new Error("في الفاتورة شحنات؛ لا يتغير العميل ولا العملة. فك الدمج أو أخرج الشحنات أولاً");
-    if (!fixed.length && !input.lines.length) throw new Error("الفاتورة بلا بنود");
+    if (!fixed.length && !input.lines.length && !input.hasCharges) {
+      const [charge] = await tx.select({ id: s.waybillExpenses.id }).from(s.waybillExpenses).where(eq(s.waybillExpenses.invoiceId, id)).limit(1);
+      if (!charge) throw new Error("الفاتورة بلا بنود");
+    }
     if (fixed.length && input.invoiceDate !== inv.invoiceDate) {
       const [late] = await tx
         .select({ number: s.waybills.number, date: s.waybills.waybillDate })

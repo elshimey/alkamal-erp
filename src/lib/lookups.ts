@@ -3,6 +3,7 @@ import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
 import { accountPickOptions, type PickRow } from "@/lib/account-options";
+import type { VehiclePeriod } from "@/lib/driver-vehicle";
 
 // قوائم الاختيار المشتركة في الشيتات. الاسم الظاهر هو ما يُلصق من Excel.
 
@@ -77,7 +78,14 @@ export async function driverOptions() {
     .innerJoin(s.employees, eq(s.employees.id, s.drivers.employeeId))
     .where(eq(s.drivers.status, "active"))
     .orderBy(asc(s.employees.nameAr));
-  return rows.map((r) => ({ value: String(r.id), label: r.nameAr }));
+  // فترات إسناد كل سائق: اختياره في أي نموذج يملأ المركبة المسندة له في تاريخ المستند
+  const periods = new Map<number, VehiclePeriod[]>();
+  const assigned = await db
+    .select({ driverId: s.vehicleAssignments.driverId, v: s.vehicleAssignments.vehicleId, from: s.vehicleAssignments.fromDate, to: s.vehicleAssignments.toDate })
+    .from(s.vehicleAssignments)
+    .orderBy(asc(s.vehicleAssignments.fromDate));
+  for (const a of assigned) periods.set(a.driverId, [...(periods.get(a.driverId) ?? []), { v: String(a.v), from: a.from, to: a.to }]);
+  return rows.map((r) => ({ value: String(r.id), label: r.nameAr, ...(periods.has(r.id) ? { periods: periods.get(r.id) } : {}) }));
 }
 
 export async function chargeTypeOptions() {

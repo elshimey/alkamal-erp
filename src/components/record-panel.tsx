@@ -6,21 +6,13 @@ import { useEffect, useRef, useState, useSyncExternalStore, useTransition, type 
 import { createPortal } from "react-dom";
 import { Icon, Truck } from "./icons";
 import { confirmDiscard, useUnsavedGuard } from "./unsaved-guard";
+import { toast } from "./toast";
 
 export type PanelResult = { error: string } | { ok: string; id: number; label: string };
 
 /** رسالة النافذة المضمّنة (من داخل مستند) إلى الصفحة الأم. */
 export const PANEL_MESSAGE = "record-panel";
 export type PanelMessage = { source: typeof PANEL_MESSAGE; type: "saved"; id: number; label: string } | { source: typeof PANEL_MESSAGE; type: "close" };
-
-function toast(message: string) {
-  const el = document.createElement("div");
-  el.setAttribute("role", "status");
-  el.textContent = message;
-  el.className = "fixed bottom-20 left-1/2 z-[95] -translate-x-1/2 rounded-xl bg-asphalt-900 px-4 py-2.5 text-sm text-white shadow-xl sm:bottom-6";
-  document.body.appendChild(el);
-  setTimeout(() => el.remove(), 4000);
-}
 
 /**
  * نافذة إضافة أو تعديل سجل واحد على طريقة وافق: تغطي الصفحة، أقسامها مطلوب واختياري،
@@ -80,8 +72,8 @@ export function RecordPanel({
 
   const post = (m: { type: "saved"; id: number; label: string } | { type: "close" }) => window.parent.postMessage({ source: PANEL_MESSAGE, ...m }, window.location.origin);
 
-  const close = () => {
-    if (!confirmDiscard(dirty)) return;
+  const close = async () => {
+    if (!(await confirmDiscard(dirty))) return;
     setDirty(false);
     if (embed) post({ type: "close" });
     else router.push(closeHref, { scroll: false });
@@ -98,7 +90,8 @@ export function RecordPanel({
 
   useEffect(() => {
     const esc = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !document.querySelector("[role=listbox]")) close();
+      // Esc الذي أغلق تقويماً أو قائمة أو نافذة تأكيد (preventDefault) لا يغلق النافذة كلها
+      if (e.key === "Escape" && !e.defaultPrevented && !document.querySelector("[role=listbox],[data-confirm-dialog]")) void close();
     };
     window.addEventListener("keydown", esc);
     return () => window.removeEventListener("keydown", esc);

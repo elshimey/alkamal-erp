@@ -67,8 +67,12 @@ test("جولة المركبة: تنتقل وحدها مع الكتابة، و«�
   await expect(card(page)).toContainText("حساب الأصل");
   expect(Date.now() - t0).toBeLessThan(1500);
 
-  // Esc والنافذة مفتوحة لا يوقف الجولة (Esc للنافذة نفسها)
+  // Esc والنافذة مفتوحة لا يوقف الجولة (Esc للنافذة نفسها): فيها كتابة فتسأل بنافذة البرنامج، وEsc ثانٍ يبقيها
   await page.keyboard.press("Escape");
+  await expect(page.getByRole("alertdialog")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("alertdialog")).toBeHidden();
+  await expect(panel).toBeVisible();
   await expect(card(page)).toBeVisible();
 
   // × يوقف الجولة، وصفحة الدليل تعرض «استكمل»

@@ -9,6 +9,8 @@ import { PARTY_ROLES } from "@/data/operations";
 import { addPerson, removePerson, updatePerson, type PersonInput } from "@/lib/contacts";
 import { errorMessage } from "@/lib/errors";
 import type { FormState } from "@/components/action-form";
+import type { PanelResult } from "@/components/record-panel";
+import { parseForm, RECORDS } from "@/lib/records";
 
 export async function saveParties(rows: SheetRow[]) {
   await requirePermission("parties", "create");
@@ -31,6 +33,37 @@ export async function saveParties(rows: SheetRow[]) {
   });
   revalidatePath("/parties");
   return result;
+}
+
+/** إضافة جهة واحدة من النافذة (الزر الرئيسي «إضافة جهة»). */
+export async function createPartyAction(data: FormData): Promise<PanelResult> {
+  await requirePermission("parties", "create");
+  try {
+    const v = parseForm(RECORDS.parties, data);
+    const t = (k: string) => (v[k] == null || v[k] === "" ? null : String(v[k]).trim());
+    const country = (t("country") ?? "SA").toUpperCase();
+    if (!/^[A-Z]{2}$/.test(country)) throw new Error("الدولة رمز من حرفين مثل SA");
+    const roles = ((v.roles as string[] | undefined) ?? []).filter((r) => r in PARTY_ROLES) as PartyRole[];
+    const nameAr = String(v.nameAr ?? "").trim();
+    if (!nameAr) throw new Error("الاسم: إلزامي");
+    const party = await createParty(db, {
+      nameAr,
+      nameEn: t("nameEn"),
+      kind: v.kind === "individual" ? "individual" : "company",
+      vatNumber: t("vatNumber"),
+      crNumber: t("crNumber"),
+      mobile: t("mobile"),
+      email: t("email"),
+      country,
+      defaultCurrency: t("defaultCurrency") ?? "SAR",
+      address: { buildingNo: t("buildingNo"), street: t("street"), district: t("district"), city: t("city"), postalCode: t("postalCode"), additionalNo: t("additionalNo") },
+      roles,
+    });
+    revalidatePath("/parties");
+    return { ok: `أُضيفت ${party.nameAr}`, id: party.id, label: party.nameAr };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
 }
 
 const person = (data: FormData): PersonInput => ({

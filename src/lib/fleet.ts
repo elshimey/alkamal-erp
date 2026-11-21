@@ -4,7 +4,7 @@ import { blockingDocumentIssues } from "@/lib/documents";
 import * as s from "@/db/schema";
 import { addSubAccountTx } from "@/lib/accounts";
 import { findPgError } from "@/lib/errors";
-import { plateKey } from "@/lib/plates";
+import { normalizePlate, plateKey } from "@/lib/plates";
 
 
 export interface VehicleInput {
@@ -30,7 +30,7 @@ export async function assertPlateFree(db: Db | Tx, plate: string, exceptId?: num
 
 /** يضيف المركبة وينشئ مركز تكلفتها في معاملة واحدة (القرار 8). */
 export async function createVehicle(db: Db | Tx, input: VehicleInput) {
-  const plate = input.plate.trim().replace(/\s+/g, " ");
+  const plate = normalizePlate(input.plate);
   if (!plate) throw new Error("اللوحة إلزامية");
   return db.transaction(async (tx) => {
     await assertPlateFree(tx, plate);
