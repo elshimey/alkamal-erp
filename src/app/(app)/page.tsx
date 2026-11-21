@@ -287,7 +287,7 @@ export default async function Dashboard({
                   title="ربحية المركبات"
                   icon="truck"
                   settings={setting("/cost-centers", "cost_centers")}
-                  href={canReports ? "/reports/cost-centers" : "/vehicles"}
+                  href={canReports ? "/reports/fleet-profit" : "/vehicles"}
                   more={canReports ? "تقرير الربحية" : "المركبات"}
                   sub={period.label}
                 >
@@ -913,7 +913,7 @@ function IncomeTab({ r, period, costs, canReports, settings }: { r: Income; peri
               ))}
             </div>
           </Panel>
-          <Panel i={6} title="تكاليف التشغيل" icon="fuel" href={canReports ? `/reports/cost-centers?from=${period.from}&to=${period.to}` : undefined} more="حسب المركبة">
+          <Panel i={6} title="تكاليف التشغيل" icon="fuel" href={canReports ? `/reports/fleet-profit?from=${period.from}&to=${period.to}` : undefined} more="حسب المركبة">
             {costs.length === 0 ? (
               <Empty>لا توجد تكاليف مرحّلة في هذه الفترة.</Empty>
             ) : (

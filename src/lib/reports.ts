@@ -609,3 +609,111 @@ export async function stockMovement(db: Db, opts: { from: string; to: string; wa
     return { id: Number(x.id), code: x.code, name: x.name, unit: x.unit, openingQty: oq, openingValue: ov, inQty: iq, inValue: iv, outQty: xq, outValue: xv, closingQty: q3(oq + iq - xq), closingValue: r2(ov + iv - xv) };
   });
 }
+
+// ───────────── ربحية المركبات والسائقين (الخطوة 5) ─────────────
+
+export type FleetBy = "vehicle" | "driver";
+
+/**
+ * ربحية المركبات أو السائقين من القيود المرحّلة (قرارات أحمد 6 و7 و8، 2026-11-21):
+ * - المركبة: كل سطر إيراد أو مصروف على مركز تكلفتها.
+ * - السائق: السائق المسجل على السطر (المستند، ومنه الرواتب والعمولة من المسير)، ثم سائق الشحنة المرتبطة،
+ *   ثم السائق المسند لمركبة السطر في تاريخ القيد.
+ * الإيراد 4xxx، وكل حساب تكلفة مباشرة 5xxx عمود مستقل، وما سواها (6xxx و7xxx) «مصاريف أخرى» بتفاصيل حساباتها.
+ * ما لا يُنسب لسائق يُجمع في سطر «دون سائق» حتى تتطابق المجاميع.
+ */
+export async function fleetProfitability(db: Db, opts: { from: string; to: string; by: FleetBy; id?: number | null }) {
+  const driverOf = sql`coalesce(l.driver_id, w.driver_id,
+      (select va.driver_id from vehicle_assignments va
+        where va.vehicle_id = v.id and va.from_date <= e.entry_date and (va.to_date is null or va.to_date >= e.entry_date)
+        order by va.from_date desc limit 1))`;
+  const key = opts.by === "vehicle" ? sql`v.id` : driverOf;
+  const lines = await rows<{ k: number | null; account_id: number; code: string; account: string; amount: string }>(
+    db,
+    sql`select ${key} as k, a.id as account_id, a.code, a.name_ar as account,
+          sum(case when a.code like '4%' then l.credit_base - l.debit_base else l.debit_base - l.credit_base end) as amount
+        from journal_lines l
+        join journal_entries e on e.id = l.entry_id and e.status = 'posted' and e.source_type is distinct from 'year_close'
+        join accounts a on a.id = l.account_id
+        left join vehicles v on v.cost_center_id = l.cost_center_id
+        left join waybills w on w.id = l.waybill_id
+        where e.entry_date between ${opts.from} and ${opts.to} and left(a.code, 1) in ('4', '5', '6', '7')
+          ${opts.by === "vehicle" ? sql`and v.id is not null` : sql`and (v.id is not null or l.driver_id is not null or w.driver_id is not null)`}
+        group by 1, a.id, a.code, a.name_ar`,
+  );
+  const tripCol = opts.by === "vehicle" ? sql`w.vehicle_id` : sql`w.driver_id`;
+  const trips = await rows<{ k: number; trips: number; route: string | null; customer: string | null }>(
+    db,
+    sql`select ${tripCol} as k, count(*)::int as trips, fl.name_ar || ' ← ' || tl.name_ar as route, p.name_ar as customer
+        from waybills w
+        join routes r on r.id = w.route_id join locations fl on fl.id = r.from_location_id join locations tl on tl.id = r.to_location_id
+        join parties p on p.id = w.customer_id
+        where w.status not in ('draft', 'rejected') and w.waybill_date between ${opts.from} and ${opts.to} and ${tripCol} is not null
+        group by 1, 3, 4`,
+  );
+  const names = new Map<number, string>(
+    (opts.by === "vehicle"
+      ? await db.select({ id: s.vehicles.id, name: s.vehicles.plate }).from(s.vehicles)
+      : await db.select({ id: s.drivers.id, name: s.employees.nameAr }).from(s.drivers).innerJoin(s.employees, eq(s.employees.id, s.drivers.employeeId))
+    ).map((r) => [r.id, r.name]),
+  );
+
+  type Row = { id: number | null; name: string; trips: number; revenue: number; direct: Record<string, number>; directTotal: number; other: { code: string; account: string; amount: number }[]; otherTotal: number; profit: number; margin: number | null; routes: { name: string; trips: number }[]; customers: { name: string; trips: number }[] };
+  const map = new Map<number | null, Row>();
+  const get = (k: number | null) => {
+    let r = map.get(k);
+    if (!r) {
+      r = { id: k, name: k == null ? "دون سائق" : (names.get(k) ?? `#${k}`), trips: 0, revenue: 0, direct: {}, directTotal: 0, other: [], otherTotal: 0, profit: 0, margin: null, routes: [], customers: [] };
+      map.set(k, r);
+    }
+    return r;
+  };
+  const directAccounts = new Map<string, string>();
+  for (const l of lines) {
+    const amount = n(l.amount);
+    if (Math.abs(amount) < 0.005) continue;
+    const r = get(l.k == null ? null : Number(l.k));
+    if (l.code.startsWith("4")) r.revenue += amount;
+    else if (l.code.startsWith("5")) {
+      r.direct[l.code] = (r.direct[l.code] ?? 0) + amount;
+      directAccounts.set(l.code, l.account);
+    } else r.other.push({ code: l.code, account: l.account, amount: r2(amount) });
+  }
+  const add = (list: { name: string; trips: number }[], name: string | null, count: number) => {
+    if (!name) return;
+    const x = list.find((i) => i.name === name);
+    if (x) x.trips += count;
+    else list.push({ name, trips: count });
+  };
+  for (const t of trips) {
+    const r = get(Number(t.k));
+    r.trips += Number(t.trips);
+    add(r.routes, t.route, Number(t.trips));
+    add(r.customers, t.customer, Number(t.trips));
+  }
+  let result = [...map.values()].map((r) => {
+    for (const c of Object.keys(r.direct)) r.direct[c] = r2(r.direct[c]);
+    const revenue = r2(r.revenue);
+    const directTotal = r2(Object.values(r.direct).reduce((a, b) => a + b, 0));
+    const otherTotal = r2(r.other.reduce((a, b) => a + b.amount, 0));
+    const profit = r2(revenue - directTotal - otherTotal);
+    return {
+      ...r,
+      revenue,
+      directTotal,
+      otherTotal,
+      profit,
+      margin: revenue ? r2((profit / revenue) * 100) : null,
+      other: r.other.sort((a, b) => a.code.localeCompare(b.code)),
+      routes: r.routes.sort((a, b) => b.trips - a.trips),
+      customers: r.customers.sort((a, b) => b.trips - a.trips),
+    };
+  });
+  result = result.filter((r) => r.revenue || r.directTotal || r.otherTotal || r.trips);
+  if (opts.id) result = result.filter((r) => r.id === opts.id);
+  // الأعمدة: حسابات 5xxx التي فيها أرقام في النتيجة المعروضة فقط
+  const used = new Set(result.flatMap((r) => Object.keys(r.direct).filter((c) => r.direct[c])));
+  const columns = [...directAccounts].filter(([code]) => used.has(code)).sort(([a], [b]) => a.localeCompare(b)).map(([code, name]) => ({ code, name }));
+  result.sort((a, b) => (a.id == null ? 1 : b.id == null ? -1 : b.profit - a.profit));
+  return { columns, rows: result };
+}
