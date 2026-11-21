@@ -3526,6 +3526,54 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect([again.ok, again.issues[0]?.message]).toEqual([0, expect.stringContaining("مسجل مسبقاً")]);
     });
 
+    it("مركز التقارير: الأرصدة وكشف الجهة وأعمار الديون والمبيعات والمشتريات حسب الجهة والأستاذ العام (الخطوة 4ب)", async () => {
+      const R = await import("@/lib/reports");
+      const { contactStatement } = await import("@/lib/contacts");
+      const cust = await createParty(db, { nameAr: "عميل تقارير 4ب", roles: ["customer"] });
+      const sup = await createParty(db, { nameAr: "مورد تقارير 4ب", roles: ["supplier"] });
+      const old = `${YEAR + 1}-06-01`;
+      // فاتورة متأخرة أكثر من 90 يوماً بـ 1000 + 150 ضريبة، وسند قبض 400 يُطبَّق عليها
+      const inv = await createDirectInvoice(db, { customerId: cust.id, invoiceDate: old, dueDate: old, currencyCode: "SAR", lines: [{ description: "نقل", quantity: 1, unitPrice: 1000, discountPercent: 0, amount: 1000, vatRate: 15, vatAmount: 150, taxCodeId: null, accountId: acc["4101"], costCenterId: null }] });
+      await issueInvoice(db, inv.id);
+      await createReceipt(db, { receiptDate: D, customerId: cust.id, amount: 400, method: "cash", cashAccountId: acc["110101"], post: true });
+      const bill = await createPurchaseInvoice(db, { supplierId: sup.id, supplierInvoiceNo: `R4B-${Date.now()}`, invoiceDate: D, lines: [{ accountId: acc["6105"], description: "إيجار", amount: 200, vatRate: 15 }] });
+      await postPurchaseInvoice(db, bill.id);
+
+      const yearFrom = `${YEAR + 1}-01-01`;
+      const cb = (await R.partyBalances(db, { side: "customer", from: yearFrom, to: D })).find((x) => x.id === cust.id)!;
+      expect([cb.opening, cb.debit, cb.credit, cb.closing]).toEqual([0, 1150, 400, 750]);
+      // الرصيد الافتتاحي يُحمل من قبل الفترة
+      const later = (await R.partyBalances(db, { side: "customer", from: `${YEAR + 1}-09-01`, to: D })).find((x) => x.id === cust.id)!;
+      expect([later.opening, later.debit, later.credit, later.closing]).toEqual([1150, 0, 400, 750]);
+      const sb = (await R.partyBalances(db, { side: "supplier", from: yearFrom, to: D })).find((x) => x.id === sup.id)!;
+      expect([sb.credit, sb.closing]).toEqual([230, 230]);
+      expect((await R.partyBalances(db, { side: "supplier", from: yearFrom, to: D })).some((x) => x.id === cust.id)).toBe(false);
+
+      const ag = (await R.partyAging(db, { side: "customer", asOf: D })).find((x) => x.id === cust.id)!;
+      expect([ag.over, ag.current, ag.open, ag.ledger, ag.unlinked]).toEqual([750, 0, 750, 750, 0]);
+      const sag = (await R.partyAging(db, { side: "supplier", asOf: D })).find((x) => x.id === sup.id)!;
+      expect([sag.open, sag.ledger, sag.unlinked]).toEqual([230, 230, 0]);
+
+      const sales = (await R.salesByCustomer(db, yearFrom, D)).find((x) => x.id === cust.id)!;
+      expect([sales.invoices, sales.revenue, sales.vat, sales.total]).toEqual([1, 1000, 150, 1150]);
+      const buys = (await R.purchasesBySupplier(db, yearFrom, D)).find((x) => x.id === sup.id)!;
+      expect([buys.bills, buys.net, buys.vat, buys.total]).toEqual([1, 200, 30, 230]);
+
+      const st = await contactStatement(db, cust.id, yearFrom, D, "customer");
+      expect([st.rows.length, st.closing, st.rows[0].source_type]).toEqual([3, 750, "sales_invoice"]); // سطرا الفاتورة (المبلغ والضريبة) وسطر القبض
+      expect((await contactStatement(db, cust.id, yearFrom, D, "supplier")).rows).toHaveLength(0);
+
+      const gl = await R.generalLedger(db, { from: D, to: D, prefix: "6105" });
+      const rent = gl.find((g) => g.account.code === "6105")!;
+      expect(gl.every((g) => g.account.code.startsWith("6105"))).toBe(true);
+      expect(rent.lines.some((l) => l.debit === 200 && l.source_type === "purchase_invoice")).toBe(true);
+      expect(rent.closing).toBeCloseTo(rent.opening + rent.debit - rent.credit, 2);
+
+      const audit = await R.auditTrail(db, { from: "2000-01-01", to: "2999-12-31", entity: "parties" });
+      expect(audit.some((a) => Number(a.entityId) === cust.id && a.action === "create")).toBe(true);
+      expect(Array.isArray(await R.stockMovement(db, { from: yearFrom, to: D }))).toBe(true);
+    });
+
     it("فاتورة بمصاريف العميل وحدها دون بنود تُقبل وتصدر (ملاحظة التشغيل 15)", async () => {
       const { addInvoiceChargesTx } = await import("@/lib/invoices");
       const [customs] = await db.select().from(s.chargeTypes).where(eq(s.chargeTypes.nameAr, "رسوم جمركية باسم العميل"));

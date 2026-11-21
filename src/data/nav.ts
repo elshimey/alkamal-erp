@@ -1,5 +1,6 @@
 import type { IconName } from "@/components/icons";
 import type { Entity } from "@/lib/permissions";
+import { REPORT_GROUPS } from "@/data/reports";
 
 // أقسام القائمة الجانبية، ويستخدمها البحث الشامل أيضاً
 export const NAV: { title: string; icon: IconName; items: { href: string; label: string; icon: IconName; entity?: Entity }[] }[] = [
@@ -100,6 +101,8 @@ export const NAV: { title: string; icon: IconName; items: { href: string; label:
       { href: "/reports/income", label: "قائمة الدخل", icon: "chart", entity: "financial_reports" },
       { href: "/reports/balance-sheet", label: "المركز المالي", icon: "tree", entity: "financial_reports" },
       { href: "/reports/ledger", label: "كشف حساب", icon: "document", entity: "financial_reports" },
+      { href: "/reports/party-balances", label: "أرصدة العملاء والموردين", icon: "people", entity: "financial_reports" },
+      { href: "/reports/aging", label: "أعمار الديون", icon: "calendar", entity: "financial_reports" },
       { href: "/reports/cost-centers", label: "ربحية المركبات", icon: "truck", entity: "financial_reports" },
       { href: "/reports/vat", label: "إقرار الضريبة", icon: "invoice", entity: "financial_reports" },
       { href: "/reports/unbilled-charges", label: "مصاريف العملاء غير المفوترة", icon: "document", entity: "financial_reports" },
@@ -107,6 +110,8 @@ export const NAV: { title: string; icon: IconName; items: { href: string; label:
   },
 ];
 
+
+const NAV_HREFS = new Set(NAV.flatMap((g) => g.items.map((x) => x.href)));
 
 // صفحات لا تظهر في القائمة الجانبية لكن يصل لها البحث الشامل
 export const EXTRA_PAGES: { href: string; label: string; group: string; entity?: Entity; admin?: boolean; keywords?: string }[] = [
@@ -145,6 +150,10 @@ export const EXTRA_PAGES: { href: string; label: string; group: string; entity?:
   { href: "/import/maintenance-orders", label: "استيراد أوامر الصيانة من Excel", group: "استيراد", entity: "maintenance" },
   { href: "/import/maintenance-plans", label: "استيراد خطط الصيانة من Excel", group: "استيراد", entity: "maintenance" },
   { href: "/import/breakdown-requests", label: "استيراد طلبات العطل من Excel", group: "استيراد", entity: "maintenance" },
+  // تقارير مركز التقارير غير الموجودة في القائمة الجانبية
+  ...REPORT_GROUPS.flatMap((g) =>
+    g.reports.map((r) => ({ href: r.href, label: r.title, group: `التقارير · ${g.title}`, entity: r.entity ?? ("financial_reports" as Entity), keywords: r.keywords })),
+  ).filter((r) => !NAV_HREFS.has(r.href)),
 ];
 
 // كلمات إضافية يجد بها البحث شاشات القائمة (المفرد والعامية)

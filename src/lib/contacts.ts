@@ -82,19 +82,22 @@ export async function contactSummary(db: Db | Tx, partyId: number) {
   return { receivable, payable, net: receivable - payable };
 }
 
-/** كشف حساب الجهة: كل حركاتها المرحّلة على حساب العملاء والموردين برصيد تراكمي (مدين موجب). */
-export async function contactStatement(db: Db | Tx, partyId: number, from: string, to: string) {
-  const accountFilter = sql`(${isReceivable} or ${isPayable})`;
+/**
+ * كشف حساب الجهة: كل حركاتها المرحّلة على حساب العملاء والموردين برصيد تراكمي (مدين موجب).
+ * side يحصره في جانب واحد (كشف العميل على 1103، وكشف المورد على 2101–2105) كما في مركز التقارير.
+ */
+export async function contactStatement(db: Db | Tx, partyId: number, from: string, to: string, side?: "customer" | "supplier") {
+  const accountFilter = side === "customer" ? isReceivable : side === "supplier" ? isPayable : sql`(${isReceivable} or ${isPayable})`;
   const [open] = (await db.execute(sql`
     select coalesce(sum(l.debit_base - l.credit_base), 0)::float8 as bal
     from journal_lines l join journal_entries e on e.id = l.entry_id and e.status = 'posted' join accounts a on a.id = l.account_id
     where l.party_id = ${partyId} and ${accountFilter} and e.entry_date < ${from}`)) as unknown as { bal: number }[];
   const lines = (await db.execute(sql`
-    select e.id as entry_id, e.number, e.entry_date, coalesce(l.description, e.description) as description, a.code, a.name_ar as account,
+    select e.id as entry_id, e.number, e.entry_date, e.source_type, e.source_id, e.description as entry_description, coalesce(l.description, e.description) as description, a.code, a.name_ar as account,
       l.debit_base::float8 as debit, l.credit_base::float8 as credit
     from journal_lines l join journal_entries e on e.id = l.entry_id and e.status = 'posted' join accounts a on a.id = l.account_id
     where l.party_id = ${partyId} and ${accountFilter} and e.entry_date between ${from} and ${to}
-    order by e.entry_date, e.id, l.id`)) as unknown as { entry_id: number; number: string; entry_date: string; description: string | null; code: string; account: string; debit: number; credit: number }[];
+    order by e.entry_date, e.id, l.id`)) as unknown as { entry_id: number; number: string; entry_date: string; source_type: string | null; source_id: number | null; entry_description: string | null; description: string | null; code: string; account: string; debit: number; credit: number }[];
   let bal = Number(open?.bal ?? 0);
   const opening = bal;
   const rows = lines.map((l) => {
