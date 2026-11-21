@@ -11,11 +11,14 @@ import { DriverLive } from "../live";
 import { Icon } from "@/components/icons";
 import { db } from "@/db";
 import { unreadCount } from "@/lib/driver-notify";
+import { driverDocumentFiles } from "@/lib/driver-docs";
+import { todayRiyadh } from "@/lib/dates";
+import { DocCache } from "../doc-cache";
 
 export default async function DriverLayout({ children }: { children: React.ReactNode }) {
   const { user, driver, lang, t } = await getDriverContext();
   const office = user.roles.some((r) => r.key !== "driver");
-  const [brand, unread, tenant] = await Promise.all([getBrand(true), driver ? unreadCount(db, driver.id) : 0, getTenant()]);
+  const [brand, unread, tenant, docFiles] = await Promise.all([getBrand(true), driver ? unreadCount(db, driver.id) : 0, getTenant(), driver ? driverDocumentFiles(db, driver, todayRiyadh()) : []]);
   return (
     <div dir={isRtl(lang) ? "rtl" : "ltr"} lang={lang} className="min-h-screen bg-concrete pb-24">
       <header className="relative overflow-hidden bg-asphalt-900 px-4 pt-[calc(env(safe-area-inset-top)+0.75rem)] pb-4 text-white">
@@ -53,6 +56,7 @@ export default async function DriverLayout({ children }: { children: React.React
       </header>
       <main className="mx-auto max-w-md px-4 pt-4">
         {driver && <OfflineSync owner={`${tenant.schema}:${user.id}`} labels={{ offline: t.offline, pending: t.pendingSync, sending: t.sending, retry: t.sendNow, failed: t.syncFailed }} />}
+        {driver && <DocCache files={docFiles} />}
         {driver && <DriverLive labels={{ enable: t.x.pushEnable, hint: t.x.pushHint, ios: t.x.pushIos, denied: t.x.pushDenied, later: t.x.pushLater }} />}
         {driver ? (
           children

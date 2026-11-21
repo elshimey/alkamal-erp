@@ -29,6 +29,23 @@ self.addEventListener("fetch", (e) => {
     return;
   }
 
+  // ملفات الوثائق والصور: الشبكة أولاً ثم المحفوظة، فتفتح وثائق السائق في الكمين بدون إنترنت
+  if (url.pathname.startsWith("/driver/files/")) {
+    const key = url.pathname;
+    e.respondWith(
+      fetch(req)
+        .then((res) => {
+          if (res.ok && !url.searchParams.has("download")) {
+            const copy = res.clone();
+            caches.open(CACHE).then((c) => c.put(key, copy));
+          }
+          return res;
+        })
+        .catch(() => caches.match(key).then((hit) => hit || Response.error())),
+    );
+    return;
+  }
+
   if (req.mode === "navigate" && url.pathname.startsWith("/driver")) {
     e.respondWith(
       fetch(req)

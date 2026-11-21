@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { getDriverContext } from "@/lib/driver-auth";
 import { driverTrips } from "@/lib/driver-app";
 import { driverTripRequests } from "@/lib/driver-trip-requests";
-import { ownerDocuments } from "@/lib/documents";
+import { driverDocuments } from "@/lib/driver-docs";
 import { todayRiyadh } from "@/lib/dates";
 import { Icon } from "@/components/icons";
 import { isRtl } from "@/data/driver-i18n";
@@ -17,7 +17,7 @@ export default async function DriverHome() {
   const [open, past, docs, requests] = await Promise.all([
     driverTrips(db, driver.id, { open: true }),
     driverTrips(db, driver.id, { open: false, limit: 10 }),
-    Promise.all([ownerDocuments(db, "driver", driver.id, today), driver.vehicle ? ownerDocuments(db, "vehicle", driver.vehicle.id, today) : []]).then(([a, b]) => [...a, ...b]),
+    driverDocuments(db, driver, today).then((d) => [...d.mine, ...d.vehicle, ...d.trailerDocs]),
     driverTripRequests(db, driver.id),
   ]);
   const time = (at: Date) => at.toLocaleString("en-GB", { timeZone: "Asia/Riyadh", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
