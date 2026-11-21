@@ -18,15 +18,18 @@ import { Badge, Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } fr
 import { DialogButton } from "@/components/dialog-button";
 import { approve, approveMany, approveReviewed, reject, remove, revert, saveExpenses } from "./actions";
 import { fmt } from "@/lib/format";
+import { ExpensePanel } from "./expense-panel";
 import { AccountField } from "@/components/account-field";
 import { toAccountOptions } from "@/lib/lookups";
 
 type Status = keyof typeof EXPENSE_STATUS;
 
-export default async function ExpensesPage({ searchParams }: { searchParams: Promise<{ status?: string; add?: string }> }) {
+export default async function ExpensesPage({ searchParams }: { searchParams: Promise<{ status?: string; add?: string; new?: string }> }) {
   const user = await requirePermission("expenses", "view");
-  const { status: raw, add } = await searchParams;
-  const adding = add === "1" && can(user.perms, "expenses", "create");
+  const { status: raw, add, new: isNew } = await searchParams;
+  const canCreate = can(user.perms, "expenses", "create");
+  const adding = add === "1" && canCreate;
+  const creating = isNew === "1" && canCreate;
   const status: Status | undefined = raw && raw in EXPENSE_STATUS ? (raw as Status) : undefined;
   const today = todayRiyadh();
   const since = new Date(Date.parse(today) - 60 * 86_400_000).toISOString().slice(0, 10);
@@ -80,7 +83,14 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
   return (
     <>
       <PageHeader title="المصروفات" description="مصروفات الطريق والمكتب المدفوعة من عهدة السائق، أو من الصندوق والبنك وعهدة موظف المكتب. تُقيد على المركبة عند الاعتماد، واختيار الشحنة يربطها بها.">
-        {!adding && <ListActions addHref={can(user.perms, "expenses", "create") && "/expenses?add=1"} addLabel="إدخال مصروفات" />}
+        {!adding && (
+          <ListActions
+            newHref={canCreate && `/expenses?new=1${status ? `&status=${status}` : ""}`}
+            newLabel="مصروف جديد"
+            addHref={canCreate && "/expenses?add=1"}
+            addLabel="إدخال مصروفات جماعي (شيت)"
+          />
+        )}
       </PageHeader>
       {adding && <AddModeBar backHref="/expenses" backLabel="المصروفات" title="إدخال مصروفات" />}
       <div className="mb-6 grid gap-6 xl:grid-cols-3">
@@ -177,7 +187,10 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
               {e.billToCustomer && <div className="text-[11px] font-medium text-amber-700">على العميل (يُفوتر)</div>}
               {e.driverKind && <div className="text-[11px] text-sky-700">📱 من تطبيق السائق</div>}
             </Td>
-            <Td>{plate ?? "—"}</Td>
+            <Td>
+              {plate ?? "—"}
+              {driver && e.payer !== "driver_custody" && <div className="text-xs text-gray-500">{driver}</div>}
+            </Td>
             <Td className="text-xs">
               {e.payer === "driver_custody" ? `عهدة ${driver ?? ""}` : e.payer === "unpaid" ? (e.paymentId ? "سُدد بسند صرف" : "لم يُدفع بعد") : box}
               {e.status === "pending" && e.reportedPayer === "company" && <div className="font-medium text-amber-700">السائق: دفعت الشركة</div>}
@@ -268,6 +281,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
       </Table>
         </>
       )}
+      {creating && <ExpensePanel closeHref={status ? `/expenses?status=${status}` : "/expenses"} canApprove={canApprove} />}
     </>
   );
 }
