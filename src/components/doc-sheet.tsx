@@ -9,6 +9,7 @@ import { isoToDmy } from "@/components/date-input";
 import { ComboBox, useCreatedOptions } from "@/components/combo-box";
 import { norm } from "@/lib/filter-options";
 import type { QuickKind, QuickOption } from "@/lib/quick-add-types";
+import { vehicleOnDate } from "@/lib/driver-vehicle";
 
 export interface DocSheetColumn {
   key: string;
@@ -26,6 +27,8 @@ export interface DocSheetColumn {
   /** قيمة محسوبة من خلايا السطر الحالية (إجمالي البند مثلاً) فتتحدث أثناء التعديل */
   /** خلية محسوبة لا تُحرر: حاصل ضرب أعمدة، مع نسبة ضريبة اختيارية من عمود آخر (تمر من الخادم فلا تكون دالة). */
   calc?: { multiply: string[]; vatPercent?: string };
+  /** عمود السائق: اختياره يملأ عمود المركبة بالمسندة له في تاريخ المستند (ويبقى تغييرها ممكناً) */
+  autoVehicle?: { key: string; dateKey?: string };
 }
 
 export interface DocSheetLine {
@@ -161,10 +164,19 @@ export function DocSheet({ columns: baseColumns, rows, action, emptyText, openLa
       v = hit.value;
     }
     const key = keyOf(vr, col);
+    // اختيار السائق يملأ مركبته في تاريخ المستند
+    const auto = col.autoVehicle && v ? columns.find((x) => x.key === col.autoVehicle!.key) : undefined;
+    const date = col.autoVehicle?.dateKey ? columns.find((x) => x.key === col.autoVehicle!.dateKey) : undefined;
+    const vehicle = auto && auto.editable && hasCell(vr, auto) ? vehicleOnDate(col.options?.find((o) => o.value === v)?.periods, date ? raw(vr, date) : null) : "";
     setEdits((e) => {
       const next = { ...e };
       if (v === original(vr, col)) delete next[key];
       else next[key] = v;
+      if (auto && vehicle && auto.options?.some((o) => o.value === vehicle)) {
+        const vk = keyOf(vr, auto);
+        if (vehicle === original(vr, auto)) delete next[vk];
+        else next[vk] = vehicle;
+      }
       return next;
     });
     return true;

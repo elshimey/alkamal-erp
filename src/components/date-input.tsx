@@ -221,7 +221,20 @@ function Calendar({ anchor: anchorRef, value, min, max, onPick, onClose }: { anc
     const anchor = anchorRef.current;
     const outside = (e: MouseEvent) => {
       const t = e.target as Node;
-      if (!ref.current?.contains(t) && !anchor?.contains(t)) onClose();
+      if (ref.current?.contains(t) || anchor?.contains(t)) return;
+      onClose();
+      // النقر على عنوان قسم لإغلاق التقويم يغلقه فقط، ولا يطوي القسم فيختفي ما بعده (ملاحظة التشغيل 5)
+      const header = (t as Element).closest?.("summary");
+      if (header) {
+        const swallow = (c: MouseEvent) => {
+          if (header.contains(c.target as Node)) {
+            c.preventDefault();
+            c.stopPropagation();
+          }
+        };
+        document.addEventListener("click", swallow, { capture: true, once: true });
+        setTimeout(() => document.removeEventListener("click", swallow, true), 500);
+      }
     };
     const esc = (e: globalThis.KeyboardEvent) => {
       if (e.key !== "Escape") return;

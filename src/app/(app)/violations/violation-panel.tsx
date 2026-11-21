@@ -41,7 +41,7 @@ export async function ViolationPanel({ closeHref }: { closeHref: string }) {
           </span>
         </PanelField>
         <PanelField label="السائق" hint="فارغ = من سجل الإسناد في تاريخ المخالفة">
-          <FormCombo name="driverId" options={drivers} create="driver" placeholder="تلقائي من الإسناد…" />
+          <FormCombo name="driverId" options={drivers} create="driver" placeholder="تلقائي من الإسناد…" autoVehicle={{ name: "vehicleId", dateName: "date" }} />
         </PanelField>
       </PanelSection>
       <PanelSection title="تفاصيل أخرى" optional open>

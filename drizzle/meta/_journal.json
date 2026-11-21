@@ -309,6 +309,13 @@
       "when": 1793340000000,
       "tag": "0043_document_alerts",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1793430000000,
+      "tag": "0044_normalize_plates",
+      "breakpoints": true
     }
   ]
 }

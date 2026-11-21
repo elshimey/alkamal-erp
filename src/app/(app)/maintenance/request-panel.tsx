@@ -44,7 +44,7 @@ export async function RequestPanel({ closeHref, savedHref }: { closeHref: string
       </PanelSection>
       <PanelSection title="تفاصيل أخرى" optional open>
         <PanelField label="السائق" hint="من أبلغ عن العطل">
-          <FormCombo name="driverId" options={drivers} placeholder="اختياري…" />
+          <FormCombo name="driverId" options={drivers} placeholder="اختياري…" autoVehicle={{ name: "vehicleId", dateName: "date" }} />
         </PanelField>
         <PanelField label="التكلفة التقديرية" hint="تحدد من يعتمد البلاغ">
           <Input name="estimatedCost" type="number" min={0} step="0.01" dir="ltr" className="w-full" />

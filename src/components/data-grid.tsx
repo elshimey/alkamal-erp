@@ -9,6 +9,7 @@ import { parseDelimited } from "@/lib/sheet";
 import type { QuickKind } from "@/lib/quick-add-types";
 import { ComboBox, useCreatedOptions } from "./combo-box";
 import { isoToDmy } from "@/components/date-input";
+import { vehicleOnDate, type VehiclePeriod } from "@/lib/driver-vehicle";
 
 export interface GridColumn {
   key: string;
@@ -16,7 +17,7 @@ export interface GridColumn {
   defaultValue?: string;
   label: string;
   type?: "text" | "number" | "date" | "select";
-  options?: { value: string; label: string; code?: string }[];
+  options?: { value: string; label: string; code?: string; periods?: VehiclePeriod[] }[];
   required?: boolean;
   ltr?: boolean;
   width?: string;
@@ -33,12 +34,26 @@ export interface GridColumn {
   dependsOn?: { key: string; options: Record<string, { value: string; label: string }[]>; create?: Record<string, QuickKind>; prefix?: Record<string, string> };
   /** نص حر مع اقتراحات أثناء الكتابة (مثل المرسل والمستلم من جهات الاتصال) */
   suggest?: string[];
+  /** عمود السائق: اختياره يملأ عمود المركبة بالمسندة له في تاريخ الصف (ويبقى تغييرها ممكناً) */
+  autoVehicle?: { key: string; dateKey?: string };
 }
 
 export type GridRow = Record<string, string>;
 type Cell = [number, number];
 
 export const emptyGridRow = (columns: GridColumn[]): GridRow => Object.fromEntries(columns.map((c) => [c.key, c.defaultValue ?? ""]));
+/** يملأ مركبة السائق المختار في الصف؛ onlyEmpty عند اللصق حتى لا تُستبدل مركبة ملصوقة. */
+function fillVehicle(columns: GridColumn[], row: GridRow, prev: GridRow, onlyEmpty: boolean) {
+  for (const c of columns) {
+    if (!c.autoVehicle || row[c.key] === prev[c.key] || !row[c.key]) continue;
+    const target = c.autoVehicle.key;
+    if (onlyEmpty && row[target]) continue;
+    const v = vehicleOnDate(c.options?.find((o) => o.value === row[c.key])?.periods, c.autoVehicle.dateKey ? row[c.autoVehicle.dateKey] : null);
+    if (v && columns.some((x) => x.key === target && x.options?.some((o) => o.value === v))) row[target] = v;
+  }
+  return row;
+}
+
 export const isEmptyGridRow = (row: GridRow) => Object.values(row).every((v) => !String(v ?? "").trim());
 
 /** يحوّل النص الملصوق إلى قيمة العمود؛ في القوائم يقبل الاسم الظاهر أو القيمة. */
@@ -132,7 +147,7 @@ export function DataGrid({
         while (!next[r]) next.push(emptyGridRow(columns));
         next[r][col.key] = normalizeCell(col, raw);
       });
-      return next;
+      return next.map((row, i) => fillVehicle(columns, row, prev[i] ?? emptyGridRow(columns), true));
     });
 
   const onCopy = (e: ClipboardEvent) => {
@@ -230,7 +245,7 @@ export function DataGrid({
         const next = { ...row, [key]: value };
         // الخلايا التابعة لهذه الخلية تُفرَّغ إن تغيرت قيمتها
         if (row[key] !== value) for (const c of columns) if (c.dependsOn?.key === key) next[c.key] = "";
-        return next;
+        return fillVehicle(columns, next, row, false);
       }),
     );
 

@@ -353,7 +353,7 @@ export function InvoiceEditor({
                     <ComboField name="tripVehicleId" options={vehicles} defaultValue={trip.vehicleId} create="vehicle" required placeholder="رقم اللوحة" onChange={(v) => setTrip({ vehicleId: v })} />
                   </PanelField>
                   <PanelField label="السائق" hint="فارغ = المسند للمركبة">
-                    <ComboField name="tripDriverId" options={drivers} defaultValue={trip.driverId} create="driver" placeholder="السائق المسند تلقائياً" onChange={(v) => setTrip({ driverId: v })} />
+                    <ComboField name="tripDriverId" options={drivers} defaultValue={trip.driverId} create="driver" placeholder="السائق المسند تلقائياً" onChange={(v) => setTrip({ driverId: v })} autoVehicle={{ name: "tripVehicleId", dateName: "invoiceDate" }} />
                   </PanelField>
                   <PanelField label="المرسل" required>
                     <input name="tripShipper" value={trip.shipper} onChange={(e) => setTrip({ shipper: e.target.value })} required className={field} placeholder={customer?.label ?? ""} />

@@ -2,6 +2,7 @@
 
 import { Truck } from "./icons";
 import { newOpId } from "@/lib/op-id";
+import { toast } from "./toast";
 import { createContext, startTransition, useActionState, useContext, useEffect, useRef, type ReactNode } from "react";
 
 export type FormState = { error?: string; ok?: string } | undefined;
@@ -86,6 +87,11 @@ export function ActionForm({
   useEffect(() => {
     if (state?.error !== RETRY_MESSAGE) op.current = "";
     if (resetOnSuccess && state?.ok) formRef.current?.reset();
+    // رسالة النجاح أسفل نموذج طويل لا تُرى (بيانات المنشأة): تظهر أيضاً أسفل الشاشة
+    if (state?.ok) {
+      const msg = formRef.current?.querySelector(":scope > [role=status]")?.getBoundingClientRect();
+      if (!msg || msg.top < 0 || msg.bottom > window.innerHeight) toast(state.ok);
+    }
   }, [state, resetOnSuccess]);
   return (
     <PendingContext.Provider value={pending}>

@@ -7,9 +7,11 @@ import { CONTACT_SORTS, CONTACT_TABS, contactCountries, listContacts, type Conta
 import { Icon } from "@/components/icons";
 import { Badge, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
 import { ContactPanel } from "./contact-panel";
+import { PartyPanel } from "./party-panel";
+import { AddMenu } from "@/components/add-menu";
 
 const BASE = "/parties";
-type Params = { q?: string; tab?: string; country?: string; sort?: string; open?: string; ptab?: string; from?: string; to?: string };
+type Params = { q?: string; tab?: string; country?: string; sort?: string; open?: string; ptab?: string; from?: string; to?: string; new?: string };
 
 /** رابط الصفحة نفسها مع تغيير بعض القيم (الباقي يبقى كما هو). */
 function href(sp: Params, patch: Partial<Params>) {
@@ -43,23 +45,10 @@ export default async function PartiesPage({ searchParams }: { searchParams: Prom
               تعديل جماعي
             </Link>
           )}
-          {canCreate && (
-            <details data-dropdown className="relative">
-              <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-brand-900 shadow-sm hover:bg-brand-500">
-                إضافة <span className="text-xs">▾</span>
-              </summary>
-              <div className="absolute end-0 z-30 mt-1 w-44 overflow-hidden rounded-xl border border-gray-200 bg-white py-1 text-sm shadow-lg">
-                <Link href="/parties/bulk-add" className="block px-4 py-2 hover:bg-gray-50">
-                  إضافة جماعية
-                </Link>
-                <Link href="/import/customers" className="block px-4 py-2 hover:bg-gray-50">
-                  الاستيراد من Excel
-                </Link>
-              </div>
-            </details>
-          )}
+          {canCreate && <AddMenu main={{ href: "/parties?new=1", label: "إضافة جهة" }} more={[{ href: "/parties/bulk-add", label: "إضافة جماعية" }, { href: "/import/customers", label: "الاستيراد من Excel" }]} />}
         </div>
       </PageHeader>
+      {sp.new === "1" && canCreate && <PartyPanel initial={sp.q} />}
 
       {/* تبويبات حسب الدور */}
       <nav className="mb-3 flex gap-1 overflow-x-auto border-b border-gray-200 text-sm">

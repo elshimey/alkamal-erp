@@ -48,7 +48,7 @@ export function EntryForm({ accounts, centers, parties, initial, entryId, canPos
   const missingCc = used.some((l) => byAccount.get(l.accountId)?.cc && !l.costCenterId);
   const ok = used.length >= 2 && Math.abs(diff) < 0.005 && debit > 0 && description.trim() && date && !missingCc;
 
-  // اللصق من Excel: الحساب (رقم أو اسم) | الوصف | مدين | دائن | مركز التكلفة
+  // اللصق من Excel: الحساب (رقم أو اسم) | الوصف | مدين | دائن | مركز التكلفة | الجهة (اختياري، بالاسم أو الرقم)
   const onPaste = (n: number) => (e: ClipboardEvent<HTMLElement>) => {
     const text = e.clipboardData.getData("text");
     if (!text.includes("\t") && !text.includes("\n")) return;
@@ -60,8 +60,8 @@ export function EntryForm({ accounts, centers, parties, initial, entryId, canPos
     };
     const rows = text.replace(/\r/g, "").split("\n").filter((r) => r.trim());
     const parsed = rows.map((r) => {
-      const [acc = "", desc = "", d = "", c = "", cc = ""] = r.split("\t");
-      return { ...emptyLine(), accountId: find(acc, accounts), description: desc.trim(), debit: toNum(d) ? String(toNum(d)) : "", credit: toNum(c) ? String(toNum(c)) : "", costCenterId: find(cc, centers) };
+      const [acc = "", desc = "", d = "", c = "", cc = "", party = ""] = r.split("\t");
+      return { ...emptyLine(), accountId: find(acc, accounts), description: desc.trim(), debit: toNum(d) ? String(toNum(d)) : "", credit: toNum(c) ? String(toNum(c)) : "", costCenterId: find(cc, centers), partyId: find(party, parties) || (parties.find((o) => o.value === party.trim())?.value ?? "") };
     });
     const next = [...lines];
     next.splice(n, parsed.length, ...parsed);
@@ -144,7 +144,7 @@ export function EntryForm({ accounts, centers, parties, initial, entryId, canPos
       <section className="mt-5 rounded-2xl border border-black/[0.06] bg-white p-5 shadow-sm">
         <div className="mb-2 flex flex-wrap items-center gap-2">
           <h2 className="font-semibold text-brand-900">السطور</h2>
-          <span className="text-xs text-gray-400">يمكنك لصق سطور من Excel بالترتيب: الحساب، الوصف، مدين، دائن، مركز التكلفة</span>
+          <span className="text-xs text-gray-400">يمكنك لصق سطور من Excel بالترتيب: الحساب، الوصف، مدين، دائن، مركز التكلفة، الجهة (اختياري)</span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[60rem] text-sm">

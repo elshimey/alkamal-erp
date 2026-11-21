@@ -101,7 +101,8 @@ function QuickAddForm({ kind, scope, initial, onClose, onDone }: DialogProps) {
   useEffect(() => {
     const esc = (e: globalThis.KeyboardEvent) =>
       e.key === "Escape" &&
-      !document.querySelector("[role=listbox]") &&
+      !e.defaultPrevented &&
+      !document.querySelector("[role=listbox],[data-confirm-dialog]") &&
       onClose();
     window.addEventListener("keydown", esc);
     return () => window.removeEventListener("keydown", esc);

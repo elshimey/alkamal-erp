@@ -3374,6 +3374,24 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(await count()).toBe(n);
     });
 
+    it("فاتورة بمصاريف العميل وحدها دون بنود تُقبل وتصدر (ملاحظة التشغيل 15)", async () => {
+      const { addInvoiceChargesTx } = await import("@/lib/invoices");
+      const [customs] = await db.select().from(s.chargeTypes).where(eq(s.chargeTypes.nameAr, "رسوم جمركية باسم العميل"));
+      const head = { customerId, invoiceDate: D, dueDate: D, currencyCode: "SAR", lines: [] };
+      await expect(createDirectInvoice(db, head)).rejects.toThrow("بلا بنود");
+      const inv = await db.transaction(async (tx) => {
+        const saved = await createDirectInvoice(tx as unknown as Db, { ...head, hasCharges: true });
+        await addInvoiceChargesTx(tx, saved.id, [{ chargeTypeId: customs.id, amount: 600, payer: "cash", cashAccountId: acc["110101"] }]);
+        return saved;
+      });
+      // تعديلها دون بنود يبقى مقبولاً لأن فيها مصروفاً
+      await updateDirectInvoice(db, inv.id, head);
+      const entry = await issueInvoice(db, inv.id);
+      const il = await entryLines(entry.id);
+      expect(il.find((l) => l.code === "1114")?.credit).toBe(600);
+      expect(il.filter((l) => l.code === "1103").reduce((a, l) => a + l.debit, 0)).toBe(600);
+    });
+
     it("الفاتورة المباشرة دون شحنة: نفس قسم مصاريف العميل، قيد 1114 عند الحفظ، سطر مستقل يُقفله عند الإصدار", async () => {
       const { addInvoiceCharges, removeInvoiceLine } = await import("@/lib/invoices");
       const [customs] = await db.select().from(s.chargeTypes).where(eq(s.chargeTypes.nameAr, "رسوم جمركية باسم العميل"));

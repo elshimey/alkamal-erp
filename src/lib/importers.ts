@@ -261,7 +261,7 @@ async function importInvoice(tx: Tx, rows: ImportRow[], ctx: Ctx, userId?: numbe
   }
   const charges = look ? rows.flatMap((r) => rowCharges(r, ctx, look)) : [];
 
-  const inv = await createDirectInvoiceTx(tx, { customerId, invoiceDate, dueDate, currencyCode, reference, notes: v(head, "notes") || null, userId, lines, waybillIds, trip });
+  const inv = await createDirectInvoiceTx(tx, { customerId, invoiceDate, dueDate, currencyCode, reference, notes: v(head, "notes") || null, userId, lines, waybillIds, trip, hasCharges: charges.length > 0 });
   if (charges.length) await addInvoiceChargesTx(tx, inv.id, charges.map((c) => ({ ...c, currencyCode })), userId);
   const extra = [waybillIds.length && `${waybillIds.length} شحنة`, charges.length && `${charges.length} مصروف على العميل`, trip && "رحلة"].filter(Boolean).join("، ");
   return `${inv.number} ← ${reference}${extra ? ` (${extra})` : ""}`;
