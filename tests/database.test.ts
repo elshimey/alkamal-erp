@@ -1432,6 +1432,28 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect((await driverBalances(db, me, D)).custody).toBe(before + 900);
     });
 
+    it("عهدة الرحلة «لم تُصرف بعد»: تُرسل دون سند، وتظهر في «سندات صرف تحت المراجعة» وتُصرف منها مرة واحدة", async () => {
+      const { disburseTripCustody } = await import("@/lib/trip-dispatch");
+      const { undisbursedCustody } = await import("@/lib/unpaid");
+      const [box] = await db.select().from(s.accounts).where(eq(s.accounts.code, "110101"));
+      const w = await createWaybill(db, { waybillDate: D, customerId, routeId, shipper: "مصنع", consignee: "مستودع", vehicleId: me.vehicle!.id, driverId: me.id, tripCustody: 300, userId });
+      const before = (await driverBalances(db, me, D)).custody;
+      await expect(disburseTripCustody(db, w.id, { cashAccountId: box.id })).rejects.toThrow("لم تُرسل");
+      const r = await sendTrip(db, w.id, { deferCustody: true, date: D, userId });
+      expect(r.paymentNumber).toBeNull();
+      expect((await driverBalances(db, me, D)).custody).toBe(before);
+      expect((await undisbursedCustody(db)).map((x) => x.id)).toContain(w.id);
+      await expect(disburseTripCustody(db, w.id, {})).rejects.toThrow("اختر الصندوق");
+      const d = await disburseTripCustody(db, w.id, { cashAccountId: box.id, date: D, userId });
+      expect(d.paymentNumber).toMatch(/^PV-/);
+      expect((await driverBalances(db, me, D)).custody).toBe(before + 300);
+      expect((await undisbursedCustody(db)).map((x) => x.id)).not.toContain(w.id);
+      await expect(disburseTripCustody(db, w.id, { cashAccountId: box.id })).rejects.toThrow("من قبل");
+      // إلغاء الإرسال يعكس السند المصروف لاحقاً أيضاً
+      await unsendTrip(db, w.id, userId);
+      expect((await driverBalances(db, me, D)).custody).toBe(before);
+    });
+
     it("ضغطتان متزامنتان على «إرسال للسائق» تصرفان سند عهدة واحداً، وإلغاءان متزامنان يعكسانه مرة واحدة", async () => {
       const [box] = await db.select().from(s.accounts).where(eq(s.accounts.code, "110101"));
       const w = await createWaybill(db, { waybillDate: D, customerId, routeId, shipper: "مصنع", consignee: "مستودع", vehicleId: me.vehicle!.id, driverId: me.id, tripCustody: 400, userId });
@@ -3372,6 +3394,74 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
         }),
       ).rejects.toThrow("اختر المخلص");
       expect(await count()).toBe(n);
+    });
+
+    it("مصروف على العميل «لم يُدفع بعد»: لا قيد حتى يُعتمد، والفاتورة لا تصدر قبله، ثم يُسدد بسند صرف يقفل الالتزام", async () => {
+      const { addInvoiceChargesTx, PENDING_CHARGES_MESSAGE } = await import("@/lib/invoices");
+      const { approveCharges, payAccrued, unpaidCharges, invoicePendingCharges } = await import("@/lib/unpaid");
+      const [customs] = await db.select().from(s.chargeTypes).where(eq(s.chargeTypes.nameAr, "رسوم جمركية باسم العميل"));
+      const port = (await createParty(db, { nameAr: "ميناء الدمام (مستفيد)", roles: ["supplier"] })).id;
+      const head = { customerId, invoiceDate: D, dueDate: D, currencyCode: "SAR", lines: [], hasCharges: true };
+      expect(parseChargeRows(JSON.stringify([{ chargeTypeId: String(customs.id), amount: "70", payer: "unpaid" }]), undefined, { invoiceLevel: true })[0].charge.payer).toBe("unpaid");
+      const inv = await db.transaction(async (tx) => {
+        const saved = await createDirectInvoice(tx as unknown as Db, head);
+        await addInvoiceChargesTx(tx, saved.id, [
+          { chargeTypeId: customs.id, amount: 500, payer: "unpaid", partyId: port },
+          { chargeTypeId: customs.id, amount: 70, payer: "unpaid" },
+        ]);
+        return saved;
+      });
+      const rows = await db.select().from(s.waybillExpenses).where(eq(s.waybillExpenses.invoiceId, inv.id)).orderBy(s.waybillExpenses.id);
+      expect(rows.map((r) => r.journalEntryId)).toEqual([null, null]);
+      expect(await invoicePendingCharges(db, inv.id)).toHaveLength(2);
+      await expect(issueInvoice(db, inv.id)).rejects.toThrow(PENDING_CHARGES_MESSAGE);
+
+      await approveCharges(db, rows.map((r) => r.id));
+      const [withPayee, accrued] = await db.select().from(s.waybillExpenses).where(eq(s.waybillExpenses.invoiceId, inv.id)).orderBy(s.waybillExpenses.id);
+      const a = await entryLines(withPayee.journalEntryId!);
+      expect(a.find((l) => l.code === "1114")?.debit).toBe(500);
+      expect(a.find((l) => l.code === "2101")?.credit).toBe(500);
+      const b = await entryLines(accrued.journalEntryId!);
+      expect(b.find((l) => l.code === "2106")?.credit).toBe(70);
+      await expect(approveCharges(db, [withPayee.id])).rejects.toThrow("مسبقاً");
+      // بعد الاعتماد تصدر الفاتورة ولو لم يُسدد (قرار أحمد 1)، ويُقفل 1114
+      const entry = await issueInvoice(db, inv.id);
+      expect((await entryLines(entry.id)).filter((l) => l.code === "1114").reduce((x, l) => x + l.credit, 0)).toBe(570);
+      expect((await unpaidCharges(db)).filter((c) => c.invoiceId === inv.id).map((c) => c.approved)).toEqual([true, true]);
+
+      const p = await payAccrued(db, { kind: "charge", id: withPayee.id, cashAccountId: acc["110101"], date: D });
+      const pl = await entryLines(p.journalEntryId ?? (await db.select().from(s.payments).where(eq(s.payments.id, p.id)))[0].journalEntryId!);
+      expect(pl.find((l) => l.code === "2101")?.debit).toBe(500);
+      expect(pl.find((l) => l.code === "110101")?.credit).toBe(500);
+      await expect(payAccrued(db, { kind: "charge", id: withPayee.id, cashAccountId: acc["110101"] })).rejects.toThrow("من قبل");
+      const p2 = await payAccrued(db, { kind: "charge", id: accrued.id, cashAccountId: acc["110101"], date: D });
+      const [v2] = await db.select().from(s.payments).where(eq(s.payments.id, p2.id));
+      expect(v2.status).toBe("posted");
+      expect((await entryLines(v2.journalEntryId!)).find((l) => l.code === "2106")?.debit).toBe(70);
+      expect((await unpaidCharges(db)).filter((c) => c.invoiceId === inv.id)).toHaveLength(0);
+    });
+
+    it("المصروف المباشر «لم يُدفع بعد»: يُقيد عند الاعتماد على المستفيد أو 2106، ويُسدد من سندات صرف تحت المراجعة", async () => {
+      const { payAccrued, unpaidExpenses } = await import("@/lib/unpaid");
+      const shop = (await createParty(db, { nameAr: "ورشة الطريق (آجل)", roles: ["workshop"] })).id;
+      const [rent] = await db.select().from(s.accounts).where(eq(s.accounts.code, "6105"));
+      const target = rent ?? (await db.select().from(s.accounts).where(sql`${s.accounts.code} like '6%' and ${s.accounts.isPostable}`).limit(1))[0];
+      const e = await createExpense(db, { expenseDate: D, payer: "unpaid", partyId: shop, accountId: target.id, description: "إصلاح مكيف المكتب", amount: 200, vatAmount: 30 });
+      expect(e.journalEntryId).toBeNull();
+      expect((await unpaidExpenses(db)).find((x) => x.id === e.id)?.approved).toBe(false);
+      await expect(payAccrued(db, { kind: "expense", id: e.id, cashAccountId: acc["110101"] })).rejects.toThrow("اعتمد");
+      const entry = await approveExpense(db, e.id);
+      const el = await entryLines(entry.id);
+      expect(el.filter((l) => l.code === "2104").reduce((s2, l) => s2 + l.credit, 0)).toBe(230);
+      const p = await payAccrued(db, { kind: "expense", id: e.id, cashAccountId: acc["110101"], date: D });
+      expect(p.kind).toBe("expense");
+      expect((await unpaidExpenses(db)).find((x) => x.id === e.id)).toBeUndefined();
+      // المسدد لا يُرجع قبل إرجاع سنده
+      await expect(revertExpense(db, e.id)).rejects.toThrow("سُدد");
+      // دون مستفيد: 2106
+      const e2 = await createExpense(db, { expenseDate: D, payer: "unpaid", accountId: target.id, description: "كهرباء", amount: 90, approve: true });
+      const [row2] = await db.select().from(s.expenses).where(eq(s.expenses.id, e2.id));
+      expect((await entryLines(row2.journalEntryId!)).find((l) => l.code === "2106")?.credit).toBe(90);
     });
 
     it("فاتورة بمصاريف العميل وحدها دون بنود تُقبل وتصدر (ملاحظة التشغيل 15)", async () => {

@@ -85,7 +85,7 @@ export function InvoiceEditor({
   taxes: TaxOption[];
   lineDefaults: LineDefaults;
   /** مصاريف على العميل تُضاف من المسودة لأي شحنة فيها */
-  chargeOptions?: { chargeTypes: QuickOption[]; brokers: QuickOption[]; cashAccounts: QuickOption[]; waybills: (QuickOption & { fleet: boolean })[]; tripExpenses: TripExpense[] };
+  chargeOptions?: { chargeTypes: QuickOption[]; brokers: QuickOption[]; payees: QuickOption[]; cashAccounts: QuickOption[]; waybills: (QuickOption & { fleet: boolean })[]; tripExpenses: TripExpense[] };
   currencies: string[];
   routes: QuickOption[];
   vehicles: QuickOption[];
@@ -293,6 +293,7 @@ export function InvoiceEditor({
                     }}
                     chargeTypes={chargeOptions.chargeTypes}
                     brokers={chargeOptions.brokers}
+                    payees={chargeOptions.payees}
                     cashAccounts={chargeOptions.cashAccounts}
                     waybills={chargeOptions.waybills.length ? chargeOptions.waybills : undefined}
                     fleet={false}

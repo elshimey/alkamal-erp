@@ -612,7 +612,7 @@ export async function addInvoiceChargesTx(tx: Tx, invoiceId: number, charges: Ex
   const today = todayRiyadh();
   const out = [];
   for (const c of charges) {
-    const payer = c.payer === "customs_broker" ? "customs_broker" : c.payer === "cash" ? "cash" : null;
+    const payer = c.payer === "customs_broker" || c.payer === "cash" || c.payer === "unpaid" ? c.payer : null;
     if (!payer) throw new Error("ما دفعه السائق من عهدته يُحمَّل من إيصاله في التطبيق، لا يُكتب يدوياً");
     if (payer === "cash") {
       if (!c.cashAccountId) throw new Error("اختر الحساب الذي دفعت منه الشركة");
@@ -634,11 +634,16 @@ export async function addInvoiceChargesTx(tx: Tx, invoiceId: number, charges: Ex
         exchangeRate: String(exchangeRate),
         billTo: "customer",
         payer,
-        partyId: payer === "customs_broker" ? c.partyId! : null,
+        partyId: payer === "customs_broker" || payer === "unpaid" ? (c.partyId ?? null) : null,
         cashAccountId: payer === "cash" ? c.cashAccountId! : null,
         note: c.note || null,
       })
       .returning();
+    // لم يُدفع بعد: لا قيد حتى يُعتمد من «سندات صرف تحت المراجعة»
+    if (payer === "unpaid") {
+      out.push(row);
+      continue;
+    }
     const fx = { currencyCode: currency, exchangeRate };
     const description = `${type.name} – ${inv.number}`;
     const entry = await createJournalEntryTx(tx, {
@@ -668,11 +673,20 @@ async function isInvoiceCharge(tx: Tx, chargeId: number) {
   return r?.invoiceId != null;
 }
 
+/** مصروف «لم يُدفع بعد» سُدد بسند صرف مرحّل لا يُحذف حتى يُرجع السند (وإلا بقي السداد دون التزام). */
+export async function assertChargesUnpaidTx(tx: Tx, rows: { paymentId: number | null }[]) {
+  const ids = rows.map((r) => r.paymentId).filter((v): v is number => v != null);
+  if (!ids.length) return;
+  const paid = await tx.select({ number: s.payments.number }).from(s.payments).where(and(inArray(s.payments.id, ids), eq(s.payments.status, "posted")));
+  if (paid.length) throw new Error(`المصروف سُدد بسند الصرف ${paid.map((p) => p.number).join("، ")}؛ أرجع السند لمسودة أولاً`);
+}
+
 /** يحذف مصاريف الفاتورة نفسها: سطرها ثم المصروف ثم قيده. */
 async function dropInvoiceChargesTx(tx: Tx, chargeIds: number[]) {
   if (!chargeIds.length) return;
   const rows = await tx.select().from(s.waybillExpenses).where(and(inArray(s.waybillExpenses.id, chargeIds), sql`${s.waybillExpenses.invoiceId} is not null`));
   if (!rows.length) return;
+  await assertChargesUnpaidTx(tx, rows);
   const ids = rows.map((r) => r.id);
   await tx.delete(s.salesInvoiceLines).where(inArray(s.salesInvoiceLines.waybillExpenseId, ids));
   await tx.delete(s.waybillExpenses).where(inArray(s.waybillExpenses.id, ids));
@@ -734,6 +748,24 @@ export async function removeInvoiceLine(db: Db, invoiceId: number, lineId: numbe
   });
 }
 
+export const PENDING_CHARGES_MESSAGE = "مصاريف على العميل لم تُعتمد بعد؛ اعتمدها من «سندات صرف تحت المراجعة» ثم أصدر الفاتورة";
+
+/** مصاريف الفاتورة «لم يُدفع بعد» التي لم تُعتمد (تمنع الإصدار). */
+export async function pendingInvoiceCharges(db: Db | Tx, invoiceId: number) {
+  return db
+    .select({ id: s.waybillExpenses.id, label: sql<string>`${s.chargeTypes.nameAr} || ' ' || ${s.waybillExpenses.amount}` })
+    .from(s.waybillExpenses)
+    .innerJoin(s.chargeTypes, eq(s.chargeTypes.id, s.waybillExpenses.chargeTypeId))
+    .where(
+      and(
+        eq(s.waybillExpenses.payer, "unpaid"),
+        // القيد هو الاعتماد (المصروف المباشر المعتمد يأتي بقيده)
+        isNull(s.waybillExpenses.journalEntryId),
+        sql`(${s.waybillExpenses.invoiceId} = ${invoiceId} or ${s.waybillExpenses.id} in (select waybill_expense_id from sales_invoice_lines where invoice_id = ${invoiceId} and waybill_expense_id is not null))`,
+      ),
+    );
+}
+
 /** الإصدار: يرحّل قيد الإيراد والضريبة، وتصبح شحناتها «مفوترة». */
 export async function issueInvoice(db: Db, invoiceId: number, userId?: number) {
   return db.transaction(async (tx) => {
@@ -741,6 +773,9 @@ export async function issueInvoice(db: Db, invoiceId: number, userId?: number) {
     if (inv.status !== "draft") throw new Error(`الفاتورة ${inv.number} مُصدرة مسبقاً`);
     const lines = await tx.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, invoiceId)).orderBy(asc(s.salesInvoiceLines.lineNo));
     if (!lines.length || !(num(inv.total) > 0)) throw new Error("الفاتورة فارغة أو مبلغها صفر");
+    // مصروف على العميل «لم يُدفع بعد» يُعتمد أولاً (قيد التزامه على 1114)، وإلا أقفل الإصدار 1114 دون مقابل
+    const pendingCharges = await pendingInvoiceCharges(tx, invoiceId);
+    if (pendingCharges.length) throw new Error(`${PENDING_CHARGES_MESSAGE}: ${pendingCharges.map((c) => c.label).join("، ")}`);
     const waybillIds = [...new Set(lines.map((l) => l.waybillId).filter((v): v is number => v != null))];
     const locked = await tx.select({ id: s.waybills.id, number: s.waybills.number, status: s.waybills.status }).from(s.waybills).where(inArray(s.waybills.id, waybillIds)).for("update");
     const notApproved = locked.filter((w) => w.status !== "approved");

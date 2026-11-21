@@ -11,7 +11,8 @@ export interface ChargeDraft {
   waybillId: string;
   chargeTypeId: string;
   amount: string;
-  payer: "driver_custody" | "customs_broker" | "cash";
+  payer: "driver_custody" | "customs_broker" | "cash" | "unpaid";
+  /** المخلص، أو المستفيد في «لم يُدفع بعد» */
   partyId: string;
   cashAccountId: string;
   note: string;
@@ -27,7 +28,7 @@ export interface TripExpense {
   waybill?: string;
 }
 
-export const PAYER_LABELS = { driver_custody: "عهدة السائق", customs_broker: "المخلص", cash: "الشركة" } as const;
+export const PAYER_LABELS = { driver_custody: "عهدة السائق", customs_broker: "المخلص", cash: "الشركة", unpaid: "لم يُدفع بعد" } as const;
 
 const field = "w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20";
 const num = (v: string) => Number(v.replace(/[,\s]/g, "")) || 0;
@@ -51,6 +52,7 @@ export function CustomerChargesEditor({
   onChange,
   chargeTypes,
   brokers,
+  payees,
   cashAccounts,
   waybills,
   fleet,
@@ -62,6 +64,8 @@ export function CustomerChargesEditor({
   onChange: (rows: ChargeDraft[]) => void;
   chargeTypes: QuickOption[];
   brokers: QuickOption[];
+  /** المستفيد في «لم يُدفع بعد»: مورد أو ورشة أو مخلص… (اختياري؛ الفارغ يُقيد على 2106) */
+  payees?: QuickOption[];
   cashAccounts: QuickOption[];
   /** قائمة الشحنات (في الفاتورة فقط) */
   waybills?: (QuickOption & { fleet: boolean })[];
@@ -106,7 +110,7 @@ export function CustomerChargesEditor({
         </div>
       )}
       {rows.map((r, i) => {
-        const payers = (["cash", "customs_broker"] as const).map((p) => ({ value: p, label: PAYER_LABELS[p] }));
+        const payers = (["cash", "customs_broker", "unpaid"] as const).map((p) => ({ value: p, label: PAYER_LABELS[p] }));
         return (
           <div key={i} className="space-y-2 rounded-xl border border-amber-200 bg-amber-50/40 p-3">
             <div className="flex items-center justify-between text-xs text-amber-800">
@@ -143,7 +147,7 @@ export function CustomerChargesEditor({
                 value={r.payer}
                 onChange={(e) => {
                   const payer = e.target.value as ChargeDraft["payer"];
-                  set(i, { payer });
+                  set(i, { payer, partyId: "" });
                 }}
                 className={field}
               >
@@ -156,8 +160,14 @@ export function CustomerChargesEditor({
               {r.payer === "cash" && (
                 <ComboBox value={r.cashAccountId} options={cashAccounts} create="account" scope="1101,1102" allowEmpty={false} placeholder="من أي حساب؟ صندوق، بنك…" onChange={(v) => set(i, { cashAccountId: v })} className={field} />
               )}
+              {r.payer === "unpaid" && (
+                <ComboBox value={r.partyId} options={payees ?? brokers} create="supplier" placeholder="المستفيد (اختياري)" onChange={(v) => set(i, { partyId: v })} className={field} />
+              )}
               {r.payer === "customs_broker" && <ComboBox value={r.partyId} options={brokers} create="customs_broker" allowEmpty={false} placeholder="المخلص" onChange={(v) => set(i, { partyId: v })} className={field} />}
             </div>
+            {r.payer === "unpaid" && (
+              <span className="block text-[11px] text-amber-800">يُعتمد ويُسدد من «سندات صرف تحت المراجعة»، والفاتورة لا تصدر قبل اعتماده.</span>
+            )}
             <input value={r.note} onChange={(e) => set(i, { note: e.target.value })} placeholder="ملاحظة (رقم الإيصال مثلاً)" aria-label="ملاحظة" className={field} />
           </div>
         );

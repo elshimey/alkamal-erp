@@ -84,6 +84,7 @@ export function WaybillEditor({
   taxes,
   chargeTypes,
   brokers,
+  payees,
   cashAccounts,
   company,
   template,
@@ -108,6 +109,8 @@ export function WaybillEditor({
   taxes: TaxOption[];
   chargeTypes: QuickOption[];
   brokers: QuickOption[];
+  /** المستفيد في «لم يُدفع بعد» (الموردون والورش…) */
+  payees?: QuickOption[];
   cashAccounts: QuickOption[];
   company: CompanyProfile;
   template: InvoiceTemplate;
@@ -371,7 +374,7 @@ export function WaybillEditor({
                   ))}
                 </ul>
               )}
-              <CustomerChargesEditor rows={d.charges} onChange={(rows) => set("charges", rows)} chargeTypes={chargeTypes} brokers={brokers} cashAccounts={cashAccounts} fleet={d.execution === "fleet"} tripExpenses={d.tripExpenses} picked={d.billExpenses} onPick={(ids) => set("billExpenses", ids)} />
+              <CustomerChargesEditor rows={d.charges} onChange={(rows) => set("charges", rows)} chargeTypes={chargeTypes} brokers={brokers} payees={payees} cashAccounts={cashAccounts} fleet={d.execution === "fleet"} tripExpenses={d.tripExpenses} picked={d.billExpenses} onPick={(ids) => set("billExpenses", ids)} />
             </PanelSection>
           )}
 

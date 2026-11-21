@@ -22,6 +22,7 @@ import { fmt } from "@/lib/format";
 import { fundingAccounts, invoiceTrips, invoiceWaybillIds } from "@/lib/invoices";
 import { customerPhotos } from "@/lib/attachments";
 import { CashAccountField } from "@/components/cash-account-field";
+import { invoicePendingCharges } from "@/lib/unpaid";
 
 export default async function InvoicePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ print?: string }> }) {
   const user = await requirePermission("sales_invoices", "view");
@@ -79,6 +80,8 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   const paid = Number(i.paidAmount);
   const pay = paymentState(total, paid);
   const canUpdate = draft && can(user.perms, "sales_invoices", "update");
+  // مصاريف على العميل «لم يُدفع بعد» لم تُعتمد: الإصدار ينتظرها
+  const pendingCharges = draft ? await invoicePendingCharges(db, id) : [];
 
   return (
     <>
@@ -112,6 +115,14 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
             </Link>
           </div>
         </PageHeader>
+        {pendingCharges.length > 0 && (
+          <div role="status" className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            في الفاتورة {pendingCharges.length} مصروف على العميل «لم يُدفع بعد» لم يُعتمد ({pendingCharges.map((c) => c.type).join("، ")})، فلا تصدر حتى يُعتمد.{" "}
+            <Link href={`/payments/review?tab=charges&invoice=${id}&back=${encodeURIComponent(`/invoices/${id}`)}`} className="font-semibold underline">
+              اعتمدها من سندات صرف تحت المراجعة
+            </Link>
+          </div>
+        )}
         {!draft && <ZatcaPanel doc={zatcaDoc} connected={!!zatca?.token} blocker={blocker} partyHref={`/records/parties/${i.customerId}`} send={can(user.perms, "sales_invoices", "approve") ? sendToZatca.bind(null, id) : undefined} />}
       </div>
 

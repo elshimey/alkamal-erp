@@ -3,7 +3,7 @@ import { headers } from "next/headers";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
-import { toTripExpense, tripExpensesForBilling } from "@/lib/purchases";
+import { supplierOptions, toTripExpense, tripExpensesForBilling } from "@/lib/purchases";
 import { requirePermission } from "@/lib/auth";
 import { can, hasSpecial, scopeFor } from "@/lib/permissions";
 import { accountOptions, chargeTypeOptions, cityNames, contactCards, customerOptions, driverOptions, locationOptions, partyOptions, shipperSuggestions, vehicleOptions } from "@/lib/lookups";
@@ -123,7 +123,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
   ]);
   const cashOpts = canUpdate ? await fundingAccounts(db) : [];
   const pendingRequests = canCreate ? await pendingTripRequestsCount(db) : 0;
-  const cashField = <CashAccountField options={cashOpts} />;
+  const cashField = <CashAccountField options={cashOpts} deferrable />;
   const transportOpen = !!transportDoc && transportDoc.w.status !== "rejected";
   const editing = !!editRow && EDITABLE.includes(editRow.status);
   const needOptions = view === "sheet" || creating || editing || bulkAdding;
@@ -135,7 +135,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
     editing && editRow ? waybillComponents(db, editRow.id) : Promise.resolve([]),
   ]);
   // مصاريف على العميل من نافذة الشحنة نفسها
-  const [chargeTypes, brokers, chargeCash, savedCharges, tripExpenses] = await Promise.all([
+  const [chargeTypes, brokers, chargeCash, savedCharges, tripExpenses, payees] = await Promise.all([
     creating || editing || bulkAdding ? chargeTypeOptions() : Promise.resolve([]),
     creating || editing || bulkAdding ? partyOptions("customs_broker") : Promise.resolve([]),
     // «دفعه: الشركة» من أي حساب في الشجرة (الصناديق والبنوك أولاً في البحث)
@@ -150,6 +150,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
           .orderBy(s.waybillExpenses.id)
       : Promise.resolve([]),
     editing && editRow ? tripExpensesForBilling(db, [editRow.id]) : Promise.resolve([]),
+    creating || editing ? supplierOptions(db) : Promise.resolve([]),
   ]);
   const [customers, routeRows, locs, vehicles, trailers, drivers, carriers, shippers] = needOptions
     ? await Promise.all([
@@ -832,6 +833,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
           taxes={taxes}
           chargeTypes={chargeTypes}
           brokers={brokers}
+          payees={payees}
           cashAccounts={chargeCash}
           company={company}
           template={template}
