@@ -9,6 +9,8 @@ import { can } from "@/lib/permissions";
 import { customLabels } from "@/lib/custom-lists";
 import { Badge, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
 import { ListActions } from "@/components/list-actions";
+import { DocCards, sheetBtn, sheetPrimary } from "@/components/doc-card";
+import { Facts, RecordCardFace, TapCard } from "@/components/list-card";
 import { VehiclePanel } from "./vehicle-panel";
 
 const STATUS = {
@@ -55,8 +57,43 @@ export default async function VehiclesPage({ searchParams }: { searchParams: Pro
           />
         )}
       </PageHeader>
-      {rows.length > 0 && canEdit && <p className="mb-2 text-sm text-gray-500">اضغط اللوحة لتعديل بيانات المركبة ووثائقها.</p>}
+      {rows.length > 0 && canEdit && <p className="mb-2 text-sm max-md:hidden text-gray-500">اضغط اللوحة لتعديل بيانات المركبة ووثائقها.</p>}
+      <DocCards empty="لا توجد مركبات بعد">
+        {rows.map(({ v, typeName, ccCode, accCode, accName }) => {
+          const trailer = v.assetKind === "trailer" || !!v.assetClassId;
+          const status = { label: custom(v.statusClassId) ?? STATUS[v.status].label, tone: STATUS[v.status].tone };
+          const sub = [trailer ? (custom(v.assetClassId) ?? "مقطورة") : typeName, [v.make, v.model, v.year].filter(Boolean).join(" ")].filter(Boolean).join(" · ");
+          const facts: [string, React.ReactNode][] = [
+            ["العداد", <span key="o" className="ltr-nums">{v.odometer.toLocaleString("en")} كم</span>],
+            ["الملكية", custom(v.ownershipClassId) ?? (v.ownership === "owned" ? "مملوكة" : "مستأجرة")],
+          ];
+          const docs = `/fleet-documents/owner/${v.assetKind === "trailer" ? "trailer" : "vehicle"}-${v.id}`;
+          return (
+            <TapCard
+              key={v.id}
+              tone={status.tone}
+              label={`المركبة ${v.plate}`}
+              face={<RecordCardFace avatar={trailer ? "▭" : "🚛"} name={v.plate} sub={sub} status={status} facts={facts} />}
+              header={<RecordCardFace avatar={trailer ? "▭" : "🚛"} name={v.plate} sub={sub} status={status} />}
+              details={<Facts items={[...facts, ["حساب الأصل", accCode ? `${accCode} ${accName}` : "غير مربوطة"], ["مركز التكلفة", ccCode]]} />}
+              footer={
+                <>
+                  {canEdit && (
+                    <Link href={`/vehicles?edit=${v.id}`} scroll={false} className={sheetPrimary}>
+                      تعديل البيانات
+                    </Link>
+                  )}
+                  <Link href={docs} className={`${sheetBtn} col-span-2`}>
+                    الوثائق
+                  </Link>
+                </>
+              }
+            />
+          );
+        })}
+      </DocCards>
       {(
+      <div className="max-md:hidden">
       <Table head={["اللوحة", "الفئة", "الماركة والطراز", "السنة", "العداد", "الملكية", "الحالة", "حساب الأصل", "مركز التكلفة", ""]}>
         {rows.length === 0 && <EmptyRow cols={10}>لا توجد مركبات بعد</EmptyRow>}
         {rows.map(({ v, typeName, ccCode, accCode, accName }) => (
@@ -90,6 +127,7 @@ export default async function VehiclesPage({ searchParams }: { searchParams: Pro
           </tr>
         ))}
       </Table>
+      </div>
       )}
       {panel}
     </>

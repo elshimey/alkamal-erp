@@ -20,7 +20,9 @@ import { DocToolbar } from "@/components/doc-toolbar";
 import { Icon } from "@/components/icons";
 import { AddModeBar, ListActions } from "@/components/list-actions";
 import { ViolationDocument } from "@/components/violation-document";
-import { fmt } from "@/lib/format";
+import { fmt, fmtDate } from "@/lib/format";
+import { DocCards, Plate, sheetBtn } from "@/components/doc-card";
+import { DocCardFace, Facts, SheetActions, TapCard } from "@/components/list-card";
 import { listAttachments } from "@/lib/attachments";
 import { ViolationPanel } from "./violation-panel";
 
@@ -60,6 +62,24 @@ export default async function ViolationsPage({ searchParams }: { searchParams: P
   const [photo] = openId ? await listAttachments(db, "traffic_violations", [openId]) : [];
   const canPay = can(user.perms, "violations", "approve");
   const unpaid = list.filter((x) => x.v.status === "posted");
+
+  type Row = (typeof list)[number];
+  const rowActions = ({ v, run, runStatus }: Pick<Row, "v" | "run" | "runStatus">) => (
+    <>
+                {v.status === "paid" && can(user.perms, "violations", "revert") && (
+                  <ActionForm action={revertPayment.bind(null, v.id)} resetOnSuccess={false}>
+                    <SubmitButton variant="secondary" className="whitespace-nowrap">إلغاء السداد</SubmitButton>
+                  </ActionForm>
+                )}
+                {v.status === "posted" && (!run || runStatus === "draft") && can(user.perms, "violations", "delete") && (
+                  <ActionForm action={remove.bind(null, v.id)} resetOnSuccess={false}>
+                    <SubmitButton variant="secondary">حذف</SubmitButton>
+                  </ActionForm>
+                )}
+    </>
+  );
+  const deduction = ({ v, run, runStatus }: Row) =>
+    v.chargeTo === "company" ? "—" : run ? `${runStatus === "draft" ? "في مسودة" : "خُصمت في"} ${run}` : "بانتظار المسير";
 
   return (
     <>
@@ -208,6 +228,72 @@ export default async function ViolationsPage({ searchParams }: { searchParams: P
         </Card>
       )}
 
+      <DocCards empty="لا توجد مخالفات">
+        {list.map((row) => {
+          const { v, plate, driver, entry } = row;
+          const st = v.status === "paid" ? { label: "مسددة", tone: "green" as const } : { label: "غير مسددة", tone: "red" as const };
+          const on = v.chargeTo === "driver" ? `على السائق${driver ? `: ${driver}` : ""}` : "على الشركة";
+          return (
+            <TapCard
+              key={v.id}
+              tone={st.tone}
+              label={`المخالفة ${v.number}`}
+              face={
+                <>
+                  <DocCardFace
+                    number={
+                      canPay && v.status === "posted" ? (
+                        <span className="inline-flex items-center gap-2">
+                          <RowCheck form={PAY_FORM} id={v.id} amount={v.amount} />
+                          {v.number}
+                        </span>
+                      ) : (
+                        v.number
+                      )
+                    }
+                    status={st}
+                    date={fmtDate(v.violationDate)}
+                    party={v.violationType}
+                    meta={
+                      <>
+                        {plate && <Plate>{plate}</Plate>}
+                        <span>{on}</span>
+                      </>
+                    }
+                    amount={fmt(v.amount)}
+                    next={v.status === "posted" && canPay ? "حدّدها للسداد" : null}
+                  />
+                </>
+              }
+              header={<DocCardFace number={v.number} status={st} party={v.violationType} />}
+              details={
+                <Facts
+                  items={[
+                    ["التاريخ", fmtDate(v.violationDate)],
+                    ["المبلغ", <span key="a" className="ltr-nums font-semibold">{fmt(v.amount)}</span>],
+                    ["المركبة", plate ?? "—"],
+                    ["على", on],
+                    ["الخصم من الراتب", deduction(row)],
+                    ["المرجع", v.reference ? <span key="r" className="ltr-nums">{v.reference}</span> : "—"],
+                    ...(v.location ? ([["المكان", v.location]] as [string, React.ReactNode][]) : []),
+                    ...(v.paymentDate ? ([["تاريخ السداد", fmtDate(v.paymentDate)]] as [string, React.ReactNode][]) : []),
+                    ...(entry ? ([["القيد", <span key="e" className="ltr-nums">{entry}</span>]] as [string, React.ReactNode][]) : []),
+                  ]}
+                />
+              }
+              footer={
+                <>
+                  <Link href={listHref(BASE, sp, { open: String(v.id) })} className={`${sheetBtn} col-span-2`}>
+                    عرض المستند
+                  </Link>
+                  <SheetActions>{rowActions(row)}</SheetActions>
+                </>
+              }
+            />
+          );
+        })}
+      </DocCards>
+      <div className="max-md:hidden">
       <Table head={[canPay && unpaid.length ? <SelectAll key="all" form={PAY_FORM} /> : "", "الرقم", "التاريخ", "المركبة", "المخالفة", "على", "المبلغ", "الخصم من الراتب", "الحالة", ""]}>
         {list.length === 0 && <EmptyRow cols={10}>لا توجد مخالفات</EmptyRow>}
         <LimitRow cols={10} shown={list.length} limit={300} />
@@ -253,22 +339,12 @@ export default async function ViolationsPage({ searchParams }: { searchParams: P
               {entry && <div className="ltr-nums text-[11px] whitespace-nowrap text-gray-400">{entry}</div>}
             </Td>
             <Td>
-              <div className="flex flex-wrap gap-2">
-                {v.status === "paid" && can(user.perms, "violations", "revert") && (
-                  <ActionForm action={revertPayment.bind(null, v.id)} resetOnSuccess={false}>
-                    <SubmitButton variant="secondary" className="whitespace-nowrap">إلغاء السداد</SubmitButton>
-                  </ActionForm>
-                )}
-                {v.status === "posted" && (!run || runStatus === "draft") && can(user.perms, "violations", "delete") && (
-                  <ActionForm action={remove.bind(null, v.id)} resetOnSuccess={false}>
-                    <SubmitButton variant="secondary">حذف</SubmitButton>
-                  </ActionForm>
-                )}
-              </div>
+              <div className="flex flex-wrap gap-2">{rowActions({ v, run, runStatus })}</div>
             </Td>
           </tr>
         ))}
       </Table>
+      </div>
         </>
       )}
       {creating && <ViolationPanel closeHref={listHref(BASE, { ...sp, new: undefined } as DocListParams, {})} />}

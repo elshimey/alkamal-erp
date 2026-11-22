@@ -21,6 +21,9 @@ import { bulkCustody, closeCustodyAction, custodyStep, deliverCustodyAction, sav
 import { EntryPanel, fmt, HrTabs, Kpis, YES_NO } from "../ui";
 import { AccountField } from "@/components/account-field";
 import { toAccountOptions } from "@/lib/lookups";
+import { fmtDate } from "@/lib/format";
+import { DocCards, sheetBtn, sheetPrimary } from "@/components/doc-card";
+import { DocCardFace, Facts, TapCard } from "@/components/list-card";
 
 const BASE = "/hr/custody";
 const BULK_FORM = "bulk-custody";
@@ -221,6 +224,72 @@ export default async function CustodyPage({ searchParams }: { searchParams: Prom
         </ActionForm>
       )}
 
+      <DocCards empty={filter.q || filter.status || filter.kind || filter.employeeId ? "لا توجد عهد بهذه الشروط" : "لا توجد عهد بعد"}>
+        {list.map(({ c, employee, isDriver }) => {
+          const st = CUSTODY_STATUS[c.status];
+          const href = listHref(BASE, sp, { open: String(c.id) });
+          const next = !canApprove ? null : c.status === "draft" ? "اعتمدها" : c.status === "approved" ? "سلّمها" : c.status === "delivered" ? "أغلقها عند الإرجاع" : null;
+          return (
+            <TapCard
+              key={c.id}
+              tone={st.tone}
+              label={`العهدة ${c.number}`}
+              face={
+                <DocCardFace
+                  number={
+                    canApprove && (c.status === "draft" || c.status === "approved") ? (
+                      <span className="inline-flex items-center gap-2">
+                        <RowCheck form={BULK_FORM} id={c.id} amount={c.amount} />
+                        {c.number}
+                      </span>
+                    ) : (
+                      c.number
+                    )
+                  }
+                  status={st}
+                  date={fmtDate(c.docDate)}
+                  party={employee}
+                  meta={
+                    <>
+                      <span>{CUSTODY_KIND[c.kind]}</span>
+                      <span className="truncate">{c.description}</span>
+                      {c.isOpening && <span>افتتاحية</span>}
+                    </>
+                  }
+                  amount={Number(c.amount) ? fmt(c.amount) : null}
+                  next={next}
+                />
+              }
+              header={<DocCardFace number={c.number} status={st} party={employee} />}
+              details={
+                <Facts
+                  items={[
+                    ["التاريخ", fmtDate(c.docDate)],
+                    ["الموظف", `${employee} (${isDriver ? "سائق" : "إداري"})`],
+                    ["النوع", CUSTODY_KIND[c.kind]],
+                    ["المبلغ / القيمة", <span key="a" className="ltr-nums font-semibold">{Number(c.amount) ? fmt(c.amount) : "—"}</span>],
+                    ["الوصف", c.description],
+                    ["الكمية", <span key="q" className="ltr-nums">{Number(c.quantity)}</span>],
+                    ...(c.serialNo ? ([["الرقم التسلسلي", <span key="s" className="ltr-nums">{c.serialNo}</span>]] as [string, React.ReactNode][]) : []),
+                    ...(c.closeDate ? ([["تاريخ الإغلاق", fmtDate(c.closeDate)]] as [string, React.ReactNode][]) : []),
+                  ]}
+                />
+              }
+              footer={
+                <>
+                  <Link href={href} className={sheetPrimary}>
+                    {next ?? "عرض المستند"}
+                  </Link>
+                  <Link href={`/print/custody?ids=${c.id}`} target="_blank" className={sheetBtn}>
+                    طباعة الإقرار
+                  </Link>
+                </>
+              }
+            />
+          );
+        })}
+      </DocCards>
+      <div className="max-md:hidden">
       <Table head={[selectable.length ? <SelectAll key="all" form={BULK_FORM} /> : "", "الرقم", "التاريخ", "الموظف", "العهدة", "النوع", "المبلغ / القيمة", "الحالة", ""]}>
         {list.length === 0 && <EmptyRow cols={9}>{filter.q || filter.status || filter.kind || filter.employeeId ? "لا توجد عهد بهذه الشروط" : "لا توجد عهد بعد"}</EmptyRow>}
         {list.map(({ c, employee, isDriver }) => {
@@ -263,6 +332,7 @@ export default async function CustodyPage({ searchParams }: { searchParams: Prom
           );
         })}
       </Table>
+      </div>
     </>
   );
 }

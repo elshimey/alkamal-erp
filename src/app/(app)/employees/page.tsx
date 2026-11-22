@@ -15,6 +15,9 @@ import { toAccountOptions } from "@/lib/lookups";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { AccountField } from "@/components/account-field";
 import { DialogButton } from "@/components/dialog-button";
+import { DocCards, sheetBtn, sheetPrimary } from "@/components/doc-card";
+import { Facts, RecordCardFace, TapCard } from "@/components/list-card";
+import { fmtDate } from "@/lib/format";
 
 const fmt = (v: string | number) => Number(v).toLocaleString("en", { maximumFractionDigits: 2 });
 const STATUS = { active: { label: "على رأس العمل", tone: "green" }, on_leave: { label: "إجازة", tone: "amber" }, terminated: { label: "منتهية خدمته", tone: "gray" } } as const;
@@ -72,6 +75,62 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
         )}
       </div>
       {!adding && (
+      <DocCards empty="لا يوجد موظفون بعد">
+        {rows.map(({ e, driverId, account, custody }) => {
+          const total = Number(e.basicSalary) + Number(e.housingAllowance) + Number(e.allowances);
+          const sub = [e.jobTitle ?? (driverId ? "سائق" : null), e.hireDate ? `منذ ${fmtDate(e.hireDate)}` : null].filter(Boolean).join(" · ");
+          const facts: [string, React.ReactNode][] = [
+            ["الإجمالي", <span key="t" className={`ltr-nums ${total === 0 ? "text-amber-700" : ""}`}>{total === 0 ? "لم يُحدد" : fmt(total)}</span>],
+            ["الأساسي", <span key="b" className="ltr-nums">{fmt(e.basicSalary)}</span>],
+            ["التأمينات", !e.gosiSubject ? "غير مسجل" : e.isSaudi ? "سعودي" : "غير سعودي"],
+            ["الآيبان", e.iban ? <span key="i" className="ltr-nums">{e.iban}</span> : <span key="i" className="text-amber-700">بلا آيبان</span>],
+          ];
+          const head = <RecordCardFace avatar={e.nameAr.slice(0, 1)} name={e.nameAr} sub={sub} status={STATUS[e.status]} />;
+          return (
+            <TapCard
+              key={e.id}
+              tone={STATUS[e.status].tone}
+              label={`الموظف ${e.nameAr}`}
+              face={<RecordCardFace avatar={e.nameAr.slice(0, 1)} name={e.nameAr} sub={sub} status={STATUS[e.status]} facts={facts} />}
+              header={head}
+              details={
+                <Facts
+                  items={[
+                    ...facts,
+                    ["السكن", <span key="h" className="ltr-nums">{fmt(e.housingAllowance)}</span>],
+                    ["بدلات أخرى", <span key="a" className="ltr-nums">{fmt(e.allowances)}</span>],
+                    ["حساب الراتب", <span key="ac" className="ltr-nums">{account}</span>],
+                    ["حساب العهدة", custody ? <span key="cu" className="ltr-nums">{custody}</span> : "—"],
+                  ]}
+                />
+              }
+              footer={
+                <>
+                  <a href={driverId ? `/drivers/${driverId}` : `/records/employees/${e.id}`} className={sheetPrimary}>
+                    تعديل البيانات
+                  </a>
+                  <Link href={driverId ? `/fleet-documents/owner/driver-${driverId}` : `/fleet-documents/owner/employee-${e.id}`} className={sheetBtn}>
+                    الوثائق
+                  </Link>
+                  {!driverId && !custody && canLink && e.status !== "terminated" ? (
+                    <DialogButton label="حساب العهدة" title={`حساب عهدة ${e.nameAr}`} className={sheetBtn}>
+                      <ActionForm action={linkCustody.bind(null, e.id)} className="flex flex-col gap-3 text-sm">
+                        <AccountField name="accountId" options={freeCustody} scope="1105" placeholder="فتح حساب جديد باسمه" />
+                        <SubmitButton>ربط الحساب</SubmitButton>
+                      </ActionForm>
+                    </DialogButton>
+                  ) : (
+                    <span />
+                  )}
+                </>
+              }
+            />
+          );
+        })}
+      </DocCards>
+      )}
+      {!adding && (
+      <div className="max-md:hidden">
       <Table head={["الموظف", "الوظيفة", "التعيين", "الأساسي", "السكن", "بدلات أخرى", "الإجمالي", "التأمينات", "الآيبان", "الحالة"]}>
         {rows.length === 0 && <EmptyRow cols={10}>لا يوجد موظفون بعد</EmptyRow>}
         {rows.map(({ e, driverId, account, custody }) => {
@@ -118,6 +177,7 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
           );
         })}
       </Table>
+      </div>
       )}
     </>
   );

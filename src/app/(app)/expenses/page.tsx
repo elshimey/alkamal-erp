@@ -17,7 +17,9 @@ import { AddModeBar, ListActions } from "@/components/list-actions";
 import { Badge, Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { DialogButton } from "@/components/dialog-button";
 import { approve, approveMany, approveReviewed, reject, remove, revert, saveExpenses } from "./actions";
-import { fmt } from "@/lib/format";
+import { fmt, fmtDate } from "@/lib/format";
+import { DocCards, Plate } from "@/components/doc-card";
+import { DocCardFace, Facts, SheetActions, TapCard } from "@/components/list-card";
 import { ExpensePanel } from "./expense-panel";
 import { AccountField } from "@/components/account-field";
 import { toAccountOptions } from "@/lib/lookups";
@@ -79,6 +81,83 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
   // مصروف قال السائق إن الشركة دفعته لا يُعتمد جماعياً؛ يحدد المعتمد صندوقه أولاً
   const pending = list.filter((x) => x.e.status === "pending" && !(x.e.payer === "driver_custody" && x.e.reportedPayer === "company")).map((x) => x.e.id);
   const canApprove = can(user.perms, "expenses", "approve");
+
+  type Row = (typeof list)[number];
+  const rowActions = ({ e, driver, waybill }: Pick<Row, "e" | "driver" | "waybill">) => (
+    <>
+                {e.status === "pending" && canApprove && (
+                  <>
+                    {e.driverKind ? (
+                      <DialogButton label="مراجعة واعتماد" title={`اعتماد مصروف السائق ${e.number}`} className="!border-brand-600 !bg-brand-50 font-semibold !text-brand-900">
+                        <ActionForm action={approveReviewed.bind(null, e.id)} resetOnSuccess={false} className="flex flex-col gap-3 text-sm">
+                          <p className="rounded-lg bg-gray-50 px-3 py-2">
+                            {e.description} · المبلغ الإجمالي <b className="ltr-nums">{fmt(Number(e.amount) + Number(e.vatAmount))}</b>
+                            <br />
+                            قال السائق: <b>{e.reportedPayer === "company" ? "دفعت الشركة" : "من عهدتي"}</b>
+                            {photos.has(e.id) && (
+                              <a href={`/files/${photos.get(e.id)}`} target="_blank" rel="noreferrer" className="ms-2 font-medium text-brand-700 hover:underline">
+                                📷 عرض الإيصال
+                              </a>
+                            )}
+                          </p>
+                          <Field label="من دفع فعلاً">
+                            <Select name="payer" defaultValue={e.reportedPayer === "company" ? "cash" : "driver_custody"}>
+                              <option value="driver_custody">عهدة السائق {driver ?? ""} (يُخصم من عهدته)</option>
+                              <option value="cash">الشركة: صندوق أو بنك أو عهدة موظف (لا يُخصم من عهدة السائق)</option>
+                            </Select>
+                          </Field>
+                          <Field label="الصندوق أو البنك أو عهدة الموظف (إن دفعت الشركة)">
+                            <AccountField name="cashAccountId" options={cashOpts} placeholder="—" />
+                          </Field>
+                          <Field label="حساب المصروف">
+                            <AccountField name="accountId" options={accounts} defaultValue={e.accountId} required />
+                          </Field>
+                          {waybill && (
+                            <label className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                              <input type="checkbox" name="billToCustomer" value="1" defaultChecked={e.billToCustomer} className="mt-0.5 accent-brand-600" />
+                              <span>
+                                <b>يُحمَّل على العميل</b> ويظهر سطراً في فاتورة الشحنة {waybill}
+                                <span className="block text-xs text-gray-600">يُقيد على «مصاريف مستردة من العملاء» 1114 بدل مصروف المركبة، ويُقفل عند الفوترة.</span>
+                              </span>
+                            </label>
+                          )}
+                          <div className="grid grid-cols-2 gap-3">
+                            <Field label="الضريبة ضمن المبلغ">
+                              <Input name="vat" inputMode="decimal" dir="ltr" defaultValue={Number(e.vatAmount) ? String(e.vatAmount) : ""} placeholder="0" />
+                            </Field>
+                            <Field label="المورد (اختياري)">
+                              <Input name="vendor" defaultValue={e.vendorName ?? ""} />
+                            </Field>
+                          </div>
+                          <p className="text-xs text-gray-500">الضريبة تُفصل من المبلغ الإجمالي لاسترداد ضريبة المدخلات (15% من المبلغ قبلها = الإجمالي × 15 ÷ 115).</p>
+                          <SubmitButton>اعتماد وترحيل القيد</SubmitButton>
+                        </ActionForm>
+                      </DialogButton>
+                    ) : (
+                      <ActionForm action={approve.bind(null, e.id)} resetOnSuccess={false}>
+                        <SubmitButton variant="secondary">اعتماد</SubmitButton>
+                      </ActionForm>
+                    )}
+                    <ActionForm action={reject.bind(null, e.id)} className="flex gap-1">
+                      <Input name="reason" placeholder="سبب الرفض" className="w-28" />
+                      <SubmitButton variant="secondary">رفض</SubmitButton>
+                    </ActionForm>
+                  </>
+                )}
+                {(e.status === "approved" || e.status === "rejected") && can(user.perms, "expenses", "revert") && (
+                  <ActionForm action={revert.bind(null, e.id)} resetOnSuccess={false}>
+                    <SubmitButton variant="secondary">إرجاع</SubmitButton>
+                  </ActionForm>
+                )}
+                {e.status !== "approved" && !e.driverKind && can(user.perms, "expenses", "delete") && (
+                  <ActionForm action={remove.bind(null, e.id)} resetOnSuccess={false}>
+                    <SubmitButton variant="secondary">حذف</SubmitButton>
+                  </ActionForm>
+                )}
+    </>
+  );
+  const payerText = ({ e, driver, cash: box }: Row) =>
+    e.payer === "driver_custody" ? `عهدة ${driver ?? ""}` : e.payer === "unpaid" ? (e.paymentId ? "سُدد بسند صرف" : "لم يُدفع بعد") : box;
 
   return (
     <>
@@ -166,6 +245,65 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
         )}
       </div>
 
+      <DocCards empty="لا توجد مصروفات">
+        {list.map((row) => {
+          const { e, account, code, plate, driver, waybill, entry, maintenance } = row;
+          const st = EXPENSE_STATUS[e.status];
+          const party = e.billToCustomer ? `${account} (على العميل)` : account;
+          return (
+            <TapCard
+              key={e.id}
+              tone={st.tone}
+              label={`المصروف ${e.number}`}
+              face={
+                <DocCardFace
+                  number={e.number}
+                  status={st}
+                  date={fmtDate(e.expenseDate)}
+                  party={party}
+                  meta={
+                    <>
+                      {plate && <Plate>{plate}</Plate>}
+                      {payerText(row) && <span>{payerText(row)}</span>}
+                      {waybill && <span className="ltr-nums">{waybill}</span>}
+                      {e.driverKind && <span className="text-sky-700">📱 من التطبيق</span>}
+                    </>
+                  }
+                  amount={fmt(e.amount)}
+                  next={e.status === "pending" && canApprove ? "ينتظر اعتمادك" : null}
+                />
+              }
+              header={<DocCardFace number={e.number} status={st} party={party} />}
+              details={
+                <>
+                  <Facts
+                    items={[
+                      ["التاريخ", fmtDate(e.expenseDate)],
+                      ["المبلغ", <span key="a" className="ltr-nums font-semibold">{fmt(e.amount)}</span>],
+                      ["الحساب", <span key="c"><span className="ltr-nums text-gray-500">{code}</span> {account}</span>],
+                      ["الضريبة", Number(e.vatAmount) ? fmt(e.vatAmount) : "—"],
+                      ["المركبة", plate ?? "—"],
+                      ["السائق", driver ?? "—"],
+                      ["الدافع", payerText(row) ?? "—"],
+                      ["البيان", e.description || "—"],
+                      ...(maintenance ? ([["نوع الصيانة", maintenance]] as [string, React.ReactNode][]) : []),
+                      ...(entry ? ([["القيد", <span key="en" className="ltr-nums">{entry}</span>]] as [string, React.ReactNode][]) : []),
+                    ]}
+                  />
+                  {e.rejectReason && <p className="mt-2 text-xs text-red-600">سبب الرفض: {e.rejectReason}</p>}
+                  {photos.has(e.id) && (
+                    <a href={`/files/${photos.get(e.id)}`} target="_blank" rel="noreferrer" className="mt-3 inline-block text-sm font-medium text-brand-700 underline">
+                      📷 عرض الإيصال
+                    </a>
+                  )}
+                </>
+              }
+              footer={<SheetActions>{rowActions(row)}</SheetActions>}
+            />
+          );
+        })}
+      </DocCards>
+      <div className="max-md:hidden">
       <Table head={["الرقم", "التاريخ", "النوع", "البيان", "المركبة", "الدافع", "المبلغ", "الضريبة", "الحالة", ""]}>
         {list.length === 0 && <EmptyRow cols={10}>لا توجد مصروفات</EmptyRow>}
         {list.map(({ e, account, code, plate, driver, cash: box, waybill, entry, maintenance }) => (
@@ -204,81 +342,12 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
               {entry && <div className="ltr-nums text-[11px] text-gray-400">{entry}</div>}
             </Td>
             <Td>
-              <div className="flex flex-wrap gap-2">
-                {e.status === "pending" && canApprove && (
-                  <>
-                    {e.driverKind ? (
-                      <DialogButton label="مراجعة واعتماد" title={`اعتماد مصروف السائق ${e.number}`} className="!border-brand-600 !bg-brand-50 font-semibold !text-brand-900">
-                        <ActionForm action={approveReviewed.bind(null, e.id)} resetOnSuccess={false} className="flex flex-col gap-3 text-sm">
-                          <p className="rounded-lg bg-gray-50 px-3 py-2">
-                            {e.description} · المبلغ الإجمالي <b className="ltr-nums">{fmt(Number(e.amount) + Number(e.vatAmount))}</b>
-                            <br />
-                            قال السائق: <b>{e.reportedPayer === "company" ? "دفعت الشركة" : "من عهدتي"}</b>
-                            {photos.has(e.id) && (
-                              <a href={`/files/${photos.get(e.id)}`} target="_blank" rel="noreferrer" className="ms-2 font-medium text-brand-700 hover:underline">
-                                📷 عرض الإيصال
-                              </a>
-                            )}
-                          </p>
-                          <Field label="من دفع فعلاً">
-                            <Select name="payer" defaultValue={e.reportedPayer === "company" ? "cash" : "driver_custody"}>
-                              <option value="driver_custody">عهدة السائق {driver ?? ""} (يُخصم من عهدته)</option>
-                              <option value="cash">الشركة: صندوق أو بنك أو عهدة موظف (لا يُخصم من عهدة السائق)</option>
-                            </Select>
-                          </Field>
-                          <Field label="الصندوق أو البنك أو عهدة الموظف (إن دفعت الشركة)">
-                            <AccountField name="cashAccountId" options={cashOpts} placeholder="—" />
-                          </Field>
-                          <Field label="حساب المصروف">
-                            <AccountField name="accountId" options={accounts} defaultValue={e.accountId} required />
-                          </Field>
-                          {waybill && (
-                            <label className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-                              <input type="checkbox" name="billToCustomer" value="1" defaultChecked={e.billToCustomer} className="mt-0.5 accent-brand-600" />
-                              <span>
-                                <b>يُحمَّل على العميل</b> ويظهر سطراً في فاتورة الشحنة {waybill}
-                                <span className="block text-xs text-gray-600">يُقيد على «مصاريف مستردة من العملاء» 1114 بدل مصروف المركبة، ويُقفل عند الفوترة.</span>
-                              </span>
-                            </label>
-                          )}
-                          <div className="grid grid-cols-2 gap-3">
-                            <Field label="الضريبة ضمن المبلغ">
-                              <Input name="vat" inputMode="decimal" dir="ltr" defaultValue={Number(e.vatAmount) ? String(e.vatAmount) : ""} placeholder="0" />
-                            </Field>
-                            <Field label="المورد (اختياري)">
-                              <Input name="vendor" defaultValue={e.vendorName ?? ""} />
-                            </Field>
-                          </div>
-                          <p className="text-xs text-gray-500">الضريبة تُفصل من المبلغ الإجمالي لاسترداد ضريبة المدخلات (15% من المبلغ قبلها = الإجمالي × 15 ÷ 115).</p>
-                          <SubmitButton>اعتماد وترحيل القيد</SubmitButton>
-                        </ActionForm>
-                      </DialogButton>
-                    ) : (
-                      <ActionForm action={approve.bind(null, e.id)} resetOnSuccess={false}>
-                        <SubmitButton variant="secondary">اعتماد</SubmitButton>
-                      </ActionForm>
-                    )}
-                    <ActionForm action={reject.bind(null, e.id)} className="flex gap-1">
-                      <Input name="reason" placeholder="سبب الرفض" className="w-28" />
-                      <SubmitButton variant="secondary">رفض</SubmitButton>
-                    </ActionForm>
-                  </>
-                )}
-                {(e.status === "approved" || e.status === "rejected") && can(user.perms, "expenses", "revert") && (
-                  <ActionForm action={revert.bind(null, e.id)} resetOnSuccess={false}>
-                    <SubmitButton variant="secondary">إرجاع</SubmitButton>
-                  </ActionForm>
-                )}
-                {e.status !== "approved" && !e.driverKind && can(user.perms, "expenses", "delete") && (
-                  <ActionForm action={remove.bind(null, e.id)} resetOnSuccess={false}>
-                    <SubmitButton variant="secondary">حذف</SubmitButton>
-                  </ActionForm>
-                )}
-              </div>
+              <div className="flex flex-wrap gap-2">{rowActions({ e, driver, waybill })}</div>
             </Td>
           </tr>
         ))}
       </Table>
+      </div>
         </>
       )}
       {creating && <ExpensePanel closeHref={status ? `/expenses?status=${status}` : "/expenses"} canApprove={canApprove} />}

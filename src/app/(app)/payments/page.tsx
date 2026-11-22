@@ -16,7 +16,9 @@ import { SheetEditor } from "@/components/sheet-editor";
 import { AddModeBar, ListActions } from "@/components/list-actions";
 import { Badge, Card, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
 import { post, remove, revert, savePayments } from "./actions";
-import { fmt } from "@/lib/format";
+import { fmt, fmtDate } from "@/lib/format";
+import { DocCards } from "@/components/doc-card";
+import { DocCardFace, Facts, SheetActions, TapCard } from "@/components/list-card";
 import { toAccountOptions } from "@/lib/lookups";
 
 export default async function PaymentsPage({ searchParams }: { searchParams: Promise<{ add?: string }> }) {
@@ -53,6 +55,27 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
       .orderBy(desc(s.payments.paymentDate), desc(s.payments.id))
       .limit(300),
   ]);
+
+  const rowActions = (p: (typeof list)[number]["p"]) => (
+    <>
+                {p.status === "draft" && can(user.perms, "payments", "approve") && (
+                  <ActionForm action={post.bind(null, p.id)} resetOnSuccess={false}>
+                    <SubmitButton variant="secondary">ترحيل</SubmitButton>
+                  </ActionForm>
+                )}
+                {p.status === "posted" && can(user.perms, "payments", "revert") && (
+                  <ActionForm action={revert.bind(null, p.id)} resetOnSuccess={false}>
+                    <SubmitButton variant="secondary">إرجاع</SubmitButton>
+                  </ActionForm>
+                )}
+                {p.status === "draft" && can(user.perms, "payments", "delete") && (
+                  <ActionForm action={remove.bind(null, p.id)} resetOnSuccess={false}>
+                    <SubmitButton variant="secondary">حذف</SubmitButton>
+                  </ActionForm>
+                )}
+    </>
+  );
+  const next = (p: (typeof list)[number]["p"]) => (p.status === "draft" ? "رحّله" : null);
 
   return (
     <>
@@ -112,6 +135,54 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
       </div>
 
       {!adding && (
+      <DocCards empty="لا توجد سندات صرف بعد">
+        {list.map(({ p, party, driver, cash: box, entry, invoices }) => {
+          const st = RECEIPT_STATUS[p.status];
+          const face = (
+            <DocCardFace
+              number={p.number}
+              status={st}
+              date={fmtDate(p.paymentDate)}
+              party={party ?? driver ?? "—"}
+              meta={
+                <>
+                  <span>{PAYMENT_KINDS[p.kind]}</span>
+                  {box && <span>من: {box}</span>}
+                </>
+              }
+              amount={fmt(p.amount)}
+              currency={p.currencyCode}
+              next={next(p)}
+            />
+          );
+          return (
+            <TapCard
+              key={p.id}
+              tone={st.tone}
+              label={`سند الصرف ${p.number}`}
+              face={face}
+              header={<DocCardFace number={p.number} status={st} party={party ?? driver ?? "—"} />}
+              details={
+                <Facts
+                  items={[
+                    ["التاريخ", fmtDate(p.paymentDate)],
+                    ["المبلغ", <span key="a" className="ltr-nums font-semibold">{fmt(p.amount)} {p.currencyCode}</span>],
+                    ["النوع", PAYMENT_KINDS[p.kind]],
+                    ["الطريقة", PAYMENT_METHODS[p.method]],
+                    ["من", box ?? "—"],
+                    ["المخصص على", invoices || (p.kind === "supplier" ? "رصيد الجهة" : "—")],
+                    ...(entry ? ([["القيد", <span key="e" className="ltr-nums">{entry}</span>]] as [string, React.ReactNode][]) : []),
+                  ]}
+                />
+              }
+              footer={<SheetActions>{rowActions(p)}</SheetActions>}
+            />
+          );
+        })}
+      </DocCards>
+      )}
+      {!adding && (
+      <div className="max-md:hidden">
       <Table head={["الرقم", "التاريخ", "النوع", "إلى", "المبلغ", "الطريقة", "من", "المخصص على", "الحالة", ""]}>
         {list.length === 0 && <EmptyRow cols={10}>لا توجد سندات صرف بعد</EmptyRow>}
         {list.map(({ p, party, driver, cash: box, entry, invoices }) => (
@@ -141,27 +212,12 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
               {entry && <div className="ltr-nums mt-1 text-[11px] text-gray-400">{entry}</div>}
             </Td>
             <Td>
-              <div className="flex gap-2">
-                {p.status === "draft" && can(user.perms, "payments", "approve") && (
-                  <ActionForm action={post.bind(null, p.id)} resetOnSuccess={false}>
-                    <SubmitButton variant="secondary">ترحيل</SubmitButton>
-                  </ActionForm>
-                )}
-                {p.status === "posted" && can(user.perms, "payments", "revert") && (
-                  <ActionForm action={revert.bind(null, p.id)} resetOnSuccess={false}>
-                    <SubmitButton variant="secondary">إرجاع</SubmitButton>
-                  </ActionForm>
-                )}
-                {p.status === "draft" && can(user.perms, "payments", "delete") && (
-                  <ActionForm action={remove.bind(null, p.id)} resetOnSuccess={false}>
-                    <SubmitButton variant="secondary">حذف</SubmitButton>
-                  </ActionForm>
-                )}
-              </div>
+              <div className="flex gap-2">{rowActions(p)}</div>
             </Td>
           </tr>
         ))}
       </Table>
+      </div>
       )}
     </>
   );

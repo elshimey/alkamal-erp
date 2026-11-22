@@ -10,6 +10,9 @@ import { CONTRACT_STATUS } from "@/data/operations";
 import { SheetEditor } from "@/components/sheet-editor";
 import { Badge, Card, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
 import { saveContracts } from "./actions";
+import { fmtDate } from "@/lib/format";
+import { DocCards } from "@/components/doc-card";
+import { cardShell, DocCardFace, STRIPE } from "@/components/list-card";
 
 export default async function ContractsPage({ searchParams }: { searchParams: Promise<{ add?: string }> }) {
   const user = await requirePermission("contracts", "view");
@@ -64,6 +67,33 @@ export default async function ContractsPage({ searchParams }: { searchParams: Pr
         </Card>
       )}
       {!adding && (
+      <>
+      <DocCards empty="لا توجد عقود بعد">
+        {rows.map(({ c, customer, rates }) => {
+          const st = CONTRACT_STATUS[c.status];
+          return (
+            <Link key={c.id} href={`/contracts/${c.id}`} className={`${cardShell} ${STRIPE[st.tone]} active:scale-[0.985]`}>
+              <DocCardFace
+                number={c.number}
+                status={st}
+                party={customer}
+                meta={
+                  <>
+                    <span className="ltr-nums">
+                      {fmtDate(c.fromDate)} ← {fmtDate(c.toDate)}
+                    </span>
+                    <span>{rates} بند تسعير</span>
+                    <span>{c.currencyCode}</span>
+                  </>
+                }
+                amount={showPrices && c.creditLimit ? Number(c.creditLimit).toLocaleString("en") : null}
+                currency="حد ائتماني"
+              />
+            </Link>
+          );
+        })}
+      </DocCards>
+      <div className="max-md:hidden">
       <Table head={["رقم العقد", "العميل", "من", "إلى", "العملة", "الحد الائتماني", "بنود التسعير", "الحالة"]}>
         {rows.length === 0 && <EmptyRow cols={8}>لا توجد عقود بعد</EmptyRow>}
         {rows.map(({ c, customer, rates }) => (
@@ -85,6 +115,8 @@ export default async function ContractsPage({ searchParams }: { searchParams: Pr
           </tr>
         ))}
       </Table>
+      </div>
+      </>
       )}
     </>
   );
