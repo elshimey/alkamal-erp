@@ -21,10 +21,11 @@ const OWN_STAGE = sql.raw(`ts.waybill_id = "waybills"."id" and ts.created_by = (
  * حالة الرحلة كما يراها السائق: من مراحله هو لا من حالة المستند في المكتب.
  * اعتماد المكتب مراجعة قبل الفوترة؛ لا تُغلق الرحلة عند السائق حتى يسجّل التسليم.
  */
-export function driverStatus(status: WaybillStatus, stages: TripStage[]): WaybillStatus {
+export function driverStatus(status: WaybillStatus, stages: TripStage[], deliverOnly = false): WaybillStatus {
   if (status === "rejected") return "rejected";
   if (stages.includes("delivery")) return status === "approved" || status === "invoiced" ? status : "delivered";
-  return stages.length ? "in_transit" : "draft";
+  // رحلة الفاتورة المباشرة تصله «في الطريق» مباشرة
+  return stages.length || deliverOnly ? "in_transit" : "draft";
 }
 
 export interface DriverProfile {
@@ -75,6 +76,7 @@ export async function driverTrips(db: Db | Tx, driverId: number, opts: { open: b
       delivered: sql<boolean>`exists (select 1 from trip_stages ts where ${OWN_STAGE} and ts.stage = 'delivery')`,
       sentToDriverAt: s.waybills.sentToDriverAt,
       driverAcceptedAt: s.waybills.driverAcceptedAt,
+      deliverOnly: s.waybills.deliverOnly,
     })
     .from(s.waybills)
     .innerJoin(s.parties, eq(s.parties.id, s.waybills.customerId))
@@ -100,7 +102,7 @@ export async function driverTrips(db: Db | Tx, driverId: number, opts: { open: b
     .limit(opts.limit ?? 50);
   return rows.map(({ delivered, ...r }) => ({
     ...r,
-    status: driverStatus(r.status, [...(r.lastStage ? [r.lastStage] : []), ...(delivered ? (["delivery"] as TripStage[]) : [])]),
+    status: driverStatus(r.status, [...(r.lastStage ? [r.lastStage] : []), ...(delivered ? (["delivery"] as TripStage[]) : [])], r.deliverOnly),
   }));
 }
 
@@ -131,7 +133,7 @@ export async function tripDetail(db: Db | Tx, driverId: number, waybillId: numbe
   ]);
   const done = stages.map((x) => x.stage);
   return {
-    trip: { ...trip, status: driverStatus(w.status, done), shipper: w.shipper, consignee: w.consignee, containerNumber: w.containerNumber, weightTons: w.weightTons, rejectionReason: w.rejectionReason, sentToDriverAt: w.sentToDriverAt, driverAcceptedAt: w.driverAcceptedAt, logistiNumber: w.logistiNumber, tripCustody: w.tripCustody },
+    trip: { ...trip, status: driverStatus(w.status, done, w.deliverOnly), deliverOnly: w.deliverOnly, shipper: w.shipper, consignee: w.consignee, containerNumber: w.containerNumber, weightTons: w.weightTons, rejectionReason: w.rejectionReason, sentToDriverAt: w.sentToDriverAt, driverAcceptedAt: w.driverAcceptedAt, logistiNumber: w.logistiNumber, tripCustody: w.tripCustody },
     stages,
     fuel,
     expenses,
@@ -168,9 +170,10 @@ async function driverTripsById(db: Db | Tx, waybillId: number) {
  * التحميل يجعل الشحنة «في الطريق» والتسليم يجعلها «مُسلَّمة» تلقائياً.
  * تبقى متاحة مهما غيّر المكتب الحالة، حتى لو اعتمدها (الاعتماد مراجعة لا إغلاق)، إلا إن رُفضت للتصحيح.
  */
-export function nextStages(w: { status: string }, done: TripStage[]): TripStage[] {
+export function nextStages(w: { status: string; deliverOnly?: boolean }, done: TripStage[]): TripStage[] {
   if (w.status === "rejected" || done.includes("delivery")) return [];
-  return done.includes("loading") ? ["delivery"] : ["loading"];
+  // رحلة الفاتورة المباشرة أُرسلت على مرحلة التسليم: زر واحد «تم التسليم»
+  return done.includes("loading") || w.deliverOnly ? ["delivery"] : ["loading"];
 }
 
 /** التراجع عن آخر مرحلة ضغطها السائق بالخطأ. صورها تبقى محفوظة. */

@@ -41,8 +41,9 @@ export async function stageAction(_: FormState, data: FormData): Promise<FormSta
   const stage = str(data, "stage") as TripStage;
   try {
     if (!STAGES.includes(stage)) throw new Error("اختر المرحلة");
-    // التحميل والتسليم يُثبتان بصورة
-    if ((stage === "loading" || stage === "delivery") && !photo(data)) throw new Error(t.x.photoMissing);
+    // التحميل والتسليم يُثبتان بصورة، إلا تسليم رحلة الفاتورة المباشرة (الصورة فيها اختيارية)
+    const deliverOnly = stage === "delivery" && (await ownTrip(db, driver.id, waybillId)).deliverOnly;
+    if ((stage === "loading" || stage === "delivery") && !photo(data) && !deliverOnly) throw new Error(t.x.photoMissing);
     await onceForOp(db, op(data), async () => {
       await recordDriverStage(db, driver.id, waybillId, stage, { odometer: num(data, "odometer"), note: str(data, "note") || null, userId: user.id });
       // صورة إجبارية وثانية اختيارية مع كل مرحلة

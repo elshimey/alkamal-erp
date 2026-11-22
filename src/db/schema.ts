@@ -801,6 +801,8 @@ export const waybills = pgTable(
     // رحلة أنشأتها فاتورة مباشرة: إيرادها في تلك الفاتورة فلا تدخل قائمة «بانتظار الفوترة»
     sourceInvoiceId: ref("source_invoice_id").references((): AnyPgColumn => salesInvoices.id, { onDelete: "set null" }),
     driverAcceptedAt: timestamp("driver_accepted_at", { withTimezone: true }),
+    // رحلة الفاتورة المباشرة تُرسل للسائق «في الطريق»: لا يبقى له إلا «تم التسليم» (الترحيل 0047)
+    deliverOnly: boolean("deliver_only").notNull().default(false),
     status: waybillStatus("status").notNull().default("draft"),
     rejectionReason: text("rejection_reason"),
     // سبب تجاوز الضوابط (بلا عقد ساري، الحد الائتماني) لمن يملك الصلاحية
@@ -1065,6 +1067,8 @@ export const salesInvoiceLines = pgTable(
     details: text("details"),
     // للمصروف المحمّل على العميل: تكلفته بعملة الفاتورة؛ ما يزيد عليها إيراد 4104
     costAmount: money("cost_amount"),
+    // سطر النقل في الفاتورة المباشرة بنافذة الشحنة: سعره من رحلتها (الأساسي والمكونات)، ويُبنى من جديد مع كل حفظ
+    trip: boolean("trip").notNull().default(false),
     // للبند الحر بعد الدمج: رقم الفاتورة التي جاء منها، ليعود إليها عند فك الدمج
     groupKey: integer("group_key"),
   },

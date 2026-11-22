@@ -8,7 +8,9 @@ import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { fundingAccounts, currentTrip, invoicingQueue, listSalesInvoices, salesInvoiceDoc, summarizeSalesInvoices } from "@/lib/invoices";
 import { PAGE_SIZE, pageOf } from "@/lib/paging";
-import { accountOptions, chargeTypeOptions, driverOptions, partyOptions, routeOptions, vehicleOptions } from "@/lib/lookups";
+import { accountOptions, chargeTypeOptions, driverOptions, partyOptions, routeOptions, shipperSuggestions, vehicleOptions } from "@/lib/lookups";
+import { customListOptions } from "@/lib/custom-lists";
+import { joinCustom } from "@/data/custom-lists";
 import { getCompany, getInvoiceTemplate, invoiceReadiness } from "@/lib/company";
 import { invoiceQrSvg } from "@/lib/zatca-qr";
 import { clearedQr, getSettings, latestDocument, sendBlocker } from "@/lib/zatca/service";
@@ -27,11 +29,13 @@ import { ClickRow } from "@/components/click-row";
 import { CashAccountField } from "@/components/cash-account-field";
 import { DriverSentTag } from "@/components/driver-sent";
 import { InvoiceEditor, type InvoiceDraft } from "./invoice-editor";
+import { NO_TRIP } from "./trip-draft";
 import { invoiceActions } from "./invoice-menu";
 import { TaxInvoiceDocument } from "@/components/tax-invoice";
-import { Badge, EmptyRow, Input, Pager, PageHeader, Table, Td } from "@/components/ui";
-import { ListActions } from "@/components/list-actions";
-import { bulkInvoiceOps, invoiceAll, invoiceCustomer, issue, saveInvoicePanel, saveInvoiceSheet, sendToZatca } from "./actions";
+import { Badge, Card, EmptyRow, Input, Pager, PageHeader, Table, Td } from "@/components/ui";
+import { AddModeBar, ListActions } from "@/components/list-actions";
+import { SheetEditor } from "@/components/sheet-editor";
+import { bulkInvoiceOps, invoiceAll, invoiceCustomer, issue, saveInvoicePanel, saveInvoiceRows, saveInvoiceSheet, sendToZatca } from "./actions";
 import { ActionsMenu, type MenuItem } from "@/components/actions-menu";
 import { DocCard, DocCards, SheetFacts, SheetMoney, sheetBtn, sheetPrimary } from "@/components/doc-card";
 import { MobileSheet } from "@/components/mobile-sheet";
@@ -47,10 +51,9 @@ const plusDays = (d: string, n: number) => {
   x.setUTCDate(x.getUTCDate() + n);
   return x.toISOString().slice(0, 10);
 };
-const NO_TRIP: InvoiceDraft["trip"] = { on: false, routeId: "", vehicleId: "", driverId: "", shipper: "", consignee: "", custody: "" };
 const STATUSES = { draft: INVOICE_STATUS.draft.label, issued: INVOICE_STATUS.issued.label };
 
-export default async function InvoicesPage({ searchParams }: { searchParams: Promise<DocListParams & { new?: string; edit?: string }> }) {
+export default async function InvoicesPage({ searchParams }: { searchParams: Promise<DocListParams & { new?: string; edit?: string; add?: string }> }) {
   const user = await requirePermission("sales_invoices", "view");
   const sp = await searchParams;
   const canCreate = can(user.perms, "sales_invoices", "create");
@@ -86,10 +89,12 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
   // نافذة الإنشاء والتعديل
   const editId = canUpdate ? Number(sp.edit) || null : null;
   const creating = canCreate && sp.new === "1";
+  // إدخال عدة فواتير مباشرة بنقلها من شيت واحد (مثل «إدخال عدة شحنات»)
+  const bulkAdding = canCreate && sp.add === "1";
   const editDoc = editId ? await salesInvoiceDoc(db, editId) : null;
   const editing = !!editDoc && editDoc.i.status === "draft";
   const [customers, revenue, centers, currencies] =
-    creating || editing
+    creating || editing || bulkAdding
       ? await Promise.all([
           db
             .selectDistinct({ id: s.parties.id, nameAr: s.parties.nameAr, vat: s.parties.vatNumber })
@@ -106,9 +111,20 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
           db.select({ code: s.currencies.code }).from(s.currencies).orderBy(asc(s.currencies.code)),
         ])
       : [[], [], [], []];
-  const [tripRoutes, tripVehicles, tripDrivers, editTrip] =
-    creating || editing ? await Promise.all([routeOptions(), vehicleOptions("head"), driverOptions(), editing && editId ? currentTrip(db, editId) : Promise.resolve(null)]) : [[], [], [], null];
-  const taxRows = creating || editing ? await taxCodesFor(db, "sales") : [];
+  const [tripRoutes, tripVehicles, tripDrivers, editTrip, tripTrailers, tripCarriers, tripShippers, componentKinds] =
+    creating || editing || bulkAdding
+      ? await Promise.all([
+          routeOptions(),
+          vehicleOptions("head"),
+          driverOptions(),
+          editing && editId ? currentTrip(db, editId) : Promise.resolve(null),
+          vehicleOptions("trailer"),
+          partyOptions("carrier"),
+          shipperSuggestions(),
+          customListOptions(db, "price_component"),
+        ])
+      : [[], [], [], null, [], [], [] as string[], []];
+  const taxRows = creating || editing || bulkAdding ? await taxCodesFor(db, "sales") : [];
   // مصاريف على العميل: في أي فاتورة جديدة أو مسودة؛ لشحنة فيها، أو على الفاتورة نفسها إن كانت مباشرة
   const invoiceWaybillIds = editing && editDoc ? [...new Set(editDoc.lines.filter((l) => l.kind === "waybill" && l.waybillId).map((l) => l.waybillId!))] : [];
   // مصاريف الفاتورة نفسها وإيصالات رحلتها لا تثبّت العميل (ليست شحنات)
@@ -122,7 +138,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
         ).map((r) => r.id)
       : [],
   );
-  const [chargeTypes, chargeBrokers, chargeCash, chargeWaybills, tripExpenses, chargePayees] = creating || editing
+  const [chargeTypes, chargeBrokers, chargeCash, chargeWaybills, tripExpenses, chargePayees] = creating || editing || bulkAdding
     ? await Promise.all([
         chargeTypeOptions(),
         partyOptions("customs_broker"),
@@ -137,7 +153,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
         supplierOptions(db),
       ])
     : [[], [], [], [], [], []];
-  const taxOpts = taxRows.map((x) => ({ value: String(x.id), label: `${x.nameAr} (${Number(x.rate)}%)`, rate: Number(x.rate) }));
+  const taxOpts = taxRows.map((x) => ({ value: String(x.id), label: `${x.nameAr} (${Number(x.rate)}%)`, rate: Number(x.rate), code: x.code }));
   const taxName = (id: number | null) => taxRows.find((x) => x.id === id)?.nameAr ?? null;
   // البند الإضافي يبدأ بضريبة أول شحنة في الفاتورة وحسابها ومركبتها
   const firstWaybill = editing ? editDoc?.lines.find((l) => l.kind === "waybill") : undefined;
@@ -161,7 +177,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
         reference: i.reference ?? "",
         notes: i.notes ?? "",
         lines: editDoc.lines
-          .filter((l) => l.kind === "manual")
+          .filter((l) => l.kind === "manual" && !l.trip)
           .map((l) => ({
             description: l.description,
             quantity: String(Number(l.quantity ?? 1)),
@@ -187,13 +203,30 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
           })),
         trip: editTrip
           ? {
+              ...NO_TRIP,
               on: true,
+              priced: editTrip.priced ?? false,
               routeId: String(editTrip.routeId),
-              vehicleId: String(editTrip.vehicleId),
+              execution: editTrip.carrierId ? "carrier" : "fleet",
+              vehicleId: editTrip.vehicleId ? String(editTrip.vehicleId) : "",
+              trailerId: editTrip.trailerId ? String(editTrip.trailerId) : "",
               driverId: editTrip.driverId ? String(editTrip.driverId) : "",
+              commission: editTrip.priced && !editTrip.carrierId ? String(editTrip.driverCommission ?? "") : "",
+              custody: editTrip.tripCustody ? String(editTrip.tripCustody) : "",
+              carrierId: editTrip.carrierId ? String(editTrip.carrierId) : "",
+              carrierCost: editTrip.carrierCost != null ? String(editTrip.carrierCost) : "",
+              carrierPlate: editTrip.carrierPlate ?? "",
+              carrierDriverName: editTrip.carrierDriverName ?? "",
               shipper: editTrip.shipper,
               consignee: editTrip.consignee,
-              custody: editTrip.tripCustody ? String(editTrip.tripCustody) : "",
+              amount: editTrip.amount != null ? String(editTrip.amount) : "",
+              components: (editTrip.priceComponents ?? []).map((c) => ({ kind: joinCustom(c.kind, c.classId ?? null), label: c.label ?? "", quantity: String(c.quantity ?? 1), unitPrice: String(c.unitPrice) })),
+              taxCodeId: editTrip.priced && editTrip.taxCodeId ? String(editTrip.taxCodeId) : "",
+              weight: editTrip.weightTons != null ? String(editTrip.weightTons) : "",
+              container: editTrip.containerNumber ?? "",
+              deliveryNote: editTrip.deliveryNoteNumber ?? "",
+              customs: editTrip.customsDeclaration ?? "",
+              priceNote: editTrip.priced ? editTrip.priceNote : null,
               number: editTrip.number,
               sent: !!editTrip.sentToDriverAt,
             }
@@ -316,10 +349,65 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
     </MobileSheet>
   );
 
+  if (bulkAdding) {
+    return (
+      <>
+        <AddModeBar backHref={BASE} backLabel="الفواتير" title="إدخال عدة فواتير" />
+        <Card className="mb-6">
+          <SheetEditor
+            templateName="الفواتير المباشرة"
+            action={saveInvoiceRows}
+            initialRows={4}
+            columns={[
+              { key: "date", label: "التاريخ", type: "date", placeholder: today },
+              { key: "dueDate", label: "الاستحقاق", type: "date", placeholder: "= التاريخ" },
+              { key: "customerId", label: "العميل", type: "select", required: true, options: customers.map((c) => ({ value: String(c.id), label: c.nameAr })), width: "11rem", create: "customer" },
+              { key: "routeId", label: "المسار", type: "select", required: true, options: tripRoutes, width: "13rem", create: "route" },
+              { key: "shipper", label: "المرسل", required: true, width: "10rem", suggest: tripShippers },
+              { key: "consignee", label: "المستلم", required: true, width: "10rem", suggest: tripShippers },
+              { key: "vehicleId", label: "المركبة", type: "select", options: tripVehicles, width: "8rem", create: "vehicle" },
+              { key: "driverId", label: "السائق", type: "select", options: tripDrivers, width: "9rem", create: "driver", autoVehicle: { key: "vehicleId", dateKey: "date" } },
+              { key: "carrierId", label: "أو ناقل خارجي", type: "select", options: tripCarriers, width: "9rem", create: "carrier" },
+              { key: "carrierCost", label: "تكلفة الناقل", type: "number", width: "6rem" },
+              { key: "carrierPlate", label: "لوحة الناقل", width: "7rem" },
+              { key: "amount", label: "السعر الأساسي", type: "number", width: "6rem", placeholder: "من العقد" },
+              ...[1, 2].flatMap((n) => [
+                { key: `comp${n}`, label: `مكون السعر ${n}`, type: "select" as const, options: componentKinds, width: "9rem" },
+                { key: `comp${n}Qty`, label: `كمية ${n}`, type: "number" as const, width: "4.5rem", placeholder: "1" },
+                { key: `comp${n}Price`, label: `سعر المكون ${n}`, type: "number" as const, width: "6rem" },
+              ]),
+              { key: "taxCodeId", label: "نوع الضريبة", type: "select", options: taxOpts, width: "12rem", placeholder: "حسب المسار" },
+              { key: "commission", label: "عمولة السائق", type: "number", width: "6rem", placeholder: "من المسار" },
+              { key: "weight", label: "الوزن (طن)", type: "number", width: "5rem" },
+              { key: "container", label: "رقم الحاوية", ltr: true, width: "7rem" },
+              ...[1, 2].flatMap((n) => [
+                { key: `charge${n}`, label: `مصروف على العميل ${n}`, type: "select" as const, options: chargeTypes, width: "9rem" },
+                { key: `charge${n}Amount`, label: `مبلغ المصروف ${n}`, type: "number" as const, width: "6rem" },
+                {
+                  key: `charge${n}From`,
+                  label: `دفعه ${n}`,
+                  type: "select" as const,
+                  width: "12rem",
+                  options: [...chargeBrokers.map((b) => ({ value: `b:${b.value}`, label: `المخلص: ${b.label}` })), ...chargeCash.map((a) => ({ value: `a:${a.value}`, label: a.label, code: a.code }))],
+                },
+              ]),
+              { key: "send", label: "إرسال للسائق", type: "select", options: [{ value: "1", label: "نعم، على مرحلة التسليم" }], width: "10rem", placeholder: "لا" },
+              { key: "reference", label: "المرجع", width: "8rem" },
+              { key: "notes", label: "ملاحظات", width: "9rem" },
+            ]}
+          />
+          <p className="mt-2 text-xs text-gray-500">
+            كل صف فاتورة مباشرة مسودة بنقلها، بنفس قواعد نافذة الفاتورة: السعر الفارغ من العقد الساري، والضريبة من المسار، والسائق الفارغ هو المسند للمركبة. اختر مركبة أو ناقلاً خارجياً (تكلفته دين له عند الإصدار). «إرسال للسائق» يرسلها له «في الطريق» ليضغط «تم التسليم».
+          </p>
+        </Card>
+      </>
+    );
+  }
+
   return (
     <>
       <PageHeader title="فواتير المبيعات" description="فاتورة لشحنة أو لعدة شحنات مدمجة، أو فاتورة مباشرة ببنود حرة. تُحفظ مسودة برقم مسودة، وعند الاعتماد تأخذ رقمها الرسمي ويُقيد الإيراد والضريبة.">
-        <ListActions bulkHref={canUpdate && "/invoices?view=sheet&status=draft"} importHref={canCreate && "/import/sales-invoices"} />
+        <ListActions bulkHref={canUpdate && "/invoices?view=sheet&status=draft"} addHref={canCreate && "/invoices?add=1"} addLabel="إدخال عدة فواتير" importHref={canCreate && "/import/sales-invoices"} />
         {canCreate && (
           <Link href={withParam(listUrl(), "new", "1")} scroll={false} className="rounded-lg bg-brand-600 px-5 py-2 text-sm font-semibold text-brand-900 shadow-sm transition hover:bg-brand-500">
             + إنشاء فاتورة
@@ -699,7 +787,14 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
           currencies={currencies.map((c) => c.code)}
           routes={tripRoutes}
           vehicles={tripVehicles}
+          trailers={tripTrailers}
           drivers={tripDrivers}
+          carriers={tripCarriers}
+          shippers={tripShippers}
+          componentKinds={componentKinds}
+          custodyAccounts={cashOpts.map((a) => ({ value: String(a.id), label: `${a.nameAr} · ${a.code}` }))}
+          canSend={canSend}
+          canIssue={canIssue}
           company={company}
           template={template}
           action={saveInvoicePanel.bind(null, editing ? editId : null)}

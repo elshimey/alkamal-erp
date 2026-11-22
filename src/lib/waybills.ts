@@ -563,14 +563,16 @@ async function accountIds(tx: Tx) {
 export async function approveWaybill(
   db: Db,
   id: number,
-  opts: { userId?: number; canOverride?: boolean; overrideReason?: string | null } = {},
+  opts: { userId?: number; canOverride?: boolean; overrideReason?: string | null; fromInvoice?: string } = {},
 ) {
   return db.transaction(async (tx) => {
     const w = await lockWaybill(tx, id);
     if (!APPROVABLE.includes(w.status)) {
       throw new Error(w.status === "rejected" ? `الشحنة ${w.number} مرفوضة؛ صحّحها وأعدها لمسودة أولاً` : `الشحنة ${w.number} معتمدة مسبقاً`);
     }
-    const issues = await approvalIssues(tx, w);
+    // رحلة الفاتورة المباشرة تُعتمد مع إصدار فاتورتها: إيرادها في الفاتورة نفسها، فلا عقد ولا حد ائتماني، وتبقى الوثائق
+    const issues = (await approvalIssues(tx, w)).filter((i) => !opts.fromInvoice || i.code === "documents");
+    if (opts.fromInvoice && issues.length) throw new Error(`رحلة الفاتورة ${w.number}: ${issues.map((i) => i.message).join("، ")}؛ اعتمدها من صفحة الشحنة بسبب التجاوز ثم أصدر الفاتورة`);
     const reason = opts.overrideReason?.trim() || null;
     if (issues.length && !(opts.canOverride && reason)) {
       const hint = opts.canOverride ? "؛ اكتب سبب التجاوز للاعتماد" : "؛ يلزم مستخدم بصلاحية تجاوز الضوابط";
@@ -1176,11 +1178,31 @@ export async function patchWaybill(db: Db, id: number, patch: Partial<Omit<Waybi
 
 export interface InvoiceTripInput {
   routeId: number;
-  vehicleId: number;
+  /** فارغة = ناقل خارجي (carrierId) */
+  vehicleId?: number | null;
   driverId?: number | null;
   shipper: string;
   consignee: string;
   tripCustody?: number | null;
+  /**
+   * الفاتورة المباشرة بنافذة الشحنة: سعرها في الرحلة نفسها (الأساسي والمكونات والضريبة) ويُبنى منه سطر النقل.
+   * غير محددة = الطريقة القديمة (سعر الرحلة = مجموع بنود الفاتورة).
+   */
+  priced?: boolean;
+  trailerId?: number | null;
+  driverCommission?: number | null;
+  carrierId?: number | null;
+  carrierCost?: number | null;
+  carrierPlate?: string | null;
+  carrierDriverName?: string | null;
+  /** السعر الأساسي؛ فارغ = من العقد الساري */
+  amount?: number | null;
+  priceComponents?: PriceComponentInput[];
+  taxCodeId?: number | null;
+  weightTons?: number | null;
+  containerNumber?: string | null;
+  deliveryNoteNumber?: string | null;
+  customsDeclaration?: string | null;
 }
 
 /**
@@ -1201,35 +1223,76 @@ export async function syncInvoiceTripTx(
     await tx.delete(s.waybills).where(eq(s.waybills.id, existing.id));
     return null;
   }
-  // رحلة الفاتورة المباشرة سعرها من الفاتورة، بلا مكونات
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { components: _c, ...values } = await resolveWaybill(tx, {
+  // الطريقة القديمة: سعر الرحلة من بنود الفاتورة بلا مكونات. الجديدة (priced): سعرها وتنفيذها كالشحنة
+  const priced = !!trip.priced;
+  const { components, ...values } = await resolveWaybill(tx, {
     waybillDate: inv.invoiceDate,
     customerId: inv.customerId,
     routeId: trip.routeId,
-    vehicleId: trip.vehicleId,
-    driverId: trip.driverId ?? null,
+    vehicleId: trip.carrierId ? null : (trip.vehicleId ?? null),
+    trailerId: trip.carrierId ? null : (trip.trailerId ?? null),
+    driverId: trip.carrierId ? null : (trip.driverId ?? null),
+    carrierId: trip.carrierId ?? null,
+    carrierCost: trip.carrierCost ?? null,
+    carrierPlate: trip.carrierPlate ?? null,
+    carrierDriverName: trip.carrierDriverName ?? null,
     shipper: trip.shipper,
     consignee: trip.consignee,
-    amount: num(inv.subtotal),
+    amount: priced ? (trip.amount ?? null) : num(inv.subtotal),
+    priceComponents: priced ? (trip.priceComponents ?? []) : [],
+    taxCodeId: priced ? (trip.taxCodeId ?? null) : null,
+    driverCommission: trip.driverCommission ?? null,
+    weightTons: trip.weightTons ?? null,
+    containerNumber: trip.containerNumber ?? null,
     tripCustody: trip.tripCustody ?? 0,
     notes: `رحلة الفاتورة ${inv.number}`,
   });
-  const row = { ...values, currencyCode: inv.currencyCode, priceNote: `من الفاتورة ${inv.number}`, sourceInvoiceId: inv.id };
+  if (priced && !(num(values.amount) > 0)) throw new Error("اكتب سعر النقل (لا يوجد سعر في عقد العميل لهذا المسار)");
+  const row = {
+    ...values,
+    currencyCode: inv.currencyCode,
+    priceNote: priced ? values.priceNote : `من الفاتورة ${inv.number}`,
+    sourceInvoiceId: inv.id,
+    deliveryNoteNumber: trip.deliveryNoteNumber || null,
+    customsDeclaration: trip.customsDeclaration || null,
+  };
   if (existing) {
     if (!EDITABLE.includes(existing.status)) {
       // رحلة منتهية (معتمدة): تتغير فواتيرها وأسعارها، أما بيانات الرحلة فبعد إرجاعها
       const same =
-        existing.routeId === row.routeId && existing.vehicleId === row.vehicleId && existing.driverId === row.driverId && existing.shipper === row.shipper && existing.consignee === row.consignee && num(existing.tripCustody) === num(row.tripCustody);
+        existing.routeId === row.routeId &&
+        existing.vehicleId === row.vehicleId &&
+        existing.driverId === row.driverId &&
+        existing.carrierId === row.carrierId &&
+        num(existing.carrierCost) === num(row.carrierCost) &&
+        existing.shipper === row.shipper &&
+        existing.consignee === row.consignee &&
+        num(existing.tripCustody) === num(row.tripCustody);
       if (!same) throw new Error(`رحلة الفاتورة ${existing.number} ${WAYBILL_STATUS[existing.status].label}؛ أرجعها لمسودة لتعديل بياناتها`);
-      const [u] = await tx.update(s.waybills).set({ amount: row.amount, updatedAt: new Date() }).where(eq(s.waybills.id, existing.id)).returning();
+      const [u] = await tx.update(s.waybills).set({ amount: row.amount, baseAmount: row.baseAmount, taxCodeId: row.taxCodeId, updatedAt: new Date() }).where(eq(s.waybills.id, existing.id)).returning();
+      if (priced) await saveComponents(tx, existing.id, components);
       return u;
     }
     assertSentLocks(existing, row);
     const [u] = await tx.update(s.waybills).set({ ...row, updatedAt: new Date() }).where(eq(s.waybills.id, existing.id)).returning();
+    if (priced) await saveComponents(tx, existing.id, components);
     return u;
   }
   const number = await nextDocumentNumber(tx, "waybill", "WB", Number(inv.invoiceDate.slice(0, 4)));
   const [created] = await tx.insert(s.waybills).values({ ...row, number, createdBy: inv.userId }).returning();
+  if (priced) await saveComponents(tx, created.id, components);
   return created;
+}
+
+/**
+ * إرجاع فاتورة مباشرة لمسودة: رحلتها التي اعتُمدت مع إصدارها تعود لحالة مراحلها (مسودة، في الطريق، مُسلَّمة)
+ * ويُلغى قيد تكلفتها، فتُعتمد من جديد مع الإصدار التالي.
+ */
+export async function unapproveInvoiceTripTx(tx: Tx, invoiceId: number) {
+  const [w] = await tx.select().from(s.waybills).where(eq(s.waybills.sourceInvoiceId, invoiceId)).for("update");
+  if (!w || w.status !== "approved") return;
+  const stages = (await tx.select({ stage: s.tripStages.stage }).from(s.tripStages).where(eq(s.tripStages.waybillId, w.id))).map((x) => x.stage);
+  const status: WaybillStatus = stages.includes("delivery") ? "delivered" : stages.length || w.deliverOnly ? "in_transit" : "draft";
+  await tx.update(s.waybills).set({ status, journalEntryId: null, approvedBy: null, approvedAt: null, updatedAt: new Date() }).where(eq(s.waybills.id, w.id));
+  if (w.journalEntryId) await deleteEntryTx(tx, w.journalEntryId);
 }

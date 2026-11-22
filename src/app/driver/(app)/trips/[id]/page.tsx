@@ -86,7 +86,7 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
           <DriverForm actionKey="stage" savedOffline={t.savedOffline} className="mb-3 flex flex-col gap-3 rounded-2xl bg-white p-4 shadow-sm">
             <input type="hidden" name="waybillId" value={trip.id} />
             <input type="hidden" name="stage" value={step} />
-            <PhotoInput label={t.flow.photo} required />
+            <PhotoInput label={t.flow.photo} required={!trip.deliverOnly} />
             <PhotoInput name="photo2" label={t.flow.photo2} />
             <SubmitButton pendingLabel={t.saving} className={`flex w-full flex-col items-center gap-1 !rounded-2xl !py-5 text-xl ${step === "delivery" ? "!bg-green-600 !text-white" : ""}`}>
               <span aria-hidden className="text-3xl">{step === "delivery" ? "✅" : "📦"}</span>

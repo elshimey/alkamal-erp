@@ -35,6 +35,8 @@ export interface SendOptions {
   deferCustody?: boolean;
   date?: string;
   userId?: number;
+  /** رحلة الفاتورة المباشرة: تصل للسائق «في الطريق» ولا يبقى له إلا «تم التسليم» */
+  atDelivery?: boolean;
 }
 
 /** إرسال شحنة واحدة للسائق مع صرف عهدتها. */
@@ -58,7 +60,11 @@ export async function sendTrip(db: Db, id: number, opts: SendOptions = {}) {
   // حجز الإرسال أولاً: إن ضغط موظفان «إرسال» معاً ينجح واحد فقط، فلا يُصرف سند عهدة مرتين
   const [claimed] = await db
     .update(s.waybills)
-    .set({ sentToDriverAt: new Date(), driverAcceptedAt: null, updatedAt: new Date() })
+    .set(
+      opts.atDelivery
+        ? { sentToDriverAt: new Date(), driverAcceptedAt: new Date(), deliverOnly: true, status: t.status === "draft" ? "in_transit" : t.status, updatedAt: new Date() }
+        : { sentToDriverAt: new Date(), driverAcceptedAt: null, updatedAt: new Date() },
+    )
     .where(and(eq(s.waybills.id, id), isNull(s.waybills.sentToDriverAt)))
     .returning({ id: s.waybills.id });
   if (!claimed) throw new Error(`${t.number}: أُرسلت للسائق من قبل`);
@@ -78,7 +84,7 @@ export async function sendTrip(db: Db, id: number, opts: SendOptions = {}) {
         userId: opts.userId,
       });
     } catch (err) {
-      await db.update(s.waybills).set({ sentToDriverAt: null, updatedAt: new Date() }).where(eq(s.waybills.id, id));
+      await db.update(s.waybills).set({ sentToDriverAt: null, driverAcceptedAt: null, deliverOnly: false, status: t.status, updatedAt: new Date() }).where(eq(s.waybills.id, id));
       throw err;
     }
     paymentId = p.id;
@@ -87,7 +93,7 @@ export async function sendTrip(db: Db, id: number, opts: SendOptions = {}) {
       await db.update(s.waybills).set({ custodyPaymentId: paymentId }).where(eq(s.waybills.id, id));
     } catch (err) {
       await dropPayment(db, paymentId, "تعذّر إرسال الرحلة");
-      await db.update(s.waybills).set({ sentToDriverAt: null, updatedAt: new Date() }).where(eq(s.waybills.id, id));
+      await db.update(s.waybills).set({ sentToDriverAt: null, driverAcceptedAt: null, deliverOnly: false, status: t.status, updatedAt: new Date() }).where(eq(s.waybills.id, id));
       throw err;
     }
   }
@@ -151,7 +157,15 @@ export async function unsendTrip(db: Db, id: number, userId?: number) {
   // شرط الحالة نفسها التي قُرئت: إلغاءان متزامنان لا يعكسان السند مرتين
   const [released] = await db
     .update(s.waybills)
-    .set({ sentToDriverAt: null, driverAcceptedAt: null, custodyPaymentId: null, updatedAt: new Date() })
+    .set({
+      sentToDriverAt: null,
+      driverAcceptedAt: null,
+      custodyPaymentId: null,
+      deliverOnly: false,
+      // «في الطريق» التي وضعها الإرسال على مرحلة التسليم تعود مسودة (لم يسجّل أحد مرحلة)
+      ...(t.deliverOnly && t.status === "in_transit" ? { status: "draft" as const } : {}),
+      updatedAt: new Date(),
+    })
     .where(and(eq(s.waybills.id, id), isNotNull(s.waybills.sentToDriverAt)))
     .returning({ id: s.waybills.id });
   if (!released) throw new Error(`${t.number}: تغيّر إرسالها للتو؛ حدّث الصفحة`);

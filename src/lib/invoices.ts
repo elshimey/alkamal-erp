@@ -4,7 +4,7 @@ import * as s from "@/db/schema";
 import { customerPhotos } from "@/lib/attachments";
 import { createJournalEntryTx, deleteEntryTx, nextDocumentNumber } from "@/lib/ledger";
 import { invoicePostingLines, lineVat, round2 } from "@/lib/invoice-posting";
-import { checkPayAccountTx, rateOn, syncInvoiceTripTx, waybillAccountIds, type ExpenseInput, type InvoiceTripInput } from "@/lib/waybills";
+import { approveWaybill, checkPayAccountTx, rateOn, syncInvoiceTripTx, unapproveInvoiceTripTx, waybillAccountIds, waybillComponents, type ExpenseInput, type InvoiceTripInput } from "@/lib/waybills";
 import { todayRiyadh } from "@/lib/dates";
 import { SALES_ACCOUNTS } from "@/data/sales";
 import type { DocFilter } from "@/lib/doc-filters";
@@ -309,7 +309,7 @@ function checkHeader(input: { invoiceDate: string; dueDate: string; customerId: 
 
 /** فاتورة مسودة بسطور حرة: مباشرة من صفحة الفواتير، أو من عرض سعر، أو مستوردة من Excel أو نظام سابق. */
 export async function createManualInvoiceTx(tx: Tx, input: ManualInvoiceInput) {
-  if (!input.lines.length && !input.waybillIds?.length && !input.hasCharges) throw new Error("الفاتورة بلا بنود");
+  if (!input.lines.length && !input.waybillIds?.length && !input.hasCharges && !input.trip?.priced) throw new Error("الفاتورة بلا بنود");
   checkHeader(input);
   const reference = input.reference?.trim() || null;
   if (reference) {
@@ -353,8 +353,47 @@ async function addWaybillLinesTx(tx: Tx, inv: typeof s.salesInvoices.$inferSelec
 /** فاتورة مباشرة (ومعها رحلتها إن وُجدت) داخل معاملة قائمة. */
 export async function createDirectInvoiceTx(tx: Tx, input: ManualInvoiceInput) {
   const inv = await createManualInvoiceTx(tx, input);
-  if (input.trip) await syncTrip(tx, inv.id, input.userId, input.trip);
+  if (input.trip) {
+    const w = await syncTrip(tx, inv.id, input.userId, input.trip);
+    if (input.trip.priced && w) await tripLineTx(tx, inv.id, w);
+  }
   return inv;
+}
+
+/**
+ * سطر النقل في الفاتورة المباشرة بنافذة الشحنة: سطر واحد بإجمالي الرحلة (الأساسي والمكونات) وتحته التفاصيل،
+ * بحساب إيراد الشحنات (دولي أو داخلي) ومركز تكلفة المركبة أو الناقلين الخارجيين. يُبنى من جديد مع كل حفظ.
+ */
+async function tripLineTx(tx: Tx, invoiceId: number, w: typeof s.waybills.$inferSelect) {
+  await tx.delete(s.salesInvoiceLines).where(and(eq(s.salesInvoiceLines.invoiceId, invoiceId), eq(s.salesInvoiceLines.trip, true)));
+  const [tax] = w.taxCodeId ? await tx.select({ rate: s.taxCodes.rate }).from(s.taxCodes).where(eq(s.taxCodes.id, w.taxCodeId)) : [];
+  const [cc] = w.vehicleId
+    ? await tx.select({ id: s.vehicles.costCenterId }).from(s.vehicles).where(eq(s.vehicles.id, w.vehicleId))
+    : await tx.select({ id: s.costCenters.id }).from(s.costCenters).where(eq(s.costCenters.code, "EXT"));
+  const [route] = await tx.execute<{ label: string }>(sql`
+    select f.name_ar || ' ← ' || t.name_ar as label from routes r
+    join locations f on f.id = r.from_location_id join locations t on t.id = r.to_location_id where r.id = ${w.routeId}`);
+  const amount = num(w.amount);
+  const vatRate = num(tax?.rate);
+  await tx.insert(s.salesInvoiceLines).values({
+    invoiceId,
+    // أول سطر في الفاتورة، وتُعاد أرقام السطور بعده
+    lineNo: 0,
+    kind: "manual",
+    trip: true,
+    description: `خدمة نقل · ${route?.label ?? ""}`,
+    quantity: "1",
+    unitPrice: String(amount),
+    amount: String(amount),
+    taxCodeId: w.taxCodeId,
+    vatRate: String(vatRate),
+    vatAmount: String(lineVat(amount, vatRate)),
+    accountId: await accountId(tx, w.isInternational ? SALES_ACCOUNTS.internationalRevenue : SALES_ACCOUNTS.domesticRevenue),
+    costCenterId: cc?.id ?? null,
+    details: priceDetails(w.baseAmount, await waybillComponents(tx, w.id)),
+  });
+  await renumberLines(tx, invoiceId);
+  await recomputeTotals(tx, invoiceId);
 }
 
 /** فاتورة مباشرة من صفحة الفواتير، دون شحنة؛ تُحفظ مسودة حتى تُعتمد. */
@@ -363,10 +402,40 @@ export async function createDirectInvoice(db: Db, input: ManualInvoiceInput) {
 }
 
 /** بيانات رحلة الفاتورة الحالية بصيغة الإدخال (للمحرر ولإعادة المزامنة). */
-export async function currentTrip(db: Db | Tx, invoiceId: number): Promise<(InvoiceTripInput & { id: number; number: string; sentToDriverAt: Date | null; status: string }) | null> {
+export async function currentTrip(db: Db | Tx, invoiceId: number): Promise<(InvoiceTripInput & { id: number; number: string; sentToDriverAt: Date | null; deliverOnly: boolean; status: string; priceNote: string | null }) | null> {
   const [w] = await db.select().from(s.waybills).where(eq(s.waybills.sourceInvoiceId, invoiceId));
-  if (!w || !w.vehicleId) return null;
-  return { id: w.id, number: w.number, sentToDriverAt: w.sentToDriverAt, status: w.status, routeId: w.routeId, vehicleId: w.vehicleId, driverId: w.driverId, shipper: w.shipper, consignee: w.consignee, tripCustody: num(w.tripCustody) };
+  if (!w) return null;
+  const [line] = await db.select({ id: s.salesInvoiceLines.id }).from(s.salesInvoiceLines).where(and(eq(s.salesInvoiceLines.invoiceId, invoiceId), eq(s.salesInvoiceLines.trip, true))).limit(1);
+  const priced = !!line;
+  const components = priced ? await waybillComponents(db, w.id) : [];
+  return {
+    id: w.id,
+    number: w.number,
+    sentToDriverAt: w.sentToDriverAt,
+    deliverOnly: w.deliverOnly,
+    status: w.status,
+    priceNote: w.priceNote,
+    priced,
+    routeId: w.routeId,
+    vehicleId: w.vehicleId,
+    trailerId: w.trailerId,
+    driverId: w.driverId,
+    driverCommission: num(w.driverCommission),
+    carrierId: w.carrierId,
+    carrierCost: w.carrierCost == null ? null : num(w.carrierCost),
+    carrierPlate: w.carrierPlate,
+    carrierDriverName: w.carrierDriverName,
+    shipper: w.shipper,
+    consignee: w.consignee,
+    tripCustody: num(w.tripCustody),
+    amount: priced ? num(w.baseAmount ?? w.amount) : null,
+    priceComponents: components.map((c) => ({ kind: c.kind, classId: c.classId, label: c.label, quantity: num(c.quantity), unitPrice: num(c.unitPrice) })),
+    taxCodeId: w.taxCodeId,
+    weightTons: w.weightTons == null ? null : num(w.weightTons),
+    containerNumber: w.containerNumber,
+    deliveryNoteNumber: w.deliveryNoteNumber,
+    customsDeclaration: w.customsDeclaration,
+  };
 }
 
 async function syncTrip(tx: Tx, id: number, userId: number | undefined, trip: InvoiceTripInput | null) {
@@ -383,13 +452,16 @@ export async function updateDirectInvoice(db: Db, id: number, input: ManualInvoi
   return db.transaction(async (tx) => {
     const inv = await lockInvoice(tx, id);
     if (inv.status !== "draft") throw new Error(`الفاتورة ${inv.number} صادرة؛ أرجعها لمسودة لتعديلها`);
+    // الرحلة كما هي قبل حذف البنود (سطر النقل منها)
+    const before = await currentTrip(tx, id);
     // سطور الشحنات ومصاريفها؛ مصاريف الفاتورة نفسها لا تمنع تغيير العميل أو العملة
     const fixed = await tx
       .select({ kind: s.salesInvoiceLines.kind })
       .from(s.salesInvoiceLines)
       .where(and(eq(s.salesInvoiceLines.invoiceId, id), sql`${s.salesInvoiceLines.kind} <> 'manual'`, sql`coalesce(${s.salesInvoiceLines.waybillExpenseId} not in ${ownCharges(id)}, true)`));
     if (fixed.length && (input.customerId !== inv.customerId || input.currencyCode !== inv.currencyCode)) throw new Error("في الفاتورة شحنات؛ لا يتغير العميل ولا العملة. فك الدمج أو أخرج الشحنات أولاً");
-    if (!fixed.length && !input.lines.length && !input.hasCharges) {
+    const nextTrip = input.trip !== undefined ? input.trip : before;
+    if (!fixed.length && !input.lines.length && !input.hasCharges && !nextTrip?.priced) {
       const [charge] = await tx.select({ id: s.waybillExpenses.id }).from(s.waybillExpenses).where(eq(s.waybillExpenses.invoiceId, id)).limit(1);
       if (!charge) throw new Error("الفاتورة بلا بنود");
     }
@@ -428,8 +500,10 @@ export async function updateDirectInvoice(db: Db, id: number, input: ManualInvoi
     await applyFixedEdits(tx, id, edits);
     await recomputeTotals(tx, id);
     // الرحلة تتبع الفاتورة (التاريخ والعميل والمبلغ)؛ بلا تغيير في بياناتها إن لم تُرسل
-    const trip = input.trip !== undefined ? input.trip : await currentTrip(tx, id);
-    if (input.trip !== undefined || trip) await syncTrip(tx, id, input.userId, trip);
+    if (input.trip !== undefined || nextTrip) {
+      const w = await syncTrip(tx, id, input.userId, nextTrip);
+      if (nextTrip?.priced && w) await tripLineTx(tx, id, w);
+    }
     return { ...inv, number: inv.number };
   });
 }
@@ -818,6 +892,12 @@ export async function issueInvoice(db: Db, invoiceId: number, userId?: number) {
       .set({ status: "issued", journalEntryId: entry.id, issuedBy: userId ?? null, issuedAt: new Date(), updatedAt: new Date() })
       .where(eq(s.salesInvoices.id, invoiceId));
     if (waybillIds.length) await tx.update(s.waybills).set({ status: "invoiced", updatedAt: new Date() }).where(inArray(s.waybills.id, waybillIds));
+    // رحلة الفاتورة المباشرة بنافذة الشحنة تُعتمد مع الإصدار: تُقيد عمولة السائق أو تكلفة الناقل (دائناً له) الآن،
+    // ويكمل السائق التسليم من تطبيقه إن كانت مرسلة له
+    if (lines.some((l) => l.trip)) {
+      const [trip] = await tx.select({ id: s.waybills.id, status: s.waybills.status }).from(s.waybills).where(eq(s.waybills.sourceInvoiceId, invoiceId));
+      if (trip && ["draft", "in_transit", "delivered"].includes(trip.status)) await approveWaybill(tx as unknown as Db, trip.id, { userId, fromInvoice: inv.number });
+    }
     return Object.assign(entry, { invoiceNumber: inv.number });
   });
 }
@@ -831,6 +911,8 @@ export async function revertInvoice(db: Db, invoiceId: number) {
     if (inv.zatcaStatus === "accepted") throw new Error(`الفاتورة ${inv.number} معتمدة لدى هيئة الزكاة؛ لا تُعدّل، وتُصحح بإشعار دائن`);
     await tx.update(s.salesInvoices).set({ status: "draft", journalEntryId: null, issuedBy: null, issuedAt: null, updatedAt: new Date() }).where(eq(s.salesInvoices.id, invoiceId));
     if (inv.journalEntryId) await deleteEntryTx(tx, inv.journalEntryId);
+    const [tripLine] = await tx.select({ id: s.salesInvoiceLines.id }).from(s.salesInvoiceLines).where(and(eq(s.salesInvoiceLines.invoiceId, invoiceId), eq(s.salesInvoiceLines.trip, true))).limit(1);
+    if (tripLine) await unapproveInvoiceTripTx(tx, invoiceId);
     await tx
       .update(s.waybills)
       .set({ status: "approved", updatedAt: new Date() })

@@ -1540,6 +1540,68 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(await currentTrip(db, inv.id)).toBeNull();
     });
 
+    it("الفاتورة المباشرة بنافذة الشحنة: سطر نقل بالأساسي والمكونات، تُرسل على مرحلة التسليم، وتُعتمد رحلتها مع الإصدار", async () => {
+      const [box] = await db.select().from(s.accounts).where(eq(s.accounts.code, "110101"));
+      const head = { customerId, invoiceDate: D, dueDate: D, currencyCode: "SAR", lines: [], userId };
+      const trip = { priced: true, routeId, vehicleId: me.vehicle!.id, shipper: "مصنع", consignee: "مستلم", driverCommission: 150, amount: 1000, priceComponents: [{ kind: "waiting", quantity: 2, unitPrice: 100 }], weightTons: 20, containerNumber: "MSKU1", tripCustody: 0 };
+      await expect(createDirectInvoice(db, { ...head, trip: { ...trip, amount: 0, priceComponents: [] } })).rejects.toThrow("سعر النقل");
+      const inv = await createDirectInvoice(db, { ...head, trip });
+      const lines = await db.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, inv.id));
+      expect(lines).toHaveLength(1);
+      expect([lines[0].trip, lines[0].kind, Number(lines[0].amount), lines[0].lineNo]).toEqual([true, "manual", 1200, 1]);
+      expect(lines[0].description).toContain("خدمة نقل");
+      expect(lines[0].details).toContain("أساسي 1,000");
+      const t1 = (await currentTrip(db, inv.id))!;
+      expect([t1.priced, t1.amount, t1.priceComponents?.length, t1.driverCommission, t1.weightTons, t1.containerNumber]).toEqual([true, 1000, 1, 150, 20, "MSKU1"]);
+      // التعديل يعيد بناء سطر النقل (لا يتكرر) ويحفظ البند الإضافي معه
+      const [rev] = await db.select().from(s.accounts).where(eq(s.accounts.code, "4101"));
+      const extra = { description: "تخزين", quantity: 1, unitPrice: 100, discountPercent: 0, amount: 100, vatRate: 15, vatAmount: 15, taxCodeId: null, accountId: rev.id, costCenterId: null };
+      await updateDirectInvoice(db, inv.id, { ...head, lines: [extra], trip: { ...trip, amount: 1300 } });
+      const after = await db.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, inv.id)).orderBy(s.salesInvoiceLines.lineNo);
+      expect(after.map((l) => [l.trip, Number(l.amount)])).toEqual([[true, 1500], [false, 100]]);
+      // تعديل الرأس دون تمرير الرحلة يبقي سطر النقل
+      await updateDirectInvoice(db, inv.id, { ...head, lines: [extra], notes: "ملاحظة" });
+      expect((await db.select().from(s.salesInvoiceLines).where(and(eq(s.salesInvoiceLines.invoiceId, inv.id), eq(s.salesInvoiceLines.trip, true)))).length).toBe(1);
+      // الإرسال على مرحلة التسليم: «في الطريق» ولا يبقى للسائق إلا «تم التسليم»
+      await sendTrip(db, t1.id, { cashAccountId: box.id, date: D, atDelivery: true });
+      const [sentRow] = await db.select().from(s.waybills).where(eq(s.waybills.id, t1.id));
+      expect([sentRow.status, sentRow.deliverOnly, !!sentRow.driverAcceptedAt]).toEqual(["in_transit", true, true]);
+      expect((await tripDetail(db, me.id, t1.id)).next).toEqual(["delivery"]);
+      // الإصدار يعتمد الرحلة ويقيد عمولة السائق، والإرجاع يعيدها «في الطريق» ويلغي قيدها
+      await issueInvoice(db, inv.id, userId);
+      const [approved] = await db.select().from(s.waybills).where(eq(s.waybills.id, t1.id));
+      expect(approved.status).toBe("approved");
+      expect(approved.journalEntryId).not.toBeNull();
+      expect((await tripDetail(db, me.id, t1.id)).next).toEqual(["delivery"]);
+      await revertInvoice(db, inv.id);
+      const [back] = await db.select().from(s.waybills).where(eq(s.waybills.id, t1.id));
+      expect([back.status, back.journalEntryId]).toEqual(["in_transit", null]);
+      await unsendTrip(db, t1.id);
+      const [unsent] = await db.select().from(s.waybills).where(eq(s.waybills.id, t1.id));
+      expect([unsent.status, unsent.deliverOnly, unsent.sentToDriverAt]).toEqual(["draft", false, null]);
+    });
+
+    it("الفاتورة المباشرة بناقل خارجي: تكلفة الناقل دين له عند الإصدار، وتلغى بالإرجاع", async () => {
+      const carrier = (await createParty(db, { nameAr: "ناقل الفاتورة المباشرة", roles: ["carrier"] })).id;
+      const inv = await createDirectInvoice(db, { customerId, invoiceDate: D, dueDate: D, currencyCode: "SAR", lines: [], userId, trip: { priced: true, routeId, carrierId: carrier, carrierCost: 700, carrierPlate: "ا ب ج 1", shipper: "مصنع", consignee: "مستلم", amount: 900 } });
+      const t1 = (await currentTrip(db, inv.id))!;
+      expect([t1.carrierId, t1.carrierCost, t1.vehicleId]).toEqual([carrier, 700, null]);
+      await issueInvoice(db, inv.id, userId);
+      const [w] = await db.select().from(s.waybills).where(eq(s.waybills.id, t1.id));
+      expect(w.status).toBe("approved");
+      const jl = await db
+        .select({ code: s.accounts.code, credit: s.journalLines.credit, debit: s.journalLines.debit, party: s.journalLines.partyId })
+        .from(s.journalLines)
+        .innerJoin(s.accounts, eq(s.accounts.id, s.journalLines.accountId))
+        .where(eq(s.journalLines.entryId, w.journalEntryId!));
+      expect(jl.find((l) => l.code.startsWith("2102"))).toMatchObject({ party: carrier });
+      expect(Number(jl.find((l) => l.code.startsWith("2102"))!.credit)).toBe(700);
+      expect(Number(jl.find((l) => l.code.startsWith("5105"))!.debit)).toBe(700);
+      await revertInvoice(db, inv.id);
+      const [back] = await db.select().from(s.waybills).where(eq(s.waybills.id, t1.id));
+      expect([back.status, back.journalEntryId]).toEqual(["draft", null]);
+    });
+
     it("عدّ رحلات الفواتير في القائمة يطابق التعريف الأصلي (رحلة الفاتورة المباشرة أو شحنة مفوترة فيها)", async () => {
       const rows = await listSalesInvoices(db, parseDocFilter({}, ["draft", "issued"], D), 2000);
       const ref = await db.execute<{ id: string; trips: number; sent: number }>(sql`
