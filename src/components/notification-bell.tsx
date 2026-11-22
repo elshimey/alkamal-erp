@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
+import { useNarrow } from "@/lib/use-narrow";
 import { bellPulse, bellState, markAllRead, markRead, officePushKey, saveOfficePush } from "@/app/(app)/notifications/actions";
 import { onPushMessage, pollWhileVisible, pushState, subscribePush, usePushState } from "@/lib/push-client";
 import { Icon } from "./icons";
@@ -11,20 +12,6 @@ import { Icon } from "./icons";
 type State = Awaited<ReturnType<typeof bellState>>;
 // مربع الأيقونة بلون الخطورة
 const TILE = { red: "bg-red-50 text-red-600", amber: "bg-amber-50 text-amber-700", blue: "bg-sky-50 text-sky-700" } as const;
-
-// الجوال (أقل من 768): اللوحة تصعد من أسفل الشاشة؛ الكمبيوتر: نافذة بجانب الجرس
-const NARROW = "(max-width: 767px)";
-const onMedia = (cb: () => void) => {
-  const m = window.matchMedia(NARROW);
-  m.addEventListener("change", cb);
-  return () => m.removeEventListener("change", cb);
-};
-const useNarrow = () =>
-  useSyncExternalStore(
-    onMedia,
-    () => window.matchMedia(NARROW).matches,
-    () => false,
-  );
 
 /** جرس التنبيهات أعلى الصفحة: عدد غير المقروء، وقائمة مختصرة تفتح كل تنبيه، و«تعليم الكل كمقروء». */
 export function NotificationBell() {

@@ -104,3 +104,34 @@ test("الضغط مرتين على «حفظ» ينشئ شحنة واحدة فق�
   await page.waitForTimeout(1500);
   expect((await sql`select count(*)::int as n from waybills where shipper = ${shipper}`)[0].n).toBe(1);
 });
+
+test("الجوال: الشحنات والفواتير والسندات بطاقات، واللمس يفتح معاينة تصعد من الأسفل وتُغلق بكل الطرق", async ({ browser }) => {
+  const ctx = await browser.newContext({ locale: "ar", timezoneId: "Asia/Riyadh", viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const page = await ctx.newPage();
+  await officeLogin(page);
+  const noSideScroll = () => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
+
+  // أزرار الحالات بعددها تُسحب جانبياً دون أن تسحب الصفحة
+  await page.goto("/waybills");
+  await expect(page.getByRole("navigation", { name: "حالة الشحنات" })).toBeVisible();
+  for (const [path, label] of [["/waybills", "معاينة الشحنة"], ["/invoices", "معاينة الفاتورة"], ["/receipts", "معاينة السند"]] as const) {
+    await page.goto(path);
+    const cards = page.locator("[data-doc-cards] > a");
+    await expect(cards.first()).toBeVisible();
+    await expect(page.locator("table").first()).toBeHidden();
+    expect(await noSideScroll()).toBe(true);
+    for (const close of ["esc", "x", "backdrop"] as const) {
+      await cards.first().click();
+      const sheet = page.getByRole("dialog", { name: new RegExp(label) });
+      await expect(sheet).toBeVisible();
+      await expect(sheet.getByRole("link", { name: /فتح كاملة/ })).toBeVisible();
+      expect(await noSideScroll()).toBe(true);
+      if (close === "esc") await page.keyboard.press("Escape");
+      else if (close === "x") await sheet.getByRole("link", { name: "إغلاق المعاينة" }).click();
+      else await page.mouse.click(195, 30);
+      await expect(sheet).toBeHidden();
+      await expect(page).not.toHaveURL(/[?&]open=/);
+    }
+  }
+  await ctx.close();
+});

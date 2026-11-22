@@ -33,7 +33,9 @@ import { Badge, EmptyRow, Input, Pager, PageHeader, Table, Td } from "@/componen
 import { ListActions } from "@/components/list-actions";
 import { bulkInvoiceOps, invoiceAll, invoiceCustomer, issue, saveInvoicePanel, saveInvoiceSheet, sendToZatca } from "./actions";
 import { ActionsMenu, type MenuItem } from "@/components/actions-menu";
-import { fmt } from "@/lib/format";
+import { DocCard, DocCards, SheetFacts, SheetMoney, sheetBtn, sheetPrimary } from "@/components/doc-card";
+import { MobileSheet } from "@/components/mobile-sheet";
+import { fmt, fmtDate } from "@/lib/format";
 import { toAccountOptions } from "@/lib/lookups";
 import { taxCodesFor } from "@/lib/tax-codes";
 
@@ -214,6 +216,106 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
     return { total, paid, overdue, pay: i.status === "issued" ? (overdue ? { label: "متأخرة", tone: "red" as const } : pay) : null };
   };
 
+  // الجوال: بطاقة لكل فاتورة بنفس شكل بطاقة الشحنة (قرار أحمد 2026-11-22)
+  const mobileList = (
+    <div className="md:hidden">
+      <DocCards empty={filter.q || filter.status || filter.pay || filter.from ? "لا توجد فواتير بهذه الشروط" : "لا توجد فواتير بعد"}>
+        {invoices.map(({ i, customer, waybills }) => {
+          const st = state(i);
+          const due = st.total - st.paid;
+          return (
+            <DocCard
+              key={i.id}
+              href={listUrl({ open: String(i.id) })}
+              number={i.number}
+              status={{ label: INVOICE_STATUS[i.status].label, tone: INVOICE_STATUS[i.status].tone }}
+              extraBadge={st.pay}
+              date={i.invoiceDate}
+              party={customer}
+              meta={
+                <>
+                  {waybills > 0 && <span>{waybills === 1 ? "شحنة واحدة" : `${waybills} شحنات`}</span>}
+                  <span className={st.overdue ? "font-semibold text-st-bad-fg" : ""}>
+                    الاستحقاق <span className="ltr-nums">{fmtDate(i.dueDate)}</span>
+                  </span>
+                </>
+              }
+              amount={fmt(st.total)}
+              currency={i.currencyCode}
+              next={i.status === "draft" ? (canIssue ? "أصدرها" : null) : due > 0.005 ? `باقي ${fmt(due)}` : null}
+              active={i.id === openId}
+            />
+          );
+        })}
+      </DocCards>
+      <Pager page={page} size={PAGE_SIZE} total={summary.n} hrefFor={(p) => listUrl({ page: p > 1 ? String(p) : undefined, open: undefined })} />
+    </div>
+  );
+  const openState = openDoc ? state(openDoc.i) : null;
+  const mobileSheet = openDoc && openState && (
+    <MobileSheet
+      closeHref={listHref(BASE, sp, { open: undefined })}
+      label={`معاينة الفاتورة ${openDoc.i.number}`}
+      header={
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="ltr-nums font-display text-[17px] font-semibold text-brand-900">{openDoc.i.number}</span>
+            <Badge tone={INVOICE_STATUS[openDoc.i.status].tone}>{INVOICE_STATUS[openDoc.i.status].label}</Badge>
+            {openState.pay && <Badge tone={openState.pay.tone}>{openState.pay.label}</Badge>}
+          </div>
+          <p className="mt-1 truncate text-[13px] text-gray-600">{openDoc.customer.nameAr}</p>
+        </>
+      }
+      footer={
+        <>
+          {openDoc.i.status === "draft" && canIssue && (
+            <ActionForm action={issue.bind(null, openDoc.i.id)} resetOnSuccess={false} className="col-span-2">
+              <SubmitButton pendingLabel="جارٍ الإصدار…" className={`w-full ${sheetPrimary}`}>
+                اعتماد وإصدار
+              </SubmitButton>
+            </ActionForm>
+          )}
+          {openDoc.i.status === "issued" && openState.paid < openState.total && canReceive && (
+            <Link href={`/receipts/new?customer=${openDoc.i.customerId}&invoice=${openDoc.i.id}`} className={sheetPrimary}>
+              <Icon name="cash" className="size-4.5" />
+              تسجيل تحصيل
+            </Link>
+          )}
+          <Link href={`/invoices/${openDoc.i.id}`} className={sheetBtn}>
+            <Icon name="expand" className="size-4" />
+            فتح كاملة
+          </Link>
+          {invoiceMenu(openDoc).length > 0 ? (
+            <ActionsMenu items={invoiceMenu(openDoc)} label="العمليات" className={sheetBtn} />
+          ) : (
+            <Link href={`/invoices/${openDoc.i.id}?print=1`} target="_blank" className={sheetBtn}>
+              <Icon name="printer" className="size-4" />
+              طباعة
+            </Link>
+          )}
+        </>
+      }
+    >
+      <SheetFacts
+        items={[
+          ["التاريخ", <span key="d" className="ltr-nums">{fmtDate(openDoc.i.invoiceDate)}</span>],
+          ["الاستحقاق", <span key="u" className={`ltr-nums ${openState.overdue ? "text-st-bad-fg" : ""}`}>{fmtDate(openDoc.i.dueDate)}</span>],
+          ["الشحنات", openDoc.trips.length ? `${openDoc.trips.length}` : "دون شحنة"],
+          ["هيئة الزكاة", openDoc.i.status === "issued" ? ZATCA_STATUS[openDoc.i.zatcaStatus] : "بعد الإصدار"],
+        ]}
+      />
+      <SheetMoney
+        lines={[
+          ["قبل الضريبة", fmt(openDoc.i.subtotal)],
+          ["الضريبة", fmt(openDoc.i.vatTotal)],
+          ["الإجمالي", fmt(openState.total)],
+          ["المسدد", fmt(openState.paid)],
+        ]}
+        total={["المتبقي", `${fmt(openState.total - openState.paid)} ${openDoc.i.currencyCode}`]}
+      />
+    </MobileSheet>
+  );
+
   return (
     <>
       <PageHeader title="فواتير المبيعات" description="فاتورة لشحنة أو لعدة شحنات مدمجة، أو فاتورة مباشرة ببنود حرة. تُحفظ مسودة برقم مسودة، وعند الاعتماد تأخذ رقمها الرسمي ويُقيد الإيراد والضريبة.">
@@ -320,7 +422,10 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
           <Pager page={page} size={PAGE_SIZE} total={summary.n} hrefFor={(p) => listUrl({ page: p > 1 ? String(p) : undefined })} />
         </>
       ) : openDoc ? (
-        <div className="grid items-start gap-4 lg:grid-cols-[minmax(17rem,22rem)_1fr]">
+        <>
+        {mobileList}
+        {mobileSheet}
+        <div className="grid items-start gap-4 max-md:hidden lg:grid-cols-[minmax(17rem,22rem)_1fr]">
           {/* القائمة المختصرة بجانب المعاينة */}
           <ul className="hidden max-h-[calc(100vh-9rem)] lg:block divide-y divide-gray-100 overflow-y-auto rounded-2xl border border-black/[0.06] bg-white shadow-sm print:hidden lg:sticky lg:top-4">
             {invoices.map(({ i, customer }) => {
@@ -415,8 +520,11 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
             </div>
           </section>
         </div>
+        </>
       ) : (
         <>
+          {mobileList}
+          <div className="max-md:hidden">
           {(canIssue || canUpdate || canRevert || canDelete) && (
             <ActionForm id={BULK_FORM} action={bulkInvoiceOps} resetOnSuccess={false} className="mb-3 rounded-2xl bg-white px-4 py-2.5 shadow-sm">
               <input type="hidden" name="op" defaultValue="" />
@@ -567,6 +675,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
             })}
           </Table>
           <Pager page={page} size={PAGE_SIZE} total={summary.n} hrefFor={(p) => listUrl({ page: p > 1 ? String(p) : undefined, open: undefined })} />
+          </div>
           {summary.n > 0 && (
             <p className="mt-3 text-xs text-gray-500">
               إجمالي الفواتير بهذه الشروط <span className="ltr-nums font-semibold text-gray-700">{fmt(summary.total)}</span> ريال، والمتبقي منه{" "}
