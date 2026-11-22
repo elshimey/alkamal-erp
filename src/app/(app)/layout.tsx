@@ -54,7 +54,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const groups: NavGroup[] = NAV.map((g) => ({
     title: g.title,
     icon: g.icon,
-    items: g.items.filter((n) => !n.entity || can(user.perms, n.entity, "view")).map(({ href, label, icon }) => ({ href, label, icon })),
+    items: g.items.filter((n) => !n.entity || can(user.perms, n.entity, "view")).map(({ href, label, icon, sec }) => ({ href, label, icon, sec })),
   })).filter((g) => g.items.length);
   // كل شاشة يحق للمستخدم فتحها، للبحث الشامل
   const pages: SearchPage[] = [

@@ -123,7 +123,7 @@ const inv = at("/invoices", "فواتير المبيعات");
 const invNew = at("/invoices", "فاتورة مبيعات جديدة", "/invoices?new=1");
 const invOne = at("/invoices/[id]", "الفاتورة");
 const rcptNew = at("/receipts/new", "دفعة فواتير");
-const notes = at("/notes/[side]", "الإشعارات الدائنة والمدينة", "/notes/sales");
+const notes = at("/notes/[side]", "إشعارات العملاء", "/notes/sales");
 const noteNew = at("/notes/[side]/new", "إشعار دائن أو مدين", "/notes/sales/new?kind=sales_credit");
 const pr = at("/purchase-requests", "طلبات الشراء");
 const po = at("/purchase-orders", "أوامر الشراء");

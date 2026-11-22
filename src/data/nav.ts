@@ -2,10 +2,56 @@ import type { IconName } from "@/components/icons";
 import type { Entity } from "@/lib/permissions";
 import { REPORT_GROUPS } from "@/data/reports";
 
-// أقسام القائمة الجانبية، ويستخدمها البحث الشامل أيضاً
-export const NAV: { title: string; icon: IconName; items: { href: string; label: string; icon: IconName; entity?: Entity }[] }[] = [
-  { title: "عام",
+// أقسام القائمة الجانبية، ويستخدمها البحث الشامل أيضاً (ترتيب أحمد 2026-11-22: التقارير ثانياً، الصيانة قسم مستقل،
+// جهات الاتصال في المحاسبة، إشعارات العملاء في المبيعات وإشعارات الموردين في المشتريات).
+// sec: عنوان صغير داخل القسم يبدأ عنده هذا البند وما بعده حتى عنوان آخر.
+export type NavItem = { href: string; label: string; icon: IconName; entity?: Entity; sec?: string };
+export const NAV: { title: string; icon: IconName; items: NavItem[] }[] = [
+  { title: "الرئيسية",
     icon: "home", items: [{ href: "/", label: "لوحة القيادة", icon: "home" }] },
+  {
+    title: "التقارير",
+    icon: "chart",
+    items: [
+      { href: "/reports/income", label: "قائمة الدخل", icon: "chart", entity: "financial_reports", sec: "الأهم" },
+      { href: "/reports/balance-sheet", label: "المركز المالي", icon: "tree", entity: "financial_reports", sec: "الأهم" },
+      { href: "/reports/fleet-profit", label: "ربحية المركبات والسائقين", icon: "truck", entity: "financial_reports", sec: "الأهم" },
+      { href: "/reports/party-balances", label: "أرصدة العملاء والموردين", icon: "people", entity: "financial_reports", sec: "الأهم" },
+      { href: "/reports/aging", label: "أعمار الديون", icon: "calendar", entity: "financial_reports", sec: "الأهم" },
+      { href: "/reports/trial-balance", label: "ميزان المراجعة", icon: "ledger", entity: "financial_reports", sec: "الأهم" },
+      { href: "/reports/ledger", label: "كشف حساب", icon: "document", entity: "financial_reports", sec: "الأهم" },
+      { href: "/reports/vat", label: "إقرار الضريبة", icon: "invoice", entity: "financial_reports", sec: "الأهم" },
+      { href: "/reports", label: "كل التقارير", icon: "grid", entity: "financial_reports", sec: "باقي التقارير" },
+    ],
+  },
+  {
+    title: "المبيعات والتشغيل",
+    icon: "waybill",
+    items: [
+      { href: "/quotations", label: "عروض الأسعار", icon: "contract", entity: "sales_invoices", sec: "المستندات" },
+      { href: "/waybills", label: "الشحنات", icon: "waybill", entity: "waybills", sec: "المستندات" },
+      { href: "/invoices", label: "الفواتير", icon: "invoice", entity: "sales_invoices", sec: "المستندات" },
+      { href: "/receipts", label: "سندات العملاء", icon: "cash", entity: "receipts", sec: "المستندات" },
+      { href: "/notes/sales", label: "إشعارات العملاء", icon: "document", entity: "sales_invoices", sec: "المستندات" },
+      { href: "/customers", label: "العملاء", icon: "people", entity: "parties", sec: "البيانات" },
+      { href: "/contracts", label: "العقود والأسعار", icon: "contract", entity: "contracts", sec: "البيانات" },
+      { href: "/routes", label: "المواقع والمسارات", icon: "route", entity: "routes", sec: "البيانات" },
+    ],
+  },
+  {
+    title: "المشتريات والمصروفات",
+    icon: "invoice",
+    items: [
+      { href: "/purchase-requests", label: "طلبات الشراء", icon: "list", entity: "purchase_invoices", sec: "المستندات" },
+      { href: "/purchase-orders", label: "أوامر الشراء", icon: "document", entity: "purchase_invoices", sec: "المستندات" },
+      { href: "/purchases", label: "فواتير الموردين", icon: "invoice", entity: "purchase_invoices", sec: "المستندات" },
+      { href: "/expenses", label: "المصروفات", icon: "fuel", entity: "expenses", sec: "المستندات" },
+      { href: "/payments", label: "سندات الصرف", icon: "cash", entity: "payments", sec: "المستندات" },
+      { href: "/payments/installments", label: "الأقساط", icon: "cash", entity: "payments", sec: "المستندات" },
+      { href: "/notes/purchase", label: "إشعارات الموردين", icon: "document", entity: "purchase_invoices", sec: "المستندات" },
+      { href: "/fuel-cards", label: "مطابقة بطاقات الوقود", icon: "fuel", entity: "fuel_cards", sec: "المطابقة" },
+    ],
+  },
   {
     title: "الأسطول",
     icon: "truck",
@@ -15,6 +61,12 @@ export const NAV: { title: string; icon: IconName; items: { href: string; label:
       { href: "/assignments", label: "الإسناد والتسليم", icon: "handover", entity: "vehicles" },
       { href: "/fleet-documents", label: "سجل الوثائق", icon: "document", entity: "fleet_documents" },
       { href: "/violations", label: "المخالفات المرورية", icon: "ticket", entity: "violations" },
+    ],
+  },
+  {
+    title: "الصيانة",
+    icon: "wrench",
+    items: [
       { href: "/maintenance", label: "أوامر الصيانة", icon: "wrench", entity: "maintenance" },
       { href: "/maintenance/requests", label: "طلبات العطل", icon: "alert", entity: "maintenance" },
       { href: "/maintenance/driver-requests", label: "طلبات صيانة السائقين", icon: "driver", entity: "maintenance" },
@@ -22,54 +74,22 @@ export const NAV: { title: string; icon: IconName; items: { href: string; label:
     ],
   },
   {
-    title: "التشغيل والمبيعات",
-    icon: "waybill",
-    items: [
-      { href: "/quotations", label: "عروض الأسعار", icon: "contract", entity: "sales_invoices" },
-      { href: "/waybills", label: "الشحنات", icon: "waybill", entity: "waybills" },
-      { href: "/invoices", label: "الفواتير", icon: "invoice", entity: "sales_invoices" },
-      { href: "/customers", label: "العملاء", icon: "people", entity: "parties" },
-      { href: "/receipts", label: "سندات العملاء", icon: "cash", entity: "receipts" },
-      { href: "/notes/sales", label: "الإشعارات الدائنة والمدينة", icon: "document", entity: "sales_invoices" },
-      { href: "/parties", label: "جهات الاتصال", icon: "people", entity: "parties" },
-      { href: "/routes", label: "المواقع والمسارات", icon: "route", entity: "routes" },
-      { href: "/contracts", label: "العقود والأسعار", icon: "contract", entity: "contracts" },
-    ],
-  },
-  {
-    title: "المشتريات والمصروفات",
-    icon: "invoice",
-    items: [
-      { href: "/purchase-requests", label: "طلبات الشراء", icon: "list", entity: "purchase_invoices" },
-      { href: "/purchase-orders", label: "أوامر الشراء", icon: "document", entity: "purchase_invoices" },
-      { href: "/purchases", label: "فواتير الموردين", icon: "invoice", entity: "purchase_invoices" },
-      { href: "/expenses", label: "المصروفات", icon: "fuel", entity: "expenses" },
-      { href: "/payments", label: "سندات الصرف", icon: "cash", entity: "payments" },
-      { href: "/payments/review", label: "سندات صرف تحت المراجعة", icon: "list", entity: "payments" },
-      { href: "/payments/installments", label: "الأقساط", icon: "cash", entity: "payments" },
-      { href: "/fuel-cards", label: "مطابقة بطاقات الوقود", icon: "fuel", entity: "fuel_cards" },
-      { href: "/notes/purchase", label: "إشعارات الموردين", icon: "document", entity: "purchase_invoices" },
-    ],
-  },
-  {
     title: "الموظفون والرواتب",
     icon: "people",
     items: [
-      { href: "/hr", label: "لوحة الموارد البشرية", icon: "chart", entity: "employees" },
-      { href: "/employees", label: "الموظفون", icon: "people", entity: "employees" },
-      { href: "/hr/custody", label: "العُهد", icon: "handover", entity: "custody" },
-      { href: "/hr/discipline", label: "الإنذارات والجزاءات والحوافز", icon: "alert", entity: "hr_actions" },
-      { href: "/hr/leaves", label: "الإجازات", icon: "calendar", entity: "leaves" },
-      { href: "/hr/attendance", label: "الحضور", icon: "check", entity: "leaves" },
-      { href: "/hr/evaluations", label: "التقييم والترقية", icon: "target", entity: "evaluations" },
-      { href: "/hr/advances", label: "مقدم العمولة", icon: "cash", entity: "payroll" },
-      { href: "/payroll", label: "مسيرات الرواتب", icon: "cash", entity: "payroll" },
-      { href: "/payroll/advances", label: "السلف", icon: "handover", entity: "payroll" },
+      { href: "/payroll", label: "مسيرات الرواتب", icon: "cash", entity: "payroll", sec: "الرواتب" },
+      { href: "/payroll/advances", label: "السلف ومقدم العمولة", icon: "handover", entity: "payroll", sec: "الرواتب" },
+      { href: "/hr", label: "لوحة الموارد البشرية", icon: "chart", entity: "employees", sec: "الموظفون" },
+      { href: "/employees", label: "الموظفون", icon: "people", entity: "employees", sec: "الموظفون" },
+      { href: "/hr/custody", label: "العُهد", icon: "handover", entity: "custody", sec: "الموظفون" },
+      { href: "/hr/leaves", label: "الإجازات والحضور", icon: "calendar", entity: "leaves", sec: "الموظفون" },
+      { href: "/hr/discipline", label: "الإنذارات والجزاءات والحوافز", icon: "alert", entity: "hr_actions", sec: "الموظفون" },
+      { href: "/hr/evaluations", label: "التقييم والترقية", icon: "target", entity: "evaluations", sec: "الموظفون" },
     ],
   },
   {
     title: "المخزون",
-    icon: "wrench",
+    icon: "list",
     items: [
       { href: "/products", label: "الأصناف والخدمات", icon: "list", entity: "inventory" },
       { href: "/inventory", label: "المخزون والمستودعات", icon: "building", entity: "inventory" },
@@ -80,43 +100,31 @@ export const NAV: { title: string; icon: IconName; items: { href: string; label:
     title: "المحاسبة",
     icon: "ledger",
     items: [
-      { href: "/journal", label: "القيود اليومية", icon: "ledger", entity: "journal_entries" },
-      { href: "/bank-accounts", label: "البنوك والصناديق", icon: "cash", entity: "accounts" },
-      { href: "/transfers", label: "التحويل بين الحسابات", icon: "exchange", entity: "payments" },
-      { href: "/bank-accounts/reconcile", label: "التسوية البنكية", icon: "check", entity: "accounts" },
-      { href: "/ecl", label: "مخصص الديون المشكوك فيها", icon: "shield", entity: "journal_entries" },
-      { href: "/fixed-assets", label: "الأصول الثابتة", icon: "building", entity: "fixed_assets" },
-      { href: "/journal/reclassify", label: "إعادة التصنيف", icon: "exchange", entity: "journal_entries" },
-      { href: "/accounts", label: "شجرة الحسابات", icon: "tree", entity: "accounts" },
-      { href: "/cost-centers", label: "مراكز التكلفة", icon: "target", entity: "cost_centers" },
-      { href: "/exchange-rates", label: "أسعار الصرف", icon: "exchange", entity: "accounts" },
-      { href: "/periods", label: "الفترات والإقفال", icon: "calendar", entity: "fiscal_periods" },
-    ],
-  },
-  {
-    title: "التقارير",
-    icon: "chart",
-    items: [
-      { href: "/reports", label: "كل التقارير", icon: "chart", entity: "financial_reports" },
-      { href: "/reports/trial-balance", label: "ميزان المراجعة", icon: "ledger", entity: "financial_reports" },
-      { href: "/reports/income", label: "قائمة الدخل", icon: "chart", entity: "financial_reports" },
-      { href: "/reports/balance-sheet", label: "المركز المالي", icon: "tree", entity: "financial_reports" },
-      { href: "/reports/ledger", label: "كشف حساب", icon: "document", entity: "financial_reports" },
-      { href: "/reports/party-balances", label: "أرصدة العملاء والموردين", icon: "people", entity: "financial_reports" },
-      { href: "/reports/aging", label: "أعمار الديون", icon: "calendar", entity: "financial_reports" },
-      { href: "/reports/fleet-profit", label: "ربحية المركبات والسائقين", icon: "truck", entity: "financial_reports" },
-      { href: "/reports/vat", label: "إقرار الضريبة", icon: "invoice", entity: "financial_reports" },
-      { href: "/reports/unbilled-charges", label: "مصاريف العملاء غير المفوترة", icon: "document", entity: "financial_reports" },
+      { href: "/journal", label: "القيود اليومية", icon: "ledger", entity: "journal_entries", sec: "اليومي" },
+      { href: "/parties", label: "جهات الاتصال", icon: "people", entity: "parties", sec: "اليومي" },
+      { href: "/bank-accounts", label: "البنوك والصناديق", icon: "cash", entity: "accounts", sec: "البنوك والنقد" },
+      { href: "/transfers", label: "التحويل بين الحسابات", icon: "exchange", entity: "payments", sec: "البنوك والنقد" },
+      { href: "/bank-accounts/reconcile", label: "التسوية البنكية", icon: "check", entity: "accounts", sec: "البنوك والنقد" },
+      { href: "/fixed-assets", label: "الأصول الثابتة", icon: "building", entity: "fixed_assets", sec: "نهاية الفترة" },
+      { href: "/ecl", label: "مخصص الديون المشكوك فيها", icon: "shield", entity: "journal_entries", sec: "نهاية الفترة" },
+      { href: "/journal/reclassify", label: "إعادة التصنيف", icon: "exchange", entity: "journal_entries", sec: "نهاية الفترة" },
+      { href: "/periods", label: "الفترات والإقفال", icon: "calendar", entity: "fiscal_periods", sec: "نهاية الفترة" },
+      { href: "/accounts", label: "شجرة الحسابات", icon: "tree", entity: "accounts", sec: "الإعداد" },
+      { href: "/cost-centers", label: "مراكز التكلفة", icon: "target", entity: "cost_centers", sec: "الإعداد" },
+      { href: "/exchange-rates", label: "أسعار الصرف", icon: "exchange", entity: "accounts", sec: "الإعداد" },
     ],
   },
 ];
-
 
 const NAV_HREFS = new Set(NAV.flatMap((g) => g.items.map((x) => x.href)));
 
 // صفحات لا تظهر في القائمة الجانبية لكن يصل لها البحث الشامل
 export const EXTRA_PAGES: { href: string; label: string; group: string; entity?: Entity; admin?: boolean; keywords?: string }[] = [
-  { href: "/notifications", label: "كل التنبيهات", group: "عام", keywords: "جرس إشعارات" },
+  { href: "/notifications", label: "كل التنبيهات", group: "الرئيسية", keywords: "جرس إشعارات" },
+  // صفحات صارت تبويباً داخل صفحة في القائمة
+  { href: "/payments/review", label: "سندات صرف تحت المراجعة", group: "المشتريات والمصروفات", entity: "payments", keywords: "لم يدفع مستحق غير مسدد عهدة لم تصرف مراجعة اعتماد" },
+  { href: "/hr/advances", label: "مقدم العمولة", group: "الموظفون والرواتب", entity: "payroll", keywords: "سلفة عمولة سائق" },
+  { href: "/hr/attendance", label: "الحضور", group: "الموظفون والرواتب", entity: "leaves", keywords: "غياب تأخير دوام" },
   { href: "/waybills", label: "إضافة شحنة جديدة", group: "إنشاء", entity: "waybills", keywords: "بوليصة رحلة" },
   { href: "/waybills/driver-requests", label: "رحلات بدأها السائقون", group: "إنشاء", entity: "waybills", keywords: "طلب رحلة سائق تحويل لشحنة فاتورة الطرف الأول" },
   { href: "/invoices", label: "فاتورة مبيعات جديدة", group: "إنشاء", entity: "sales_invoices", keywords: "فوترة" },
@@ -164,7 +172,6 @@ export const NAV_KEYWORDS: Record<string, string> = {
   "/waybills": "شحنة بوليصة رحلة نقلة",
   "/receipts": "سند قبض تحصيل",
   "/payments": "سند صرف دفع سداد",
-  "/payments/review": "لم يدفع مستحق غير مسدد عهدة لم تصرف مراجعة اعتماد",
   "/payments/installments": "قسط أقساط قرض بنك تمويل دائن جدول سداد مبكر مرابحة سيارة 2201 2114 7101",
   "/journal": "قيد يومية",
   "/transfers": "تحويل بنك صندوق شحن بطاقة",
@@ -177,7 +184,11 @@ export const NAV_KEYWORDS: Record<string, string> = {
   "/drivers": "سائق",
   "/employees": "موظف",
   "/customers": "عميل",
-  "/parties": "عميل مورد ورشة ناقل",
+  "/parties": "عميل مورد ورشة ناقل جهات اتصال",
+  "/notes/sales": "إشعار دائن مدين عميل مرتجع خصم",
+  "/notes/purchase": "إشعار مدين دائن مورد مرتجع خصم",
+  "/payroll/advances": "سلفة سلف مقدم عمولة",
+  "/hr/leaves": "إجازة حضور غياب",
   "/products": "صنف قطع غيار",
   "/reports/ledger": "كشف حساب",
   "/expenses": "مصروف",

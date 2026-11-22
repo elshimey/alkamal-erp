@@ -9,7 +9,6 @@ const TABS = [
   { key: "leaves", href: "/hr/leaves", label: "الإجازات" },
   { key: "attendance", href: "/hr/attendance", label: "الحضور" },
   { key: "evaluations", href: "/hr/evaluations", label: "التقييم والترقية" },
-  { key: "advances", href: "/hr/advances", label: "مقدم العمولة" },
 ] as const;
 
 export function HrTabs({ active }: { active: (typeof TABS)[number]["key"] }) {

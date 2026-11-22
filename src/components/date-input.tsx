@@ -182,6 +182,42 @@ export function DateInput({ value, defaultValue, onChange, name, required, min, 
   );
 }
 
+/**
+ * زر التقويم وحده لخلايا الشيتات (شيت الإضافة والتعديل الجماعي): يفتح التقويم نفسه الذي في النماذج.
+ * value بصيغة 2026-10-25 أو 25/10/2026، وonPick يعيد 2026-10-25.
+ */
+export function DatePickButton({ value, onPick, className }: { value: string; onPick: (iso: string) => void; className?: string }) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLSpanElement>(null);
+  const iso = /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : (dmyToIso(value) ?? "");
+  return (
+    <span ref={box} className={className ?? "absolute end-1 top-1/2 -translate-y-1/2"}>
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-label="اختر من التقويم"
+        aria-expanded={open}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => setOpen((o) => !o)}
+        className={`rounded p-0.5 transition ${open ? "bg-brand-50 text-brand-800" : "text-gray-400 hover:text-brand-700"}`}
+      >
+        <Icon name="calendar" className="size-3.5" />
+      </button>
+      {open && (
+        <Calendar
+          anchor={box}
+          value={iso}
+          onPick={(d) => {
+            setOpen(false);
+            onPick(d);
+          }}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </span>
+  );
+}
+
 function Calendar({ anchor: anchorRef, value, min, max, onPick, onClose }: { anchor: RefObject<HTMLSpanElement | null>; value: string; min?: string; max?: string; onPick: (iso: string) => void; onClose: () => void }) {
   const start = value || todayIso();
   const [view, setView] = useState({ y: Number(start.slice(0, 4)), m: Number(start.slice(5, 7)) - 1 });

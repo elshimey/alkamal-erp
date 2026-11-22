@@ -17,6 +17,8 @@ export interface NavGroup {
     icon: IconName;
     external?: boolean;
     hint?: string;
+    /** عنوان صغير داخل القسم يبدأ عند هذا البند */
+    sec?: string;
   }[];
 }
 
@@ -131,7 +133,7 @@ export function NavLinks({
         key={g.title}
         type="button"
         data-nav-group
-        onClick={(e) => toggle(g.title, g.items.length, e.currentTarget)}
+        onClick={(e) => toggle(g.title, g.items.length + new Set(g.items.map((i) => i.sec).filter(Boolean)).size * 0.7, e.currentTarget)}
         aria-expanded={isOpen}
         aria-haspopup="menu"
         className={`group relative flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors duration-200 ${
@@ -191,8 +193,13 @@ export function NavLinks({
             <div className="px-3 pt-1.5 pb-1 text-[11px] font-semibold tracking-wide text-gray-400">
               {openGroup.title}
             </div>
-            {openGroup.items.map((n) => {
+            {openGroup.items.map((n, i) => {
               const on = n.href === active;
+              const head = n.sec && n.sec !== openGroup.items[i - 1]?.sec ? (
+                <div key={`h-${n.sec}`} role="presentation" className="px-3 pt-2 pb-0.5 text-[11px] font-semibold text-gray-400">
+                  {n.sec}
+                </div>
+              ) : null;
               const cls = `flex items-center gap-2.5 rounded-lg px-3 py-2 transition-colors ${on ? "bg-brand-50 font-semibold text-brand-800" : "text-gray-700 hover:bg-gray-50"}`;
               const inner = (
                 <>
@@ -208,7 +215,7 @@ export function NavLinks({
                   )}
                 </>
               );
-              return n.external ? (
+              const link = n.external ? (
                 <a
                   key={n.href}
                   href={n.href}
@@ -230,6 +237,7 @@ export function NavLinks({
                   {inner}
                 </Link>
               );
+              return head ? [head, link] : link;
             })}
           </div>,
           document.body,
@@ -350,7 +358,12 @@ export function MobileNav({ groups, brand }: { groups: NavGroup[]; brand: { name
                     </button>
                     {isOpen && (
                       <div className="ms-5 flex flex-col gap-0.5 border-s border-white/10 ps-3 pt-1 pb-2">
-                        {g.items.map((n) =>
+                        {g.items.map((n, i) => [
+                          n.sec && n.sec !== g.items[i - 1]?.sec ? (
+                            <div key={`h-${n.sec}`} className="px-3 pt-2 pb-0.5 text-[11px] font-semibold text-white/35">
+                              {n.sec}
+                            </div>
+                          ) : null,
                           n.external ? (
                             <a key={n.href} href={n.href} {...(n.href.startsWith("http") ? { target: "_blank", rel: "noopener noreferrer" } : {})} className={linkCls(n.href)}>
                               <Icon name={n.icon} className="size-4 opacity-80" />
@@ -362,7 +375,7 @@ export function MobileNav({ groups, brand }: { groups: NavGroup[]; brand: { name
                               {n.label}
                             </Link>
                           ),
-                        )}
+                        ])}
                       </div>
                     )}
                   </div>

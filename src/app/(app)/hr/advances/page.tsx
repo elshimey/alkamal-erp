@@ -12,7 +12,8 @@ import { Badge, EmptyRow, Field, Input, PageHeader, Table, Td } from "@/componen
 import { RowCheck, SelectAll, SelectionTotal } from "@/components/row-selection";
 import { DocToolbar } from "@/components/doc-toolbar";
 import { approveAdvanceAction, bulkAdvances, rejectAdvanceAction } from "../actions";
-import { fmt, HrTabs, Kpis } from "../ui";
+import { fmt, Kpis } from "../ui";
+import { PayrollTabs } from "../../payroll/tabs";
 import { AccountField } from "@/components/account-field";
 import { toAccountOptions } from "@/lib/lookups";
 import { fmtDate } from "@/lib/format";
@@ -60,10 +61,10 @@ export default async function AdvanceRequestsPage({ searchParams }: { searchPara
   return (
     <>
       <PageHeader
-        title="الموارد البشرية"
+        title="الرواتب"
         description="يطلب السائق من تطبيقه مقدم عمولة نقداً (في أيام الطلب وبحد شهري حسب فئته) أو سلفة من العهدة التي معه. مقدم العمولة يُستقطع كاملاً من مسير الشهر ويُصرف من الصندوق أو البنك. سلفة العهدة تُقيد على عهدة السائق (مدين سلف الموظفين، دائن عهدة السائق) وتُقسّط على الرواتب بالقسط الذي تحدده."
       />
-      <HrTabs active="advances" />
+      <PayrollTabs active="commission" />
       <Kpis
         items={[
           { label: "نافذة الطلب", value: `${settings.advanceOpenDay} – ${settings.advanceCloseDay}`, hint: isOpen ? "مفتوحة اليوم" : "مغلقة اليوم", href: "/settings/hr" },

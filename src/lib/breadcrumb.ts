@@ -26,7 +26,7 @@ export function crumbTrail(path: string, pages: CrumbPage[], title?: string | nu
   const trail: Crumb[] = [];
   const first = chain[0];
   const label = (p: CrumbPage) => SHORT[p.href] ?? p.label;
-  if (first && first.group !== "عام" && label(first) !== first.group) trail.push({ label: first.group });
+  if (first && first.group !== "الرئيسية" && label(first) !== first.group) trail.push({ label: first.group });
   for (const p of chain) trail.push({ label: label(p), href: p.href });
   const last = chain.at(-1);
   if (last?.href === clean) delete trail[trail.length - 1].href;

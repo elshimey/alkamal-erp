@@ -6,11 +6,11 @@ const pages = crumbPages(NAV, EXTRA_PAGES);
 
 describe("مسار الصفحة", () => {
   it("القائمة: القسم ثم اسم القائمة بلا رابط", () => {
-    expect(crumbTrail("/waybills", pages)).toEqual([{ label: "التشغيل والمبيعات" }, { label: "الشحنات" }]);
+    expect(crumbTrail("/waybills", pages)).toEqual([{ label: "المبيعات والتشغيل" }, { label: "الشحنات" }]);
   });
   it("المستند: القسم ثم رابط القائمة ثم رقم المستند من عنوان الصفحة", () => {
     expect(crumbTrail("/waybills/63", pages, "WB-2026-000063")).toEqual([
-      { label: "التشغيل والمبيعات" },
+      { label: "المبيعات والتشغيل" },
       { label: "الشحنات", href: "/waybills" },
       { label: "WB-2026-000063" },
     ]);

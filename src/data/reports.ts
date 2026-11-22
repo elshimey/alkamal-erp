@@ -11,6 +11,9 @@ export interface ReportLink {
   keywords?: string;
 }
 
+/** أهم التقارير: أعلى مركز التقارير وفي القائمة الجانبية تحت «التقارير» (قرار أحمد 2026-11-22). */
+export const KEY_REPORTS = ["/reports/income", "/reports/balance-sheet", "/reports/fleet-profit", "/reports/party-balances", "/reports/aging", "/reports/trial-balance"];
+
 export const REPORT_GROUPS: { title: string; reports: ReportLink[] }[] = [
   {
     title: "المالية",
