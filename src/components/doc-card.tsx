@@ -47,6 +47,7 @@ export function DocCards({ children, empty }: { children: ReactNode; empty?: Rea
  * بطاقة مستند على الجوال (قرار أحمد 2026-11-22): الرقم والحالة والتاريخ أعلاها، ثم الجهة،
  * ثم المسار (للشحنات)، ثم سطر صغير بالتفاصيل (اللوحة والسائق)، والمبلغ واضحاً مع الخطوة التالية.
  * لمسها يفتح المعاينة التي تصعد من الأسفل (رابط ?open=).
+ * دون href تصبح بطاقة ثابتة وأزرارها (actions) تحتها مباشرة، مثل طلبات الشراء (اعتماد، رفض، إصدار أمر شراء).
  */
 export function DocCard({
   href,
@@ -61,8 +62,9 @@ export function DocCard({
   currency,
   next,
   active,
+  actions,
 }: {
-  href: string;
+  href?: string;
   number: string;
   status: { label: string; tone: Tone };
   extraBadge?: { label: string; tone: Tone } | null;
@@ -74,14 +76,12 @@ export function DocCard({
   currency?: string;
   next?: string | null;
   active?: boolean;
+  /** أزرار البطاقة (للبطاقة دون href فقط، لأن النموذج لا يوضع داخل رابط) */
+  actions?: ReactNode;
 }) {
-  return (
-    <Link
-      href={href}
-      scroll={false}
-      aria-current={active ? "true" : undefined}
-      className={`relative block overflow-hidden rounded-[18px] bg-white px-3.5 pt-3.5 pb-3 shadow-[0_1px_2px_rgba(27,33,38,0.06),0_4px_14px_-6px_rgba(27,33,38,0.14)] transition before:absolute before:inset-y-3.5 before:right-0 before:w-[3px] before:rounded-e-[3px] active:scale-[0.985] ${STRIPE[status.tone]} ${active ? "ring-2 ring-brand-500" : ""}`}
-    >
+  const cls = `relative block overflow-hidden rounded-[18px] bg-white px-3.5 pt-3.5 pb-3 shadow-[0_1px_2px_rgba(27,33,38,0.06),0_4px_14px_-6px_rgba(27,33,38,0.14)] transition before:absolute before:inset-y-3.5 before:right-0 before:w-[3px] before:rounded-e-[3px] ${STRIPE[status.tone]}`;
+  const body = (
+    <>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span className="ltr-nums font-display text-sm font-semibold whitespace-nowrap text-brand-900">{number}</span>
         <Badge tone={status.tone}>{status.label}</Badge>
@@ -111,6 +111,18 @@ export function DocCard({
           {next && <span className="ms-auto rounded-lg bg-brand-50 px-2 py-1 text-[11.5px] font-semibold text-brand-700">{next}</span>}
         </div>
       )}
+    </>
+  );
+  if (!href)
+    return (
+      <div data-doc-card className={cls}>
+        {body}
+        {actions && <div className="mt-3 flex flex-wrap items-start gap-2 [&>*]:min-w-[8rem] [&>*]:flex-1">{actions}</div>}
+      </div>
+    );
+  return (
+    <Link href={href} scroll={false} aria-current={active ? "true" : undefined} className={`${cls} active:scale-[0.985] ${active ? "ring-2 ring-brand-500" : ""}`}>
+      {body}
     </Link>
   );
 }
