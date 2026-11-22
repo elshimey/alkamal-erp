@@ -12,6 +12,8 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { MIN_PASSWORD_LENGTH } from "@/lib/password";
 import { createDriverLoginAction, saveDrivers } from "./actions";
 import { DriverPanel } from "./driver-panel";
+import { DocCards, Plate, sheetBtn, sheetPrimary } from "@/components/doc-card";
+import { Facts, RecordCardFace, TapCard } from "@/components/list-card";
 
 const LANG = { ar: "عربي", ur: "أوردو", hi: "هندي", en: "إنجليزي" } as const;
 const STATUS = {
@@ -113,6 +115,42 @@ export default async function DriversPage({ searchParams }: { searchParams: Prom
       )}
       {!adding && (
       <>
+      <DocCards empty="لا يوجد سائقون بعد">
+        {rows.map(({ d, name, custodyCode, plate, login }) => {
+          const facts: [string, React.ReactNode][] = [
+            ["المركبة الحالية", plate ? <Plate>{plate}</Plate> : "بلا مركبة"],
+            ["العمولة", d.commissionClass === "domestic" ? "داخلي" : "خارجي"],
+            ["لغة التطبيق", LANG[d.appLanguage]],
+            ["دخول التطبيق", login ?? "غير مفعّل"],
+          ];
+          return (
+            <TapCard
+              key={d.id}
+              tone={STATUS[d.status].tone}
+              label={`السائق ${name}`}
+              face={<RecordCardFace avatar={name.slice(0, 1)} name={name} sub={[d.mobile, d.nationality].filter(Boolean).join(" · ")} status={STATUS[d.status]} facts={facts} />}
+              header={<RecordCardFace avatar={name.slice(0, 1)} name={name} sub={[d.mobile, d.nationality].filter(Boolean).join(" · ")} status={STATUS[d.status]} />}
+              details={<Facts items={[...facts, ["حساب العهدة", <span key="c" className="ltr-nums">{custodyCode}</span>]]} />}
+              footer={
+                <>
+                  {canEdit && (
+                    <Link href={`/drivers?edit=${d.id}`} scroll={false} className={sheetPrimary}>
+                      تعديل البيانات
+                    </Link>
+                  )}
+                  <Link href={`/fleet-documents/owner/driver-${d.id}`} className={sheetBtn}>
+                    الوثائق
+                  </Link>
+                  <Link href={`/drivers/${d.id}`} className={sheetBtn}>
+                    فتح كاملة
+                  </Link>
+                </>
+              }
+            />
+          );
+        })}
+      </DocCards>
+      <div className="max-md:hidden">
       <p className="mb-2 text-sm text-gray-500">اضغط اسم السائق لتعديل بياناته ووثائقه.</p>
       <Table head={["الاسم", "الجوال", "الجنسية", "لغة التطبيق", "العمولة", "المركبة الحالية", "حساب العهدة", "دخول التطبيق", "الحالة"]}>
         {rows.length === 0 && <EmptyRow cols={9}>لا يوجد سائقون بعد</EmptyRow>}
@@ -139,6 +177,7 @@ export default async function DriversPage({ searchParams }: { searchParams: Prom
           </tr>
         ))}
       </Table>
+      </div>
       </>
       )}
       {panel}

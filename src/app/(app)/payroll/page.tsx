@@ -11,6 +11,8 @@ import { Badge, Card, EmptyRow, Field, Input, PageHeader, Table, Td } from "@/co
 import { PayrollTabs } from "./tabs";
 import { createRun } from "./actions";
 import { fmt } from "@/lib/format";
+import { DocCards } from "@/components/doc-card";
+import { cardShell, DocCardFace, Facts, STRIPE } from "@/components/list-card";
 
 export default async function PayrollPage() {
   const user = await requirePermission("payroll", "view");
@@ -46,6 +48,32 @@ export default async function PayrollPage() {
           </ActionForm>
         </Card>
       )}
+      <DocCards empty="لا توجد مسيرات بعد">
+        {runs.map(({ r, count, gross, commissions, violations, net }) => {
+          const st = PAYROLL_STATUS[r.status];
+          return (
+            <Link key={r.id} href={`/payroll/${r.id}`} className={`${cardShell} ${STRIPE[st.tone]} active:scale-[0.985]`}>
+              <DocCardFace
+                number={r.number}
+                status={st}
+                party={monthLabel(r.month)}
+                meta={<span>{count} موظف</span>}
+                amount={fmt(net)}
+                currency="الصافي"
+                next={r.status === "draft" ? "راجعه واعتمده" : r.status === "approved" ? "اصرفه" : null}
+              />
+              <Facts
+                items={[
+                  ["الرواتب والبدلات", <span key="g" className="ltr-nums">{fmt(gross)}</span>],
+                  ["العمولات", <span key="c" className="ltr-nums">{fmt(commissions)}</span>],
+                  ["المخالفات", <span key="v" className="ltr-nums text-red-600">{Number(violations) ? fmt(violations) : "—"}</span>],
+                ]}
+              />
+            </Link>
+          );
+        })}
+      </DocCards>
+      <div className="max-md:hidden">
       <Table head={["الرقم", "الشهر", "الموظفون", "الرواتب والبدلات", "العمولات", "المخالفات", "الصافي للصرف", "الحالة"]}>
         {runs.length === 0 && <EmptyRow cols={8}>لا توجد مسيرات بعد</EmptyRow>}
         {runs.map(({ r, count, gross, commissions, violations, net }) => (
@@ -67,6 +95,7 @@ export default async function PayrollPage() {
           </tr>
         ))}
       </Table>
+      </div>
     </>
   );
 }

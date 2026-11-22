@@ -9,6 +9,8 @@ import { Badge, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
 import { ContactPanel } from "./contact-panel";
 import { PartyPanel } from "./party-panel";
 import { AddMenu } from "@/components/add-menu";
+import { DocCards } from "@/components/doc-card";
+import { RecordCardFace, cardShell } from "@/components/list-card";
 
 const BASE = "/parties";
 type Params = { q?: string; tab?: string; country?: string; sort?: string; open?: string; ptab?: string; from?: string; to?: string; new?: string };
@@ -123,6 +125,27 @@ export default async function PartiesPage({ searchParams }: { searchParams: Prom
           />
         </div>
       ) : (
+        <>
+        <DocCards empty={sp.q || sp.country ? "لا توجد جهات بهذه الشروط" : "لا توجد جهات بعد؛ أضفها من زر «إضافة»"}>
+          {list.map(({ p, roles, people }) => {
+            const roleNames = roles.map((r) => PARTY_ROLES[r as keyof typeof PARTY_ROLES]);
+            return (
+              <Link key={p.id} href={href(sp, { open: String(p.id) })} scroll={false} className={`${cardShell} active:scale-[0.985] ${p.isActive ? "before:bg-st-info-dot" : "before:bg-st-neutral-dot"}`}>
+                <RecordCardFace
+                  avatar={p.nameAr.slice(0, 1)}
+                  name={p.nameAr}
+                  sub={[roleNames.join("، "), [p.city, country(p.country)].filter(Boolean).join("، ")].filter(Boolean).join(" · ")}
+                  status={p.isActive ? null : { label: "موقوف", tone: "gray" }}
+                  facts={[
+                    ["الجوال", p.mobile ? <span key="m" className="ltr-nums">{p.mobile}</span> : "—"],
+                    p.vatNumber ? ["الرقم الضريبي", <span key="v" className="ltr-nums">{p.vatNumber}</span>] : ["الأشخاص", people || "—"],
+                  ]}
+                />
+              </Link>
+            );
+          })}
+        </DocCards>
+        <div className="max-md:hidden">
         <Table head={["الاسم", "نوع جهة الاتصال", "الأشخاص", "الرقم الضريبي", "البريد الإلكتروني", "الجوال", "البلد", "المدينة", "الشارع", "رقم المبنى", ""]}>
           {list.length === 0 && <EmptyRow cols={11}>{sp.q || sp.country ? "لا توجد جهات بهذه الشروط" : "لا توجد جهات بعد؛ أضفها من زر «إضافة»"}</EmptyRow>}
           {list.map(({ p, roles, people }) => {
@@ -161,6 +184,8 @@ export default async function PartiesPage({ searchParams }: { searchParams: Prom
             );
           })}
         </Table>
+        </div>
+        </>
       )}
     </>
   );

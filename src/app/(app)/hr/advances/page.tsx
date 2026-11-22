@@ -15,6 +15,9 @@ import { approveAdvanceAction, bulkAdvances, rejectAdvanceAction } from "../acti
 import { fmt, HrTabs, Kpis } from "../ui";
 import { AccountField } from "@/components/account-field";
 import { toAccountOptions } from "@/lib/lookups";
+import { fmtDate } from "@/lib/format";
+import { DocCards } from "@/components/doc-card";
+import { DocCardFace, Facts, SheetActions, TapCard } from "@/components/list-card";
 
 const BASE = "/hr/advances";
 const BULK_FORM = "bulk-advances";
@@ -38,6 +41,20 @@ export default async function AdvanceRequestsPage({ searchParams }: { searchPara
 
   const cashSelect = (
     <AccountField name="cashAccountId" options={await toAccountOptions(cashes)} placeholder="اعتماد دون صرف (أو اختر الصندوق)" className="w-64" />
+  );
+
+  type Req = (typeof list)[number]["r"];
+  const rowActions = (r: Req) => (
+    <>
+      <ActionForm action={approveAdvanceAction.bind(null, r.id)} resetOnSuccess={false} className="flex flex-wrap items-center gap-1.5">
+        {r.source === "custody" ? <Input name="installment" inputMode="decimal" dir="ltr" placeholder={`القسط الشهري (${fmt(r.amount)})`} className="w-36" /> : cashSelect}
+        <SubmitButton>اعتماد</SubmitButton>
+      </ActionForm>
+      <ActionForm action={rejectAdvanceAction.bind(null, r.id)} className="flex flex-wrap items-center gap-1.5">
+        <Input name="reason" placeholder="سبب الرفض" className="w-28" />
+        <SubmitButton variant="secondary">رفض</SubmitButton>
+      </ActionForm>
+    </>
   );
 
   return (
@@ -67,6 +84,63 @@ export default async function AdvanceRequestsPage({ searchParams }: { searchPara
         </ActionForm>
       )}
 
+      <DocCards empty="لا توجد طلبات بعد. يطلبها السائق من تبويب «رصيدي» في تطبيقه.">
+        {list.map(({ r, name, commissionClass, advance }) => {
+          const st = ADVANCE_REQUEST_STATUS[r.status];
+          const kind = r.source === "custody" ? "سلفة من العهدة" : "مقدم عمولة";
+          const pendingMine = r.status === "pending" && canApprove;
+          return (
+            <TapCard
+              key={r.id}
+              tone={st.tone}
+              label={`الطلب ${r.number}`}
+              face={
+                <DocCardFace
+                  number={
+                    pendingMine ? (
+                      <span className="inline-flex items-center gap-2">
+                        <RowCheck form={BULK_FORM} id={r.id} amount={r.amount} />
+                        {r.number}
+                      </span>
+                    ) : (
+                      r.number
+                    )
+                  }
+                  status={st}
+                  date={fmtDate(r.requestDate)}
+                  party={name}
+                  meta={
+                    <>
+                      <span>{kind}</span>
+                      <span>{commissionClass === "international" ? "دولي" : "داخلي"}</span>
+                    </>
+                  }
+                  amount={fmt(r.amount)}
+                  next={pendingMine ? "تنتظر اعتمادك" : null}
+                />
+              }
+              header={<DocCardFace number={r.number} status={st} party={name} />}
+              details={
+                <>
+                  <Facts
+                    items={[
+                      ["التاريخ", fmtDate(r.requestDate)],
+                      ["المبلغ", <span key="a" className="ltr-nums font-semibold">{fmt(r.amount)}</span>],
+                      ["النوع", kind],
+                      ["الفئة", commissionClass === "international" ? "دولي" : "داخلي"],
+                      ...(r.notes ? ([["ملاحظة", r.notes]] as [string, React.ReactNode][]) : []),
+                      ...(advance ? ([["السلفة", <Link key="adv" href="/payroll/advances" className="ltr-nums text-brand-700 underline">{advance}</Link>]] as [string, React.ReactNode][]) : []),
+                    ]}
+                  />
+                  {r.rejectReason && <p className="mt-3 text-sm text-red-600">سبب الرفض: {r.rejectReason}</p>}
+                </>
+              }
+              footer={pendingMine ? <SheetActions>{rowActions(r)}</SheetActions> : undefined}
+            />
+          );
+        })}
+      </DocCards>
+      <div className="max-md:hidden">
       <Table head={[canApprove && pending.length ? <SelectAll key="all" form={BULK_FORM} /> : "", "الرقم", "التاريخ", "السائق", "النوع", "المبلغ", "ملاحظة", "الحالة", ""]}>
         {list.length === 0 && <EmptyRow cols={9}>لا توجد طلبات بعد. يطلبها السائق من تبويب «رصيدي» في تطبيقه.</EmptyRow>}
         {list.map(({ r, name, commissionClass, advance }) => (
@@ -93,22 +167,12 @@ export default async function AdvanceRequestsPage({ searchParams }: { searchPara
               )}
             </Td>
             <Td>
-              {r.status === "pending" && canApprove && (
-                <div className="flex flex-wrap items-center gap-2">
-                  <ActionForm action={approveAdvanceAction.bind(null, r.id)} resetOnSuccess={false} className="flex items-center gap-1.5">
-                    {r.source === "custody" ? <Input name="installment" inputMode="decimal" dir="ltr" placeholder={`القسط الشهري (${fmt(r.amount)})`} className="w-36" /> : cashSelect}
-                    <SubmitButton>اعتماد</SubmitButton>
-                  </ActionForm>
-                  <ActionForm action={rejectAdvanceAction.bind(null, r.id)} className="flex items-center gap-1.5">
-                    <Input name="reason" placeholder="سبب الرفض" className="w-28" />
-                    <SubmitButton variant="secondary">رفض</SubmitButton>
-                  </ActionForm>
-                </div>
-              )}
+              {r.status === "pending" && canApprove && <div className="flex flex-wrap items-center gap-2">{rowActions(r)}</div>}
             </Td>
           </tr>
         ))}
       </Table>
+      </div>
     </>
   );
 }

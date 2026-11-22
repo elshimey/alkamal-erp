@@ -10,6 +10,9 @@ import { ListActions } from "@/components/list-actions";
 import { PanelField, PanelSection } from "@/components/panel-ui";
 import { RecordPanel } from "@/components/record-panel";
 import { AssignmentFields } from "./assignment-fields";
+import { DocCards, sheetBtn, sheetPrimary } from "@/components/doc-card";
+import { RecordCardFace, TapCard, cardShell } from "@/components/list-card";
+import { fmtDate } from "@/lib/format";
 import { endAssignmentAction, handoverAssignmentAction, startAssignmentAction } from "./actions";
 
 const baseQuery = () =>
@@ -65,6 +68,41 @@ export default async function AssignmentsPage({ searchParams }: { searchParams: 
         <ListActions newHref={canEdit && "/assignments?new=1"} newLabel="استلام مركبة" />
       </PageHeader>
       <h2 className="mb-3 font-semibold text-gray-800">المسندة حالياً</h2>
+      <DocCards empty="لا توجد مركبات مسندة">
+        {open.map(({ a, plate, driver }) => {
+          const face = (
+            <RecordCardFace
+              avatar="🚛"
+              name={plate}
+              sub={`مع ${driver} منذ ${fmtDate(a.fromDate)}`}
+              status={{ label: "مسندة", tone: "blue" }}
+              facts={[["عداد الاستلام", a.odometerStart != null ? `${a.odometerStart.toLocaleString("en")} كم` : "—"]]}
+            />
+          );
+          return (
+            <TapCard
+              key={a.id}
+              tone="blue"
+              label={`إسناد ${plate}`}
+              face={face}
+              header={<RecordCardFace avatar="🚛" name={plate} sub={`مع ${driver} منذ ${fmtDate(a.fromDate)}`} />}
+              footer={
+                canEdit ? (
+                  <>
+                    <Link href={`/assignments?handover=${a.id}`} scroll={false} className={sheetPrimary}>
+                      تسليم لسائق آخر
+                    </Link>
+                    <Link href={`/assignments?release=${a.id}`} scroll={false} className={`${sheetBtn} col-span-2`}>
+                      تسليم للشركة
+                    </Link>
+                  </>
+                ) : undefined
+              }
+            />
+          );
+        })}
+      </DocCards>
+      <div className="max-md:hidden">
       <Table head={["المركبة", "السائق", "منذ", "عداد الاستلام", ""]}>
         {open.length === 0 && <EmptyRow cols={5}>لا توجد مركبات مسندة</EmptyRow>}
         {open.map(({ a, plate, driver }) => (
@@ -88,7 +126,25 @@ export default async function AssignmentsPage({ searchParams }: { searchParams: 
           </tr>
         ))}
       </Table>
+      </div>
       <h2 className="mt-8 mb-3 font-semibold text-gray-800">السجل</h2>
+      <DocCards empty="لا يوجد سجل بعد">
+        {history.map(({ a, plate, driver }) => (
+          <div key={a.id} className={`${cardShell} before:bg-st-neutral-dot`}>
+            <RecordCardFace
+              avatar="🚛"
+              name={plate}
+              sub={driver}
+              facts={[
+                ["الفترة", <span key="p" className="ltr-nums">{fmtDate(a.fromDate)} – {a.toDate ? fmtDate(a.toDate) : ""}</span>],
+                ["الكيلومترات", a.odometerEnd != null && a.odometerStart != null ? (a.odometerEnd - a.odometerStart).toLocaleString("en") : "—"],
+                ...(a.notes ? ([["ملاحظات", a.notes]] as [string, string][]) : []),
+              ]}
+            />
+          </div>
+        ))}
+      </DocCards>
+      <div className="max-md:hidden">
       <Table head={["المركبة", "السائق", "من", "إلى", "الكيلومترات", "ملاحظات"]}>
         {history.length === 0 && <EmptyRow cols={6}>لا يوجد سجل بعد</EmptyRow>}
         {history.map(({ a, plate, driver }) => (
@@ -104,6 +160,7 @@ export default async function AssignmentsPage({ searchParams }: { searchParams: 
           </tr>
         ))}
       </Table>
+      </div>
 
       {creating && (
         <RecordPanel title="استلام مركبة" subtitle="يُسند الرأس للسائق من تاريخ الاستلام حتى تسجيل التسليم" closeHref="/assignments" action={startAssignmentAction} creating>

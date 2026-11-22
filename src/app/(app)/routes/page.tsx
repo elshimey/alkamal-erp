@@ -9,6 +9,8 @@ import { countryOptions, locationOptions } from "@/lib/lookups";
 import { YES_NO } from "@/data/operations";
 import { SheetEditor } from "@/components/sheet-editor";
 import { Badge, Card, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
+import { DocCards, sheetPrimary } from "@/components/doc-card";
+import { Facts, RecordCardFace, TapCard } from "@/components/list-card";
 import { saveLocations, saveRoutes } from "./actions";
 
 export default async function RoutesPage({ searchParams }: { searchParams: Promise<{ add?: string }> }) {
@@ -61,6 +63,36 @@ export default async function RoutesPage({ searchParams }: { searchParams: Promi
       )}
       {!adding && (
       <>
+      <DocCards empty="لا توجد مسارات بعد">
+        {sorted.map((r) => {
+          const kind = r.isInternational ? "دولي" : "داخلي";
+          const status = r.isActive ? { label: kind, tone: (r.isInternational ? "amber" : "gray") as "amber" | "gray" } : { label: "مخفي", tone: "gray" as const };
+          const sub = [kind, r.distanceKm != null ? `${r.distanceKm.toLocaleString("en")} كم` : null].filter(Boolean).join(" · ");
+          const facts: [string, React.ReactNode][] = [
+            ["عمولة السائق", <span key="c" className="ltr-nums">{Number(r.driverCommission).toLocaleString("en")}</span>],
+            ["الديزل التقديري", r.estimatedDieselLiters != null ? `${r.estimatedDieselLiters} لتر` : "—"],
+          ];
+          const name = `${r.fromLabel} ← ${r.toLabel}`;
+          return (
+            <TapCard
+              key={r.id}
+              tone={status.tone}
+              label={`المسار ${name}`}
+              face={<RecordCardFace avatar="↔" name={name} sub={sub} status={status} facts={facts} />}
+              header={<RecordCardFace avatar="↔" name={name} sub={sub} status={status} />}
+              details={<Facts items={facts} />}
+              footer={
+                canEdit ? (
+                  <a href={`/records/routes/${r.id}`} className={sheetPrimary}>
+                    تعديل المسار
+                  </a>
+                ) : undefined
+              }
+            />
+          );
+        })}
+      </DocCards>
+      <div className="max-md:hidden">
       <Table head={["من", "إلى", "المسافة", "النوع", "عمولة السائق", "الديزل التقديري"]}>
         {sorted.length === 0 && <EmptyRow cols={6}>لا توجد مسارات بعد</EmptyRow>}
         {sorted.map((r) => (
@@ -84,6 +116,7 @@ export default async function RoutesPage({ searchParams }: { searchParams: Promi
           </tr>
         ))}
       </Table>
+      </div>
       {allLocations.length > 0 && (
         <Card title="المدن والمواقع المسجلة" className="mt-6">
           {canEdit && (
