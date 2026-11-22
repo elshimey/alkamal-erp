@@ -49,7 +49,7 @@ export default async function NotesPage({ params, searchParams }: { params: Prom
 
   return (
     <>
-      <PageHeader title={cfg.title} description={side === "sales" ? "الإشعارات الدائنة (تخفيض أو مرتجع) والمدينة (زيادة) على فواتير العملاء، ضريبية وقابلة للطباعة." : "إشعارات المرتجعات والخصومات من الموردين وفروق الأسعار عليهم."}>
+      <PageHeader title={cfg.title} description={side === "sales" ? "الإشعار الدائن يقلل ما على العميل (خصم أو مرتجع)، والمدين يزيد عليه (فرق سعر أو مصروف نُسي). ضريبية وقابلة للطباعة." : "الإشعار المدين للمورد يقلل ما علينا له (مرتجع أو خصم منه)، والدائن من المورد يزيد ما علينا (فرق سعر)."}>
         {canCreate && (
           <div className="flex flex-wrap gap-2">
             {cfg.kinds.map((k, i) => (

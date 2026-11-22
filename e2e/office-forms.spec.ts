@@ -85,3 +85,26 @@ test("مركز تكلفة «المقطورات» من الشاشة، ثم أصل
   const [a] = await sql`select c.name_ar from fixed_assets f join cost_centers c on c.id = f.cost_center_id where f.name_ar = 'سطحة E2E'`;
   expect(a.name_ar).toBe("المقطورات E2E");
 });
+
+test("شيت إدخال عدة شحنات: التاريخ يُختار من التقويم نفسه", async ({ page }) => {
+  await officeLogin(page);
+  await page.goto("/waybills?add=1");
+  const cell = page.getByRole("textbox", { name: "التاريخ — صف 2" });
+  await expect(cell).toHaveValue("");
+  await cell.locator("xpath=..").getByRole("button", { name: "اختر من التقويم" }).click();
+  const calendar = page.getByRole("dialog", { name: "التقويم" });
+  await expect(calendar).toBeVisible();
+  await calendar.getByRole("button", { name: "اليوم" }).click();
+  await expect(calendar).toBeHidden();
+  // «اليوم» حسب ساعة المتصفح
+  const now = await page.evaluate(() => {
+    const n = new Date();
+    return `${String(n.getDate()).padStart(2, "0")}/${String(n.getMonth() + 1).padStart(2, "0")}/${n.getFullYear()}`;
+  });
+  await expect(cell).toHaveValue(now);
+  // Esc يغلق التقويم وحده والشيت يبقى
+  await cell.locator("xpath=..").getByRole("button", { name: "اختر من التقويم" }).click();
+  await page.keyboard.press("Escape");
+  await expect(calendar).toBeHidden();
+  await expect(cell).toBeVisible();
+});

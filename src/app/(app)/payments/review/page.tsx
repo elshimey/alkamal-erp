@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PaymentsTabs } from "../tabs";
 import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
@@ -58,6 +59,7 @@ export default async function PaymentsReviewPage({ searchParams }: { searchParam
           </Link>
         )}
       </PageHeader>
+      <PaymentsTabs active="review" />
       <nav className="mb-4 flex flex-wrap gap-2 text-sm" aria-label="الأقسام">
         {(Object.keys(TABS) as Tab[]).map((t) => (
           <Link

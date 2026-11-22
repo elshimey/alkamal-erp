@@ -3,6 +3,7 @@ import Link from "next/link";
 const TABS = [
   { key: "runs", href: "/payroll", label: "مسيرات الرواتب" },
   { key: "advances", href: "/payroll/advances", label: "السلف" },
+  { key: "commission", href: "/hr/advances", label: "مقدم العمولة" },
 ] as const;
 
 export function PayrollTabs({ active }: { active: (typeof TABS)[number]["key"] }) {

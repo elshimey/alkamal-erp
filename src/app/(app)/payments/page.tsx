@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PaymentsTabs } from "./tabs";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
@@ -82,6 +83,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
       <PageHeader title="سندات الصرف" description="سداد الموردين والورش والناقلين والمحطات، وصرف العهد للسائقين، من الصندوق أو البنك.">
         {!adding && <ListActions addHref={canCreate && "/payments?add=1"} addLabel="إدخال سندات صرف" />}
       </PageHeader>
+      {!adding && <PaymentsTabs active="payments" />}
       {adding && <AddModeBar backHref="/payments" backLabel="سندات الصرف" title="إدخال سندات صرف" />}
       <div className="mb-6 grid gap-6 xl:grid-cols-3">
         {adding && (

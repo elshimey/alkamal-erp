@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type Key
 import { parseDelimited } from "@/lib/sheet";
 import type { QuickKind } from "@/lib/quick-add-types";
 import { ComboBox, useCreatedOptions } from "./combo-box";
-import { isoToDmy } from "@/components/date-input";
+import { DatePickButton, isoToDmy } from "@/components/date-input";
 import { vehicleOnDate, type VehiclePeriod } from "@/lib/driver-vehicle";
 
 export interface GridColumn {
@@ -272,6 +272,7 @@ export function DataGrid({
               {startColumn && <td className="border-b border-gray-100 px-1 text-center">{startColumn.render(r)}</td>}
               {columns.map((col, c) => {
                 const selected = multi && inRange(r, c);
+                const cellCls = `w-full bg-transparent px-2 py-1.5 outline-none select-text focus:bg-brand-50 ${col.readOnly ? "text-gray-500" : ""}`;
                 const common = {
                   "data-cell": `${r}-${c}`,
                   value: row[col.key] ?? "",
@@ -285,7 +286,7 @@ export function DataGrid({
                       setFocus([r, c]);
                     }
                   },
-                  className: `w-full bg-transparent px-2 py-1.5 outline-none select-text focus:bg-brand-50 ${col.readOnly ? "text-gray-500" : ""}`,
+                  className: cellCls,
                   "aria-label": `${col.label} — صف ${r + 1}`,
                 };
                 return (
@@ -321,6 +322,19 @@ export function DataGrid({
                         className={common.className}
                         inputProps={{ "data-cell": common["data-cell"], "aria-label": common["aria-label"], onFocus: common.onFocus, dir: col.ltr ? "ltr" : undefined }}
                       />
+                    ) : col.type === "date" && !col.readOnly ? (
+                      // التاريخ يُكتب أو يُلصق، أو يُختار من التقويم نفسه الذي في النماذج
+                      <span className="relative block">
+                        <input
+                          {...common}
+                          type="text"
+                          dir="ltr"
+                          className={`${cellCls} pe-7`}
+                          placeholder={r === 0 && col.placeholder ? isoToDmy(col.placeholder) : "dd/mm/yyyy"}
+                          onChange={(e) => setCell(r, col.key, e.target.value)}
+                        />
+                        <DatePickButton value={row[col.key] ?? ""} onPick={(d) => setCell(r, col.key, isoToDmy(d))} />
+                      </span>
                     ) : (
                       <input
                         {...common}

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition, type KeyboardEvent } from "react";
 import { Icon } from "@/components/icons";
-import { isoToDmy } from "@/components/date-input";
+import { DatePickButton, isoToDmy } from "@/components/date-input";
 import { ComboBox, useCreatedOptions } from "@/components/combo-box";
 import { norm } from "@/lib/filter-options";
 import type { QuickKind, QuickOption } from "@/lib/quick-add-types";
@@ -98,7 +98,6 @@ export function DocSheet({ columns: baseColumns, rows, action, emptyText, openLa
   const [message, setMessage] = useState<string>();
   const [saving, start] = useTransition();
   const box = useRef<HTMLDivElement>(null);
-  const picker = useRef<HTMLInputElement>(null);
   const touched = useRef(false);
   // آخر تنشيط للخلية بالنقر: خلية الاختيار تفتح قائمتها مباشرة
   const [clicked, setClicked] = useState(false);
@@ -286,17 +285,6 @@ export function DocSheet({ columns: baseColumns, rows, action, emptyText, openLa
       router.refresh();
     });
 
-  const openPicker = () => {
-    const el = picker.current;
-    if (!el) return;
-    el.value = value(vrows[sel.r], columns[sel.c]);
-    try {
-      el.showPicker();
-    } catch {
-      el.focus();
-    }
-  };
-
   const keyHandlers = {
     onKeyDown: (e: KeyboardEvent<HTMLInputElement>) => {
       e.stopPropagation();
@@ -351,19 +339,6 @@ export function DocSheet({ columns: baseColumns, rows, action, emptyText, openLa
         }}
         className="max-h-[70vh] overflow-auto outline-none"
       >
-        {/* منتقي التاريخ الأصلي للخلية النشطة */}
-        <input
-          ref={picker}
-          type="date"
-          tabIndex={-1}
-          aria-hidden
-          onChange={(e) => {
-            if (e.target.value) setCell(sel.r, sel.c, e.target.value);
-            setEditing(null);
-          }}
-          className="pointer-events-none fixed h-px w-px opacity-0"
-          style={{ top: 0, left: 0 }}
-        />
         <table data-report="الورقة" className="w-max min-w-full border-separate border-spacing-0 text-sm">
           <thead className="sticky top-0 z-10">
             <tr>
@@ -459,18 +434,10 @@ export function DocSheet({ columns: baseColumns, rows, action, emptyText, openLa
                               {...keyHandlers}
                               className={`absolute inset-0 w-full px-2.5 text-sm outline-none ${editing ? "bg-white outline-2 -outline-offset-2 outline-brand-600" : "bg-transparent"} ${numeric ? "ltr-nums" : ""} ${col.type === "date" ? "pe-7" : ""} ${col.type === "number" ? "text-end" : ""}`}
                             />
-                            {col.type === "date" && (
-                              <button
-                                type="button"
-                                tabIndex={-1}
-                                aria-label="اختر من التقويم"
-                                onMouseDown={(e) => e.preventDefault()}
-                                onClick={openPicker}
-                                className="absolute end-1 top-1/2 -translate-y-1/2 rounded p-0.5 text-gray-400 hover:text-brand-700"
-                              >
-                                <Icon name="calendar" className="size-3.5" />
-                              </button>
-                            )}
+                            {col.type === "date" && <DatePickButton value={v} onPick={(d) => {
+                              setCell(r, c, d);
+                              setEditing(null);
+                            }} />}
                           </>
                         ) : badge ? (
                           <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${TONES[badge.tone]}`}>{badge.label}</span>
