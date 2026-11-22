@@ -24,9 +24,6 @@ export default async function NotePage({ params, searchParams }: { params: Promi
     <div className="mx-auto max-w-3xl">
       {(await searchParams).print === "1" && <AutoPrint />}
       <div className="mb-4 flex items-center gap-2 print:hidden">
-        <Link href={`/notes/${side}?open=${id}`} className="text-sm text-brand-700 hover:underline">
-          ← {NOTE_SIDES[side].title}
-        </Link>
         <span className="ms-auto flex items-center gap-2">
           <SendDocument kind="notes" id={id} label={`إشعار رقم ${doc.n.number}`} company={company.nameAr} phone={doc.party.mobile} email={doc.party.email} />
           <PrintButton />

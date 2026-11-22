@@ -71,9 +71,6 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
             ملف التحويل البنكي
           </a>
           )}
-          <Link href="/payroll" className="text-sm text-brand-700 hover:underline">
-            ← المسيرات
-          </Link>
         </div>
       </PageHeader>
 

@@ -1,16 +1,20 @@
 import type { ComponentProps, ReactNode } from "react";
 import Link from "next/link";
 import { DateInput } from "@/components/date-input";
+import { CrumbTitle } from "@/components/breadcrumb";
+import { ScrollTable } from "@/components/scroll-table";
 
 export function PageHeader({ title, description, children }: { title: string; description?: string; children?: ReactNode }) {
   return (
-    <div className="mb-7 flex flex-wrap items-end justify-between gap-4">
+    <div className="mb-7 flex flex-wrap items-end justify-between gap-4 max-md:mb-5">
+      <CrumbTitle title={title} />
       <div>
-        <h1 className="flex items-center gap-3 text-2xl font-semibold text-brand-900">
+        {/* على الجوال يظهر العنوان في رأس الشاشة نفسه، فلا يتكرر هنا */}
+        <h1 className="flex items-center gap-3 text-2xl font-semibold text-brand-900 max-md:sr-only print:not-sr-only">
           <span className="h-7 w-1.5 rounded-full bg-brand-600" />
           {title}
         </h1>
-        {description && <p className="mt-1.5 max-w-2xl ps-4.5 text-sm leading-relaxed text-gray-500">{description}</p>}
+        {description && <p className="mt-1.5 max-w-2xl ps-4.5 text-sm max-md:mt-0 max-md:ps-0 leading-relaxed text-gray-500">{description}</p>}
       </div>
       {children}
     </div>
@@ -77,9 +81,9 @@ export function Table({ head, children, stack = true }: { head: ReactNode[]; chi
     .map((l, i) => (l ? `.${key} tbody>tr>td:nth-child(${i + 1})::before{content:"${cssText(l)}"}` : ""))
     .join("");
   return (
-    <div className="overflow-x-auto rounded-2xl border border-black/[0.06] bg-white shadow-[0_4px_16px_-8px_rgba(27,33,38,0.08)]">
+    <ScrollTable className="overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-[0_4px_16px_-8px_rgba(27,33,38,0.08)]">
       {stack && rules && <style precedence="default" href={key}>{`@media (max-width:767px){${rules}}`}</style>}
-      <table className={`w-full text-sm ${stack ? `stack-table ${key}` : ""}`}>
+      <table className={`w-full text-sm ${stack ? `stack-table ${key}` : "sticky-first"}`}>
         <thead className="bg-asphalt-900 text-white/85">
           <tr>
             {head.map((h, i) => (
@@ -91,7 +95,7 @@ export function Table({ head, children, stack = true }: { head: ReactNode[]; chi
         </thead>
         <tbody className="divide-y divide-gray-100 [&>tr]:transition-colors [&>tr:hover]:bg-brand-50/60">{children}</tbody>
       </table>
-    </div>
+    </ScrollTable>
   );
 }
 

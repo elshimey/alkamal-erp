@@ -37,9 +37,6 @@ export default async function StatementPage({ params }: { params: Promise<{ id: 
               <SubmitButton variant={open ? "primary" : "secondary"}>{open ? "إقفال الكشف مطابقاً" : "إعادة فتح الكشف"}</SubmitButton>
             </ActionForm>
           )}
-          <Link href="/fuel-cards" className="text-sm font-medium text-brand-700 hover:underline">
-            ← كل الكشوف
-          </Link>
         </div>
       </PageHeader>
 

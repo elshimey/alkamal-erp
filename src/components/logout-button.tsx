@@ -11,7 +11,7 @@ export function LogoutButton({ action }: { action: () => Promise<void> }) {
     <>
       <button type="button" onClick={() => ref.current?.showModal()} aria-label="خروج" className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-gray-500 transition hover:bg-red-50 hover:text-red-600">
         <Icon name="logout" className="size-4" />
-        <span className="hidden sm:inline">خروج</span>
+        <span className="hidden 2xl:inline">خروج</span>
       </button>
       <dialog
         ref={ref}

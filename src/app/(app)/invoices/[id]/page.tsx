@@ -110,9 +110,6 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
                 editHref: `/invoices?open=${id}&edit=${id}`,
               })}
             />
-            <Link href="/invoices" className="text-sm text-brand-700 hover:underline">
-              ← فواتير المبيعات
-            </Link>
           </div>
         </PageHeader>
         {pendingCharges.length > 0 && (

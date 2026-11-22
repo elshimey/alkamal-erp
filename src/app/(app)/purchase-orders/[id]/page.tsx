@@ -35,9 +35,6 @@ export default async function PurchaseOrderPage({ params }: { params: Promise<{ 
   return (
     <div className="mx-auto max-w-4xl">
       <div className="mb-4 flex flex-wrap items-center gap-2 print:hidden">
-        <Link href="/purchase-orders" className="text-sm text-brand-700 hover:underline">
-          ← أوامر الشراء
-        </Link>
         <Badge tone={PO_STATUS[o.status].tone}>{PO_STATUS[o.status].label}</Badge>
         {o.purchaseInvoiceId && (
           <Link href={`/purchases?open=${o.purchaseInvoiceId}`} className="text-sm font-medium text-brand-700 hover:underline">

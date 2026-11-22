@@ -87,7 +87,7 @@ export function GlobalSearch({ pages }: { pages: SearchPage[] }) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex min-w-0 items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-1.5 text-sm text-gray-500 transition hover:border-brand-400 hover:bg-white md:w-80"
+        className="flex min-w-0 items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-1.5 text-sm text-gray-500 transition hover:border-brand-400 hover:bg-white max-md:size-10 max-md:justify-center max-md:p-0 md:w-52 2xl:w-72"
         aria-label="بحث شامل"
       >
         <Icon name="search" className="size-4 shrink-0" />

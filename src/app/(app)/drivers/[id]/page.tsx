@@ -49,9 +49,6 @@ export default async function DriverPage({ params }: { params: Promise<{ id: str
           <Link href={`/fleet-documents/owner/driver-${d.id}`} className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-brand-700 hover:bg-brand-50">
             الوثائق
           </Link>
-          <Link href="/drivers" className="text-sm font-medium text-brand-700 hover:underline">
-            ← كل السائقين
-          </Link>
         </div>
       </PageHeader>
 

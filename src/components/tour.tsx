@@ -171,10 +171,11 @@ export function TourHelpButton() {
         aria-haspopup={list.length > 1 ? "menu" : undefined}
         aria-expanded={list.length > 1 ? open : undefined}
         title="جولة تشرح هذه الشاشة خطوة بخطوة"
-        className="flex items-center gap-1.5 rounded-full border border-brand-600/40 bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-900 transition hover:bg-brand-100"
+        aria-label="كيف أعمل هذا؟"
+        className="flex items-center gap-1.5 rounded-full border border-brand-600/40 bg-brand-50 px-3 py-1.5 text-xs font-semibold max-2xl:size-9 max-2xl:justify-center max-2xl:p-0 text-brand-900 transition hover:bg-brand-100"
       >
         <span className="flex size-4 items-center justify-center rounded-full bg-brand-600 text-[10px] font-bold">؟</span>
-        <span className="hidden sm:inline">كيف أعمل هذا؟</span>
+        <span className="hidden 2xl:inline">كيف أعمل هذا؟</span>
       </button>
       {open && (
         <div role="menu" className="absolute end-0 top-full z-40 mt-2 w-72 rounded-xl border border-black/10 bg-white p-1.5 shadow-xl">
