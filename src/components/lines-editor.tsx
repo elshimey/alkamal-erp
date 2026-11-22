@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ClipboardEvent } from "react";
 import { Icon } from "./icons";
 import { fmt } from "@/lib/format";
 import type { QuickKind } from "@/lib/quick-add-types";
+import { useNarrow } from "@/lib/use-narrow";
 import { ComboBox, useCreatedOptions } from "./combo-box";
 
 // محرر سطور مستند (طلب شراء، أمر شراء، عرض سعر): إضافة وحذف ولصق من Excel، والإجمالي مباشرة.
@@ -30,6 +31,8 @@ export interface LineColumn {
   defaultValue?: string;
   // زر «+ إضافة» في القائمة (مسار، صنف…)
   create?: QuickKind;
+  // في عرض البطاقات: الخانة تأخذ عرض البطاقة كله (الصنف، الحساب، البيان)
+  wide?: boolean;
 }
 type Row = Record<string, string>;
 
@@ -49,12 +52,14 @@ export function LinesEditor({
   onChange,
   totalsVat,
   vatRateOf,
+  layout = "table",
+  addLabel = "+ سطر",
 }: {
   columns: LineColumn[];
   initial?: Row[];
   name?: string;
-  // مفاتيح الكمية والسعر ونسبة الضريبة لحساب الإجمالي
-  totals?: { qty: string; price: string; vat?: string };
+  // مفاتيح الكمية والسعر ونسبة الضريبة لحساب الإجمالي (دون كمية: السعر هو مبلغ السطر)
+  totals?: { qty?: string; price: string; vat?: string };
   minRows?: number;
   /** يُبلَّغ بالسطور المستخدمة بعد كل تعديل (للمعاينة المباشرة) */
   onChange?: (rows: Row[]) => void;
@@ -62,7 +67,12 @@ export function LinesEditor({
   totalsVat?: number;
   /** نسبة ضريبة السطر حين تكون خانته نوع ضريبة لا نسبة (رقم النوع ← نسبته) */
   vatRateOf?: (row: Row) => number;
+  /** «cards»: كل سطر بطاقة بخانات معنونة (فاتورة المورد). على الجوال البطاقات دائماً حتى لا تتداخل الخانات */
+  layout?: "table" | "cards";
+  addLabel?: string;
 }) {
+  const narrow = useNarrow();
+  const cards = layout === "cards" || narrow;
   const withCreated = useCreatedOptions();
   const columns = baseColumns.map((c) => (c.create ? { ...c, options: withCreated(c.create, c.options) } : c));
   const empty = (): Row => Object.fromEntries(columns.map((c) => [c.key, c.defaultValue ?? (c.type === "select" && c.options?.length === 1 ? c.options[0].value : "")]));
@@ -104,7 +114,7 @@ export function LinesEditor({
     report.current?.(JSON.parse(json));
   }, [json]);
 
-  const lineTotal = (r: Row) => (totals ? toNum(r[totals.qty]) * toNum(r[totals.price]) : 0);
+  const lineTotal = (r: Row) => (totals ? (totals.qty ? toNum(r[totals.qty]) : 1) * toNum(r[totals.price]) : 0);
   const sub = rows.reduce((t, r) => t + lineTotal(r), 0);
   const rate = (r: Row) => (vatRateOf ? vatRateOf(r) : (r[totals!.vat!] ?? "") === "" && totalsVat !== undefined ? totalsVat : toNum(r[totals!.vat!]));
   const vat = totals?.vat ? rows.reduce((t, r) => t + (lineTotal(r) * rate(r)) / 100, 0) : 0;
@@ -131,12 +141,55 @@ export function LinesEditor({
     });
   };
 
+  const control = (r: Row, n: number, c: LineColumn, label?: string) =>
+    c.type === "select" ? (
+      <ComboBox value={r[c.key] ?? ""} options={c.options ?? []} create={c.create} placeholder={c.placeholder ?? "ابحث…"} onChange={(v, o) => set(n, c.key, v, o?.fill)} className={cell} />
+    ) : (
+      <input
+        value={r[c.key] ?? ""}
+        onChange={(e) => set(n, c.key, e.target.value)}
+        inputMode={c.type === "number" ? "decimal" : undefined}
+        placeholder={c.placeholder}
+        aria-label={label}
+        className={`${cell} ${c.type === "number" ? "ltr-nums text-end" : ""}`}
+      />
+    );
+  const remove = (n: number) => setRows(rows.filter((_, i) => i !== n));
+
   // أقل عرض للجدول = مجموع أعمدته (والوصف 10rem على الأقل)، فإن ضاق المكان يُمرَّر الجدول أفقياً بدل أن تنضغط الخانات
   const minRem = 4 + (totals ? 7 : 0) + columns.reduce((sum, c) => sum + (c.width?.endsWith("rem") ? parseFloat(c.width) : 10), 0);
 
   return (
     <div>
       <input ref={hidden} type="hidden" name={name} value={json} />
+      {cards ? (
+        <div className="space-y-3" data-line-cards>
+          {rows.map((r, n) => (
+            <div key={n} className="rounded-xl border border-gray-200 bg-gray-50/60 p-3" data-line-card>
+              <div className="mb-2 flex items-center justify-between text-xs text-gray-500">
+                <span>البند {n + 1}</span>
+                {rows.length > 1 && (
+                  <button type="button" onClick={() => remove(n)} className="rounded px-1.5 py-0.5 text-red-600 hover:bg-red-50">
+                    حذف
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-x-2 gap-y-2.5 sm:grid-cols-4">
+                {columns.map((c) => (
+                  <label key={c.key} className={`block min-w-0 text-xs text-gray-500 ${c.wide ? "col-span-2" : ""}`}>
+                    <span className="mb-1 block">
+                      {c.label}
+                      {c.required && <span className="text-red-500"> *</span>}
+                    </span>
+                    {control(r, n, c, c.label)}
+                  </label>
+                ))}
+              </div>
+              {totals?.qty && lineTotal(r) > 0 && <div className="ltr-nums mt-2 text-end text-sm font-medium">{fmt(lineTotal(r))}</div>}
+            </div>
+          ))}
+        </div>
+      ) : (
       <div className="overflow-x-auto">
         <table className="w-full text-sm" style={{ minWidth: `${Math.max(44, minRem)}rem` }}>
           <thead className="border-b border-gray-200 text-xs text-gray-500">
@@ -158,23 +211,13 @@ export function LinesEditor({
                 <td className="ltr-nums py-1 text-center text-xs text-gray-400">{n + 1}</td>
                 {columns.map((c, ci) => (
                   <td key={c.key} className="px-1 py-1" onPaste={onPaste(n, ci)}>
-                    {c.type === "select" ? (
-                      <ComboBox value={r[c.key] ?? ""} options={c.options ?? []} create={c.create} placeholder={c.placeholder ?? "ابحث…"} onChange={(v, o) => set(n, c.key, v, o?.fill)} className={cell} />
-                    ) : (
-                      <input
-                        value={r[c.key] ?? ""}
-                        onChange={(e) => set(n, c.key, e.target.value)}
-                        inputMode={c.type === "number" ? "decimal" : undefined}
-                        placeholder={c.placeholder}
-                        className={`${cell} ${c.type === "number" ? "ltr-nums text-end" : ""}`}
-                      />
-                    )}
+                    {control(r, n, c)}
                   </td>
                 ))}
                 {totals && <td className="ltr-nums px-1 text-end font-medium">{lineTotal(r) ? fmt(lineTotal(r)) : "—"}</td>}
                 <td className="px-1">
                   {rows.length > 1 && (
-                    <button type="button" aria-label="حذف السطر" onClick={() => setRows(rows.filter((_, i) => i !== n))} className="p-1 text-gray-300 hover:text-red-600">
+                    <button type="button" aria-label="حذف السطر" onClick={() => remove(n)} className="p-1 text-gray-300 hover:text-red-600">
                       <Icon name="close" className="size-4" />
                     </button>
                   )}
@@ -184,9 +227,10 @@ export function LinesEditor({
           </tbody>
         </table>
       </div>
+      )}
       <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
-        <button type="button" onClick={() => setRows([...rows, empty()])} className="rounded-lg px-2 py-1 text-sm font-medium text-brand-700 hover:bg-brand-50">
-          + سطر
+        <button type="button" onClick={() => setRows([...rows, empty()])} className={cards ? "w-full rounded-lg border border-dashed border-brand-500 bg-brand-50/60 px-3 py-2 text-sm font-medium text-brand-700 hover:bg-brand-50" : "rounded-lg px-2 py-1 text-sm font-medium text-brand-700 hover:bg-brand-50"}>
+          {addLabel}
         </button>
         {totals && (
           <dl className="ltr-nums grid min-w-56 grid-cols-2 gap-x-6 gap-y-1 text-sm">

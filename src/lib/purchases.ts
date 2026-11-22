@@ -125,7 +125,7 @@ export function purchasePostingLines(
   return out;
 }
 
-export async function createPurchaseInvoice(db: Db, input: PurchaseInvoiceInput) {
+export async function createPurchaseInvoice(db: Db | Tx, input: PurchaseInvoiceInput) {
   return db.transaction(async (tx) => {
     const supplierInvoiceNo = input.supplierInvoiceNo.trim();
     if (!supplierInvoiceNo) throw new Error("رقم فاتورة المورد إلزامي");
@@ -259,6 +259,7 @@ export async function deletePurchaseInvoice(db: Db, id: number, opts: { reason: 
     if (inv.status !== "draft") throw new Error("الحذف متاح للمسودة فقط");
     const lines = await tx.select().from(s.purchaseInvoiceLines).where(eq(s.purchaseInvoiceLines.invoiceId, id));
     await tx.insert(s.deletionLog).values({ entity: "purchase_invoice", entityId: String(id), snapshot: { invoice: inv, lines }, reason: opts.reason.trim(), userId: opts.userId });
+    await tx.delete(s.attachments).where(and(eq(s.attachments.entity, "purchase_invoices"), eq(s.attachments.entityId, id)));
     await tx.delete(s.purchaseInvoices).where(eq(s.purchaseInvoices.id, id));
   });
 }

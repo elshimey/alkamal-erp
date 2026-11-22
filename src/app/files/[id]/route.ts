@@ -7,7 +7,7 @@ import { isDriverOnly } from "@/lib/driver-app";
 import { driverCanSeeDocument } from "@/lib/driver-docs";
 import { can, type Entity } from "@/lib/permissions";
 
-const ENTITY_PERM: Record<string, Entity> = { waybills: "waybills", expenses: "expenses", fleet_documents: "fleet_documents", document_submissions: "fleet_documents", traffic_violations: "violations", breakdown_requests: "maintenance", driver_trip_requests: "waybills" };
+const ENTITY_PERM: Record<string, Entity> = { waybills: "waybills", expenses: "expenses", fleet_documents: "fleet_documents", document_submissions: "fleet_documents", traffic_violations: "violations", breakdown_requests: "maintenance", driver_trip_requests: "waybills", purchase_invoices: "purchase_invoices" };
 
 /** عرض صورة مرفقة: للمكتب حسب الصلاحية، وللسائق صور رحلاته ومصروفاته ووثائقه ووثائق مركبته ومقطورته فقط. */
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {

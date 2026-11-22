@@ -14,13 +14,14 @@ export const ATTACHMENT_KINDS = {
   document: "صورة الوثيقة",
   // فاتورة الطرف الأول في رحلة بدأها السائق: داخلية للمكتب لا يراها العميل (قرار أحمد 2026-11-18)
   first_party_invoice: "فاتورة الطرف الأول",
+  supplier_invoice: "صورة فاتورة المورد",
   other: "صورة",
 } as const;
 export type AttachmentKind = keyof typeof ATTACHMENT_KINDS;
 
 /** يحفظ صورة (أو PDF للوثائق) مرسلة كـ data URL. القيمة الفارغة لا تفعل شيئاً. */
 export async function saveDataUrl(db: Db | Tx, input: { entity: string; entityId: number; kind: AttachmentKind; dataUrl: string | null | undefined; userId?: number }) {
-  const isDoc = input.kind === "document";
+  const isDoc = input.kind === "document" || input.kind === "supplier_invoice";
   const m = input.dataUrl?.match(isDoc ? /^data:(image\/(?:jpeg|png|webp)|application\/pdf);base64,([A-Za-z0-9+/=]+)$/ : /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/);
   if (!m) {
     if (input.dataUrl && isDoc) throw new Error("المرفق يجب أن يكون صورة أو PDF");

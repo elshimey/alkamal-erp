@@ -14,6 +14,7 @@ import { paymentState } from "@/data/sales";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { DocSheet, type DocSheetRow } from "@/components/doc-sheet";
 import { BulkPdfButton } from "@/components/bulk-pdf";
+import { AddModeBar, ListActions } from "@/components/list-actions";
 import { DocToolbar } from "@/components/doc-toolbar";
 import { Icon } from "@/components/icons";
 import { PurchaseInvoiceDocument } from "@/components/purchase-invoice";
@@ -21,6 +22,7 @@ import { RowCheck, SelectAll, SelectionTotal } from "@/components/row-selection"
 import { SheetEditor } from "@/components/sheet-editor";
 import { Badge, EmptyRow, LimitRow, PageHeader, Table, Td } from "@/components/ui";
 import { post, postMany, savePurchaseSheet, savePurchases } from "./actions";
+import { PurchasePanel } from "./purchase-panel";
 import { fmt } from "@/lib/format";
 import { taxCodeOptions } from "@/lib/tax-codes";
 
@@ -28,7 +30,7 @@ const BASE = "/purchases";
 const POST_FORM = "post-purchases";
 const STATUSES = { draft: PURCHASE_STATUS.draft.label, posted: PURCHASE_STATUS.posted.label };
 
-export default async function PurchasesPage({ searchParams }: { searchParams: Promise<DocListParams> }) {
+export default async function PurchasesPage({ searchParams }: { searchParams: Promise<DocListParams & { add?: string; new?: string }> }) {
   const user = await requirePermission("purchase_invoices", "view");
   const sp = await searchParams;
   const today = todayRiyadh();
@@ -36,16 +38,19 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
   const canPost = can(user.perms, "purchase_invoices", "approve");
   const filter = parseDocFilter(sp, Object.keys(STATUSES), today);
   const view = sp.view === "sheet" ? "sheet" : "table";
+  // «+ فاتورة مورد» نافذة فاتورة واحدة، والسهم بجانبه للإدخال الجماعي (الشيت)
+  const adding = sp.add === "1" && canCreate;
+  const creating = sp.new === "1" && canCreate;
   const openId = view === "table" ? Number(sp.open) || null : null;
   const [suppliers, accounts, vehicles, list, openDoc, products, warehouses, taxes] = await Promise.all([
-    canCreate ? supplierOptions(db) : Promise.resolve([]),
-    canCreate ? expenseAccountOptions(db) : Promise.resolve([]),
-    canCreate ? vehicleOptions() : Promise.resolve([]),
+    adding ? supplierOptions(db) : Promise.resolve([]),
+    adding ? expenseAccountOptions(db) : Promise.resolve([]),
+    adding ? vehicleOptions() : Promise.resolve([]),
     listPurchaseInvoices(db, filter),
     openId ? purchaseInvoiceDoc(db, openId) : Promise.resolve(null),
-    canCreate ? productOptions(db).then((r) => r.map((p) => ({ value: String(p.id), label: `${p.code} ${p.nameAr}` }))) : Promise.resolve([]),
-    canCreate ? db.select({ id: s.warehouses.id, nameAr: s.warehouses.nameAr }).from(s.warehouses).where(eq(s.warehouses.isActive, true)).then((r) => r.map((w) => ({ value: String(w.id), label: w.nameAr }))) : Promise.resolve([]),
-    canCreate ? taxCodeOptions(db, "purchases") : Promise.resolve([]),
+    adding ? productOptions(db).then((r) => r.map((p) => ({ value: String(p.id), label: `${p.code} ${p.nameAr}` }))) : Promise.resolve([]),
+    adding ? db.select({ id: s.warehouses.id, nameAr: s.warehouses.nameAr }).from(s.warehouses).where(eq(s.warehouses.isActive, true)).then((r) => r.map((w) => ({ value: String(w.id), label: w.nameAr }))) : Promise.resolve([]),
+    adding ? taxCodeOptions(db, "purchases") : Promise.resolve([]),
   ]);
 
   const state = (i: (typeof list)[number]["i"]) => {
@@ -59,17 +64,14 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
 
   return (
     <>
-      <PageHeader title="فواتير الموردين" description="مشتريات الصيانة وقطع الغيار والإطارات والخدمات. كل سطر على حسابه ومركبته، وضريبة المدخلات تُسترد تلقائياً." />
+      <PageHeader title="فواتير الموردين" description="مشتريات الصيانة وقطع الغيار والإطارات والخدمات. كل سطر على حسابه ومركبته، وضريبة المدخلات تُسترد تلقائياً.">
+        {!adding && <ListActions newHref={canCreate && "/purchases?new=1"} newLabel="فاتورة مورد" addHref={canCreate && "/purchases?add=1"} addLabel="إدخال جماعي (شيت)" />}
+      </PageHeader>
+      {adding && <AddModeBar backHref="/purchases" backLabel="فواتير الموردين" title="إدخال فواتير موردين" />}
 
-      {canCreate && (
-        <details open={!list.length && !filter.q && !filter.status} className="group mb-5 rounded-2xl border border-brand-500/30 bg-brand-50/60 print:hidden">
-          <summary className="flex cursor-pointer list-none items-center gap-3 px-5 py-3.5">
-            <span className="flex size-8 items-center justify-center rounded-lg bg-brand-500 text-lg leading-none font-bold text-brand-900">+</span>
-            <span className="font-semibold text-brand-900">إدخال فواتير موردين</span>
-            <span className="text-xs text-gray-500">بطريقة الورقة، أو الصقها من Excel</span>
-            <span className="ms-auto text-xs text-gray-500 group-open:hidden">فتح</span>
-          </summary>
-          <div className="px-5 pb-4">
+      {adding && (
+        <div className="mb-5 rounded-2xl border border-brand-500/30 bg-brand-50/60 print:hidden">
+          <div className="px-5 py-4">
               <>
                 <SheetEditor
                   templateName="فواتير الموردين"
@@ -100,7 +102,7 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
                 </p>
               </>
           </div>
-        </details>
+        </div>
       )}
 
       <DocToolbar base={BASE} params={sp} statuses={STATUSES} exportName="فواتير-الموردين" count={list.length} />
@@ -273,6 +275,7 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
           </Table>
         </>
       )}
+      {creating && <PurchasePanel closeHref="/purchases" canPost={canPost} />}
     </>
   );
 }

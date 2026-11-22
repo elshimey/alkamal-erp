@@ -11,6 +11,7 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { PurchaseInvoiceDocument } from "@/components/purchase-invoice";
 import { Badge, Card, Input, PageHeader, Table, Td } from "@/components/ui";
 import { purchaseInvoiceDoc } from "@/lib/purchases";
+import { listAttachments } from "@/lib/attachments";
 import { post, remove, revert } from "../actions";
 import { fmt } from "@/lib/format";
 
@@ -18,7 +19,7 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
   const user = await requirePermission("purchase_invoices", "view");
   const id = Number((await params).id);
   if (!Number.isInteger(id)) notFound();
-  const [doc, allocations] = await Promise.all([
+  const [doc, allocations, files] = await Promise.all([
     purchaseInvoiceDoc(db, id),
     db
       .select({ a: s.paymentAllocations, p: s.payments })
@@ -26,6 +27,7 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
       .innerJoin(s.payments, eq(s.payments.id, s.paymentAllocations.paymentId))
       .where(eq(s.paymentAllocations.invoiceId, id))
       .orderBy(asc(s.payments.paymentDate)),
+    listAttachments(db, "purchase_invoices", [id]),
   ]);
   if (!doc) notFound();
   const { i } = doc;
@@ -55,6 +57,15 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
         </div>
       </PageHeader>
 
+      {files.length > 0 && (
+        <div className="mb-4 flex flex-wrap gap-2 print:hidden">
+          {files.map((f) => (
+            <a key={f.id} href={`/files/${f.id}`} target="_blank" className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
+              صورة فاتورة المورد
+            </a>
+          ))}
+        </div>
+      )}
       <div className="mb-6">
         <PurchaseInvoiceDocument doc={doc} />
       </div>

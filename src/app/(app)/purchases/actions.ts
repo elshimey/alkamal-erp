@@ -12,6 +12,8 @@ import type { SheetResult } from "@/lib/sheet";
 import { createPurchaseInvoice, deletePurchaseInvoice, postPurchaseInvoice, revertPurchaseInvoice, updateDraftPurchase, type DraftPurchasePatch, type PurchaseLineInput } from "@/lib/purchases";
 import type { DocSheetResult, SheetChange } from "@/components/doc-sheet";
 import type { FormState } from "@/components/action-form";
+import type { PanelResult } from "@/components/record-panel";
+import { saveDataUrl } from "@/lib/attachments";
 
 const refresh = (id?: number) => {
   revalidatePath("/purchases");
@@ -70,6 +72,53 @@ export async function savePurchases(rows: SheetRow[]): Promise<SheetResult> {
   }
   refresh();
   return { saved, rowErrors: Object.keys(rowErrors).length ? rowErrors : undefined };
+}
+
+/** نافذة فاتورة مورد واحدة (مثل فاتورة المبيعات): تُحفظ مسودة، أو تُرحَّل فوراً بزر «حفظ وترحيل» لمن له الصلاحية. */
+export async function savePurchaseAction(data: FormData): Promise<PanelResult> {
+  const user = await requirePermission("purchase_invoices", "create");
+  const get = (k: string) => String(data.get(k) ?? "").trim();
+  try {
+    const wantPost = get("postNow") === "1";
+    if (wantPost && !can(user.perms, "purchase_invoices", "approve")) throw new Error("ليست لديك صلاحية ترحيل فواتير الموردين");
+    if (!get("supplierId")) throw new Error("اختر المورد");
+    const raw = JSON.parse(get("lines") || "[]") as SheetRow[];
+    if (!Array.isArray(raw) || !raw.length) throw new Error("أضف بنداً واحداً على الأقل");
+    const lines: PurchaseLineInput[] = raw.map((r, k) => {
+      const amount = cell.number(r.amount, `البند ${k + 1}: المبلغ`);
+      if (!amount) throw new Error(`البند ${k + 1}: المبلغ إلزامي`);
+      if (!r.accountId && !r.productId) throw new Error(`البند ${k + 1}: اختر الحساب أو الصنف`);
+      return {
+        accountId: r.accountId ? Number(r.accountId) : null,
+        productId: r.productId ? Number(r.productId) : null,
+        warehouseId: r.warehouseId ? Number(r.warehouseId) : null,
+        quantity: cell.number(r.quantity, `البند ${k + 1}: الكمية`),
+        vehicleId: r.vehicleId ? Number(r.vehicleId) : null,
+        description: cell.text(r.description) ?? "",
+        amount,
+        ...(r.vat ? { taxCodeId: Number(r.vat) } : { vatRate: 15 }),
+      };
+    });
+    const inv = await db.transaction(async (tx) => {
+      const row = await createPurchaseInvoice(tx, {
+        supplierId: Number(get("supplierId")),
+        supplierInvoiceNo: get("supplierInvoiceNo"),
+        invoiceDate: cell.date(get("date"), "التاريخ") ?? todayRiyadh(),
+        dueDate: cell.date(get("dueDate"), "الاستحقاق"),
+        currencyCode: get("currency") === "KWD" ? "KWD" : "SAR",
+        notes: get("notes") || null,
+        lines,
+        post: wantPost,
+        userId: user.id,
+      });
+      await saveDataUrl(tx, { entity: "purchase_invoices", entityId: row.id, kind: "supplier_invoice", dataUrl: get("file"), userId: user.id });
+      return row;
+    });
+    refresh(inv.id);
+    return { ok: wantPost ? `حُفظت ورُحّلت فاتورة المورد ${inv.number}` : `حُفظت فاتورة المورد ${inv.number} مسودة`, id: inv.id, label: inv.number };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
 }
 
 export async function post(id: number): Promise<FormState> {
