@@ -357,8 +357,9 @@ aside:hover > .road-line {
   }
 }
 
-/* الجوال: الجداول تتحول إلى بطاقات، وكل خلية تحمل عنوان عمودها (من Table في ui.tsx) */
-@media (max-width: 767px) {
+/* الجوال: الجداول تتحول إلى بطاقات، وكل خلية تحمل عنوان عمودها (من Table في ui.tsx).
+   screen فقط: عرض ورقة A4 في الطباعة أقل من 768 فلا تتحول الجداول المطبوعة إلى بطاقات */
+@media screen and (max-width: 767px) {
   .stack-table {
     display: block;
   }
@@ -430,8 +431,9 @@ aside:hover > .road-line {
   }
 }
 
-/* الجدول العريض (ScrollTable): على الجوال العمود الأول ثابت أثناء السحب، وظل على الحافة التي فيها أعمدة أخرى */
-@media (max-width: 767px) {
+/* الجدول العريض (ScrollTable): على الجوال العمود الأول ثابت أثناء السحب، وظل على الحافة التي فيها أعمدة أخرى.
+   screen فقط: في الطباعة يبقى العمود مثبتاً فيركب فوق الأعمدة الأخرى (ملاحظة أحمد 2026-11-22) */
+@media screen and (max-width: 767px) {
   .scroll-table .sticky-first > thead > tr > th:first-child,
   .scroll-table .sticky-first > tbody > tr > td:first-child:not([colspan]),
   .scroll-table .sticky-first > tfoot > tr > td:first-child:not([colspan]) {
@@ -444,7 +446,7 @@ aside:hover > .road-line {
     --sticky-bg: var(--color-asphalt-900);
   }
 }
-@media (max-width: 767px) {
+@media screen and (max-width: 767px) {
   [data-moved] > .scroll-table .sticky-first > * > tr > :first-child:not([colspan]) {
     box-shadow: -8px 0 10px -10px rgb(27 33 38 / 0.5);
   }
@@ -459,11 +461,91 @@ aside:hover > .road-line {
   border-end-start-radius: inherit;
   background: linear-gradient(to right, rgb(27 33 38 / 0.1), transparent);
 }
+/* الطباعة: الجدول كاملاً داخل عرض الورقة، لا سحب ولا قص ولا عمود ثابت، والعناوين تلتف بدل أن تمد الجدول */
 @media print {
   [data-more]::after {
     display: none;
   }
-  .scroll-table .sticky-first > * > tr > :first-child {
-    position: static;
+  .scroll-table {
+    overflow: visible !important;
+  }
+  .scroll-table table {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+  .scroll-table table th,
+  .scroll-table table td {
+    position: static !important;
+    box-shadow: none !important;
+  }
+  .scroll-table table th {
+    white-space: normal !important;
+  }
+  .scroll-table table td:not(.ltr-nums) {
+    overflow-wrap: anywhere;
+  }
+  table[data-report] {
+    font-size: 9px !important;
+  }
+  table[data-report] th,
+  table[data-report] td {
+    padding: 3px 4px !important;
+  }
+  table,
+  tr,
+  img {
+    break-inside: avoid-page;
+  }
+  table {
+    break-inside: auto;
+  }
+  thead {
+    display: table-header-group;
+  }
+}
+
+/* الطباعة من أي شاشة (Ctrl+P): لا أزرار ولا نماذج إدخال ولا شيتات على الورق، فلا تخرج خانات مقصوصة فوق بعضها.
+   المستند الرسمي يُطبع من زر «طباعة» الخاص به. */
+@media print {
+  main button,
+  main form:has(input:not([type="hidden"]), select, textarea),
+  main div:has(> table.select-none) {
+    display: none !important;
+  }
+}
+
+/* عمود «م» (التسلسل) في جداول التقارير: يُرقَّم كل سطر بيانات، ولا تُرقَّم سطور العناوين والمجاميع والسطر الممتد
+   (طلب أحمد 2026-11-22). التصدير إلى Excel يضيف العمود نفسه بنفس القاعدة (export-button.tsx). */
+table[data-report]:not([data-noserial]) {
+  counter-reset: report-row;
+}
+table[data-report]:not([data-noserial]) > * > tr::before {
+  content: "";
+  display: table-cell;
+  width: 2.25rem;
+  padding: 0.5rem 0.25rem;
+  text-align: center;
+  vertical-align: middle;
+  font-variant-numeric: tabular-nums;
+  color: #8a9096;
+  font-size: 0.85em;
+}
+table[data-report]:not([data-noserial]) > thead > tr:first-child::before {
+  content: "م";
+  color: inherit;
+  font-weight: 500;
+}
+table[data-report]:not([data-noserial]) > tbody > tr:not(.font-bold):not(.font-semibold):not(:has(> td[colspan]))::before {
+  counter-increment: report-row;
+  content: counter(report-row);
+}
+@media print {
+  table[data-report]:not([data-noserial]) > * > tr::before {
+    border: 1px solid #9ca3af;
+    color: #333;
+  }
+  table[data-report]:not([data-noserial]) > thead > tr::before {
+    background: #f3f4f6;
+    border-color: #6b7280;
   }
 }

@@ -33,7 +33,7 @@ export default async function VatReport({ searchParams }: { searchParams: Promis
           <div className="ltr-nums mt-1 text-xl font-semibold">{money(Math.abs(v.net), false)}</div>
         </div>
       </div>
-      <RTable name="إقرار ضريبة القيمة المضافة" head={["#", "البند", "المبلغ (ريال)", "التعديلات", "ضريبة القيمة المضافة"]}>
+      <RTable name="إقرار ضريبة القيمة المضافة" serial={false} head={["الخانة", "البند", "المبلغ (ريال)", "التعديلات", "ضريبة القيمة المضافة"]}>
         <tr className="bg-gray-100 font-bold">
           <C />
           <C>المبيعات</C>

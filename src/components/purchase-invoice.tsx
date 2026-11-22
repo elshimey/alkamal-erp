@@ -46,7 +46,7 @@ export function PurchaseInvoiceDocument({ doc }: { doc: Doc }) {
       <table className="w-full text-xs">
         <thead className="bg-asphalt-900 text-white/90 print:bg-gray-100 print:text-gray-800">
           <tr>
-            {["#", "الحساب", "المركبة / المركز", "البيان", "المبلغ", "الضريبة", "الإجمالي"].map((h, k) => (
+            {["م", "الحساب", "المركبة / المركز", "البيان", "المبلغ", "الضريبة", "الإجمالي"].map((h, k) => (
               <th key={h} className={`px-2.5 py-2 font-medium ${k > 3 ? "text-end" : "text-start"}`}>
                 {h}
               </th>

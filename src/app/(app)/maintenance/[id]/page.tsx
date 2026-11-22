@@ -79,7 +79,7 @@ export default async function MaintenanceOrderPage({ params }: { params: Promise
         </p>
       )}
 
-      <Table head={["#", "النوع", "الوصف", "الكمية", "السعر", "المبلغ", "الضريبة", "الإجمالي", ""]}>
+      <Table head={["م", "النوع", "الوصف", "الكمية", "السعر", "المبلغ", "الضريبة", "الإجمالي", ""]}>
         {lines.length === 0 && (
           <tr>
             <td colSpan={9} className="px-4 py-6 text-center text-sm text-amber-700">

@@ -19,7 +19,7 @@ function Lines({ rows, currency, totals }: { rows: { description: string; quanti
       <table className="mt-6 w-full text-sm">
         <thead className="border-b-2 border-[var(--inv-accent)] text-xs text-gray-500">
           <tr>
-            <th className="w-8 py-2 text-start font-medium">#</th>
+            <th className="w-8 py-2 text-start font-medium">م</th>
             <th className="py-2 text-start font-medium">البيان</th>
             <th className="py-2 text-end font-medium">الكمية</th>
             <th className="py-2 text-end font-medium">السعر</th>

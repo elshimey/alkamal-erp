@@ -103,7 +103,7 @@ export function MaintenanceOrderDocument({ company, doc, template = DEFAULT_TEMP
       <table className="mt-5 w-full text-sm">
         <thead>
           <tr className="bg-[var(--inv-dark)] text-white print:[print-color-adjust:exact]">
-            {["#", "البند", "النوع", "الكمية", "السعر", "المبلغ", "الضريبة", "الإجمالي"].map((h) => (
+            {["م", "البند", "النوع", "الكمية", "السعر", "المبلغ", "الضريبة", "الإجمالي"].map((h) => (
               <th key={h} className="px-2 py-2 text-start text-xs font-medium first:rounded-s-lg last:rounded-e-lg">
                 {h}
               </th>

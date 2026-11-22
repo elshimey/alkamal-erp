@@ -114,7 +114,7 @@ export function ScheduleEditor({ paste: startPaste = false, today }: { paste?: b
           <table className="w-full min-w-[34rem] text-sm">
             <thead className="bg-gray-50 text-xs text-gray-600">
               <tr>
-                <th className="px-2 py-2 text-start">#</th>
+                <th className="px-2 py-2 text-start">م</th>
                 <th className="px-2 py-2 text-start">تاريخ الاستحقاق</th>
                 <th className="px-2 py-2 text-start">الأصل</th>
                 <th className="px-2 py-2 text-start">تكلفة التمويل</th>

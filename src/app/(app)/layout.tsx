@@ -69,7 +69,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const welcome = jar.get(WELCOME_COOKIE) ? welcomeMessage(user.name) : null;
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-screen print:block print:min-h-0">
       {welcome && <WelcomeToast cookie={WELCOME_COOKIE} title={welcome.title} text={welcome.text} />}
       <Sidebar initialPinned={jar.get(SIDEBAR_COOKIE)?.value !== "collapsed"}>
         <div className="border-b border-white/5 py-5 ps-5 pe-10">
@@ -111,7 +111,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </div>
         )}
         {expiry && <ExpiryBanner expired={expiry.expired} soon={expiry.soon} critical={expiry.critical} today={today} />}
-        <main className="flex-1 p-4 pb-24 sm:p-6 md:pb-6 lg:p-8 print:p-0">{children}</main>
+        <main className="flex-1 p-4 pb-24 sm:p-6 md:pb-6 lg:p-8 print:p-0 print:pb-0">{children}</main>
         <TruckRoad />
         <TourRunner />
       </div>

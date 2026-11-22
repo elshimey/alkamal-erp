@@ -129,7 +129,7 @@ export default async function InstallmentPlanPage({ params }: { params: Promise<
 
       <div className="mt-4">
         <Card title="الأقساط">
-          <Table head={["#", "الاستحقاق", "الأصل", "تكلفة التمويل", "القسط", "المسدد", "الباقي", "الحالة", ""]}>
+          <Table head={["م", "الاستحقاق", "الأصل", "تكلفة التمويل", "القسط", "المسدد", "الباقي", "الحالة", ""]}>
             {plan.items.map((i) => (
               <tr key={i.id} className={`border-t border-gray-100 ${i.state === "overdue" ? "bg-red-50/60" : ""}`}>
                 <Td className="ltr-nums">{i.seq}</Td>

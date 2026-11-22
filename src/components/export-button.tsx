@@ -8,7 +8,18 @@ export function ExportButton({ filename, label = "تصدير Excel" }: { filenam
     const lines: string[] = [];
     for (const t of tables) {
       if (t.dataset.report) lines.push(q(t.dataset.report));
-      for (const tr of Array.from(t.rows)) lines.push(Array.from(tr.cells).map((c) => q(c.innerText)).join(","));
+      // عمود «م» كما يظهر في التقرير (نفس قاعدة globals.css): يُرقَّم سطر البيانات فقط
+      const serial = t.dataset.noserial === undefined;
+      let n = 0;
+      for (const tr of Array.from(t.rows)) {
+        const cells = Array.from(tr.cells).map((c) => q(c.innerText));
+        if (serial) {
+          const head = tr.parentElement?.tagName === "THEAD";
+          const data = !head && !tr.matches(".font-bold, .font-semibold") && !tr.querySelector(":scope > td[colspan]");
+          cells.unshift(q(head ? (tr === t.tHead?.rows[0] ? "م" : "") : data ? String(++n) : ""));
+        }
+        lines.push(cells.join(","));
+      }
       lines.push("");
     }
     const blob = new Blob([`﻿${lines.join("\r\n")}`], { type: "text/csv;charset=utf-8" });
