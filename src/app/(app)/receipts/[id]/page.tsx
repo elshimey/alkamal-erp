@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
@@ -19,9 +18,6 @@ export default async function ReceiptPage({ params, searchParams }: { params: Pr
     <div className="mx-auto max-w-3xl">
       {print && <AutoPrint />}
       <div className="mb-4 flex items-center gap-2 print:hidden">
-        <Link href={`/receipts?open=${id}`} className="text-sm text-brand-700 hover:underline">
-          ← سندات العملاء
-        </Link>
         <span className="ms-auto flex items-center gap-2">
           <SendDocument kind="receipts" id={id} label={`سند رقم ${doc.r.number}`} company={company.nameAr} phone={doc.customer.mobile} email={doc.customer.email} />
           <PrintButton />

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ScrollTable } from "@/components/scroll-table";
 import type { ReactNode } from "react";
 import { presetRanges } from "@/lib/reports";
 import { getBrand } from "@/lib/brand";
@@ -91,10 +92,7 @@ export async function ReportHeader({ title, period, filename, children, wide = f
       </div>
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <Link href="/reports" className="text-xs text-brand-700 hover:underline print:hidden">
-            ← التقارير
-          </Link>
-          <h1 className="mt-1 flex items-center gap-3 text-2xl font-semibold text-brand-900 print:mt-0 print:text-lg print:text-black">
+          <h1 className="max-md:sr-only print:not-sr-only mt-1 flex items-center gap-3 text-2xl font-semibold text-brand-900 print:mt-0 print:text-lg print:text-black">
             <span className="h-7 w-1.5 rounded-full bg-brand-600 print:hidden" />
             {title}
           </h1>
@@ -152,8 +150,8 @@ function PresetLink({ from, to, label, active }: { from: string; to: string; lab
 
 export function RTable({ name, head, children, className = "" }: { name: string; head: ReactNode[]; children: ReactNode; className?: string }) {
   return (
-    <div className={`overflow-x-auto rounded-2xl border border-black/[0.06] bg-white shadow-[0_4px_16px_-8px_rgba(27,33,38,0.08)] print:overflow-visible print:rounded-none print:border-0 print:shadow-none ${className}`}>
-      <table data-report={name} className="w-full text-sm print:border-collapse print:text-[10px]">
+    <ScrollTable className={`overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-[0_4px_16px_-8px_rgba(27,33,38,0.08)] print:overflow-visible print:rounded-none print:border-0 print:shadow-none ${className}`}>
+      <table data-report={name} className="sticky-first w-full text-sm print:border-collapse print:text-[10px]">
         <thead className="bg-asphalt-900 text-white/85 print:table-header-group print:bg-white print:text-black">
           <tr>
             {head.map((h, i) => (
@@ -165,7 +163,7 @@ export function RTable({ name, head, children, className = "" }: { name: string;
         </thead>
         <tbody className="divide-y divide-gray-100">{children}</tbody>
       </table>
-    </div>
+    </ScrollTable>
   );
 }
 

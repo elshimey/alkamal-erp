@@ -6,7 +6,9 @@ import { getTenant, requireUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { EXTRA_PAGES, NAV, NAV_KEYWORDS } from "@/data/nav";
 import { GlobalSearch, type SearchPage } from "@/components/global-search";
-import { BrandMark, Logo } from "@/components/logo";
+import { Breadcrumbs, MobileTitle } from "@/components/breadcrumb";
+import { crumbPages } from "@/lib/breadcrumb";
+import { Logo } from "@/components/logo";
 import { getBrand } from "@/lib/brand";
 import { MobileNav, NavLinks, type NavGroup } from "@/components/nav-links";
 import { TourHelpButton, TourRunner } from "@/components/tour";
@@ -60,6 +62,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     ...EXTRA_PAGES.filter((p) => (!p.admin || user.perms.isAdmin) && (!p.entity || can(user.perms, p.entity, "view"))).map(({ href, label, group, keywords }) => ({ href, label, group, keywords })),
   ];
 
+  // مسار الصفحة: أسماء الشاشات فقط (لا بيانات)، فتُرسل كلها
+  const crumbs = crumbPages(NAV, EXTRA_PAGES);
+
   const jar = await cookies();
   const welcome = jar.get(WELCOME_COOKIE) ? welcomeMessage(user.name) : null;
 
@@ -75,18 +80,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </nav>
       </Sidebar>
       <div className="flex min-w-0 flex-1 flex-col overflow-x-clip">
-        <header className="sticky top-0 z-30 flex print:hidden items-center justify-between gap-3 border-b border-black/5 bg-white/85 px-3 py-2 backdrop-blur md:gap-4 md:px-6 md:py-3">
+        <header className="group/hdr sticky top-0 z-30 flex print:hidden items-center justify-between gap-3 border-b border-black/5 bg-white/85 px-3 py-2 backdrop-blur md:gap-4 md:px-6 md:py-3">
           <MobileNav groups={[...groups, ...FOOTER]} brand={{ name: brand.name, logo: brand.logo }} />
-          <Link href="/" className="md:hidden" aria-label="لوحة القيادة">
-            <BrandMark logo={brand.logo} size={30} />
-          </Link>
+          <MobileTitle pages={crumbs} home={brand.name} />
+          <Breadcrumbs pages={crumbs} />
           <GlobalSearch pages={pages} />
-          <div className="ms-auto flex items-center gap-2 text-sm md:gap-4">
+          <div className="flex shrink-0 items-center gap-1 text-sm md:gap-4">
             <TourHelpButton />
             <NotificationBell />
-            <Link href="/account" className="flex items-center gap-2 text-gray-700 hover:text-brand-700">
+            <Link href="/account" className="hidden items-center gap-2 md:flex text-gray-700 hover:text-brand-700">
               <span className="flex size-9 items-center justify-center rounded-full bg-asphalt-900 font-display font-semibold text-brand-500 ring-2 ring-brand-600/40">{user.name.trim()[0]}</span>
-              <span className="hidden sm:inline">
+              <span className="hidden 2xl:inline">
                 {user.name}
                 <span className="ms-2 text-xs text-gray-400">{user.roles.map((r) => r.nameAr).join("، ")}</span>
               </span>

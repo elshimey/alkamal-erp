@@ -51,9 +51,6 @@ export default async function ContractPage({ params }: { params: Promise<{ id: s
             </ActionForm>
           )}
           {canEdit && <EditLink href={`/records/contracts/${id}`} label="تعديل بيانات العقد أو حذفه" />}
-          <Link href="/contracts" className="text-sm text-brand-700 hover:underline">
-            ← العقود
-          </Link>
         </div>
       </PageHeader>
       {canEdit && (

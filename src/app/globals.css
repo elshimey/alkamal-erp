@@ -429,3 +429,41 @@ aside:hover > .road-line {
     margin: 12mm;
   }
 }
+
+/* الجدول العريض (ScrollTable): على الجوال العمود الأول ثابت أثناء السحب، وظل على الحافة التي فيها أعمدة أخرى */
+@media (max-width: 767px) {
+  .scroll-table .sticky-first > thead > tr > th:first-child,
+  .scroll-table .sticky-first > tbody > tr > td:first-child:not([colspan]),
+  .scroll-table .sticky-first > tfoot > tr > td:first-child:not([colspan]) {
+    position: sticky;
+    inset-inline-start: 0;
+    z-index: 1;
+    background: var(--sticky-bg, #fff);
+  }
+  .scroll-table .sticky-first > thead > tr > th:first-child {
+    --sticky-bg: var(--color-asphalt-900);
+  }
+}
+@media (max-width: 767px) {
+  [data-moved] > .scroll-table .sticky-first > * > tr > :first-child:not([colspan]) {
+    box-shadow: -8px 0 10px -10px rgb(27 33 38 / 0.5);
+  }
+}
+[data-more]::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 24px;
+  pointer-events: none;
+  border-end-start-radius: inherit;
+  background: linear-gradient(to right, rgb(27 33 38 / 0.1), transparent);
+}
+@media print {
+  [data-more]::after {
+    display: none;
+  }
+  .scroll-table .sticky-first > * > tr > :first-child {
+    position: static;
+  }
+}

@@ -48,9 +48,6 @@ export default async function InstallmentPlanPage({ params }: { params: Promise<
   return (
     <>
       <PageHeader title={plan.name} description={`${plan.account} (${plan.code})${plan.party ? ` · ${plan.party}` : ""}${plan.vehicle ? ` · المركبة ${plan.vehicle}` : ""}`}>
-        <Link href="/payments/installments" className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50">
-          ← الأقساط
-        </Link>
         {active && canPay && plan.remaining > 0 && <PayoffButton planId={plan.id} owed={plan.owed} today={today} from={from} />}
       </PageHeader>
 

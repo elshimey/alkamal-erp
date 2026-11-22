@@ -275,7 +275,7 @@ export function MobileNav({ groups, brand }: { groups: NavGroup[]; brand: { name
         type="button"
         onClick={() => setState({ open: true, path })}
         aria-label="القائمة"
-        className="flex size-10 items-center justify-center rounded-xl text-asphalt-900 transition hover:bg-gray-100 md:hidden"
+        className="flex size-10 shrink-0 items-center justify-center rounded-xl text-asphalt-900 transition group-has-[[data-back]]/hdr:hidden hover:bg-gray-100 md:hidden"
       >
         <svg viewBox="0 0 24 24" className="size-6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
           <path d="M4 7h16M4 12h16M4 17h10" />

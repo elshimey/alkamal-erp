@@ -135,9 +135,6 @@ export default async function WaybillPage({ params }: { params: Promise<{ id: st
             طباعة البوليصة
           </Link>
           <SendDocument kind="waybills" id={w.id} label={`بوليصة شحن رقم ${w.number}`} company={brand.name} phone={customerMobile} email={customerEmail} />
-          <Link href="/waybills" className="text-sm text-brand-700 hover:underline">
-            ← الشحنات
-          </Link>
         </div>
       </PageHeader>
       </div>

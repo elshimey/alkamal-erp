@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
@@ -65,9 +64,6 @@ export default async function RolePage({ params }: { params: Promise<{ id: strin
               )}
             </DialogButton>
           )}
-          <Link href="/roles" className="text-sm text-brand-700 hover:underline">
-            ← كل الأدوار
-          </Link>
         </div>
       </PageHeader>
       {role.isSystem && (

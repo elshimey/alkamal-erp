@@ -71,9 +71,6 @@ export default async function MaintenanceOrderPage({ params }: { params: Promise
           <Link href={`/print/maintenance?ids=${id}`} target="_blank" className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
             طباعة
           </Link>
-          <Link href={`/maintenance?open=${id}`} className="text-sm text-brand-700 hover:underline">
-            ← أوامر الصيانة
-          </Link>
         </div>
       </PageHeader>
       {(row.request || row.plan) && (

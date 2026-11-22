@@ -52,9 +52,6 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
               <SubmitButton variant="secondary">إرجاع لمسودة</SubmitButton>
             </ActionForm>
           )}
-          <Link href="/purchases" className="text-sm text-brand-700 hover:underline">
-            ← فواتير الموردين
-          </Link>
         </div>
       </PageHeader>
 

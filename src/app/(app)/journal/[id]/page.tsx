@@ -16,9 +16,6 @@ export default async function EntryPage({ params, searchParams }: { params: Prom
     <div className="mx-auto max-w-4xl">
       {(await searchParams).print === "1" && <AutoPrint />}
       <div className="mb-4 flex items-center gap-2 print:hidden">
-        <Link href={`/journal?open=${id}`} className="text-sm text-brand-700 hover:underline">
-          ← القيود اليومية
-        </Link>
         <span className="ms-auto">
           <PrintButton />
         </span>

@@ -49,9 +49,6 @@ export default async function DriverTripRequestsPage({ searchParams }: { searchP
         title="رحلات بدأها السائقون"
         description="السائق يصوّر فاتورة الطرف الأول من التطبيق، والمركبة من إسناده والوقت والموقع تلقائياً، ويسجل التحميل والتسليم. حوّلها لشحنة (تكمل العميل والمسار والسعر)، أو اربطها بشحنة أنشأتها له للرحلة نفسها، أو ارفضها بسبب يصله. لا قيد قبل التحويل."
       >
-        <Link href="/waybills" className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
-          ← الشحنات
-        </Link>
       </PageHeader>
 
       <div className="mb-4 flex flex-wrap gap-2 text-sm">

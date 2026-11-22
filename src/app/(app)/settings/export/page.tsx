@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { requireAdmin } from "@/lib/auth";
 import { Icon } from "@/components/icons";
 import { Card, PageHeader } from "@/components/ui";
@@ -8,9 +7,6 @@ export default async function ExportPage() {
   return (
     <>
       <PageHeader title="تصدير كل البيانات" description="نسخة كاملة من بيانات شركتك في ملف Excel واحد، تحتفظ بها أو تسلّمها لمراجع الحسابات.">
-        <Link href="/settings" className="text-sm font-medium text-brand-700 hover:underline">
-          ← الإعدادات
-        </Link>
       </PageHeader>
       <Card className="max-w-3xl">
         <ul className="mb-5 list-disc space-y-1.5 ps-5 text-sm text-gray-700">
