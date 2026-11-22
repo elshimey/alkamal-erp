@@ -13,7 +13,7 @@ import { todayRiyadh } from "@/lib/dates";
 import { fundingAccounts } from "@/lib/invoices";
 import { listHref, type DocListParams } from "@/lib/doc-filters";
 import { PAGE_SIZE, pageOf } from "@/lib/paging";
-import { fmt } from "@/lib/format";
+import { fmt, fmtDate } from "@/lib/format";
 import { EDITABLE, listWaybills, parseWaybillFilter, waybillComponents, waybillDoc } from "@/lib/waybills";
 import { customListOptions } from "@/lib/custom-lists";
 import { joinCustom } from "@/data/custom-lists";
@@ -21,7 +21,9 @@ import { taxCodeOptions } from "@/lib/tax-codes";
 import { WAYBILL_SORTS, WAYBILL_STATUS, type WaybillStatus } from "@/data/waybills";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { ConfirmSubmit } from "@/components/confirm-submit";
-import { ActionsMenu, type MenuItem } from "@/components/actions-menu";
+import { ActionButton, ActionsMenu, type MenuItem } from "@/components/actions-menu";
+import { DocCard, DocCards, Plate, SheetFacts, SheetMoney, SheetTrack, sheetBtn, sheetPrimary } from "@/components/doc-card";
+import { MobileSheet } from "@/components/mobile-sheet";
 import { BulkPdfButton } from "@/components/bulk-pdf";
 import { ClickRow } from "@/components/click-row";
 import { DateInput } from "@/components/date-input";
@@ -54,6 +56,9 @@ const TABS: { key: string; label: string }[] = [
   { key: "invoiced", label: "مفوترة" },
   { key: "rejected", label: "مرفوضة" },
 ];
+
+// حالات تنتظر من المكتب خطوة: تُعلَّم بالأصفر في أزرار الحالات
+const ATTN = ["delivered", "pending_invoice"];
 
 const SHEET_TONE: Record<WaybillStatus, "gray" | "green" | "blue" | "amber" | "red"> = {
   draft: "gray",
@@ -376,6 +381,127 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
   const vatOf = (w: Row["w"]) => (w.isInternational ? 0 : 15);
   const exec = (r: Row) => r.plate ?? (r.carrier ? `${r.carrier} (ناقل)` : "—");
 
+  /** الخطوة التالية تحت مبلغ البطاقة على الجوال */
+  const nextStep = (r: Row) => {
+    const w = r.w;
+    if (w.status === "draft" && w.execution === "fleet" && !w.sentToDriverAt) return "أرسلها للسائق";
+    if (w.status === "delivered") return canApprove ? "تنتظر اعتمادك" : "تنتظر الاعتماد";
+    if (w.status === "approved" && !r.invoiceId && r.invoiceWaybills >= 0) return "جاهزة للفوترة";
+    if (w.status === "rejected") return w.rejectionReason ? `مرفوضة: ${w.rejectionReason}` : null;
+    return null;
+  };
+  const splitRoute = (route: string | null) => {
+    const [from = "", to = ""] = (route ?? "").split(" ← ");
+    return { from, to };
+  };
+  // الجوال: بطاقة لكل شحنة (قرار أحمد 2026-11-22)، ولمسها يفتح المعاينة من الأسفل
+  const mobileList = (
+    <div className="md:hidden">
+      <DocCards empty={filtered ? "لا توجد شحنات بهذه الشروط" : "لا توجد شحنات بعد؛ اضغط «إنشاء»"}>
+        {rows.map((r) => {
+          const { w } = r;
+          const st = waybillState(w.status, r.invoiceId, r.invoiceWaybills);
+          return (
+            <DocCard
+              key={w.id}
+              href={listUrl({ open: String(w.id) })}
+              number={w.number}
+              status={st}
+              date={w.waybillDate}
+              party={r.customer}
+              route={{ ...splitRoute(r.route), international: w.isInternational }}
+              meta={
+                <>
+                  <Plate>{exec(r)}</Plate>
+                  <span className="flex min-w-0 items-center gap-1 truncate">
+                    <Icon name="user" className="size-3.5 shrink-0" />
+                    {r.driver ?? w.carrierDriverName ?? "—"}
+                  </span>
+                </>
+              }
+              amount={showPrices ? fmt(w.amount) : null}
+              currency={w.currencyCode}
+              next={nextStep(r)}
+              active={w.id === openId}
+            />
+          );
+        })}
+      </DocCards>
+      <Pager page={page} size={PAGE_SIZE} total={listTotal.n} hrefFor={(p) => listUrl({ page: p > 1 ? String(p) : undefined, open: undefined })} />
+    </div>
+  );
+  // الخطوة الرئيسية في معاينة الجوال: أول ما ينطبق من هذه، والباقي في «العمليات»
+  const PRIMARY = ["إرسال للسائق", "اعتماد الشحنة", "إنشاء فاتورة مسودة", "تم التسليم", "فتح الفاتورة"];
+  const openMenu = openDoc ? menu(openDoc.w, openInvoiceId, openRow?.invoice ?? null, openDoc.driverMobile) : [];
+  const openPrimary = PRIMARY.map((p) => openMenu.find((i) => i.label.startsWith(p))).find(Boolean);
+  const WB_STEPS = ["مسودة", "في الطريق", "مُسلَّمة", "معتمدة", "مفوترة"];
+  const mobileSheet = openDoc && (
+    <MobileSheet
+      closeHref={listUrl()}
+      label={`معاينة الشحنة ${openDoc.w.number}`}
+      header={
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="ltr-nums font-display text-[17px] font-semibold text-brand-900">{openDoc.w.number}</span>
+            {(() => {
+              const st = waybillState(openDoc.w.status, openInvoiceId, openRow?.invoiceWaybills ?? 0);
+              return <Badge tone={st.tone}>{st.label}</Badge>;
+            })()}
+          </div>
+          <p className="mt-1 truncate text-[13px] text-gray-600">{openDoc.customer}</p>
+        </>
+      }
+      footer={
+        <>
+          {openPrimary && <ActionButton item={openPrimary} className={sheetPrimary} />}
+          <Link href={`/waybills/${openDoc.w.id}`} className={sheetBtn}>
+            <Icon name="expand" className="size-4" />
+            فتح كاملة
+          </Link>
+          <ActionsMenu items={openMenu.filter((i) => i !== openPrimary)} label="العمليات" className={sheetBtn} />
+        </>
+      }
+    >
+      <SheetTrack
+        from={openDoc.from ?? undefined}
+        to={openDoc.to ?? undefined}
+        steps={WB_STEPS}
+        at={openDoc.w.status === "rejected" ? 2 : { draft: 0, in_transit: 1, delivered: 2, approved: 3, invoiced: 4 }[openDoc.w.status]}
+        muted={openDoc.w.status === "draft"}
+      />
+      {openDoc.w.status === "rejected" && openDoc.w.rejectionReason && <p className="mt-3 rounded-xl bg-st-bad-bg px-3 py-2.5 text-[12.5px] text-st-bad-fg">سبب الرفض: {openDoc.w.rejectionReason}</p>}
+      {openInvoiceId && (
+        <p className="mt-3 rounded-xl bg-st-ok-bg px-3 py-2.5 text-[12.5px] text-st-ok-fg">
+          الشحنة في الفاتورة <span className="ltr-nums">{openRow?.invoice}</span>
+          {openDoc.w.status === "approved" ? " (مسودة)" : ""}.{" "}
+          <Link href={`/invoices?open=${openInvoiceId}`} className="font-semibold underline">
+            فتح الفاتورة
+          </Link>
+        </p>
+      )}
+      <SheetFacts
+        items={[
+          ["المركبة", openDoc.plate ? <Plate>{openDoc.plate}</Plate> : (openRow && exec(openRow)) || "—"],
+          ["السائق", openDoc.driver ?? openDoc.w.carrierDriverName ?? "—"],
+          ["التاريخ", <span key="d" className="ltr-nums">{fmtDate(openDoc.w.waybillDate)}</span>],
+          ["الضريبة", openDoc.w.isInternational ? "صفرية · نقل دولي" : "15% · داخلي"],
+          ["عمولة السائق", <span key="c" className="ltr-nums">{fmt(openDoc.w.driverCommission)}</span>],
+          ["السائق والتطبيق", openDoc.w.execution !== "fleet" ? "ناقل" : openDoc.w.sentToDriverAt ? (openDoc.w.driverAcceptedAt ? "استلمها" : "أُرسلت له") : "لم تُرسل"],
+        ]}
+      />
+      {showPrices && (
+        <SheetMoney
+          lines={[
+            ["قبل الضريبة", fmt(openDoc.w.amount)],
+            [`الضريبة ${vatOf(openDoc.w)}%`, fmt((Number(openDoc.w.amount) * vatOf(openDoc.w)) / 100)],
+          ]}
+          total={["الإجمالي", `${fmt(Number(openDoc.w.amount) * (1 + vatOf(openDoc.w) / 100))} ${openDoc.w.currencyCode}`]}
+        />
+      )}
+      {Number(openDoc.w.tripCustody) > 0 && <p className="mt-3 text-xs text-gray-500">عهدة الرحلة {fmt(openDoc.w.tripCustody)}</p>}
+    </MobileSheet>
+  );
+
   return (
     <>
       <PageHeader title="الشحنات" description="كل شحنة رحلة واحدة. السعر من العقد الساري والعمولة من المسار تلقائياً، والضريبة من المسار (الدولي صفري والداخلي 15%)، والقيد يُرحّل عند الاعتماد.">
@@ -451,7 +577,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
         </>
       ) : (
         <>
-          <nav className="mb-3 flex flex-wrap gap-2 text-sm">
+          <nav aria-label="حالة الشحنات" className="-mx-4 mb-3 flex gap-2 overflow-x-auto px-4 pb-1 text-sm [scrollbar-width:none] md:mx-0 md:flex-wrap md:overflow-visible md:px-0 md:pb-0 [&::-webkit-scrollbar]:hidden">
             {TABS.map((t) => {
               const active = (lp.status ?? "") === t.key;
               const n = counts[t.key || "all"] ?? 0;
@@ -460,10 +586,11 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
                   key={t.key || "all"}
                   href={listUrl({ status: t.key || undefined, open: undefined, page: undefined })}
                   scroll={false}
-                  className={`flex items-center gap-2 rounded-full px-3.5 py-1.5 transition ${active ? "bg-asphalt-900 font-semibold text-brand-500" : "bg-white text-gray-600 shadow-sm hover:bg-brand-50"} ${t.key === "pending_invoice" && n > 0 && !active ? "ring-1 ring-brand-500" : ""}`}
+                  aria-current={active ? "page" : undefined}
+                  className={`flex shrink-0 items-center gap-2 rounded-full px-3.5 py-1.5 whitespace-nowrap transition max-md:h-9 ${active ? "bg-asphalt-900 font-semibold text-brand-500" : "bg-white text-gray-600 shadow-sm hover:bg-brand-50"} ${ATTN.includes(t.key) && n > 0 && !active ? "ring-1 ring-brand-500" : ""}`}
                 >
                   {t.label}
-                  <span className={`ltr-nums rounded-full px-1.5 text-xs ${active ? "bg-white/10" : "bg-gray-100"}`}>{n}</span>
+                  <span className={`ltr-nums rounded-full px-1.5 text-xs ${active ? "bg-white/10" : ATTN.includes(t.key) && n > 0 ? "bg-brand-500 font-semibold text-brand-900" : "bg-gray-100"}`}>{n}</span>
                 </Link>
               );
             })}
@@ -538,7 +665,10 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
             <Pager page={page} size={PAGE_SIZE} total={listTotal.n} hrefFor={(p) => listUrl({ page: p > 1 ? String(p) : undefined })} />
             </>
           ) : openDoc ? (
-            <div className="grid items-start gap-4 lg:grid-cols-[minmax(17rem,22rem)_1fr]">
+            <>
+            {mobileList}
+            {mobileSheet}
+            <div className="grid items-start gap-4 max-md:hidden lg:grid-cols-[minmax(17rem,22rem)_1fr]">
               <ul className="hidden max-h-[calc(100vh-9rem)] divide-y divide-gray-100 overflow-y-auto rounded-2xl border border-black/[0.06] bg-white shadow-sm lg:sticky lg:top-4 lg:block print:hidden">
                 {rows.map(({ w, customer, invoiceId, invoiceWaybills }) => (
                   <li key={w.id}>
@@ -652,8 +782,11 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
                 </div>
               </section>
             </div>
+            </>
           ) : (
             <>
+              {mobileList}
+              <div className="max-md:hidden">
               {(canUpdate || canApprove || canInvoice) && (
                 <ActionForm id={BULK_FORM} action={bulkWaybillOps} resetOnSuccess={false} className="mb-3 rounded-2xl bg-white px-4 py-2.5 shadow-sm">
                   <input type="hidden" name="op" defaultValue="" />
@@ -804,6 +937,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
                 })}
               </Table>
               <Pager page={page} size={PAGE_SIZE} total={listTotal.n} hrefFor={(p) => listUrl({ page: p > 1 ? String(p) : undefined, open: undefined })} />
+              </div>
               {listTotal.n > 0 && showPrices && (
                 <p className="mt-3 text-xs text-gray-500">
                   إجمالي الشحنات بهذه الشروط قبل الضريبة <span className="ltr-nums font-semibold text-gray-700">{fmt(listTotal.amount)}</span>

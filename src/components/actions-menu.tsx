@@ -37,18 +37,126 @@ function toast(message: string, error = false) {
   setTimeout(() => el.remove(), error ? 6000 : 3500);
 }
 
+/** تنفيذ عنصر عمليات: التأكيد في نافذة البرنامج إن طُلب، ثم الإجراء ورسالته. يشترك فيه القائمة وزر الإجراء الواحد. */
+function useMenuRunner() {
+  const [confirming, setConfirming] = useState<MenuItem | null>(null);
+  const [pending, start] = useTransition();
+  const dialog = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    if (confirming) dialog.current?.showModal();
+  }, [confirming]);
+
+  const run = (item: MenuItem, data = new FormData()) =>
+    start(async () => {
+      const res = await item.action!(data);
+      if (res?.error) toast(res.error, true);
+      else {
+        if (res?.ok) toast(res.ok);
+        setConfirming(null);
+        dialog.current?.close();
+      }
+    });
+
+  const choose = (item: MenuItem) => {
+    if (item.disabled) return;
+    if (item.copyFrom) {
+      start(async () => {
+        try {
+          const res = await fetch(item.copyFrom!);
+          if (!res.ok) throw new Error();
+          await navigator.clipboard.writeText(await res.text());
+          toast("نُسخت البيانات؛ الصقها في Excel");
+        } catch {
+          toast("تعذر النسخ إلى الحافظة", true);
+        }
+      });
+      return;
+    }
+    if (!item.action) return;
+    if (item.confirm) setConfirming(item);
+    else run(item);
+  };
+
+  const confirmDialog =
+    confirming &&
+    createPortal(
+      <dialog
+        ref={dialog}
+        onClose={() => setConfirming(null)}
+        onClick={(e) => e.target === dialog.current && !pending && dialog.current?.close()}
+        className="animate-rise m-auto w-[min(28rem,calc(100%-2rem))] rounded-2xl bg-white p-0 text-gray-800 shadow-2xl backdrop:bg-asphalt-900/50 backdrop:backdrop-blur-[2px]"
+      >
+        <form
+          className="p-5"
+          onSubmit={(e) => {
+            e.preventDefault();
+            run(confirming, new FormData(e.currentTarget));
+          }}
+        >
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h3 className={`font-display text-lg font-semibold ${confirming.danger ? "text-red-700" : "text-brand-900"}`}>{confirming.confirm!.title}</h3>
+            <button type="button" onClick={() => dialog.current?.close()} aria-label="إغلاق" className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700">
+              <Icon name="close" className="size-5" />
+            </button>
+          </div>
+          {confirming.confirm!.text && <p className="text-sm text-gray-600">{confirming.confirm!.text}</p>}
+          {confirming.confirm!.fields && <div className="mt-3 space-y-3">{confirming.confirm!.fields}</div>}
+          <div className="mt-5 flex justify-end gap-2 border-t border-gray-100 pt-3">
+            <button type="button" onClick={() => dialog.current?.close()} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+              إلغاء
+            </button>
+            <button
+              type="submit"
+              disabled={pending}
+              className={`rounded-lg px-4 py-2 text-sm font-semibold shadow-sm disabled:opacity-60 ${confirming.danger ? "bg-red-600 text-white hover:bg-red-700" : "bg-brand-600 text-brand-900 hover:bg-brand-500"}`}
+            >
+              {pending ? "جارٍ التنفيذ…" : confirming.confirm!.submit}
+            </button>
+          </div>
+        </form>
+      </dialog>,
+      document.body,
+    );
+
+  return { pending, choose, confirmDialog };
+}
+
+/** عنصر عمليات واحد كزر ظاهر (الخطوة التالية في معاينة الجوال مثلاً)، بنفس تأكيده ورسالته. */
+export function ActionButton({ item, className = "" }: { item: MenuItem; className?: string }) {
+  const { pending, choose, confirmDialog } = useMenuRunner();
+  const body = (
+    <>
+      {item.icon && <Icon name={item.icon} className="size-4.5 shrink-0" />}
+      {pending ? "جارٍ التنفيذ…" : item.label}
+    </>
+  );
+  if (item.href && !item.disabled)
+    return (
+      <Link href={item.href} target={item.newTab ? "_blank" : undefined} className={className}>
+        {body}
+      </Link>
+    );
+  return (
+    <>
+      <button type="button" disabled={pending || !!item.disabled} onClick={() => choose(item)} className={className}>
+        {body}
+      </button>
+      {confirmDialog}
+    </>
+  );
+}
+
 /**
  * قائمة عمليات المستند على طريقة وافق (زر «⋮» أو زر باسم): تغيير الحالة، النسخ، الحذف، التنزيل…
  * تُغلق بالضغط خارجها أو Esc أو اختيار عنصر، والعمليات الحساسة تسأل في نافذة تأكيد لها «إلغاء».
  */
 export function ActionsMenu({ items, label, className = "" }: { items: MenuItem[]; label?: ReactNode; className?: string }) {
   const [open, setOpen] = useState(false);
-  const [confirming, setConfirming] = useState<MenuItem | null>(null);
-  const [pending, start] = useTransition();
+  const { pending, choose: runItem, confirmDialog } = useMenuRunner();
   const [pos, setPos] = useState<{ top: number; left?: number; right?: number } | null>(null);
   const btn = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
-  const dialog = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -80,40 +188,9 @@ export function ActionsMenu({ items, label, className = "" }: { items: MenuItem[
     };
   }, [open]);
 
-  useEffect(() => {
-    if (confirming) dialog.current?.showModal();
-  }, [confirming]);
-
-  const run = (item: MenuItem, data = new FormData()) =>
-    start(async () => {
-      const res = await item.action!(data);
-      if (res?.error) toast(res.error, true);
-      else {
-        if (res?.ok) toast(res.ok);
-        setConfirming(null);
-        dialog.current?.close();
-      }
-    });
-
   const choose = (item: MenuItem) => {
     setOpen(false);
-    if (item.disabled) return;
-    if (item.copyFrom) {
-      start(async () => {
-        try {
-          const res = await fetch(item.copyFrom!);
-          if (!res.ok) throw new Error();
-          await navigator.clipboard.writeText(await res.text());
-          toast("نُسخت البيانات؛ الصقها في Excel");
-        } catch {
-          toast("تعذر النسخ إلى الحافظة", true);
-        }
-      });
-      return;
-    }
-    if (!item.action) return;
-    if (item.confirm) setConfirming(item);
-    else run(item);
+    runItem(item);
   };
 
   return (
@@ -178,45 +255,7 @@ export function ActionsMenu({ items, label, className = "" }: { items: MenuItem[
           </div>,
           document.body,
         )}
-      {confirming &&
-        createPortal(
-          <dialog
-            ref={dialog}
-            onClose={() => setConfirming(null)}
-            onClick={(e) => e.target === dialog.current && !pending && dialog.current?.close()}
-            className="animate-rise m-auto w-[min(28rem,calc(100%-2rem))] rounded-2xl bg-white p-0 text-gray-800 shadow-2xl backdrop:bg-asphalt-900/50 backdrop:backdrop-blur-[2px]"
-          >
-            <form
-              className="p-5"
-              onSubmit={(e) => {
-                e.preventDefault();
-                run(confirming, new FormData(e.currentTarget));
-              }}
-            >
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <h3 className={`font-display text-lg font-semibold ${confirming.danger ? "text-red-700" : "text-brand-900"}`}>{confirming.confirm!.title}</h3>
-                <button type="button" onClick={() => dialog.current?.close()} aria-label="إغلاق" className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700">
-                  <Icon name="close" className="size-5" />
-                </button>
-              </div>
-              {confirming.confirm!.text && <p className="text-sm text-gray-600">{confirming.confirm!.text}</p>}
-              {confirming.confirm!.fields && <div className="mt-3 space-y-3">{confirming.confirm!.fields}</div>}
-              <div className="mt-5 flex justify-end gap-2 border-t border-gray-100 pt-3">
-                <button type="button" onClick={() => dialog.current?.close()} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
-                  إلغاء
-                </button>
-                <button
-                  type="submit"
-                  disabled={pending}
-                  className={`rounded-lg px-4 py-2 text-sm font-semibold shadow-sm disabled:opacity-60 ${confirming.danger ? "bg-red-600 text-white hover:bg-red-700" : "bg-brand-600 text-brand-900 hover:bg-brand-500"}`}
-                >
-                  {pending ? "جارٍ التنفيذ…" : confirming.confirm!.submit}
-                </button>
-              </div>
-            </form>
-          </dialog>,
-          document.body,
-        )}
+      {confirmDialog}
     </>
   );
 }
