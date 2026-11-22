@@ -128,6 +128,7 @@ const noteNew = at("/notes/[side]/new", "إشعار دائن أو مدين", "/n
 const pr = at("/purchase-requests", "طلبات الشراء");
 const po = at("/purchase-orders", "أوامر الشراء");
 const pinv = at("/purchases", "فواتير الموردين");
+const prNew = at("/purchase-requests", "طلب شراء جديد", "/purchase-requests?new=1");
 const pinvNew = at("/purchases", "فاتورة مورد جديدة", "/purchases?new=1");
 const exp = at("/expenses", "المصروفات");
 const expNew = at("/expenses", "مصروف جديد", "/expenses?new=1");
@@ -595,10 +596,11 @@ export const TOURS: Tour[] = [
     summary: "الطلب الداخلي، ثم أمر الشراء للمورد، ثم فاتورته التي تُدخل الأصناف للمخزون أو تُقيد مصروفاً.",
     screens: ["/purchase-requests", "/purchase-orders", "/purchases"],
     steps: [
-      pr.click(S("+ طلب شراء جديد"), "طلب شراء", "افتح «+ طلب شراء جديد».", { group: "الطلب" }),
-      pr.fill("مطلوب قبل", "مطلوب قبل", "", { optional: true, group: "الطلب" }),
-      pr.fill("للمركبة", "للمركبة", "إن كان للمركبة معينة.", { optional: true, group: "الطلب" }),
-      pr.click(B("حفظ الطلب"), "احفظ الطلب", "بعد كتابة الأصناف في السطور اضغط «حفظ الطلب». يعتمده المدير.", { group: "الطلب" }),
+      pr.click(L("+ طلب شراء"), "طلب شراء", "اضغط «+ طلب شراء» فتفتح نافذة الطلب.", { group: "الطلب" }),
+      prNew.fill("مطلوب قبل", "مطلوب قبل", "اختر التاريخ من التقويم.", { optional: true, group: "الطلب" }),
+      prNew.fill("للمركبة", "للمركبة", "إن كان للمركبة معينة.", { optional: true, group: "الطلب" }),
+      prNew.info(S("الأصناف المطلوبة"), "الأصناف", "كل صنف بطاقة: الصنف من المخزون أو الوصف، والكمية، والسعر التقديري. «+ إضافة صنف» لصنف آخر.", { group: "الطلب" }),
+      prNew.click(SAVE, "احفظ الطلب", "اضغط «حفظ». يعتمده المدير، ثم يصدر له أمر شراء.", { group: "الطلب" }),
       po.click(S("+ أمر شراء جديد"), "أمر الشراء", "افتح «+ أمر شراء جديد».", { group: "الأمر" }),
       po.fill("المورد", "المورد", "", { group: "الأمر" }),
       po.click(B("حفظ أمر الشراء"), "احفظ الأمر", "بعد السطور اضغط «حفظ أمر الشراء». يُطبع ويُرسل للمورد.", { group: "الأمر" }),

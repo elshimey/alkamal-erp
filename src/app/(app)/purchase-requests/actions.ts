@@ -6,25 +6,33 @@ import { requirePermission } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
 import { createPurchaseOrder, createPurchaseRequest, decideRequest, deleteOrder, deleteRequest, orderToInvoice, setOrderStatus } from "@/lib/purchasing";
 import type { FormState } from "@/components/action-form";
+import type { PanelResult } from "@/components/record-panel";
 import { redirect } from "next/navigation";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 const num = (v: unknown) => Number(String(v ?? "").replace(/[,\s]/g, "")) || 0;
 const lines = (fd: FormData) => JSON.parse(str(fd, "lines") || "[]") as Record<string, string>[];
 
-export async function saveRequest(_: FormState, fd: FormData): Promise<FormState> {
+const requestInput = (fd: FormData, userId: number) => {
+  const items = lines(fd);
+  if (!items.length) throw new Error("أضف صنفاً واحداً على الأقل");
+  return {
+    date: str(fd, "date"),
+    neededBy: str(fd, "neededBy") || null,
+    vehicleId: Number(str(fd, "vehicleId")) || null,
+    notes: str(fd, "notes"),
+    userId,
+    lines: items.map((l) => ({ productId: Number(l.productId) || null, description: l.description ?? "", quantity: num(l.quantity), estimatedPrice: l.price ? num(l.price) : null })),
+  };
+};
+
+/** نافذة «+ طلب شراء» (قرار أحمد 2026-11-22): نفس createPurchaseRequest. */
+export async function saveRequestPanel(fd: FormData): Promise<PanelResult> {
   const user = await requirePermission("purchase_invoices", "create");
   try {
-    const pr = await createPurchaseRequest(db, {
-      date: str(fd, "date"),
-      neededBy: str(fd, "neededBy") || null,
-      vehicleId: Number(str(fd, "vehicleId")) || null,
-      notes: str(fd, "notes"),
-      userId: user.id,
-      lines: lines(fd).map((l) => ({ productId: Number(l.productId) || null, description: l.description ?? "", quantity: num(l.quantity), estimatedPrice: l.price ? num(l.price) : null })),
-    });
+    const pr = await createPurchaseRequest(db, requestInput(fd, user.id));
     revalidatePath("/purchase-requests");
-    return { ok: `حُفظ طلب الشراء ${pr.number}` };
+    return { ok: `حُفظ طلب الشراء ${pr.number}، بانتظار اعتماد المدير`, id: pr.id, label: pr.number };
   } catch (err) {
     return { error: errorMessage(err) };
   }
