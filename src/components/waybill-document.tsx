@@ -19,7 +19,7 @@ function GoodsTable({ goods }: { goods: Doc["goods"] }) {
       <table className="w-full text-sm">
         <thead className="bg-gray-50 text-xs text-gray-500">
           <tr>
-            <th className="px-3 py-2 text-start font-medium">#</th>
+            <th className="px-3 py-2 text-start font-medium">م</th>
             <th className="px-3 py-2 text-start font-medium">الوصف</th>
             <th className="px-3 py-2 text-start font-medium">العدد</th>
             <th className="px-3 py-2 text-start font-medium">الوزن</th>

@@ -82,7 +82,7 @@ export function Table({ head, children, stack = true }: { head: ReactNode[]; chi
     .join("");
   return (
     <ScrollTable className="overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-[0_4px_16px_-8px_rgba(27,33,38,0.08)]">
-      {stack && rules && <style precedence="default" href={key}>{`@media (max-width:767px){${rules}}`}</style>}
+      {stack && rules && <style precedence="default" href={key}>{`@media screen and (max-width:767px){${rules}}`}</style>}
       <table className={`w-full text-sm ${stack ? `stack-table ${key}` : "sticky-first"}`}>
         <thead className="bg-asphalt-900 text-white/85">
           <tr>

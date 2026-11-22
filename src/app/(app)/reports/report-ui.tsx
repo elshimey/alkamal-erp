@@ -148,10 +148,11 @@ function PresetLink({ from, to, label, active }: { from: string; to: string; lab
   );
 }
 
-export function RTable({ name, head, children, className = "" }: { name: string; head: ReactNode[]; children: ReactNode; className?: string }) {
+/** جدول التقرير، وفيه عمود «م» للتسلسل تلقائياً (globals.css)؛ serial={false} لجدول له ترقيمه الخاص مثل خانات الإقرار. */
+export function RTable({ name, head, children, className = "", serial = true }: { name: string; head: ReactNode[]; children: ReactNode; className?: string; serial?: boolean }) {
   return (
     <ScrollTable className={`overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-[0_4px_16px_-8px_rgba(27,33,38,0.08)] print:overflow-visible print:rounded-none print:border-0 print:shadow-none ${className}`}>
-      <table data-report={name} className="sticky-first w-full text-sm print:border-collapse print:text-[10px]">
+      <table data-report={name} data-noserial={serial ? undefined : ""} className="sticky-first w-full text-sm print:border-collapse print:text-[10px]">
         <thead className="bg-asphalt-900 text-white/85 print:table-header-group print:bg-white print:text-black">
           <tr>
             {head.map((h, i) => (

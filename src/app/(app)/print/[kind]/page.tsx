@@ -26,7 +26,7 @@ export default async function BatchPrintPage({ params, searchParams }: { params:
       {docs.length === 0 && <p className="text-center text-sm text-gray-500">لا توجد مستندات</p>}
       <div className="space-y-8 print:space-y-0">
         {docs.map((d, i) => (
-          <div key={i} data-doc={d.name} className="break-after-page bg-white">
+          <div key={i} data-doc={d.name} className="break-after-page bg-white last:break-after-auto">
             {d.node}
           </div>
         ))}

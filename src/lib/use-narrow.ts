@@ -3,7 +3,7 @@
 import { useSyncExternalStore } from "react";
 
 // الجوال (أقل من 768): اللوحات تصعد من أسفل الشاشة؛ الكمبيوتر: نافذة أو معاينة جانبية
-const NARROW = "(max-width: 767px)";
+const NARROW = "screen and (max-width: 767px)";
 const onMedia = (cb: () => void) => {
   const m = window.matchMedia(NARROW);
   m.addEventListener("change", cb);

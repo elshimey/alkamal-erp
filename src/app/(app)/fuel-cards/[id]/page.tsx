@@ -64,7 +64,7 @@ export default async function StatementPage({ params }: { params: Promise<{ id: 
 
       <h2 className="mb-3 font-semibold text-brand-900">سطور الكشف</h2>
       <div className="mb-8">
-        <Table head={["#", "التاريخ", "اللوحة", "المحطة", "المرجع", "اللترات", "المبلغ", "الحالة", "الإجراء"]}>
+        <Table head={["م", "التاريخ", "اللوحة", "المحطة", "المرجع", "اللترات", "المبلغ", "الحالة", "الإجراء"]}>
           {lines.length === 0 && <EmptyRow cols={9}>لا سطور</EmptyRow>}
           {lines.map(({ l, vehicle, entry, fuel }) => {
             const options = candidates.filter((f) => !l.vehicleId || f.vehicleId === l.vehicleId);

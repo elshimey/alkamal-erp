@@ -181,7 +181,7 @@ export function TaxInvoiceDocument({
         <thead className={minimal ? "border-b-2 border-[var(--inv-dark)] text-[var(--inv-dark)]" : "bg-[var(--inv-dark)] text-white/90 print:[print-color-adjust:exact]"}>
           <tr>
             {[
-              ["#", "No."],
+              ["م", "No."],
               ["الوصف", "Description"],
               ["المبلغ الخاضع", "Taxable"],
               ["الضريبة %", "VAT %"],

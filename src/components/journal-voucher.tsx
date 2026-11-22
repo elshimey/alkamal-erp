@@ -82,6 +82,7 @@ export function JournalVoucher({ company, doc, template: t = DEFAULT_TEMPLATE, c
       <table className="mt-5 w-full text-xs">
         <thead className="bg-[var(--inv-dark)] text-white print:[print-color-adjust:exact]">
           <tr>
+            <th className="w-8 px-2 py-2 text-start font-medium">م</th>
             <th className="px-2 py-2 text-start font-medium">الحساب</th>
             <th className="px-2 py-2 text-start font-medium">الوصف</th>
             <th className="px-2 py-2 text-start font-medium">مركز التكلفة / الجهة</th>
@@ -90,8 +91,9 @@ export function JournalVoucher({ company, doc, template: t = DEFAULT_TEMPLATE, c
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
-          {doc.lines.map(({ l, code, account, costCenter, party }) => (
+          {doc.lines.map(({ l, code, account, costCenter, party }, i) => (
             <tr key={l.id}>
+              <td className="ltr-nums px-2 py-2 text-gray-500">{i + 1}</td>
               <td className="px-2 py-2">
                 <span className="ltr-nums text-gray-400">{code}</span> {account}
               </td>
@@ -104,7 +106,7 @@ export function JournalVoucher({ company, doc, template: t = DEFAULT_TEMPLATE, c
         </tbody>
         <tfoot>
           <tr className="border-t-2 border-[var(--inv-dark)] font-semibold">
-            <td colSpan={3} className="px-2 py-2">
+            <td colSpan={4} className="px-2 py-2">
               الإجمالي <span className="font-normal text-gray-500">({amountInWords(doc.debit, "SAR")})</span>
             </td>
             <td className="ltr-nums px-2 py-2 text-end">{fmt(doc.debit)}</td>

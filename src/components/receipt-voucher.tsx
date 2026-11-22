@@ -117,6 +117,7 @@ export function ReceiptVoucher({ company, doc, template: t = DEFAULT_TEMPLATE, c
           <table className="w-full text-xs">
             <thead className="bg-gray-50 text-gray-500">
               <tr>
+                <th className="w-8 px-3 py-2 text-start font-medium">م</th>
                 <th className="px-3 py-2 text-start font-medium">الفاتورة</th>
                 <th className="px-3 py-2 text-start font-medium">التاريخ</th>
                 <th className="px-3 py-2 text-end font-medium">قيمة الفاتورة</th>
@@ -125,8 +126,9 @@ export function ReceiptVoucher({ company, doc, template: t = DEFAULT_TEMPLATE, c
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {doc.allocations.map((a) => (
+              {doc.allocations.map((a, i) => (
                 <tr key={a.invoiceId}>
+                  <td className="ltr-nums px-3 py-2 text-gray-500">{i + 1}</td>
                   <td className="ltr-nums px-3 py-2">
                     <Link href={`/invoices?open=${a.invoiceId}`} className="text-brand-700 hover:underline print:text-gray-800 print:no-underline">
                       {a.number}

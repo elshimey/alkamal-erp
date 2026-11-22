@@ -107,7 +107,7 @@ export function NoteDocument({
       <table className="mt-5 w-full text-xs">
         <thead className="bg-[var(--inv-dark)] text-white print:[print-color-adjust:exact]">
           <tr>
-            <th className="px-3 py-2 text-start font-medium">#</th>
+            <th className="px-3 py-2 text-start font-medium">م</th>
             <th className="px-3 py-2 text-start font-medium">البيان</th>
             <th className="px-3 py-2 text-end font-medium">المبلغ</th>
             <th className="px-3 py-2 text-end font-medium">الضريبة</th>
