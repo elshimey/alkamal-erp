@@ -7,7 +7,7 @@ import { todayRiyadh } from "@/lib/dates";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Badge, Card, EmptyRow, Field, Input, PageHeader, Table, Td } from "@/components/ui";
 import { createReconciliationAction } from "./actions";
-import { fmt } from "@/lib/format";
+import { fmt, fmtDate } from "@/lib/format";
 import { AddModeBar, ListActions } from "@/components/list-actions";
 import { AccountField } from "@/components/account-field";
 import { toAccountOptions } from "@/lib/lookups";
@@ -68,7 +68,7 @@ export default async function ReconciliationsPage({ searchParams }: { searchPara
             <Td>
               <span className="ltr-nums text-gray-500">{code}</span> {account}
             </Td>
-            <Td className="ltr-nums">{r.statementDate}</Td>
+            <Td className="ltr-nums">{fmtDate(r.statementDate)}</Td>
             <Td className="ltr-nums">
               {fmt(Number(r.statementBalance))} <span className="text-xs text-gray-400">{currency ?? "SAR"}</span>
             </Td>

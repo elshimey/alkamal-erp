@@ -11,7 +11,7 @@ import { SheetEditor } from "@/components/sheet-editor";
 import { Badge, Card, EmptyRow, Input, PageHeader, Table, Td } from "@/components/ui";
 import { PayrollTabs } from "../tabs";
 import { deleteAdvanceAction, payAdvanceAction, revertAdvanceAction, saveAdvances } from "../actions";
-import { fmt } from "@/lib/format";
+import { fmt, fmtDate } from "@/lib/format";
 import { AccountField } from "@/components/account-field";
 import { toAccountOptions } from "@/lib/lookups";
 
@@ -63,7 +63,7 @@ export default async function AdvancesPage() {
         {list.map(({ a, name, cash }) => (
           <tr key={a.id}>
             <Td className="ltr-nums font-medium whitespace-nowrap">{a.number}</Td>
-            <Td className="ltr-nums whitespace-nowrap">{a.advanceDate}</Td>
+            <Td className="ltr-nums whitespace-nowrap">{fmtDate(a.advanceDate)}</Td>
             <Td className="font-medium">
               {name}
               {a.notes && <div className="text-xs font-normal text-gray-500">{a.notes}</div>}

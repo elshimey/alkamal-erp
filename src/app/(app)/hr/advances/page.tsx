@@ -148,7 +148,7 @@ export default async function AdvanceRequestsPage({ searchParams }: { searchPara
           <tr key={r.id} className="transition hover:bg-brand-50/40">
             <Td>{canApprove && r.status === "pending" && <RowCheck form={BULK_FORM} id={r.id} amount={r.amount} />}</Td>
             <Td className="ltr-nums font-medium whitespace-nowrap text-brand-700">{r.number}</Td>
-            <Td className="ltr-nums whitespace-nowrap">{r.requestDate}</Td>
+            <Td className="ltr-nums whitespace-nowrap">{fmtDate(r.requestDate)}</Td>
             <Td className="font-medium">{name}</Td>
             <Td>
               {r.source === "custody" ? <Badge tone="blue">سلفة من العهدة</Badge> : "مقدم عمولة"}

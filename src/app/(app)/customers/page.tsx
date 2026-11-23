@@ -10,7 +10,7 @@ import { DocToolbar } from "@/components/doc-toolbar";
 import { Icon } from "@/components/icons";
 import { ImportLink } from "@/components/import-link";
 import { Badge, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
-import { fmt } from "@/lib/format";
+import { fmt, fmtDate } from "@/lib/format";
 
 const BASE = "/customers";
 const btn = "rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50";
@@ -140,7 +140,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
                     <Link href={`/invoices?open=${i.id}`} className="ltr-nums font-medium text-brand-700 hover:underline">
                       {i.number}
                     </Link>
-                    <span className="ltr-nums text-xs text-gray-400">{i.invoiceDate}</span>
+                    <span className="ltr-nums text-xs text-gray-400">{fmtDate(i.invoiceDate)}</span>
                     <span className="ms-auto ltr-nums text-xs">{fmt(i.total)}</span>
                     <Badge tone={late ? "red" : st.tone}>{late ? "متأخرة" : st.label}</Badge>
                   </li>
@@ -155,7 +155,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
                   <Link href={`/receipts?open=${r.id}`} className="ltr-nums font-medium text-brand-700 hover:underline">
                     {r.number}
                   </Link>
-                  <span className="ltr-nums text-xs text-gray-400">{r.receiptDate}</span>
+                  <span className="ltr-nums text-xs text-gray-400">{fmtDate(r.receiptDate)}</span>
                   <span className="ms-auto ltr-nums text-xs">{fmt(r.amount)}</span>
                   <Badge tone={RECEIPT_KINDS[r.kind].tone}>{RECEIPT_KINDS[r.kind].short}</Badge>
                 </li>

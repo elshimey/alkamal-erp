@@ -306,7 +306,7 @@ export default async function ViolationsPage({ searchParams }: { searchParams: P
               </Link>
               {v.reference && <div className="ltr-nums text-xs font-normal text-gray-400">{v.reference}</div>}
             </Td>
-            <Td className="ltr-nums whitespace-nowrap">{v.violationDate}</Td>
+            <Td className="ltr-nums whitespace-nowrap">{fmtDate(v.violationDate)}</Td>
             <Td className="whitespace-nowrap">{plate}</Td>
             <Td>
               {v.violationType}
@@ -335,7 +335,7 @@ export default async function ViolationsPage({ searchParams }: { searchParams: P
             </Td>
             <Td>
               <Badge tone={v.status === "paid" ? "green" : "red"}>{v.status === "paid" ? "مسددة" : "غير مسددة"}</Badge>
-              {v.paymentDate && <div className="ltr-nums text-[11px] text-gray-400">{v.paymentDate}</div>}
+              {v.paymentDate && <div className="ltr-nums text-[11px] text-gray-400">{fmtDate(v.paymentDate)}</div>}
               {entry && <div className="ltr-nums text-[11px] whitespace-nowrap text-gray-400">{entry}</div>}
             </Td>
             <Td>

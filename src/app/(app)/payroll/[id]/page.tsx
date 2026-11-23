@@ -13,7 +13,7 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { SheetEditor } from "@/components/sheet-editor";
 import { Badge, Card, Field, Input, PageHeader, Table, Td } from "@/components/ui";
 import { adjustLines, approveRun, deleteRun, payRun, refreshRun, revertPay, revertRun } from "../actions";
-import { fmt } from "@/lib/format";
+import { fmt, fmtDate } from "@/lib/format";
 import { AccountField } from "@/components/account-field";
 import { toAccountOptions } from "@/lib/lookups";
 
@@ -191,7 +191,7 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
         {r.status === "paid" && (
           <Card title="مصروف">
             <p className="text-sm text-gray-600">
-              صُرف في <span className="ltr-nums">{r.paymentDate}</span> من {row.bank}.
+              صُرف في <span className="ltr-nums">{fmtDate(r.paymentDate)}</span> من {row.bank}.
             </p>
           </Card>
         )}

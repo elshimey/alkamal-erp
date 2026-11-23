@@ -1,4 +1,5 @@
 import { db } from "@/db";
+import { fmtDate } from "@/lib/format";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { evaluationMonth, getHrSettings, listCriteria, listPromotions, promotionCandidates } from "@/lib/hr";
@@ -175,7 +176,7 @@ export default async function EvaluationsPage({ searchParams }: { searchParams: 
             {promotions.map(({ p, name }) => (
               <tr key={p.id}>
                 <Td className="font-medium">{name}</Td>
-                <Td className="ltr-nums whitespace-nowrap">{p.effectiveDate}</Td>
+                <Td className="ltr-nums whitespace-nowrap">{fmtDate(p.effectiveDate)}</Td>
                 <Td className="text-xs">
                   {p.fromTitle ?? "—"} ← <b>{p.toTitle ?? "—"}</b>
                 </Td>

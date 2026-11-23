@@ -104,8 +104,8 @@ export default async function ContractsPage({ searchParams }: { searchParams: Pr
               </Link>
             </Td>
             <Td>{customer}</Td>
-            <Td className="ltr-nums">{c.fromDate}</Td>
-            <Td className="ltr-nums">{c.toDate}</Td>
+            <Td className="ltr-nums">{fmtDate(c.fromDate)}</Td>
+            <Td className="ltr-nums">{fmtDate(c.toDate)}</Td>
             <Td>{c.currencyCode}</Td>
             <Td className="ltr-nums">{showPrices && c.creditLimit ? Number(c.creditLimit).toLocaleString("en") : "—"}</Td>
             <Td className="ltr-nums">{rates}</Td>

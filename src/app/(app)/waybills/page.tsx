@@ -37,6 +37,8 @@ import { SendDocument } from "@/components/send-document";
 import { SheetEditor } from "@/components/sheet-editor";
 import { AddModeBar } from "@/components/list-actions";
 import { Badge, Card, EmptyRow, PageHeader, Pager, Table, Td } from "@/components/ui";
+import { BulkBar, EdgeCell, NextStepCell, NumDateCell, RouteLine, StatusCell, StatusTabs, Sub } from "@/components/desk-list";
+import { DeskDrawer } from "@/components/desk-drawer";
 import { WaybillDocument } from "@/components/waybill-document";
 import { bulkWaybillOps, copyWaybill, invoiceOne, issueOne, unmergeOne, removeWaybillAction, saveTransportPanel, saveWaybillPanel, saveWaybills, saveWaybillSheet, sendToDriverAction, unsendFromDriverAction, waybillToStatus } from "./actions";
 import { TransportPanel } from "./transport-panel";
@@ -390,6 +392,24 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
     if (w.status === "rejected") return w.rejectionReason ? `مرفوضة: ${w.rejectionReason}` : null;
     return null;
   };
+  /** زر «الخطوة التالية» في صف الكمبيوتر: نفس بند العمليات باسم قصير، والأصفر لما ينتظر إجراءً منا */
+  const rowNext = (r: Row): { item?: MenuItem; label?: string; go?: boolean; note?: string } => {
+    const w = r.w;
+    const items = menu(w, r.invoiceId, r.invoice);
+    const find = (p: string) => items.find((i) => i.label.startsWith(p));
+    const pick = (p: string, label: string, go: boolean, note: string) => {
+      const item = find(p);
+      return item ? { item, label, go } : { note };
+    };
+    const st = w.status;
+    if (st === "invoiced") return { note: "اكتملت" };
+    if ((st === "draft" || st === "in_transit") && w.execution === "fleet") return w.sentToDriverAt ? { note: "عند السائق" } : pick("إرسال للسائق", "أرسلها للسائق", true, "مسودة");
+    if (st === "draft" || st === "in_transit" || st === "delivered") return pick("اعتماد الشحنة", "اعتمدها", true, "تنتظر الاعتماد");
+    if (st === "approved" && r.invoiceId) return pick("فتح الفاتورة", "افتح الفاتورة", false, "في فاتورة");
+    if (st === "approved") return pick("إنشاء فاتورة مسودة", "حوّلها لفاتورة", true, "بانتظار الفوترة");
+    if (st === "rejected") return pick("إعادة إلى مسودة", "صحّحها", false, "مرفوضة");
+    return {};
+  };
   const splitRoute = (route: string | null) => {
     const [from = "", to = ""] = (route ?? "").split(" ← ");
     return { from, to };
@@ -502,6 +522,108 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
     </MobileSheet>
   );
 
+  // الكمبيوتر: معاينة جانبية فوق القائمة بنفس محتوى معاينة الجوال، وتحته المستند نفسه (قرار أحمد 2026-11-23)
+  const deskDrawer = openDoc && (
+    <DeskDrawer
+      closeHref={listUrl()}
+      label={`معاينة الشحنة ${openDoc.w.number}`}
+      header={
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-display text-lg font-semibold text-brand-900">
+              شحنة <span className="ltr-nums">{openDoc.w.number}</span>
+            </span>
+            {(() => {
+              const st = waybillState(openDoc.w.status, openInvoiceId, openRow?.invoiceWaybills ?? 0);
+              return <Badge tone={st.tone}>{st.label}</Badge>;
+            })()}
+          </div>
+          <p className="mt-0.5 truncate text-sm text-gray-600">
+            {openDoc.customer} · <span className="ltr-nums">{fmtDate(openDoc.w.waybillDate)}</span>
+          </p>
+        </>
+      }
+      footer={
+        <>
+          {openPrimary && <ActionButton item={openPrimary} className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-brand-600 px-4 text-sm font-semibold text-brand-900 shadow-sm hover:bg-brand-500 disabled:opacity-60" />}
+          <Link href={`/waybills/${openDoc.w.id}`} className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-gray-300 bg-white px-3 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
+            <Icon name="expand" className="size-4" />
+            فتح كاملة
+          </Link>
+          {editable(openDoc.w) && (
+            <Link href={withParam(listUrl({ open: String(openDoc.w.id) }), "edit", String(openDoc.w.id))} scroll={false} className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-gray-300 bg-white px-3 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
+              <Icon name="pencil" className="size-4" />
+              تعديل
+            </Link>
+          )}
+          <SendDocument kind="waybills" id={openDoc.w.id} label={`بوليصة شحن رقم ${openDoc.w.number}`} company={company.nameAr} phone={openDoc.customerMobile} email={openDoc.customerEmail} />
+          <span className="ms-auto">
+            <ActionsMenu items={openMenu} label="العمليات" />
+          </span>
+        </>
+      }
+    >
+      <SheetTrack
+        from={openDoc.from ?? undefined}
+        to={openDoc.to ?? undefined}
+        steps={WB_STEPS}
+        at={openDoc.w.status === "rejected" ? 2 : { draft: 0, in_transit: 1, delivered: 2, approved: 3, invoiced: 4 }[openDoc.w.status]}
+        muted={openDoc.w.status === "draft"}
+      />
+      {openDoc.w.status === "rejected" && openDoc.w.rejectionReason && <p className="mt-3 rounded-xl bg-st-bad-bg px-3 py-2.5 text-sm text-st-bad-fg">سبب الرفض: {openDoc.w.rejectionReason}</p>}
+      {openInvoiceId && (
+        <p className="mt-3 rounded-xl bg-st-ok-bg px-3 py-2.5 text-sm text-st-ok-fg">
+          الشحنة في الفاتورة <span className="ltr-nums">{openRow?.invoice}</span>
+          {openDoc.w.status === "approved" ? " (مسودة)" : ""}.{" "}
+          <Link href={`/invoices?open=${openInvoiceId}`} className="font-semibold underline">
+            فتح الفاتورة
+          </Link>
+        </p>
+      )}
+      <SheetFacts
+        items={[
+          ["المسار", `${openDoc.from ?? ""} ← ${openDoc.to ?? ""} (${openDoc.w.isInternational ? "دولي، ضريبة صفرية" : "داخلي، ضريبة 15%"})`],
+          ["المركبة", openDoc.plate ? <Plate>{openDoc.plate}</Plate> : (openRow && exec(openRow)) || "—"],
+          ["السائق", openDoc.driver ?? openDoc.w.carrierDriverName ?? "—"],
+          ["عمولة السائق", <span key="c" className="ltr-nums">{fmt(openDoc.w.driverCommission)}</span>],
+          ["عهدة الرحلة", <span key="t" className="ltr-nums">{Number(openDoc.w.tripCustody) > 0 ? fmt(openDoc.w.tripCustody) : "—"}</span>],
+          ["السائق والتطبيق", openDoc.w.execution !== "fleet" ? "ناقل" : openDoc.w.sentToDriverAt ? (openDoc.w.driverAcceptedAt ? "استلمها" : "أُرسلت له") : "لم تُرسل"],
+          ...(openDoc.w.logistiNumber ? [["رقم لوجستي", openDoc.w.logistiNumber] as [string, string]] : []),
+        ]}
+      />
+      {showPrices && (
+        <SheetMoney
+          lines={[
+            ["قبل الضريبة", fmt(openDoc.w.amount)],
+            [`الضريبة ${vatOf(openDoc.w)}%`, fmt((Number(openDoc.w.amount) * vatOf(openDoc.w)) / 100)],
+          ]}
+          total={["الإجمالي", `${fmt(Number(openDoc.w.amount) * (1 + vatOf(openDoc.w) / 100))} ${openDoc.w.currencyCode}`]}
+        />
+      )}
+      <div className="mt-5 rounded-2xl bg-gray-100/70 p-3 shadow-inner">
+        <div className="mb-3 flex items-center gap-2">
+          {(
+            [
+              ["waybill", "البوليصة"],
+              ["transport", "وثيقة النقل"],
+            ] as const
+          ).map(([k, l]) => (
+            <Link
+              key={k}
+              href={k === "transport" ? withParam(listUrl({ open: String(openDoc.w.id) }), "doc", "transport") : listUrl({ open: String(openDoc.w.id) })}
+              scroll={false}
+              replace
+              className={`rounded-full px-3 py-1 text-sm ${docVariant === k ? "bg-asphalt-900 font-semibold text-brand-500" : "border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"}`}
+            >
+              {l}
+            </Link>
+          ))}
+        </div>
+        <WaybillDocument company={company} doc={openDoc} template={template} compact variant={docVariant} />
+      </div>
+    </DeskDrawer>
+  );
+
   return (
     <>
       <PageHeader title="الشحنات" description="كل شحنة رحلة واحدة. السعر من العقد الساري والعمولة من المسار تلقائياً، والضريبة من المسار (الدولي صفري والداخلي 15%)، والقيد يُرحّل عند الاعتماد.">
@@ -577,24 +699,24 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
         </>
       ) : (
         <>
-          <nav aria-label="حالة الشحنات" className="-mx-4 mb-3 flex gap-2 overflow-x-auto px-4 pb-1 text-sm [scrollbar-width:none] md:mx-0 md:flex-wrap md:overflow-visible md:px-0 md:pb-0 [&::-webkit-scrollbar]:hidden">
-            {TABS.map((t) => {
-              const active = (lp.status ?? "") === t.key;
-              const n = counts[t.key || "all"] ?? 0;
-              return (
-                <Link
-                  key={t.key || "all"}
-                  href={listUrl({ status: t.key || undefined, open: undefined, page: undefined })}
-                  scroll={false}
-                  aria-current={active ? "page" : undefined}
-                  className={`flex shrink-0 items-center gap-2 rounded-full px-3.5 py-1.5 whitespace-nowrap transition max-md:h-9 ${active ? "bg-asphalt-900 font-semibold text-brand-500" : "bg-white text-gray-600 shadow-sm hover:bg-brand-50"} ${ATTN.includes(t.key) && n > 0 && !active ? "ring-1 ring-brand-500" : ""}`}
-                >
-                  {t.label}
-                  <span className={`ltr-nums rounded-full px-1.5 text-xs ${active ? "bg-white/10" : ATTN.includes(t.key) && n > 0 ? "bg-brand-500 font-semibold text-brand-900" : "bg-gray-100"}`}>{n}</span>
-                </Link>
-              );
-            })}
-          </nav>
+          <StatusTabs
+            label="حالة الشحنات"
+            tabs={TABS.map((t) => ({
+              key: t.key,
+              label: t.label,
+              href: listUrl({ status: t.key || undefined, open: undefined, page: undefined }),
+              count: counts[t.key || "all"] ?? 0,
+              attn: ATTN.includes(t.key),
+              active: (lp.status ?? "") === t.key,
+            }))}
+            summary={
+              listTotal.n > 0 && showPrices ? (
+                <>
+                  الإجمالي قبل الضريبة <b className="ltr-nums font-display text-sm font-semibold text-asphalt-900">{fmt(listTotal.amount)}</b>
+                </>
+              ) : null
+            }
+          />
 
           <DocToolbar
             base={BASE}
@@ -607,7 +729,16 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
             sorts={WAYBILL_SORTS}
             exportable={false}
             placeholder="ابحث برقم الشحنة أو العميل أو المرسل أو اللوحة أو المدينة أو المبلغ"
-            extra={<ActionsMenu items={pageMenu} />}
+            extra={
+              <>
+                {view !== "sheet" && rows.length > 0 && (
+                  <span className="max-md:hidden">
+                    <BulkPdfButton kind="waybills" ids={rows.map((r) => r.w.id)} />
+                  </span>
+                )}
+                <ActionsMenu items={pageMenu} />
+              </>
+            }
           />
 
           {view === "sheet" ? (
@@ -664,146 +795,18 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
             />
             <Pager page={page} size={PAGE_SIZE} total={listTotal.n} hrefFor={(p) => listUrl({ page: p > 1 ? String(p) : undefined })} />
             </>
-          ) : openDoc ? (
-            <>
-            {mobileList}
-            {mobileSheet}
-            <div className="grid items-start gap-4 max-md:hidden lg:grid-cols-[minmax(17rem,22rem)_1fr]">
-              <ul className="hidden max-h-[calc(100vh-9rem)] divide-y divide-gray-100 overflow-y-auto rounded-2xl border border-black/[0.06] bg-white shadow-sm lg:sticky lg:top-4 lg:block print:hidden">
-                {rows.map(({ w, customer, invoiceId, invoiceWaybills }) => (
-                  <li key={w.id}>
-                    <Link
-                      href={listUrl({ open: String(w.id) })}
-                      scroll={false}
-                      className={`block border-s-4 px-4 py-3 transition ${w.id === openId ? "border-brand-500 bg-brand-50/70" : "border-transparent hover:bg-gray-50"}`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <span className="line-clamp-1 text-sm font-semibold text-gray-800">{customer}</span>
-                        {showPrices && <span className="ltr-nums shrink-0 text-sm font-semibold text-brand-900">{fmt(w.amount)}</span>}
-                      </div>
-                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
-                        <span className="ltr-nums whitespace-nowrap">{w.number}</span>
-                        <span className="text-gray-300">|</span>
-                        <span className="ltr-nums whitespace-nowrap">{w.waybillDate}</span>
-                        <span className="ms-auto">
-                          <Badge tone={waybillState(w.status, invoiceId, invoiceWaybills).tone}>{waybillState(w.status, invoiceId, invoiceWaybills).label}</Badge>
-                        </span>
-                      </div>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-
-              <section className="animate-flyout min-w-0 rounded-2xl bg-gray-100/70 shadow-inner">
-                <div className="flex flex-wrap items-center gap-3 rounded-t-2xl border-b border-gray-200 bg-white px-5 py-3">
-                  <Link href={listUrl()} scroll={false} aria-label="إغلاق المعاينة" title="إغلاق" className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100">
-                    <Icon name="close" className="size-4" />
-                  </Link>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-display text-lg font-semibold text-brand-900">
-                        شحنة <span className="ltr-nums">{openDoc.w.number}</span>
-                      </span>
-                      {(() => {
-                        const st = waybillState(openDoc.w.status, openInvoiceId, openRow?.invoiceWaybills ?? 0);
-                        return <Badge tone={st.tone}>{st.label}</Badge>;
-                      })()}
-                    </div>
-                    <div className="text-xs text-gray-500">
-                      {openDoc.customer} · {openDoc.from} ← {openDoc.to} · {openDoc.w.isInternational ? "دولي، ضريبة صفرية" : "داخلي، ضريبة 15%"}
-                    </div>
-                  </div>
-                  <div className="ms-auto flex flex-wrap items-center gap-2">
-                    {editable(openDoc.w) && (
-                      <Link href={withParam(listUrl({ open: String(openDoc.w.id) }), "edit", String(openDoc.w.id))} scroll={false} className="flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
-                        <Icon name="pencil" className="size-4" />
-                        تعديل
-                      </Link>
-                    )}
-                    <SendDocument kind="waybills" id={openDoc.w.id} label={`بوليصة شحن رقم ${openDoc.w.number}`} company={company.nameAr} phone={openDoc.customerMobile} email={openDoc.customerEmail} />
-                    <ActionsMenu items={menu(openDoc.w, openInvoiceId, openRow?.invoice ?? null, openDoc.driverMobile)} label="العمليات" />
-                  </div>
-                </div>
-                {openDoc.w.status === "rejected" && openDoc.w.rejectionReason && <p className="border-b border-red-100 bg-red-50 px-5 py-2 text-sm text-red-800">سبب الرفض: {openDoc.w.rejectionReason}</p>}
-                {openInvoiceId && (
-                  <p className="border-b border-green-100 bg-green-50 px-5 py-2 text-sm text-green-800">
-                    الشحنة في الفاتورة {openRow?.invoice}
-                    {openDoc.w.status === "approved" ? " (مسودة)" : ""}.{" "}
-                    <Link href={`/invoices?open=${openInvoiceId}`} className="font-semibold underline">
-                      فتح الفاتورة
-                    </Link>
-                  </p>
-                )}
-                {showPrices && (
-                  <div className="ltr-nums grid grid-cols-2 gap-3 border-b border-gray-200 bg-white px-5 py-3 text-sm sm:grid-cols-4">
-                    <span>
-                      <span className="block text-xs text-gray-500">المبلغ قبل الضريبة</span>
-                      {fmt(openDoc.w.amount)} <span className="text-xs text-gray-400">{openDoc.w.currencyCode}</span>
-                    </span>
-                    <span>
-                      <span className="block text-xs text-gray-500">الضريبة {vatOf(openDoc.w)}%</span>
-                      {fmt((Number(openDoc.w.amount) * vatOf(openDoc.w)) / 100)}
-                    </span>
-                    <span className="font-semibold">
-                      <span className="block text-xs font-normal text-gray-500">الإجمالي</span>
-                      {fmt(Number(openDoc.w.amount) * (1 + vatOf(openDoc.w) / 100))}
-                    </span>
-                    <span className="text-xs text-gray-500">{openDoc.w.priceNote}</span>
-                  </div>
-                )}
-                <div className="p-4 sm:p-6">
-                  <div className="mx-auto max-w-3xl">
-                    <div className="mb-3 flex items-center gap-2">
-                      {(
-                        [
-                          ["waybill", "البوليصة"],
-                          ["transport", "وثيقة النقل"],
-                        ] as const
-                      ).map(([k, l]) => (
-                        <Link
-                          key={k}
-                          href={k === "transport" ? withParam(listUrl({ open: String(openDoc.w.id) }), "doc", "transport") : listUrl({ open: String(openDoc.w.id) })}
-                          scroll={false}
-                          className={`rounded-full px-3 py-1 text-sm ${docVariant === k ? "bg-asphalt-900 font-semibold text-brand-500" : "border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"}`}
-                        >
-                          {l}
-                        </Link>
-                      ))}
-                      {openDoc.w.execution === "fleet" && (
-                        <Badge tone={openDoc.w.sentToDriverAt ? (openDoc.w.driverAcceptedAt ? "green" : "blue") : "gray"}>
-                          {openDoc.w.sentToDriverAt ? (openDoc.w.driverAcceptedAt ? "✓ أُرسلت للسائق واستلمها" : "✓ أُرسلت للسائق") : "لم تُرسل للسائق"}
-                        </Badge>
-                      )}
-                      {Number(openDoc.w.tripCustody) > 0 && <Badge tone="amber">عهدة الرحلة {fmt(openDoc.w.tripCustody)}</Badge>}
-                      {openDoc.w.logistiNumber && <Badge tone="gray">لوجستي {openDoc.w.logistiNumber}</Badge>}
-                    </div>
-                    <WaybillDocument company={company} doc={openDoc} template={template} compact variant={docVariant} />
-                  </div>
-                </div>
-              </section>
-            </div>
-            </>
           ) : (
             <>
               {mobileList}
+              {mobileSheet}
               <div className="max-md:hidden">
               {(canUpdate || canApprove || canInvoice) && (
-                <ActionForm id={BULK_FORM} action={bulkWaybillOps} resetOnSuccess={false} className="mb-3 rounded-2xl bg-white px-4 py-2.5 shadow-sm">
+                <ActionForm id={BULK_FORM} action={bulkWaybillOps} resetOnSuccess={false}>
                   <input type="hidden" name="op" defaultValue="" />
-                  <SelectionGate
-                    form={BULK_FORM}
-                    empty={
-                      <div className="flex flex-wrap items-center gap-3">
-                        <span className="text-sm text-gray-500">حدد شحنة أو أكثر من الجدول لتظهر العمليات: الإرسال للسائق، والاعتماد، والدمج، والفوترة، وفك الدمج، وتغيير الحالة.</span>
-                        <span className="ms-auto">
-                          <BulkPdfButton kind="waybills" ids={rows.map((r) => r.w.id)} />
-                        </span>
-                      </div>
-                    }
-                  >
-                    <div className="flex flex-wrap items-center gap-2.5">
+                  <SelectionGate form={BULK_FORM} empty={null}>
+                    <BulkBar>
                       <SelectionTotal form={BULK_FORM} noun="شحنة" />
-                      <span className="mx-1 h-6 w-px bg-gray-200" aria-hidden />
+                      <span className="mx-1 h-6 w-px bg-white/15" aria-hidden />
                       {canUpdate && (
                         <ConfirmSubmit
                           op="send_driver"
@@ -817,13 +820,13 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
                         </ConfirmSubmit>
                       )}
                       {canApprove && (
-                        <SubmitButton op="approved" pendingLabel="جارٍ الاعتماد…" className="!py-1.5">
+                        <SubmitButton op="approved" variant="secondary" pendingLabel="جارٍ الاعتماد…" className="!py-1.5">
                           اعتماد
                         </SubmitButton>
                       )}
                       {(canInvoice || canIssueInvoice) && (
-                        <span className="flex flex-wrap items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 p-1 ps-2">
-                          <DateInput name="invoiceDate" defaultValue={today} aria-label="تاريخ الفاتورة" title="تاريخ الفاتورة" className="h-8 w-32 rounded-md border border-gray-200 bg-white px-2 text-sm" />
+                        <span className="flex flex-wrap items-center gap-1.5 rounded-lg bg-white/10 p-1 ps-2">
+                          <DateInput name="invoiceDate" defaultValue={today} aria-label="تاريخ الفاتورة" title="تاريخ الفاتورة" className="h-8 w-32 rounded-md border border-white/10 bg-white px-2 text-sm text-gray-800" />
                           {canInvoice && (
                             <SubmitButton op="merge" variant="secondary" pendingLabel="جارٍ الدمج…" className="!py-1.5">
                               دمج المحدد
@@ -846,9 +849,9 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
                         <details data-dropdown className="relative">
                           <summary className="flex cursor-pointer list-none items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
                             تغيير الحالة
-                            <span aria-hidden className="text-xs text-gray-400">▾</span>
+                            <span aria-hidden className="text-xs text-gray-400">▴</span>
                           </summary>
-                          <div className="absolute start-0 z-30 mt-1 flex w-52 flex-col rounded-xl border border-gray-200 bg-white p-1 shadow-lg">
+                          <div className="absolute start-0 bottom-full z-30 mb-2 flex w-52 flex-col rounded-xl border border-gray-200 bg-white p-1 text-gray-800 shadow-lg">
                             {(["in_transit", "delivered", "draft"] as const).map((op) => (
                               <SubmitButton key={op} op={op} variant="secondary" className="!justify-start !border-0 !text-start !shadow-none">
                                 {op === "draft" ? "إرجاع إلى مسودة" : `إلى «${WAYBILL_STATUS[op].label}»`}
@@ -877,72 +880,57 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
                           </div>
                         </details>
                       )}
-                      {canOverride && <input name="overrideReason" placeholder="سبب التجاوز عند الاعتماد (اختياري)" className="h-9 w-56 rounded-lg border border-gray-200 px-2.5 text-sm" />}
-                      <span className="ms-auto">
-                        <BulkPdfButton kind="waybills" ids={rows.map((r) => r.w.id)} />
-                      </span>
-                    </div>
+                      {canOverride && <input name="overrideReason" placeholder="سبب التجاوز عند الاعتماد (اختياري)" className="h-9 w-56 rounded-lg border border-white/10 bg-white px-2.5 text-sm text-gray-800" />}
+                    </BulkBar>
                   </SelectionGate>
                 </ActionForm>
               )}
-              <Table head={[(canUpdate || canApprove || canInvoice) && rows.length ? <SelectAll key="all" form={BULK_FORM} /> : "", "الرقم", "التاريخ", "العميل", "المسار", "نوع الشحن", "المنفّذ", "السائق", ...(showPrices ? ["المبلغ"] : []), "الحالة", "الفاتورة", ""]}>
-                {rows.length === 0 && <EmptyRow cols={showPrices ? 12 : 11}>{filtered ? "لا توجد شحنات بهذه الشروط" : "لا توجد شحنات بعد؛ اضغط «إنشاء»"}</EmptyRow>}
+              <Table head={[(canUpdate || canApprove || canInvoice) && rows.length ? <SelectAll key="all" form={BULK_FORM} /> : "", "الشحنة", "العميل والمسار", "التنفيذ", ...(showPrices ? ["المبلغ"] : []), "الحالة", "الخطوة التالية", ""]}>
+                {rows.length === 0 && <EmptyRow cols={showPrices ? 8 : 7}>{filtered ? "لا توجد شحنات بهذه الشروط" : "لا توجد شحنات بعد؛ اضغط «إنشاء»"}</EmptyRow>}
                 {rows.map((r) => {
                   const { w } = r;
                   const open = listUrl({ open: String(w.id) });
                   const st = waybillState(w.status, r.invoiceId, r.invoiceWaybills);
+                  const nx = rowNext(r);
                   return (
-                    <ClickRow key={w.id} href={open} className="transition hover:bg-brand-50/40">
+                    <ClickRow key={w.id} href={open} className={`transition hover:bg-brand-50/40 ${w.id === openId ? "bg-brand-50/70" : ""}`}>
                       <Td>{(canUpdate || canApprove || canInvoice) && <RowCheck form={BULK_FORM} id={w.id} amount={showPrices ? w.amount : "0"} />}</Td>
-                      <Td className="font-medium whitespace-nowrap">
-                        <Link href={open} scroll={false} className="ltr-nums text-brand-700 hover:underline">
-                          {w.number}
-                        </Link>
+                      <NumDateCell number={w.number} date={w.waybillDate} href={open} />
+                      <Td>
+                        <span className="font-medium text-gray-800">{r.customer}</span>
+                        <RouteLine {...splitRoute(r.route)} international={w.isInternational} />
                       </Td>
-                      <Td className="ltr-nums whitespace-nowrap">{w.waybillDate}</Td>
-                      <Td>{r.customer}</Td>
-                      <Td className="whitespace-nowrap">{r.route}</Td>
                       <Td className="whitespace-nowrap">
-                        <span className={`rounded-md px-1.5 py-0.5 text-xs ${w.isInternational ? "bg-sky-50 text-sky-800" : "bg-amber-50 text-amber-800"}`}>{w.isInternational ? "دولي · صفر" : "داخلي · 15%"}</span>
+                        {r.plate ? <Plate>{r.plate}</Plate> : r.carrier ? <span className="rounded-md bg-gray-100 px-1.5 py-0.5 text-xs text-gray-700">ناقل: {r.carrier}</span> : "—"}
+                        <Sub>{r.driver ?? w.carrierDriverName ?? "—"}</Sub>
                       </Td>
-                      <Td className="ltr-nums whitespace-nowrap">{exec(r)}</Td>
-                      <Td className="whitespace-nowrap">{r.driver ?? w.carrierDriverName ?? "—"}</Td>
                       {showPrices && (
-                        <Td className="ltr-nums font-semibold whitespace-nowrap">
-                          {fmt(w.amount)} <span className="text-xs font-normal text-gray-400">{w.currencyCode}</span>
+                        <Td className="whitespace-nowrap">
+                          <span className="ltr-nums font-display font-semibold text-asphalt-900">{fmt(w.amount)}</span> <span className="text-xs text-gray-400">{w.currencyCode}</span>
+                          <Sub>قبل الضريبة</Sub>
                         </Td>
                       )}
-                      <Td>
-                        <Badge tone={st.tone}>{st.label}</Badge>
-                        {"sub" in st && <span className="mt-0.5 block text-xs whitespace-nowrap text-amber-700">{st.sub}</span>}
-                        {w.status === "rejected" && w.rejectionReason && <span className="block max-w-48 truncate text-xs text-red-600">{w.rejectionReason}</span>}
-                        <DriverSentTag sentAt={w.sentToDriverAt} acceptedAt={w.driverAcceptedAt} fleet={w.execution === "fleet"} />
-                      </Td>
-                      <Td className="ltr-nums whitespace-nowrap">
+                      <StatusCell status={st} sub={w.status === "rejected" ? w.rejectionReason : "sub" in st ? st.sub : null}>
                         {r.invoiceId ? (
-                          <Link href={`/invoices?open=${r.invoiceId}`} className="text-brand-700 hover:underline">
-                            {r.invoice}
-                          </Link>
+                          <Sub className="whitespace-nowrap">
+                            فاتورة{" "}
+                            <Link href={`/invoices?open=${r.invoiceId}`} className="ltr-nums text-brand-700 hover:underline">
+                              {r.invoice}
+                            </Link>
+                          </Sub>
                         ) : (
-                          "—"
+                          <DriverSentTag sentAt={w.sentToDriverAt} acceptedAt={w.driverAcceptedAt} fleet={w.execution === "fleet" && (w.status === "draft" || w.status === "in_transit")} />
                         )}
-                      </Td>
-                      <Td>
-                        <Link href={open} scroll={false} aria-label="معاينة" title="معاينة بجانب القائمة" className="inline-flex rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-brand-700">
-                          <Icon name="expand" className="size-4" />
-                        </Link>
-                      </Td>
+                      </StatusCell>
+                      <NextStepCell {...nx} />
+                      <EdgeCell tone={st.tone} />
                     </ClickRow>
                   );
                 })}
               </Table>
               <Pager page={page} size={PAGE_SIZE} total={listTotal.n} hrefFor={(p) => listUrl({ page: p > 1 ? String(p) : undefined, open: undefined })} />
               </div>
-              {listTotal.n > 0 && showPrices && (
-                <p className="mt-3 text-xs text-gray-500">
-                  إجمالي الشحنات بهذه الشروط قبل الضريبة <span className="ltr-nums font-semibold text-gray-700">{fmt(listTotal.amount)}</span>
-                </p>
-              )}
+              {deskDrawer}
             </>
           )}
         </>

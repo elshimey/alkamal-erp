@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { applyAdvanceAction } from "../../actions";
-import { fmt } from "@/lib/format";
+import { fmt, fmtDate } from "@/lib/format";
 import { DateInput } from "@/components/date-input";
 
 type Inv = { id: number; number: string; invoiceDate: string; dueDate: string; total: string; paid: string };
@@ -70,7 +70,7 @@ export function ApplyForm({ receiptId, remaining, invoices, today, minDate, post
           {invoices.map((i) => (
             <tr key={i.id}>
               <td className="ltr-nums py-2 font-medium">{i.number}</td>
-              <td className="ltr-nums py-2 text-gray-600">{i.dueDate}</td>
+              <td className="ltr-nums py-2 text-gray-600">{fmtDate(i.dueDate)}</td>
               <td className="ltr-nums py-2 text-end">{fmt(bal(i))}</td>
               <td className="py-1.5">
                 <input

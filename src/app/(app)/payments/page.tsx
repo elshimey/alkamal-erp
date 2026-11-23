@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { EdgeCell } from "@/components/desk-list";
 import { PaymentsTabs } from "./tabs";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
@@ -185,12 +186,12 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
       )}
       {!adding && (
       <div className="max-md:hidden">
-      <Table head={["الرقم", "التاريخ", "النوع", "إلى", "المبلغ", "الطريقة", "من", "المخصص على", "الحالة", ""]}>
-        {list.length === 0 && <EmptyRow cols={10}>لا توجد سندات صرف بعد</EmptyRow>}
+      <Table head={["الرقم", "التاريخ", "النوع", "إلى", "المبلغ", "الطريقة", "من", "المخصص على", "الحالة", "", ""]}>
+        {list.length === 0 && <EmptyRow cols={11}>لا توجد سندات صرف بعد</EmptyRow>}
         {list.map(({ p, party, driver, cash: box, entry, invoices }) => (
           <tr key={p.id}>
             <Td className="ltr-nums font-medium whitespace-nowrap">{p.number}</Td>
-            <Td className="ltr-nums whitespace-nowrap">{p.paymentDate}</Td>
+            <Td className="ltr-nums whitespace-nowrap">{fmtDate(p.paymentDate)}</Td>
             <Td className="text-xs">{PAYMENT_KINDS[p.kind]}</Td>
             <Td>{party ?? driver}</Td>
             <Td className="ltr-nums font-semibold">
@@ -216,6 +217,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
             <Td>
               <div className="flex gap-2">{rowActions(p)}</div>
             </Td>
+            <EdgeCell tone={RECEIPT_STATUS[p.status].tone} />
           </tr>
         ))}
       </Table>

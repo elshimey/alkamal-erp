@@ -84,10 +84,10 @@ export function Table({ head, children, stack = true }: { head: ReactNode[]; chi
     <ScrollTable className="overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-[0_4px_16px_-8px_rgba(27,33,38,0.08)]">
       {stack && rules && <style precedence="default" href={key}>{`@media screen and (max-width:767px){${rules}}`}</style>}
       <table className={`w-full text-sm ${stack ? `stack-table ${key}` : "sticky-first"}`}>
-        <thead className="bg-asphalt-900 text-white/85">
+        <thead className="border-b border-gray-200 bg-[#faf9f5] text-gray-500">
           <tr>
             {head.map((h, i) => (
-              <th key={i} className="px-4 py-3 text-start font-medium whitespace-nowrap">
+              <th key={i} className="px-4 py-2.5 text-start text-xs font-medium whitespace-nowrap">
                 {h}
               </th>
             ))}

@@ -1,4 +1,5 @@
 import { desc, ne } from "drizzle-orm";
+import { fmtDate } from "@/lib/format";
 import { db } from "@/db";
 import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
@@ -43,7 +44,7 @@ export default async function ExchangeRatesPage({ searchParams }: { searchParams
         {rates.length === 0 && <EmptyRow cols={3}>لا توجد أسعار مسجلة</EmptyRow>}
         {rates.map((r) => (
           <tr key={r.id}>
-            <Td className="ltr-nums">{r.rateDate}</Td>
+            <Td className="ltr-nums">{fmtDate(r.rateDate)}</Td>
             <Td>{r.currencyCode}</Td>
             <Td className="ltr-nums font-semibold">{Number(r.rate)}</Td>
           </tr>

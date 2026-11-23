@@ -7,7 +7,7 @@ import { statementDetail } from "@/lib/fuel-cards";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Badge, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
 import { autoMatchAction, deleteStatementAction, matchAction, postExpenseAction, statusAction, unpostAction } from "../actions";
-import { fmt } from "@/lib/format";
+import { fmt, fmtDate } from "@/lib/format";
 
 export default async function StatementPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requirePermission("fuel_cards", "view");
@@ -71,7 +71,7 @@ export default async function StatementPage({ params }: { params: Promise<{ id: 
             return (
               <tr key={l.id}>
                 <Td className="ltr-nums text-xs text-gray-400">{l.lineNo}</Td>
-                <Td className="ltr-nums whitespace-nowrap">{l.txnDate}</Td>
+                <Td className="ltr-nums whitespace-nowrap">{fmtDate(l.txnDate)}</Td>
                 <Td>
                   {vehicle ?? l.plate ?? "—"}
                   {!l.vehicleId && l.plate && <div className="text-xs text-red-600">لوحة غير معرّفة</div>}

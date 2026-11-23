@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { fmtDate } from "@/lib/format";
 import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
@@ -121,7 +122,7 @@ export default async function DisciplinePage({ searchParams }: { searchParams: P
           <tr key={a.id} className="transition hover:bg-brand-50/40">
             <Td>{selectable.some((x) => x.a.id === a.id) && <RowCheck form={BULK_FORM} id={a.id} amount={a.amount} />}</Td>
             <Td className="ltr-nums font-medium whitespace-nowrap text-brand-700">{a.number}</Td>
-            <Td className="ltr-nums whitespace-nowrap">{a.actionDate}</Td>
+            <Td className="ltr-nums whitespace-nowrap">{fmtDate(a.actionDate)}</Td>
             <Td className="font-medium">{employee}</Td>
             <Td>
               <Badge tone={HR_ACTION_KIND[a.kind].tone}>{HR_ACTION_KIND[a.kind].label}</Badge>

@@ -18,7 +18,7 @@ import { Badge, Card, PageHeader, Table, Td } from "@/components/ui";
 import { addWaybills, issue, removeLine, sendToZatca } from "../actions";
 import { invoiceActions } from "../invoice-menu";
 import { ActionsMenu } from "@/components/actions-menu";
-import { fmt } from "@/lib/format";
+import { fmt, fmtDate } from "@/lib/format";
 import { fundingAccounts, invoiceTrips, invoiceWaybillIds } from "@/lib/invoices";
 import { customerPhotos } from "@/lib/attachments";
 import { CashAccountField } from "@/components/cash-account-field";
@@ -179,7 +179,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
                 {allocations.map(({ a, r }) => (
                   <tr key={r.id}>
                     <Td className="ltr-nums">{r.number}</Td>
-                    <Td className="ltr-nums">{r.receiptDate}</Td>
+                    <Td className="ltr-nums">{fmtDate(r.receiptDate)}</Td>
                     <Td>{PAYMENT_METHODS[r.method]}</Td>
                     <Td className="ltr-nums font-medium">{fmt(a.amount)}</Td>
                   </tr>

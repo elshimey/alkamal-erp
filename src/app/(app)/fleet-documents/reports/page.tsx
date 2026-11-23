@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { fmtDate } from "@/lib/format";
 import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
 import { todayRiyadh } from "@/lib/dates";
@@ -134,7 +135,7 @@ async function Expiring({ today, from, to, kinds, expired }: { today: string; fr
           <C className="text-xs text-gray-500">{OWNER_KINDS[r.ownerKind].label}</C>
           <C>{r.type.nameAr}</C>
           <C num>{r.doc.number ?? "—"}</C>
-          <C num>{r.doc.expiryDate}</C>
+          <C num>{fmtDate(r.doc.expiryDate)}</C>
           <C>
             <ExpiryBadge expiryDate={r.doc.expiryDate} today={today} alertDays={r.type.alertDays} />
           </C>

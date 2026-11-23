@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { EdgeCell } from "@/components/desk-list";
 import { and, desc, eq, gte, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
@@ -304,12 +305,12 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
         })}
       </DocCards>
       <div className="max-md:hidden">
-      <Table head={["الرقم", "التاريخ", "النوع", "البيان", "المركبة", "الدافع", "المبلغ", "الضريبة", "الحالة", ""]}>
-        {list.length === 0 && <EmptyRow cols={10}>لا توجد مصروفات</EmptyRow>}
+      <Table head={["الرقم", "التاريخ", "النوع", "البيان", "المركبة", "الدافع", "المبلغ", "الضريبة", "الحالة", "", ""]}>
+        {list.length === 0 && <EmptyRow cols={11}>لا توجد مصروفات</EmptyRow>}
         {list.map(({ e, account, code, plate, driver, cash: box, waybill, entry, maintenance }) => (
           <tr key={e.id}>
             <Td className="ltr-nums font-medium whitespace-nowrap">{e.number}</Td>
-            <Td className="ltr-nums whitespace-nowrap">{e.expenseDate}</Td>
+            <Td className="ltr-nums whitespace-nowrap">{fmtDate(e.expenseDate)}</Td>
             <Td>
               <span className="ltr-nums text-xs text-gray-400">{code}</span> {account}
             </Td>
@@ -344,6 +345,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
             <Td>
               <div className="flex flex-wrap gap-2">{rowActions({ e, driver, waybill })}</div>
             </Td>
+            <EdgeCell tone={EXPENSE_STATUS[e.status].tone} />
           </tr>
         ))}
       </Table>

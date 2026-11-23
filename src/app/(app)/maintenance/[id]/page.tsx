@@ -14,7 +14,7 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { SheetEditor } from "@/components/sheet-editor";
 import { Badge, Card, Field, Input, PageHeader, Table, Td } from "@/components/ui";
 import { approveOrder, completeOrder, deleteOrder, removeLine, revertOrder, saveLines } from "../actions";
-import { fmt } from "@/lib/format";
+import { fmt, fmtDate } from "@/lib/format";
 import { AccountField } from "@/components/account-field";
 import { toAccountOptions } from "@/lib/lookups";
 
@@ -180,7 +180,7 @@ export default async function MaintenanceOrderPage({ params }: { params: Promise
         {o.status === "completed" && (
           <Card title="مكتمل">
             <p className="text-sm text-gray-600">
-              اكتمل في <span className="ltr-nums">{o.completedDate}</span>
+              اكتمل في <span className="ltr-nums">{fmtDate(o.completedDate)}</span>
               {o.odometer ? ` عند العداد ${o.odometer.toLocaleString("en")} كم` : ""}.
             </p>
           </Card>

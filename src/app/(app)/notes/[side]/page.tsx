@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { EdgeCell } from "@/components/desk-list";
 import { notFound } from "next/navigation";
 import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
@@ -18,7 +19,7 @@ import { post, remove, revert, sendToZatca } from "./actions";
 import { getSettings, latestDocument, noteQr, sendBlocker } from "@/lib/zatca/service";
 import { qrSvg } from "@/lib/zatca-qr";
 import { ZatcaPanel } from "@/components/zatca-panel";
-import { fmt } from "@/lib/format";
+import { fmt, fmtDate } from "@/lib/format";
 
 const SORTS = { date_desc: "الأحدث أولاً", date_asc: "الأقدم أولاً", amount_desc: "الأعلى مبلغاً", amount_asc: "الأقل مبلغاً" } as const;
 const btn = "rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50";
@@ -78,7 +79,7 @@ export default async function NotesPage({ params, searchParams }: { params: Prom
                   </div>
                   <div className="mt-1 flex items-center gap-2 text-xs text-gray-500">
                     <span className="ltr-nums">{n.number}</span>
-                    <span className="ltr-nums">{n.noteDate}</span>
+                    <span className="ltr-nums">{fmtDate(n.noteDate)}</span>
                     <span className="ms-auto">{kindBadge(n.kind)}</span>
                   </div>
                 </Link>
@@ -129,14 +130,14 @@ export default async function NotesPage({ params, searchParams }: { params: Prom
           </section>
         </div>
       ) : (
-        <Table head={["التاريخ", "الرقم", cfg.party, "النوع", "الفاتورة الأصلية", "السبب", "الإجمالي", "الحالة"]}>
-          {list.length === 0 && <EmptyRow cols={8}>{f.q || f.status || f.from ? "لا توجد إشعارات بهذه الشروط" : "لا توجد إشعارات بعد"}</EmptyRow>}
+        <Table head={["التاريخ", "الرقم", cfg.party, "النوع", "الفاتورة الأصلية", "السبب", "الإجمالي", "الحالة", ""]}>
+          {list.length === 0 && <EmptyRow cols={9}>{f.q || f.status || f.from ? "لا توجد إشعارات بهذه الشروط" : "لا توجد إشعارات بعد"}</EmptyRow>}
           <LimitRow cols={8} shown={list.length} limit={500} />
           {list.map(({ n, party, invoice }) => {
             const open = listHref(base, sp, { open: String(n.id) });
             return (
               <tr key={n.id} className="transition hover:bg-brand-50/40">
-                <Td className="ltr-nums whitespace-nowrap">{n.noteDate}</Td>
+                <Td className="ltr-nums whitespace-nowrap">{fmtDate(n.noteDate)}</Td>
                 <Td className="font-medium whitespace-nowrap">
                   <Link href={open} scroll={false} className="ltr-nums text-brand-700 hover:underline">
                     {n.number}
@@ -156,6 +157,7 @@ export default async function NotesPage({ params, searchParams }: { params: Prom
                 <Td>
                   <Badge tone={NOTE_STATUS[n.status].tone}>{NOTE_STATUS[n.status].label}</Badge>
                 </Td>
+                <EdgeCell tone={NOTE_STATUS[n.status].tone} />
               </tr>
             );
           })}
