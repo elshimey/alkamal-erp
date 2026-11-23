@@ -1,3 +1,4 @@
+import { isPayFromCode } from "@/lib/banks";
 import { and, eq, or, sql } from "drizzle-orm";
 import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
@@ -518,7 +519,7 @@ async function importReceipt(tx: Tx, [r]: ImportRow[], ctx: Ctx, userId?: number
   const amount = toNumber(required(r, "amount", "المبلغ"), "المبلغ", { positive: true });
   const cashRaw = required(r, "cashAccount", "تم الدفع من خلال");
   const cash = findAccount(ctx, cashRaw, "تم الدفع من خلال");
-  if (!/^110[125]/.test(cash.code)) throw new Error(`الحساب ${cash.code} ${cash.nameAr} ليس صندوقاً أو بنكاً أو عهدة موظف`);
+  if (!isPayFromCode(cash.code)) throw new Error(`الحساب ${cash.code} ${cash.nameAr} لا يُقبض فيه؛ اختر صندوقاً أو بنكاً أو عهدة أو حساباً من الأصول والالتزامات`);
   const curRaw = v(r, "currency") || "SAR";
   const currencyCode = resolve(ctx.idx.currencies.find(curRaw), curRaw, "currency", "العملة");
   const kindRaw = normText(v(r, "kind"));

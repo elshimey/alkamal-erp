@@ -177,3 +177,33 @@ export async function accountOptions(prefix?: string | string[]) {
     .orderBy(asc(s.accounts.code));
   return toAccountOptions(rows);
 }
+
+/**
+ * «عرض كل الشجرة» في كل خانة «يُصرف من / يُسدد من / يُقبض في» (قرار أحمد 2026-11-23، نفس الآلية في كل الأقسام):
+ * كل حساب تفصيلي نشط في الأصول أو الالتزامات عدا 1103 و1114 وعهد السائقين (لها دافعها «عهدة السائق»).
+ * تُمرَّر moreOptions لـ AccountField، والمقترحة (الصناديق والبنوك) تبقى أولاً.
+ */
+export async function payFromTreeRows() {
+  return db
+    .select({ id: s.accounts.id, code: s.accounts.code, nameAr: s.accounts.nameAr, currencyCode: s.accounts.currencyCode })
+    .from(s.accounts)
+    .where(
+      and(
+        eq(s.accounts.isPostable, true),
+        eq(s.accounts.isActive, true),
+        sql`(${s.accounts.code} like '1%' or ${s.accounts.code} like '2%') and ${s.accounts.code} not like '1103%' and ${s.accounts.code} not like '1114%'`,
+        sql`not exists (select 1 from drivers d where d.custody_account_id = ${s.accounts.id})`,
+      ),
+    )
+    .orderBy(asc(s.accounts.code));
+}
+
+export async function payFromTree() {
+  return toAccountOptions(await payFromTreeRows());
+}
+
+/** للشيتات (عمود اختيار واحد): المقترحة أولاً ثم باقي الشجرة. */
+export async function payFromSheetOptions(suggested: PickRow[]) {
+  const [first, tree] = await Promise.all([toAccountOptions(suggested), payFromTree()]);
+  return [...first, ...tree.filter((o) => !first.some((x) => x.value === o.value))];
+}

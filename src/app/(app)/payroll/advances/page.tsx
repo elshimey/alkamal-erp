@@ -13,7 +13,7 @@ import { PayrollTabs } from "../tabs";
 import { deleteAdvanceAction, payAdvanceAction, revertAdvanceAction, saveAdvances } from "../actions";
 import { fmt, fmtDate } from "@/lib/format";
 import { AccountField } from "@/components/account-field";
-import { toAccountOptions } from "@/lib/lookups";
+import { payFromTree, toAccountOptions } from "@/lib/lookups";
 
 export default async function AdvancesPage() {
   const user = await requirePermission("payroll", "view");
@@ -28,7 +28,7 @@ export default async function AdvancesPage() {
       .orderBy(desc(s.employeeAdvances.advanceDate), desc(s.employeeAdvances.id))
       .limit(300),
   ]);
-  const cashOpts = await toAccountOptions(cashes);
+  const [cashOpts, tree] = await Promise.all([toAccountOptions(cashes), payFromTree()]);
   const outstanding = list.filter((x) => x.a.status === "paid").reduce((t, x) => t + Number(x.a.amount) - Number(x.a.repaidAmount), 0);
 
   return (
@@ -80,7 +80,7 @@ export default async function AdvancesPage() {
               <div className="flex flex-wrap gap-2">
                 {a.status === "pending" && can(user.perms, "payroll", "approve") && (
                   <ActionForm action={payAdvanceAction.bind(null, a.id)} resetOnSuccess={false} className="flex gap-1">
-                    <AccountField name="cashAccountId" options={cashOpts} placeholder="من صندوق / بنك" className="w-56" />
+                    <AccountField name="cashAccountId" options={cashOpts} moreOptions={tree} placeholder="من صندوق / بنك" className="w-56" />
                     <SubmitButton>صرف</SubmitButton>
                   </ActionForm>
                 )}

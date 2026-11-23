@@ -1,7 +1,7 @@
 import { and, desc, eq, gte, ne } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
-import { driverOptions, toAccountOptions, vehicleOptions } from "@/lib/lookups";
+import { driverOptions, payFromTree, toAccountOptions, vehicleOptions } from "@/lib/lookups";
 import { payFromAccounts } from "@/lib/invoices";
 import { expenseAccountOptions, supplierOptions } from "@/lib/purchases";
 import { todayRiyadh } from "@/lib/dates";
@@ -40,7 +40,7 @@ export async function ExpensePanel({ closeHref, canApprove }: { closeHref: strin
       .where(and(eq(s.costCenters.isActive, true), ne(s.costCenters.type, "vehicle")))
       .orderBy(s.costCenters.code),
   ]);
-  const cashOpts = await toAccountOptions(cashes);
+  const [cashOpts, tree] = await Promise.all([toAccountOptions(cashes), payFromTree()]);
   const firstCash = cashes.find((a) => a.code.startsWith("1101")) ?? cashes[0];
   return (
     <RecordPanel
@@ -117,7 +117,7 @@ export async function ExpensePanel({ closeHref, canApprove }: { closeHref: strin
           </span>
           <div className="group-has-[#exp-cash:checked]/payer:block hidden">
             <PanelField label="دُفع من" hint="صندوق أو بنك أو عهدة موظف المكتب">
-              <AccountField name="cashAccountId" options={cashOpts} defaultValue={firstCash?.id} scope="1101,1102,1105" />
+              <AccountField name="cashAccountId" options={cashOpts} moreOptions={tree} defaultValue={firstCash?.id} scope="1101,1102,1105" />
             </PanelField>
           </div>
           <p className="group-has-[#exp-custody:checked]/payer:block hidden rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600">

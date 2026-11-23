@@ -1,11 +1,11 @@
-import { toAccountOptions } from "@/lib/lookups";
+import { payFromTree, toAccountOptions } from "@/lib/lookups";
 import { AccountField } from "./account-field";
 
 type Account = { id: number; code: string; nameAr: string; currencyCode?: string | null };
 
 /**
  * اختيار الحساب الذي يُصرف منه المبلغ (عهدة الرحلة، سداد المخالفات…) بمنتقي الحسابات الموحد:
- * الصناديق والبنوك والعهد مجمّعة تحت حسابها الأب، والصندوق الأول مختار مسبقاً، و«+ إضافة» يضيف حساباً جديداً.
+ * الصناديق والبنوك والعهد مجمّعة تحت حسابها الأب، و«عرض كل الشجرة» لأي حساب أصول أو التزامات، والصندوق الأول مختار مسبقاً، و«+ إضافة» يضيف حساباً جديداً.
  */
 export async function CashAccountField({
   options,
@@ -23,7 +23,7 @@ export async function CashAccountField({
   return (
     <div className="text-sm">
       <span className="mb-1.5 block font-medium text-gray-700">{label}</span>
-      <AccountField name={name} options={await toAccountOptions(options)} defaultValue={first?.id} scope="1101,1102,1105" required />
+      <AccountField name={name} options={await toAccountOptions(options)} moreOptions={await payFromTree()} defaultValue={first?.id} scope="1101,1102,1105" required />
       {deferrable && (
         <label className="mt-2 flex items-center gap-2 text-gray-700">
           <input type="checkbox" name="deferCustody" value="1" className="size-4 accent-brand-600" />

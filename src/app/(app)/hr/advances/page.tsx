@@ -15,7 +15,7 @@ import { approveAdvanceAction, bulkAdvances, rejectAdvanceAction } from "../acti
 import { fmt, Kpis } from "../ui";
 import { PayrollTabs } from "../../payroll/tabs";
 import { AccountField } from "@/components/account-field";
-import { toAccountOptions } from "@/lib/lookups";
+import { payFromTree, toAccountOptions } from "@/lib/lookups";
 import { fmtDate } from "@/lib/format";
 import { DocCards } from "@/components/doc-card";
 import { DocCardFace, Facts, SheetActions, TapCard } from "@/components/list-card";
@@ -41,7 +41,7 @@ export default async function AdvanceRequestsPage({ searchParams }: { searchPara
   const isOpen = day >= settings.advanceOpenDay && day <= settings.advanceCloseDay;
 
   const cashSelect = (
-    <AccountField name="cashAccountId" options={await toAccountOptions(cashes)} placeholder="اعتماد دون صرف (أو اختر الصندوق)" className="w-64" />
+    <AccountField name="cashAccountId" options={await toAccountOptions(cashes)} moreOptions={await payFromTree()} placeholder="اعتماد دون صرف (أو اختر الصندوق)" className="w-64" />
   );
 
   type Req = (typeof list)[number]["r"];

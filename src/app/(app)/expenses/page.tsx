@@ -23,7 +23,7 @@ import { DocCards, Plate } from "@/components/doc-card";
 import { DocCardFace, Facts, SheetActions, TapCard } from "@/components/list-card";
 import { ExpensePanel } from "./expense-panel";
 import { AccountField } from "@/components/account-field";
-import { toAccountOptions } from "@/lib/lookups";
+import { payFromSheetOptions, payFromTree, toAccountOptions } from "@/lib/lookups";
 
 type Status = keyof typeof EXPENSE_STATUS;
 
@@ -77,7 +77,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
       .limit(300),
     adding ? supplierOptions(db) : Promise.resolve([]),
   ]);
-  const cashOpts = await toAccountOptions(cashes);
+  const [cashOpts, tree, sheetCash] = await Promise.all([toAccountOptions(cashes), payFromTree(), payFromSheetOptions(cashes)]);
   const photos = new Map((await listAttachments(db, "expenses", list.map((r) => r.e.id))).map((a) => [a.entityId, a.id]));
   // مصروف قال السائق إن الشركة دفعته لا يُعتمد جماعياً؛ يحدد المعتمد صندوقه أولاً
   const pending = list.filter((x) => x.e.status === "pending" && !(x.e.payer === "driver_custody" && x.e.reportedPayer === "company")).map((x) => x.e.id);
@@ -108,7 +108,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
                             </Select>
                           </Field>
                           <Field label="الصندوق أو البنك أو عهدة الموظف (إن دفعت الشركة)">
-                            <AccountField name="cashAccountId" options={cashOpts} placeholder="—" />
+                            <AccountField name="cashAccountId" options={cashOpts} moreOptions={tree} placeholder="—" />
                           </Field>
                           <Field label="حساب المصروف">
                             <AccountField name="accountId" options={accounts} defaultValue={e.accountId} required />
@@ -184,7 +184,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
                 { key: "date", label: "التاريخ", type: "date", placeholder: today },
                 { key: "payer", label: "الدافع", type: "select", required: true, options: Object.entries(EXPENSE_PAYERS).map(([value, label]) => ({ value, label })), width: "8rem" },
                 { key: "driverId", label: "السائق", type: "select", options: drivers, width: "9rem", create: "driver", autoVehicle: { key: "vehicleId", dateKey: "date" } },
-                { key: "cashAccountId", label: "أو الصندوق / عهدة موظف", type: "select", options: cashOpts, width: "11rem", create: "account" },
+                { key: "cashAccountId", label: "أو الصندوق / عهدة موظف", type: "select", options: sheetCash, width: "11rem", create: "account" },
                 { key: "partyId", label: "المستفيد (لم يُدفع)", type: "select", options: payees, width: "10rem", create: "supplier" },
                 { key: "accountId", label: "نوع المصروف", type: "select", required: true, options: accounts, width: "13rem", create: "account" },
                 { key: "vehicleId", label: "المركبة", type: "select", options: vehicles, width: "8rem", create: "vehicle" },

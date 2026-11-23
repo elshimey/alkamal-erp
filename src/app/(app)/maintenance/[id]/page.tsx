@@ -16,7 +16,7 @@ import { Badge, Card, Field, Input, PageHeader, Table, Td } from "@/components/u
 import { approveOrder, completeOrder, deleteOrder, removeLine, revertOrder, saveLines } from "../actions";
 import { fmt, fmtDate } from "@/lib/format";
 import { AccountField } from "@/components/account-field";
-import { toAccountOptions } from "@/lib/lookups";
+import { payFromTree, toAccountOptions } from "@/lib/lookups";
 
 export default async function MaintenanceOrderPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requirePermission("maintenance", "view");
@@ -156,7 +156,7 @@ export default async function MaintenanceOrderPage({ params }: { params: Promise
             <ActionForm action={approveOrder.bind(null, id)} resetOnSuccess={false} className="flex flex-wrap items-end gap-3">
               {o.provider === "internal" && !o.supplierId && (
                 <Field label="القطع اشتُريت من">
-                  <AccountField name="cashAccountId" options={await toAccountOptions(cashes)} defaultValue={o.cashAccountId} scope="1101,1102" placeholder="اختر الصندوق" className="w-64" />
+                  <AccountField name="cashAccountId" options={await toAccountOptions(cashes)} moreOptions={await payFromTree()} defaultValue={o.cashAccountId} scope="1101,1102" placeholder="اختر الصندوق" className="w-64" />
                 </Field>
               )}
               <SubmitButton>اعتماد الأمر</SubmitButton>

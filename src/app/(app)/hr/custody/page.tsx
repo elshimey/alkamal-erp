@@ -20,7 +20,7 @@ import { CustodyDocument } from "@/components/custody-document";
 import { bulkCustody, closeCustodyAction, custodyStep, deliverCustodyAction, saveCustodyRows } from "../actions";
 import { EntryPanel, fmt, HrTabs, Kpis, YES_NO } from "../ui";
 import { AccountField } from "@/components/account-field";
-import { toAccountOptions } from "@/lib/lookups";
+import { payFromTree, toAccountOptions } from "@/lib/lookups";
 import { fmtDate } from "@/lib/format";
 import { DocCards, sheetBtn, sheetPrimary } from "@/components/doc-card";
 import { DocCardFace, Facts, TapCard } from "@/components/list-card";
@@ -55,7 +55,7 @@ export default async function CustodyPage({ searchParams }: { searchParams: Prom
     getCompany(db),
     getInvoiceTemplate(db),
   ]);
-  const [cashOpts, expenseOpts] = await Promise.all([toAccountOptions(cashes), toAccountOptions(expenses)]);
+  const [cashOpts, expenseOpts, tree] = await Promise.all([toAccountOptions(cashes), toAccountOptions(expenses), payFromTree()]);
   const canCreate = can(user.perms, "custody", "create");
   const canApprove = can(user.perms, "custody", "approve");
   const canRevert = can(user.perms, "custody", "revert");
@@ -146,7 +146,7 @@ export default async function CustodyPage({ searchParams }: { searchParams: Prom
                 <ActionForm action={deliverCustodyAction.bind(null, openDoc.c.id)} resetOnSuccess={false} className="flex items-center gap-2">
                   <Input type="date" name="date" defaultValue={openDoc.c.docDate} className="w-40" />
                   {openDoc.c.kind === "cash" && (
-                    <AccountField name="cashAccountId" required options={cashOpts} placeholder="صُرفت من" className="w-56" />
+                    <AccountField name="cashAccountId" required options={cashOpts} moreOptions={tree} placeholder="صُرفت من" className="w-56" />
                   )}
                   <SubmitButton>تسليم للموظف</SubmitButton>
                 </ActionForm>
@@ -180,7 +180,7 @@ export default async function CustodyPage({ searchParams }: { searchParams: Prom
                     <Input type="number" step="0.01" min={0} name="returnedAmount" placeholder={fmt(openDoc.c.amount)} className="w-32" />
                   </Field>
                   <Field label="إلى">
-                    <AccountField name="cashAccountId" options={cashOpts} placeholder="—" className="w-56" />
+                    <AccountField name="cashAccountId" options={cashOpts} moreOptions={tree} placeholder="—" className="w-56" />
                   </Field>
                   <Field label="مصروف بمستندات">
                     <Input type="number" step="0.01" min={0} name="spentAmount" className="w-32" />
@@ -218,7 +218,7 @@ export default async function CustodyPage({ searchParams }: { searchParams: Prom
             <Input type="date" name="date" defaultValue={today} className="w-40" />
           </Field>
           <Field label="للنقدية: من">
-            <AccountField name="cashAccountId" options={cashOpts} placeholder="—" className="w-56" />
+            <AccountField name="cashAccountId" options={cashOpts} moreOptions={tree} placeholder="—" className="w-56" />
           </Field>
           <SubmitButton variant="secondary">تنفيذ على المحدد</SubmitButton>
         </ActionForm>
