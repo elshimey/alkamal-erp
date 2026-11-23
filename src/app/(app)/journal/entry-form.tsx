@@ -1,5 +1,6 @@
 "use client";
 
+import { MsgText } from "@/components/msg-text";
 import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition, type ClipboardEvent } from "react";
 import { Icon, Truck } from "@/components/icons";
@@ -120,7 +121,7 @@ export function EntryForm({ accounts, centers, parties, initial, entryId, canPos
           )}
         </div>
       </div>
-      {error && <div className="mb-4 whitespace-pre-line rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>}
+      {error && <div className="mb-4 whitespace-pre-line rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"><MsgText text={error} /></div>}
 
       <section className="grid gap-4 rounded-2xl border border-black/[0.06] bg-white p-5 shadow-sm sm:grid-cols-[10rem_12rem_1fr]">
         <label className="text-sm">

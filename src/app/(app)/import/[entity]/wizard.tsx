@@ -1,5 +1,6 @@
 "use client";
 
+import { MsgText } from "@/components/msg-text";
 import Link from "next/link";
 import { useMemo, useRef, useState, useTransition, type DragEvent } from "react";
 import type { ImportSpec } from "@/data/import-specs";
@@ -129,7 +130,7 @@ export function ImportWizard({ spec }: { spec: ImportSpec }) {
     <div className="animate-rise">
       <Steps step={step} />
 
-      {error && <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>}
+      {error && <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"><MsgText text={error} /></div>}
 
       {!parsed && (
         <div className="grid gap-4 lg:grid-cols-2">
@@ -564,7 +565,7 @@ function ReportStep({
                   <tr key={n}>
                     <td className="ltr-nums px-4 py-2 text-gray-500">{i.rows.length > 3 ? `${i.rows[0]}…${i.rows.at(-1)}` : i.rows.join("، ")}</td>
                     <td className="px-3 py-2 font-medium text-gray-700 sm:px-4">{columnOf(i.field) || "—"}</td>
-                    <td className="px-4 py-2 text-red-800">{i.message}</td>
+                    <td className="px-4 py-2 text-red-800"><MsgText text={i.message} /></td>
                   </tr>
                 ))}
               </tbody>

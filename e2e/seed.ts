@@ -13,6 +13,7 @@ import { createTenant, ensurePlatform } from "@/lib/platform";
 import { createContract, createLocation, createParty, createRoute, setContractStatus } from "@/lib/operations";
 import { assignVehicle, createDriver, createVehicle } from "@/lib/fleet";
 import { createDriverLogin } from "@/lib/driver-app";
+import { addInvoiceChargesTx, createDirectInvoice } from "@/lib/invoices";
 import { E2E } from "./data";
 
 async function main() {
@@ -44,6 +45,14 @@ async function main() {
   const driver = await createDriver(db, { nameAr: E2E.driver.name, mobile: E2E.driver.login, appLanguage: "ar" });
   await assignVehicle(db, { vehicleId: vehicle.id, driverId: driver.id, fromDate: `${year}-01-01` });
   await createDriverLogin(db, { driverId: driver.id, login: E2E.driver.login, password: E2E.driver.password });
+
+  // فاتورة مسودة عليها مصروف «لم يُدفع بعد» لعميل مستقل: رسالة منع إصدارها تحمل رابط «سندات صرف تحت المراجعة»
+  // (msg-links.spec.ts). عميل مستقل حتى لا تُدمج فيها شحنات العميل الأساسي.
+  const today = new Date().toISOString().slice(0, 10);
+  const linkCustomer = await createParty(db, { nameAr: E2E.linkCustomer, roles: ["customer"] });
+  const [customs] = await db.select().from(s.chargeTypes).where(eq(s.chargeTypes.nameAr, "رسوم جمركية باسم العميل"));
+  const pending = await createDirectInvoice(db, { customerId: linkCustomer.id, invoiceDate: today, dueDate: today, currencyCode: "SAR", lines: [], hasCharges: true });
+  await db.transaction((tx) => addInvoiceChargesTx(tx, pending.id, [{ chargeTypeId: customs.id, amount: 90, payer: "unpaid" }]));
 
   // شركة ثانية ببيانات سرية: لا يجب أن تظهر لمستخدمي الكمال ولا العكس
   const tdb = drizzle(tenantClient(client), { schema: s }) as unknown as Db;

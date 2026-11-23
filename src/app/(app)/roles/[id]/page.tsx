@@ -1,3 +1,4 @@
+import { MsgText } from "@/components/msg-text";
 import { notFound } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
@@ -53,7 +54,7 @@ export default async function RolePage({ params }: { params: Promise<{ id: strin
           {!role.isSystem && can(me.perms, "roles", "delete") && (
             <DialogButton label="حذف الدور" title={`حذف «${role.nameAr}»`} danger>
               {users.length ? (
-                <p className="text-sm leading-relaxed text-gray-600">الدور مسند إلى {users.length} مستخدم. غيّر دورهم من صفحة المستخدمين أولاً ثم احذفه.</p>
+                <p className="text-sm leading-relaxed text-gray-600"><MsgText text={`الدور مسند إلى ${users.length} مستخدم. غيّر دورهم من صفحة المستخدمين أولاً ثم احذفه.`} /></p>
               ) : (
                 <>
                   <p className="mb-3 text-sm leading-relaxed text-gray-600">يُحذف الدور وصلاحياته نهائياً.</p>

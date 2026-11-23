@@ -1,3 +1,4 @@
+import { MsgText } from "@/components/msg-text";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { asc, eq, sql } from "drizzle-orm";
@@ -166,7 +167,7 @@ export default async function WaybillPage({ params }: { params: Promise<{ id: st
                 {issues.map((i) => (
                   <li key={i.code} className="flex items-start gap-2">
                     <Icon name="alert" className="mt-0.5 size-4 shrink-0" />
-                    {i.message}
+                    <MsgText text={i.message} />
                   </li>
                 ))}
               </ul>

@@ -1,5 +1,6 @@
 "use client";
 
+import { MsgText } from "@/components/msg-text";
 import { useUnsavedGuard } from "./unsaved-guard";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -466,7 +467,7 @@ export function DocSheet({ columns: baseColumns, rows, action, emptyText, openLa
         <ul className="space-y-1 border-t border-red-100 bg-red-50/60 px-4 py-2.5 text-xs text-red-700">
           {Object.entries(errors).map(([id, err]) => (
             <li key={id}>
-              <span className="ltr-nums font-semibold">{rows.find((r) => r.id === Number(id))?.cells.number}</span>: {err}
+              <span className="ltr-nums font-semibold">{rows.find((r) => r.id === Number(id))?.cells.number}</span>: <MsgText text={err} />
             </li>
           ))}
         </ul>
