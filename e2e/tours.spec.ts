@@ -2,7 +2,8 @@
 // المبتدئ: تنتقل وحدها حين يملأ الخانة، و«أعرف هذا» يقفز للقسم التالي، و× يوقفها وتُستكمل لاحقاً.
 import { expect, test, type Page } from "@playwright/test";
 import { TOURS, type TourStep } from "@/data/tours";
-import { officeLogin, sql } from "./helpers";
+import { E2E } from "./data";
+import { officeLogin, pick, sql } from "./helpers";
 
 const KEY = "alkamal-tour";
 const ring = (page: Page) => page.locator("[data-tour-ui] .ring-4");
@@ -93,15 +94,71 @@ test("زر «كيف أعمل هذا؟» يبدأ جولة الشاشة من مك
   await expect(page.locator("[data-tour-ui]")).toHaveCount(0);
 });
 
-test("جولة الشحنة: تضيء «العمليات» ثم بند القائمة المنسدلة نفسه", async ({ page }) => {
+test("جولة الشحنة: تضيء زر «الخطوة التالية» في صف الشحنة، والضغط عليه ينقل الجولة", async ({ page }) => {
   await officeLogin(page);
-  const [w] = await sql`select id from waybills order by id desc limit 1`;
-  test.skip(!w, "لا توجد شحنة");
-  const i = TOURS.find((t) => t.id === "shipment")!.steps.findIndex((s) => s.title === "العمليات");
+  const [w] = await sql`select id from waybills where status = 'draft' and execution = 'fleet' and sent_to_driver_at is null order by id desc limit 1`;
+  test.skip(!w, "لا توجد شحنة مسودة لم تُرسل");
+  const i = TOURS.find((t) => t.id === "shipment")!.steps.findIndex((s) => s.title === "أرسلها للسائق");
   await setTour(page, "shipment", i);
-  await page.goto(`/waybills?open=${w.id}`);
+  await page.goto("/waybills");
   await expect(ring(page)).toBeVisible();
-  await page.getByRole("button", { name: "العمليات ▼" }).click();
-  await expect(card(page)).toContainText("إرسال للسائق");
+  await page.locator("main").getByRole("button", { name: "أرسلها للسائق" }).first().click();
+  await expect(card(page)).toContainText("السائق ينفذ");
+  // نافذة التأكيد تُغلق دون إرسال
+  await page.keyboard.press("Escape");
+  await expect(card(page)).toBeVisible();
+});
+
+test("الجولات الجديدة: الأقساط ومركز التكلفة والتقارير تضيء بنودها", async ({ page }) => {
+  await officeLogin(page);
+  for (const [id, title] of [
+    ["installments", "اسم الجدول"],
+    ["cost-center", "مركز جديد"],
+    ["reports", "الأهم"],
+    ["fleet-profit", "حسب المركبة أو السائق"],
+    ["bulk-invoices", "صف لكل فاتورة"],
+  ] as const) {
+    const tour = TOURS.find((t) => t.id === id)!;
+    const i = tour.steps.findIndex((s) => s.title === title);
+    expect(i, `${id}: ${title}`).toBeGreaterThanOrEqual(0);
+    await setTour(page, id, i);
+    await page.goto(tour.steps[i].href ?? tour.steps[i].path);
+    await expect(ring(page), `${id}: ${title}`).toBeVisible();
+    await expect(card(page)).toContainText(title);
+  }
+});
+
+test("الجولات الجديدة: الضغط على البند المضاء يفتح النافذة أو القائمة وتكمل الجولة داخلها", async ({ page }) => {
+  await officeLogin(page);
+  const start = async (id: string, title: string, lit = true) => {
+    const tour = TOURS.find((t) => t.id === id)!;
+    const i = tour.steps.findIndex((s) => s.title === title);
+    await setTour(page, id, i);
+    await page.goto(tour.steps[i].href ?? tour.steps[i].path);
+    await expect(card(page)).toContainText(title);
+    if (lit) await expect(ring(page)).toBeVisible();
+  };
+
+  // مركز التكلفة: الزر يفتح النافذة والجولة تضيء أول خانة فيها
+  await start("cost-center", "مركز جديد");
+  await page.locator("main").getByRole("button", { name: "+ مركز تكلفة" }).click();
+  await expect(card(page)).toContainText("مثل: المقطورات");
+  await expect(ring(page)).toBeVisible();
+
+  // عدة فواتير: «إضافة» يفتح القائمة، ثم بندها، ثم الشيت
+  await start("bulk-invoices", "قائمة الإضافة");
+  await page.locator('main button[aria-haspopup="menu"]').first().click();
+  await expect(card(page)).toContainText("اختر «إدخال عدة فواتير»");
+  await expect(ring(page)).toBeVisible();
+  await page.getByRole("menuitem", { name: "إدخال عدة فواتير" }).click();
+  await page.waitForURL(/add=1/);
+  await expect(card(page)).toContainText("صف لكل فاتورة");
+  await expect(ring(page)).toBeVisible();
+
+  // الفاتورة المباشرة: اختيار المسار يُظهر قسم «التنفيذ» فتضيئه الجولة
+  await start("direct-invoice", "التنفيذ", false);
+  const form = page.locator('[role="dialog"][aria-modal="true"]:not([data-tour-ui] *)').first();
+  await pick(page, form, "العميل*", E2E.customer);
+  await pick(page, form, /^المسار/, "مدينة الاختبار أ");
   await expect(ring(page)).toBeVisible();
 });
