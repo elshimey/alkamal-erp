@@ -14,6 +14,7 @@ import {
   addWaybillsToInvoice,
   createAllInvoices,
   createDirectInvoice,
+  createDirectInvoiceTx,
   createInvoice,
   currentTrip,
   deleteInvoice,
@@ -35,7 +36,9 @@ import type { PanelResult } from "@/components/record-panel";
 import type { SheetChange, DocSheetResult } from "@/components/doc-sheet";
 import type { FormState } from "@/components/action-form";
 import { autoSubmit, submitDocument } from "@/lib/zatca/service";
-import { bulkTrips, invoiceTripIds } from "@/lib/trip-dispatch";
+import { bulkTrips, invoiceTripIds, sendTrip } from "@/lib/trip-dispatch";
+import { splitCustom } from "@/data/custom-lists";
+import { cell, saveSheetRows, type SheetRow } from "@/lib/sheet-server";
 
 const refresh = (id?: number) => {
   revalidatePath("/invoices");
@@ -235,13 +238,40 @@ function readTrip(fd: FormData): ManualInvoiceInput["trip"] {
   if (on !== "1") return on === "0" ? null : undefined;
   const custody = toNum(str(fd, "tripCustody"));
   if (custody < 0) throw new Error("عهدة الرحلة لا تكون سالبة");
-  return {
-    routeId: requiredId(fd, "tripRouteId", "رحلة السائق: اختر المسار"),
-    vehicleId: requiredId(fd, "tripVehicleId", "رحلة السائق: اختر المركبة"),
-    driverId: Number(str(fd, "tripDriverId")) || null,
+  const carrier = str(fd, "tripExecution") === "carrier";
+  const base = {
+    routeId: requiredId(fd, "tripRouteId", "اختر المسار"),
+    vehicleId: carrier ? null : requiredId(fd, "tripVehicleId", "اختر المركبة أو الناقل الخارجي"),
+    driverId: carrier ? null : Number(str(fd, "tripDriverId")) || null,
     shipper: str(fd, "tripShipper"),
     consignee: str(fd, "tripConsignee"),
-    tripCustody: custody,
+    tripCustody: carrier ? 0 : custody,
+  };
+  // الطريقة القديمة (رحلة سعرها من بنود الفاتورة) تبقى لمسودات حُفظت بها
+  if (str(fd, "tripPriced") !== "1") return base;
+  const opt = (k: string) => (str(fd, k) === "" ? null : toNum(str(fd, k)));
+  const components = (JSON.parse(str(fd, "tripComponents") || "[]") as { kind: string; label?: string; quantity: string; unitPrice: string }[])
+    .filter((c) => c.kind || toNum(c.unitPrice))
+    .map((c) => {
+      const { base, classId } = splitCustom(c.kind);
+      return { kind: base ?? "", classId, label: c.label || null, quantity: c.quantity === "" ? 1 : toNum(c.quantity), unitPrice: toNum(c.unitPrice) };
+    });
+  return {
+    ...base,
+    priced: true,
+    trailerId: carrier ? null : Number(str(fd, "tripTrailerId")) || null,
+    driverCommission: carrier ? null : opt("tripCommission"),
+    carrierId: carrier ? requiredId(fd, "tripCarrierId", "اختر الناقل الخارجي") : null,
+    carrierCost: carrier ? toNum(str(fd, "tripCarrierCost")) : null,
+    carrierPlate: carrier ? str(fd, "tripCarrierPlate") || null : null,
+    carrierDriverName: carrier ? str(fd, "tripCarrierDriver") || null : null,
+    amount: opt("tripAmount"),
+    priceComponents: components,
+    taxCodeId: Number(str(fd, "tripTaxCodeId")) || null,
+    weightTons: opt("tripWeight"),
+    containerNumber: str(fd, "tripContainer") || null,
+    deliveryNoteNumber: str(fd, "tripDeliveryNote") || null,
+    customsDeclaration: str(fd, "tripCustoms") || null,
   };
 }
 
@@ -320,9 +350,42 @@ export async function saveInvoicePanel(id: number | null, fd: FormData): Promise
       revalidatePath("/reports/unbilled-charges");
     }
     refresh(inv.id);
-    return { ok: id ? `حُفظت الفاتورة ${inv.number}` : `أُنشئت الفاتورة ${inv.number} مسودة؛ اعتمدها لتصدر برقمها الرسمي`, id: inv.id, label: inv.number };
+    const done = [id ? `حُفظت الفاتورة ${inv.number}` : `أُنشئت الفاتورة ${inv.number} مسودة`];
+    // بعد الحفظ: الإرسال للسائق على مرحلة التسليم، ثم الإصدار (كل خطوة تُذكر نتيجتها ولا تلغي الحفظ)
+    const after = await afterSave(inv.id, fd, user.id);
+    done.push(...after.ok);
+    if (!after.ok.length && !after.error && !id) done[0] += "؛ أصدرها لتأخذ رقمها الرسمي";
+    return after.error ? { error: `${done.join("، ")}، لكن: ${after.error}`, id: inv.id, label: inv.number } : { ok: done.join("، "), id: inv.id, label: inv.number };
   } catch (err) {
     return { error: errorMessage(err) };
+  }
+}
+
+/** «أرسلها للسائق على مرحلة التسليم» و«حفظ وإصدار» من نافذة الفاتورة المباشرة. */
+async function afterSave(id: number, fd: FormData, userId: number): Promise<{ ok: string[]; error?: string }> {
+  const ok: string[] = [];
+  try {
+    if (str(fd, "sendDriver") === "1") {
+      await requirePermission("waybills", "update");
+      const trip = await currentTrip(db, id);
+      if (!trip) throw new Error("لا توجد رحلة للإرسال؛ اختر المسار والمركبة");
+      if (!trip.sentToDriverAt) {
+        const defer = str(fd, "cashAccountId") === "defer";
+        const r = await sendTrip(db, trip.id, { atDelivery: true, cashAccountId: defer ? null : Number(str(fd, "cashAccountId")) || null, deferCustody: defer, userId });
+        ok.push(`وأُرسلت للسائق ${r.driver ?? ""} على مرحلة التسليم`.replace("  ", " "));
+      }
+    }
+    if (fd.get("issueNow") != null) {
+      await requirePermission("sales_invoices", "approve");
+      const entry = await issueInvoice(db, id, userId);
+      const zatca = await autoSubmit(db, { invoiceId: id }, userId);
+      ok.push(`وصدرت برقم ${entry.invoiceNumber}${zatca ? ` ${zatca}` : ""}`);
+    }
+    refresh(id);
+    return { ok };
+  } catch (err) {
+    refresh(id);
+    return { ok, error: errorMessage(err) };
   }
 }
 
@@ -384,4 +447,87 @@ export async function sendInvoiceToDriver(id: number, fd: FormData): Promise<For
 
 export async function unsendInvoiceFromDriver(id: number): Promise<FormState> {
   return dispatchInvoices([id], "unsend");
+}
+
+const optId = (v: string | undefined) => (v && v.trim() ? Number(v) : null);
+
+/**
+ * إدخال عدة فواتير مباشرة من الشيت: كل صف فاتورة مسودة بنقلها (المسار والتنفيذ والسعر ومكوناته) ومصاريف العميل،
+ * بنفس قواعد نافذة الفاتورة، والصف الخاطئ وحده يُرفض بسببه. «إرسال للسائق» يرسلها على مرحلة التسليم.
+ */
+export async function saveInvoiceRows(rows: SheetRow[]) {
+  const user = await requirePermission("sales_invoices", "create");
+  const sends: number[] = [];
+  const result = await saveSheetRows(rows, async (r) => {
+    const date = cell.date(r.date, "التاريخ") ?? todayRiyadh();
+    const due = cell.date(r.dueDate, "الاستحقاق") ?? date;
+    const carrierId = optId(r.carrierId);
+    const components = [1, 2].flatMap((n) => {
+      const kind = cell.text(r[`comp${n}`]);
+      if (!kind) return [];
+      const unitPrice = cell.number(r[`comp${n}Price`], `سعر المكون ${n}`);
+      if (!unitPrice) throw new Error(`سعر المكون ${n} إلزامي`);
+      const { base, classId } = splitCustom(kind);
+      return [{ kind: base!, classId, quantity: cell.number(r[`comp${n}Qty`], `كمية المكون ${n}`) ?? 1, unitPrice }];
+    });
+    const charges = [1, 2].flatMap((n) => {
+      const type = cell.text(r[`charge${n}`]);
+      const amount = cell.number(r[`charge${n}Amount`], `مبلغ المصروف ${n}`);
+      const from = cell.text(r[`charge${n}From`]);
+      if (!type && !amount && !from) return [];
+      if (!type) throw new Error(`اختر نوع المصروف على العميل ${n}`);
+      if (!amount) throw new Error(`مبلغ المصروف ${n} إلزامي`);
+      const m = from?.match(/^([ab]):(\d+)$/);
+      if (!m) throw new Error(`اختر من دفع المصروف ${n}: حساب الشركة أو المخلص`);
+      return [m[1] === "b" ? { chargeTypeId: Number(type), amount, payer: "customs_broker" as const, partyId: Number(m[2]), billTo: "customer" as const } : { chargeTypeId: Number(type), amount, payer: "cash" as const, cashAccountId: Number(m[2]), billTo: "customer" as const }];
+    });
+    const send = ["1", "نعم", "yes", "true"].includes(String(r.send ?? "").trim().toLowerCase());
+    if (send && carrierId) throw new Error("الناقل الخارجي لا يُرسل لسائق في التطبيق");
+    const id = await db.transaction(async (tx) => {
+      const inv = await createDirectInvoiceTx(tx, {
+        customerId: Number(cell.required(r.customerId, "العميل")),
+        invoiceDate: date,
+        dueDate: due,
+        currencyCode: "SAR",
+        reference: cell.text(r.reference),
+        notes: cell.text(r.notes),
+        userId: user.id,
+        lines: [],
+        hasCharges: charges.length > 0,
+        trip: {
+          priced: true,
+          routeId: Number(cell.required(r.routeId, "المسار")),
+          vehicleId: carrierId ? null : optId(r.vehicleId),
+          driverId: carrierId ? null : optId(r.driverId),
+          carrierId,
+          carrierCost: cell.number(r.carrierCost, "تكلفة الناقل"),
+          carrierPlate: cell.text(r.carrierPlate),
+          shipper: cell.required(r.shipper, "المرسل"),
+          consignee: cell.required(r.consignee, "المستلم"),
+          amount: cell.number(r.amount, "السعر الأساسي"),
+          priceComponents: components,
+          taxCodeId: optId(r.taxCodeId),
+          driverCommission: cell.number(r.commission, "عمولة السائق"),
+          containerNumber: cell.text(r.container),
+          weightTons: cell.number(r.weight, "الوزن"),
+        },
+      });
+      if (charges.length) await addInvoiceChargesTx(tx, inv.id, charges, user.id);
+      return inv.id;
+    });
+    if (send) sends.push(id);
+  });
+  // الإرسال بعد الحفظ (بلا عهدة رحلة في الشيت)؛ ما لا يُرسل يُذكر ولا يلغي الفاتورة
+  const failed: string[] = [];
+  for (const id of sends) {
+    try {
+      const trip = await currentTrip(db, id);
+      if (trip) await sendTrip(db, trip.id, { atDelivery: true, userId: user.id });
+    } catch (err) {
+      failed.push(errorMessage(err));
+    }
+  }
+  refresh();
+  if (failed.length) return { ...result, error: [result.error, `حُفظت الفواتير، ولم يُرسل للسائق: ${failed.join("، ")}`].filter(Boolean).join("\n") };
+  return result;
 }

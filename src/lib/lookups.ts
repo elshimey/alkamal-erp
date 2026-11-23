@@ -27,7 +27,7 @@ export async function routeOptions() {
   const locs = new Map((await locationOptions({ includeHidden: true })).map((l) => [l.value, l.label]));
   const rows = await db.select().from(s.routes).where(eq(s.routes.isActive, true));
   return rows
-    .map((r) => ({ value: String(r.id), label: `${locs.get(String(r.fromLocationId))} ← ${locs.get(String(r.toLocationId))}` }))
+    .map((r) => ({ value: String(r.id), label: `${locs.get(String(r.fromLocationId))} ← ${locs.get(String(r.toLocationId))}`, international: r.isInternational }))
     .sort((a, b) => a.label.localeCompare(b.label, "ar"));
 }
 

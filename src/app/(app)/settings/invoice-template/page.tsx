@@ -42,6 +42,7 @@ async function sampleInvoice() {
     details: null,
     costAmount: null,
     groupKey: null,
+    trip: false,
   });
   return {
     i: {

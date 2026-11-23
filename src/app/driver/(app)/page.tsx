@@ -83,7 +83,7 @@ export default async function DriverHome() {
         <ul className="space-y-3">
           {open.map((w, i) => {
             const fresh = !w.driverAcceptedAt && !w.lastStage;
-            const done = [!!w.driverAcceptedAt || !!w.lastStage, !!w.lastStage, w.lastStage === "delivery"];
+            const done = [!!w.driverAcceptedAt || !!w.lastStage, !!w.lastStage || w.deliverOnly, w.lastStage === "delivery"];
             return (
               <li key={w.id} className="stagger animate-rise" style={{ "--i": i } as React.CSSProperties}>
                 <Link href={`/driver/trips/${w.id}`} className={`block rounded-xl border p-3 transition hover:border-brand-600 active:bg-gray-50 ${fresh ? "border-2 border-brand-600 bg-brand-50" : "border-gray-200"}`}>
