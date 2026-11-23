@@ -75,21 +75,28 @@ export async function createCashAccount(db: Db, input: BankInput) {
   });
 }
 
-/** الصندوق أو البنك الذي يُصرف منه أو يُقبض فيه: حساب تفصيلي نشط تحت 1101 أو 1102. */
+/**
+ * حساب «يُصرف منه» أو «يُقبض فيه» في كل الشاشات (قرار أحمد 2026-11-23، نفس الآلية في كل الأقسام):
+ * الصناديق والبنوك مقترحة أولاً، و«عرض كل الشجرة» يسمح بأي حساب تفصيلي نشط من الأصول أو الالتزامات
+ * (خزينة فرعية، جاري الشريك، دائن…)، عدا ذمم العملاء 1103 ومصاريف العملاء المستردة 1114.
+ */
+export const isPayFromCode = (code: string) => /^[12]/.test(code) && !/^110[3]/.test(code) && !code.startsWith("1114");
+
 export async function cashAccountFor(db: Db | Tx, id: number | null | undefined, message: string) {
   const [cash] = id ? await db.select().from(s.accounts).where(eq(s.accounts.id, id)) : [];
-  if (!cash || !cash.isPostable || !/^110[12]/.test(cash.code)) throw new Error(message);
-  if (!cash.isActive) throw new Error(`الحساب ${cash.code} ${cash.nameAr} موقوف؛ اختر صندوقاً أو بنكاً نشطاً`);
+  if (!cash || !cash.isPostable || !isPayFromCode(cash.code)) throw new Error(message);
+  if (!cash.isActive) throw new Error(`الحساب ${cash.code} ${cash.nameAr} موقوف؛ اختر حساباً نشطاً`);
   return cash;
 }
 
 /**
- * حساب «دفعته الشركة» في المصروفات ومصاريف الرحلة: صندوق أو بنك، أو عهدة موظف مكتب (فرعي تحت 1105).
+ * حساب «دفعته الشركة» في المصروفات ومصاريف الرحلة وحساب سند القبض: صندوق أو بنك أو عهدة موظف مقترحة،
+ * أو أي حساب من الشجرة كما في cashAccountFor.
  * عهدة السائق لا تُختار هنا لأن لها دافعاً مستقلاً «عهدة السائق» يربط المصروف بالسائق.
  */
 export async function payFromAccountFor(db: Db | Tx, id: number | null | undefined, message: string) {
   const [acc] = id ? await db.select().from(s.accounts).where(eq(s.accounts.id, id)) : [];
-  if (!acc || !acc.isPostable || !/^110[125]/.test(acc.code)) throw new Error(message);
+  if (!acc || !acc.isPostable || !isPayFromCode(acc.code)) throw new Error(message);
   if (!acc.isActive) throw new Error(`الحساب ${acc.code} ${acc.nameAr} موقوف؛ اختر حساباً نشطاً`);
   if (acc.code.startsWith("1105")) {
     const [d] = await db.select({ id: s.drivers.id }).from(s.drivers).where(eq(s.drivers.custodyAccountId, acc.id));

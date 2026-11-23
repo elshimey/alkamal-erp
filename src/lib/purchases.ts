@@ -10,7 +10,7 @@ import type { DocFilter } from "@/lib/doc-filters";
 import { docOrder, docWhere } from "@/lib/doc-query";
 import { PAYABLE_BY_ROLE, PURCHASE_ACCOUNTS, SUPPLIER_ROLES, isExpenseAccount } from "@/data/purchases";
 import { notifyDriver } from "@/lib/driver-notify";
-import { payFromAccountFor } from "@/lib/banks";
+import { isPayFromCode, payFromAccountFor } from "@/lib/banks";
 import { SALES_ACCOUNTS } from "@/data/sales";
 import { WAYBILL_ACCOUNTS } from "@/data/waybills";
 import { linkExpenseToWaybillTx, unlinkExpenseTx } from "@/lib/customer-charges";
@@ -604,12 +604,8 @@ export async function createPayment(db: Db, input: PaymentInput) {
   return db.transaction(async (tx) => {
     if (!(input.amount > 0)) throw new Error("المبلغ إلزامي");
     const [cash] = await tx.select().from(s.accounts).where(eq(s.accounts.id, input.cashAccountId));
-    // صرف العهدة يجوز من أي حساب أصول أو التزامات تفصيلي (خزينة فرعية، عهدة أمين الصندوق…)، وسداد المورد من صندوق أو بنك فقط
-    // وسداد القسط من أي حساب يمكن السداد منه في الشجرة (قرار أحمد 2026-11-21)، عدا حساب الدائن نفسه
-    const anyFunding = (input.kind === "custody" || (input.kind === "installment" && cash?.id !== input.debitAccountId)) && !!cash && /^[12]/.test(cash.code);
-    // سداد المصروف المستحق يجوز أيضاً من عهدة موظف المكتب (1105)
-    const custodyFunding = input.kind === "expense" && !!cash && cash.code.startsWith("1105");
-    if (!cash || !cash.isPostable || !cash.isActive || !(anyFunding || custodyFunding || /^110[12]/.test(cash.code))) throw new Error("اختر صندوقاً أو حساب بنك تفصيلياً");
+    // يُسدد من أي حساب تفصيلي نشط في الأصول أو الالتزامات (قرار أحمد 2026-11-23، نفس الآلية في كل الأقسام)
+    if (!cash || !cash.isPostable || !cash.isActive || !isPayFromCode(cash.code)) throw new Error("اختر الحساب الذي يُسدد منه (حساباً تفصيلياً نشطاً)");
     const currency = input.currencyCode ?? "SAR";
     if (cash.currencyCode && cash.currencyCode !== currency) throw new Error(`الحساب ${cash.nameAr} بعملة ${cash.currencyCode}`);
     let debitAccountId: number;
@@ -630,6 +626,7 @@ export async function createPayment(db: Db, input: PaymentInput) {
       if (!d?.custody) throw new Error("لا يوجد حساب عهدة لهذا السائق");
       debitAccountId = d.custody;
     }
+    if (debitAccountId === cash.id) throw new Error("لا يُسدد الحساب من نفسه؛ اختر حساباً آخر");
     const number = await nextDocumentNumber(tx, "payment", "PV", Number(input.paymentDate.slice(0, 4)));
     const [p] = await tx
       .insert(s.payments)

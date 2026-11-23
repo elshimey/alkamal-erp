@@ -21,6 +21,7 @@ export function ReviewForm({
   defaultKind,
   suppliers,
   cashes,
+  moreCashes,
   reportedPayer,
 }: {
   action: (state: FormState, data: FormData) => Promise<FormState>;
@@ -28,6 +29,8 @@ export function ReviewForm({
   defaultKind: string;
   suppliers: QuickOption[];
   cashes: QuickOption[];
+  /** باقي الشجرة لزر «عرض كل الشجرة» */
+  moreCashes?: QuickOption[];
   reportedPayer: string | null;
 }) {
   const [payer, setPayer] = useState<string>(reportedPayer === "company" ? "cash" : "custody");
@@ -53,7 +56,7 @@ export function ReviewForm({
       </fieldset>
       {payer === "cash" && (
         <Field label="الصندوق أو البنك">
-          <AccountField name="cashAccountId" required options={cashes} scope="1101,1102" placeholder="اختر…" />
+          <AccountField name="cashAccountId" required options={cashes} moreOptions={moreCashes} scope="1101,1102" placeholder="اختر…" />
         </Field>
       )}
       {payer === "supplier" && (

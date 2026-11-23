@@ -15,7 +15,7 @@ import { Badge, Card, Field, Input, PageHeader, Table, Td } from "@/components/u
 import { adjustLines, approveRun, deleteRun, payRun, refreshRun, revertPay, revertRun } from "../actions";
 import { fmt, fmtDate } from "@/lib/format";
 import { AccountField } from "@/components/account-field";
-import { toAccountOptions } from "@/lib/lookups";
+import { payFromTree, toAccountOptions } from "@/lib/lookups";
 
 const dash = (v: string | number) => (Number(v) ? fmt(v) : "—");
 
@@ -179,7 +179,7 @@ export default async function PayrollRunPage({ params }: { params: Promise<{ id:
           <Card title="صرف الرواتب بالصافي">
             <ActionForm action={payRun.bind(null, id)} resetOnSuccess={false} className="flex flex-wrap items-end gap-3">
               <Field label="من حساب">
-                <AccountField name="bankAccountId" options={await toAccountOptions(banks)} placeholder="اختر البنك" className="w-64" />
+                <AccountField name="bankAccountId" options={await toAccountOptions(banks)} moreOptions={await payFromTree()} placeholder="اختر البنك" className="w-64" />
               </Field>
               <Field label="تاريخ الصرف">
                 <Input name="paymentDate" type="date" defaultValue={end} min={end} />

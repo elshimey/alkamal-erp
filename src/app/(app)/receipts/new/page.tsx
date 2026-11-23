@@ -10,15 +10,16 @@ import { todayRiyadh } from "@/lib/dates";
 import { customerOptions } from "@/lib/lookups";
 import { RECEIPT_KINDS } from "@/data/sales";
 import { ReceiptForm } from "./form";
-import { toAccountOptions } from "@/lib/lookups";
+import { payFromTreeRows, toAccountOptions } from "@/lib/lookups";
 
 export default async function NewReceiptPage({ searchParams }: { searchParams: Promise<{ kind?: string; customer?: string; invoice?: string }> }) {
   const user = await requirePermission("receipts", "create");
   const sp = await searchParams;
   const kind: ReceiptKind = sp.kind === "advance" || sp.kind === "refund" ? sp.kind : "invoice_payment";
-  const [customers, cash, adjustments, currencies] = await Promise.all([
+  const [customers, cash, tree, adjustments, currencies] = await Promise.all([
     customerOptions(),
     payFromAccounts(db),
+    payFromTreeRows(),
     adjustmentAccounts(db),
     db.select({ code: s.currencies.code }).from(s.currencies).orderBy(asc(s.currencies.code)),
   ]);
@@ -45,6 +46,7 @@ export default async function NewReceiptPage({ searchParams }: { searchParams: P
           title={kind === "invoice_payment" ? "دفعة فواتير" : RECEIPT_KINDS[kind].label}
           customers={customers}
           cash={(await toAccountOptions(cash)).map((o) => ({ ...o, currency: cash.find((a) => String(a.id) === o.value)?.currencyCode ?? null }))}
+          moreCash={(await toAccountOptions(tree)).map((o) => ({ ...o, currency: tree.find((a) => String(a.id) === o.value)?.currencyCode ?? null }))}
           adjustmentAccounts={(await toAccountOptions(adjustments)).map((o) => ({ ...o, name: adjustments.find((a) => String(a.id) === o.value)?.nameAr ?? o.label }))}
           currencies={currencies.map((c) => c.code)}
           today={todayRiyadh()}

@@ -7,7 +7,7 @@ import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { can, hasSpecial, scopeFor } from "@/lib/permissions";
 import { payFromAccounts, priceDetails } from "@/lib/invoices";
-import { chargeTypeOptions, partyOptions, routeOptions, vehicleOptions } from "@/lib/lookups";
+import { chargeTypeOptions, partyOptions, payFromSheetOptions, routeOptions, vehicleOptions } from "@/lib/lookups";
 import { approvalIssues, waybillComponents } from "@/lib/waybills";
 import { EXPENSE_BILL_TO, EXPENSE_PAYERS, FUEL_SOURCES, TRIP_STAGES, WAYBILL_STATUS } from "@/data/waybills";
 import { ActionForm, SubmitButton } from "@/components/action-form";
@@ -92,7 +92,7 @@ export default async function WaybillPage({ params }: { params: Promise<{ id: st
     listAttachments(db, "waybills", [id]),
     vehicleOptions("trailer"),
   ]);
-  const cashOpts = (await payFromAccounts(db)).map((a) => ({ value: String(a.id), label: `${a.code} ${a.nameAr}` }));
+  const cashOpts = await payFromSheetOptions(await payFromAccounts(db));
 
   const showPrices = hasSpecial(user.perms, "view_prices");
   const editable = ["draft", "in_transit", "delivered", "rejected"].includes(w.status);

@@ -2242,7 +2242,7 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       const row = (o: Record<string, string>, i: number) => ({ row: i + 5, values: { customer: "شركة السندات", receiptDate: "15/12/2026", amount: "115", cashAccount: "110101", ...o } });
       const report = await runImport(db, IMPORT_SPECS.receipts, [row({ invoice: "RC-C", method: "نقد" }, 0), row({ invoice: "NOPE" }, 1), row({ kind: "دفعة مقدمة", cashAccount: "4101" }, 2), row({ kind: "دفعة مقدمة", amount: "50" }, 3)], { dryRun: false, post: true });
       expect(report.ok).toBe(2);
-      expect(report.issues.map((i) => i.missing?.kind ?? i.message)).toEqual(["invoice", expect.stringContaining("ليس صندوقاً")]);
+      expect(report.issues.map((i) => i.missing?.kind ?? i.message)).toEqual(["invoice", expect.stringContaining("لا يُقبض فيه")]);
       expect(await paid(c.id)).toBe(115);
     });
 
@@ -2272,6 +2272,10 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect((await cashAccountFor(db, acc["110101"], "اختر")).code).toBe("110101");
       await expect(cashAccountFor(db, acc["1101"], "اختر صندوقاً")).rejects.toThrow("اختر صندوقاً");
       await expect(cashAccountFor(db, acc["3104"], "اختر صندوقاً")).rejects.toThrow("اختر صندوقاً");
+      // «عرض كل الشجرة» (قرار أحمد 2026-11-23): أي حساب تفصيلي في الأصول أو الالتزامات، عدا العملاء 1103 و1114
+      const [partner] = await db.select().from(s.accounts).where(eq(s.accounts.id, acc["2101"]));
+      expect((await cashAccountFor(db, partner.id, "اختر")).id).toBe(partner.id);
+      await expect(cashAccountFor(db, acc["1103"], "اختر صندوقاً")).rejects.toThrow("اختر صندوقاً");
       await expect(cashAccountFor(db, null, "اختر صندوقاً")).rejects.toThrow("اختر صندوقاً");
       await db.update(s.accounts).set({ isActive: false }).where(eq(s.accounts.id, acc["110101"]));
       try {

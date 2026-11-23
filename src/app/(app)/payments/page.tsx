@@ -21,7 +21,7 @@ import { post, remove, revert, savePayments } from "./actions";
 import { fmt, fmtDate } from "@/lib/format";
 import { DocCards } from "@/components/doc-card";
 import { DocCardFace, Facts, SheetActions, TapCard } from "@/components/list-card";
-import { toAccountOptions } from "@/lib/lookups";
+import { payFromSheetOptions } from "@/lib/lookups";
 
 export default async function PaymentsPage({ searchParams }: { searchParams: Promise<{ add?: string }> }) {
   const user = await requirePermission("payments", "view");
@@ -105,7 +105,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
                     { key: "currency", label: "العملة", type: "select", options: [{ value: "SAR", label: "SAR" }, { value: "KWD", label: "KWD" }], width: "5rem", placeholder: "SAR" },
                     { key: "rate", label: "سعر الصرف", type: "number", width: "6rem", placeholder: "تلقائي" },
                     { key: "method", label: "الطريقة", type: "select", required: true, options: Object.entries(PAYMENT_METHODS).map(([value, label]) => ({ value, label })), width: "6rem" },
-                    { key: "cashAccountId", label: "من الصندوق / البنك", type: "select", required: true, options: await toAccountOptions(cashes), width: "13rem", create: "account" },
+                    { key: "cashAccountId", label: "من الصندوق / البنك", type: "select", required: true, options: await payFromSheetOptions(cashes), width: "13rem", create: "account" },
                     { key: "invoiceId", label: "على الفاتورة", type: "select", options: openInvoices.map((i) => ({ value: String(i.id), label: `${i.number} · ${i.supplier} · متبقي ${fmt(Number(i.total) - Number(i.paid))}` })), width: "13rem" },
                     { key: "reference", label: "المرجع / الشيك", ltr: true, width: "8rem" },
                     { key: "notes", label: "ملاحظات", width: "9rem" },

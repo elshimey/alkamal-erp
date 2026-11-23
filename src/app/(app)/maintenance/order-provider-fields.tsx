@@ -13,7 +13,7 @@ const radio = "flex items-center gap-2 rounded-lg border border-gray-300 bg-whit
  * الجهة: ورشة خارجية (تصبح دائنة بقيمة الأمر) أو ورشة داخلية (الميكانيكي موظف).
  * القطع المشتراة للورشة الداخلية من الصندوق أو ديناً على مورد آجل؛ وقطع المستودع تُصرف في البنود.
  */
-export function OrderProviderFields({ suppliers, cashes }: { suppliers: QuickOption[]; cashes: QuickOption[] }) {
+export function OrderProviderFields({ suppliers, cashes, moreCashes }: { suppliers: QuickOption[]; cashes: QuickOption[]; moreCashes?: QuickOption[] }) {
   const [provider, setProvider] = useState<"external" | "internal">("external");
   const [partsFrom, setPartsFrom] = useState<"cash" | "supplier">("cash");
   const pick = (set: (v: string) => void) => (e: React.FormEvent<HTMLSpanElement>) => set((e.target as HTMLInputElement).value);
@@ -61,7 +61,7 @@ export function OrderProviderFields({ suppliers, cashes }: { suppliers: QuickOpt
             supplierFields("مورد القطع", "يصبح دائناً بقيمة القطع المشتراة عند الاعتماد")
           ) : (
             <PanelField label="الصندوق" hint="يمكن تحديده لاحقاً عند الاعتماد">
-              <AccountField name="cashAccountId" options={cashes} scope="1101,1102" placeholder="لاحقاً عند الاعتماد" />
+              <AccountField name="cashAccountId" options={cashes} moreOptions={moreCashes} scope="1101,1102" placeholder="لاحقاً عند الاعتماد" />
             </PanelField>
           )}
         </>
