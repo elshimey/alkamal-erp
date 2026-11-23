@@ -108,3 +108,23 @@ test("شيت إدخال عدة شحنات: التاريخ يُختار من ال
   await expect(calendar).toBeHidden();
   await expect(cell).toBeVisible();
 });
+
+test("«عرض كل الشجرة» داخل قائمة «تم الدفع من خلال» نفسها (سند القبض ونموذج المصروف)", async ({ page }) => {
+  await officeLogin(page);
+  const liability = page.getByRole("listbox").getByRole("option").filter({ hasText: /\b2\d{3,}\b/ });
+  for (const [url, scope, name] of [
+    ["/receipts/new", page.locator("main"), /تم الدفع من خلال/],
+    ["/expenses?new=1", page.getByRole("dialog"), /^دُفع من/],
+  ] as const) {
+    await page.goto(url);
+    const box = scope.getByRole("combobox", { name }).first();
+    await box.click();
+    await expect(page.getByRole("listbox").getByRole("option").first()).toBeVisible();
+    await expect(liability).toHaveCount(0);
+    // البند داخل القائمة المفتوحة: النقر عليه لا يغلقها، ويظهر باقي الشجرة (الالتزامات 2xxx)
+    await page.getByRole("button", { name: /عرض كل الشجرة/ }).click();
+    await expect(liability.first()).toBeVisible();
+    await liability.first().click();
+    await expect(box).toHaveValue(/2\d{3,}/);
+  }
+});

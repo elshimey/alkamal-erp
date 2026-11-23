@@ -85,6 +85,7 @@ export function ComboBox({
   autoOpen = false,
   scope,
   createPrefix = "",
+  moreOptions,
 }: {
   value: string;
   options: QuickOption[];
@@ -107,18 +108,25 @@ export function ComboBox({
   scope?: string;
   /** بادئة تُضاف لقيمة ما أُنشئ («vehicle:» في صاحب الوثيقة) */
   createPrefix?: string;
+  /** باقي الشجرة: بند «عرض كل الشجرة» داخل القائمة نفسها يضيفها بعد المقترحة، والبحث يشملها دائماً (خانات الدفع) */
+  moreOptions?: QuickOption[];
 }) {
   const withCreated = useCreatedOptions();
+  const extra = useMemo(() => moreOptions?.filter((o) => !options.some((x) => x.value === o.value)) ?? [], [moreOptions, options]);
+  const [expanded, setExpanded] = useState(false);
+  const [query, setQuery] = useState<string | null>(null);
+  const [open, setOpen] = useState(autoOpen);
+  // الشجرة كاملة: بالزر، أو عند البحث، أو حين تكون القيمة المختارة من خارج المقترحة
+  const full = extra.length > 0 && (expanded || !!query?.trim() || extra.some((o) => o.value === value));
+  const base = useMemo(() => (full ? [...options, ...extra] : options), [full, options, extra]);
   // ما أُضيف من هذه الخانة نفسها يبقى فيها ولو كان من مجموعة أخرى
   const [mine, setMine] = useState<QuickOption[]>([]);
-  const shared = withCreated(create, options);
+  const shared = withCreated(create, base);
   const all = useMemo(() => (mine.length ? [...shared, ...mine.filter((m) => !shared.some((o) => o.value === m.value))] : shared), [shared, mine]);
   const wide = options.some((o) => o.code);
   const listId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
-  const [query, setQuery] = useState<string | null>(null);
-  const [open, setOpen] = useState(autoOpen);
   // قائمة واحدة مفتوحة في كل مرة (قاعدة الواجهة): فتح هذه يغلق أي قائمة أخرى مفتوحة (بعد Ctrl+D مثلاً)
   useEffect(() => {
     if (!open) return;
@@ -392,6 +400,21 @@ export function ComboBox({
                 className={`cursor-pointer border-t border-gray-100 px-3 py-2 font-semibold text-brand-800 ${active === shown.length ? "bg-brand-50" : ""}`}
               >
                 + إضافة {q ? `«${q}»` : "جديد"}
+              </li>
+            )}
+            {extra.length > 0 && !q && (
+              <li role="presentation" className="sticky bottom-0 border-t border-gray-100 bg-white">
+                <button
+                  type="button"
+                  data-tree-toggle
+                  onClick={() => {
+                    setExpanded((v) => !v);
+                    setActive(0);
+                  }}
+                  className="w-full px-3 py-2 text-start text-sm font-semibold text-brand-700 hover:bg-brand-50"
+                >
+                  {expanded ? "↑ المقترحة فقط" : "↓ عرض كل الشجرة (كل حسابات الأصول والالتزامات)"}
+                </button>
               </li>
             )}
           </ul>,

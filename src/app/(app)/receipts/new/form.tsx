@@ -66,9 +66,7 @@ export function ReceiptForm({
   const router = useRouter();
   const [customerId, setCustomerId] = useState(initialCustomer);
   const [cashId, setCashId] = useState(cash.length === 1 ? cash[0].value : "");
-  const [allCash, setAllCash] = useState(false);
   const extraCash = moreCash.filter((o) => !cash.some((c) => c.value === o.value));
-  const cashChoices = allCash ? [...cash, ...extraCash] : cash;
   const [currency, setCurrency] = useState("SAR");
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState(today);
@@ -199,12 +197,7 @@ export function ReceiptForm({
             <ComboBox value={customerId} options={customers} onChange={(v) => setCustomerId(v)} create="customer" placeholder="ابحث عن العميل…" className={inputCls} />
           </Row>
           <Row label={kind === "refund" ? "تم الصرف من خلال" : "تم الدفع من خلال"} required hint="الصندوق أو البنك أو عهدة الموظف الذي استلم">
-            <ComboBox value={cashId} options={cashChoices} onChange={(v) => setCashId(v)} create="account" scope="1101,1102,1105" placeholder="ابحث باسم الحساب أو رقمه…" className={inputCls} />
-            {extraCash.length > 0 && (
-              <button type="button" onClick={() => setAllCash((v) => !v)} className="mt-1 text-xs text-brand-700 hover:underline">
-                {allCash ? "المقترحة فقط" : "عرض كل الشجرة"}
-              </button>
-            )}
+            <ComboBox value={cashId} options={cash} moreOptions={extraCash} onChange={(v) => setCashId(v)} create="account" scope="1101,1102,1105" placeholder="ابحث باسم الحساب أو رقمه…" className={inputCls} />
             {cashCurrency && cashCurrency !== currency && <span className="text-xs text-red-700">الحساب بعملة {cashCurrency}</span>}
           </Row>
           <Row label="عملة الدفع" required>
