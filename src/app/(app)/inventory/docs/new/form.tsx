@@ -1,5 +1,6 @@
 "use client";
 
+import { MsgText } from "@/components/msg-text";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Field, Input, Select } from "@/components/ui";
@@ -185,7 +186,7 @@ export function StockDocForm(props: {
         </section>
       )}
 
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm whitespace-pre-line text-red-700">{error}</p>}
+      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm whitespace-pre-line text-red-700"><MsgText text={error} /></p>}
       <div className="flex flex-wrap gap-2">
         {kind === "count" ? (
           <button type="button" disabled={pending} onClick={() => submit(false)} className="rounded-lg bg-brand-600 px-5 py-2 text-sm font-semibold text-brand-900 shadow-sm hover:bg-brand-500 disabled:opacity-50">

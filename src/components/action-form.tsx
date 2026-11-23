@@ -1,5 +1,6 @@
 "use client";
 
+import { MsgText } from "@/components/msg-text";
 import { Truck } from "./icons";
 import { newOpId } from "@/lib/op-id";
 import { toast } from "./toast";
@@ -110,7 +111,7 @@ export function ActionForm({
         {children}
         {state?.error && (
           <p role="alert" className="shake col-span-full basis-full mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm whitespace-pre-line text-red-700">
-            {state.error}
+            <MsgText text={state.error} />
           </p>
         )}
         {state?.ok && (

@@ -1,5 +1,6 @@
 "use client";
 
+import { MsgText } from "@/components/msg-text";
 // نافذة الإضافة السريعة: تفتح فوق المستند، تضيف العنصر، ثم تختاره في الخانة التي فُتحت منها.
 
 import {
@@ -256,7 +257,7 @@ function QuickAddForm({ kind, scope, initial, onClose, onDone }: DialogProps) {
               role="alert"
               className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700"
             >
-              {error}
+              <MsgText text={error} />
             </p>
           )}
         </div>

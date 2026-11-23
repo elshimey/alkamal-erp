@@ -1,5 +1,6 @@
 "use client";
 
+import { MsgText } from "@/components/msg-text";
 import { useState, useTransition } from "react";
 import { Icon } from "@/components/icons";
 import { shareDocument } from "@/app/(app)/share-actions";
@@ -81,7 +82,7 @@ export function SendDocument({ kind, id, label, company, phone, email, to = "ل�
             {copied ? "نُسخ الرابط ✓" : "مشاركة أو نسخ الرابط"}
           </button>
           {busy && <p className="px-3 py-1 text-xs text-gray-500">جارٍ تجهيز الرابط…</p>}
-          {error && <p className="px-3 py-1 text-xs text-red-700">{error}</p>}
+          {error && <p className="px-3 py-1 text-xs text-red-700"><MsgText text={error} /></p>}
           <p className="border-t border-gray-100 px-3 pt-2 pb-1 text-[11px] text-gray-400">يفتح العميل المستند ويحمّله PDF دون حساب، والرابط صالح 90 يوماً.</p>
         </div>
       )}

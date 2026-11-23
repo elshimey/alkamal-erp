@@ -1,4 +1,5 @@
 "use client";
+import { MsgText } from "@/components/msg-text";
 
 import Link from "next/link";
 import { useState, useTransition } from "react";
@@ -179,7 +180,7 @@ export function ReclassifyForm({ accounts, centers, today }: { accounts: Opt[]; 
         </section>
       )}
 
-      {msg.error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{msg.error}</p>}
+      {msg.error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700"><MsgText text={msg.error} /></p>}
       {msg.ok && (
         <p className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-800">
           {msg.ok}

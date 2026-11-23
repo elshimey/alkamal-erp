@@ -1,5 +1,6 @@
 "use client";
 
+import { MsgText } from "@/components/msg-text";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState, useTransition } from "react";
@@ -255,7 +256,7 @@ export function BulkEditor({
         <ul role="alert" className="list-inside list-disc rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
           {[...dupes.entries()].map(([i, m]) => (
             <li key={i}>
-              {isNew(i) ? "صف جديد" : `الصف ${i + 1}`}: {m}
+              {isNew(i) ? "صف جديد" : `الصف ${i + 1}`}: <MsgText text={m} />
             </li>
           ))}
         </ul>
@@ -267,13 +268,13 @@ export function BulkEditor({
             return (
               <li key={id}>
                 {Number(id) < 0 ? "صف جديد" : `الصف ${i + 1}`}
-                {rows[i]?.[columns[0].key] ? ` (${rows[i][columns[0].key]})` : ""}: {e}
+                {rows[i]?.[columns[0].key] ? ` (${rows[i][columns[0].key]})` : ""}: <MsgText text={e} />
               </li>
             );
           })}
         </ul>
       )}
-      {message.error && Object.keys(errors).length === 0 && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{message.error}</p>}
+      {message.error && Object.keys(errors).length === 0 && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700"><MsgText text={message.error} /></p>}
       {message.ok && <p className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-800">✓ {message.ok}</p>}
     </div>
   );

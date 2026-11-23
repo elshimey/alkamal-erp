@@ -1,5 +1,6 @@
 "use client";
 
+import { MsgText } from "@/components/msg-text";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useSyncExternalStore, useTransition, type ReactNode } from "react";
@@ -175,7 +176,7 @@ export function RecordPanel({
         >
           {error && (
             <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm whitespace-pre-line text-red-800">
-              {error}
+              <MsgText text={error} />
             </p>
           )}
           {children}
