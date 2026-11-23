@@ -7,8 +7,8 @@ import { matchPath, TOUR_GROUPS, TOURS, toursForPath } from "@/data/tours";
 const pageExists = (p: string) => fs.existsSync(`src/app/(app)${p === "/" ? "" : p}/page.tsx`);
 
 describe("جولات دليل الاستخدام", () => {
-  it("36 جولة بمعرفات فريدة في الأقسام المعتمدة", () => {
-    expect(TOURS.length).toBe(36);
+  it("42 جولة بمعرفات فريدة في الأقسام المعتمدة", () => {
+    expect(TOURS.length).toBe(42);
     expect(new Set(TOURS.map((t) => t.id)).size).toBe(TOURS.length);
     for (const t of TOURS) expect(TOUR_GROUPS).toContain(t.group);
     for (const g of TOUR_GROUPS) expect(TOURS.some((t) => t.group === g)).toBe(true);
