@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { EdgeCell } from "@/components/desk-list";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
@@ -23,7 +24,7 @@ import { SheetEditor } from "@/components/sheet-editor";
 import { Badge, EmptyRow, LimitRow, PageHeader, Table, Td } from "@/components/ui";
 import { post, postMany, savePurchaseSheet, savePurchases } from "./actions";
 import { PurchasePanel } from "./purchase-panel";
-import { fmt } from "@/lib/format";
+import { fmt, fmtDate } from "@/lib/format";
 import { taxCodeOptions } from "@/lib/tax-codes";
 
 const BASE = "/purchases";
@@ -177,7 +178,7 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
                     <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
                       <span className="ltr-nums whitespace-nowrap">{i.supplierInvoiceNo}</span>
                       <span className="text-gray-300">|</span>
-                      <span className="ltr-nums whitespace-nowrap">{i.invoiceDate}</span>
+                      <span className="ltr-nums whitespace-nowrap">{fmtDate(i.invoiceDate)}</span>
                       <span className="ms-auto flex gap-1">
                         <Badge tone={PURCHASE_STATUS[i.status].tone}>{PURCHASE_STATUS[i.status].label}</Badge>
                         {st.pay && <Badge tone={st.pay.tone}>{st.pay.label}</Badge>}
@@ -234,8 +235,8 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
               <span className="text-xs text-gray-400">حدد المسودات من الجدول؛ تُرحّل كل فاتورة بقيدها.</span>
             </ActionForm>
           )}
-          <Table head={[canPost && drafts.length ? <SelectAll key="all" form={POST_FORM} /> : "", "الرقم", "التاريخ", "المورد", "رقم فاتورته", "الإجمالي", "المتبقي", "الاستحقاق", "الحالة", "السداد", ""]}>
-            {list.length === 0 && <EmptyRow cols={11}>{filter.q || filter.status || filter.pay || filter.from ? "لا توجد فواتير بهذه الشروط" : "لا توجد فواتير موردين بعد"}</EmptyRow>}
+          <Table head={[canPost && drafts.length ? <SelectAll key="all" form={POST_FORM} /> : "", "الرقم", "التاريخ", "المورد", "رقم فاتورته", "الإجمالي", "المتبقي", "الاستحقاق", "الحالة", "السداد", "", ""]}>
+            {list.length === 0 && <EmptyRow cols={12}>{filter.q || filter.status || filter.pay || filter.from ? "لا توجد فواتير بهذه الشروط" : "لا توجد فواتير موردين بعد"}</EmptyRow>}
             <LimitRow cols={11} shown={list.length} limit={500} />
             {list.map(({ i, supplier }) => {
               const st = state(i);
@@ -248,7 +249,7 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
                       {i.number}
                     </Link>
                   </Td>
-                  <Td className="ltr-nums whitespace-nowrap">{i.invoiceDate}</Td>
+                  <Td className="ltr-nums whitespace-nowrap">{fmtDate(i.invoiceDate)}</Td>
                   <Td>
                     <Link href={open} scroll={false} className="hover:text-brand-700">
                       {supplier}
@@ -259,7 +260,7 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
                     {fmt(st.total)} <span className="text-xs font-normal text-gray-400">{i.currencyCode}</span>
                   </Td>
                   <Td className="ltr-nums">{fmt(st.total - st.paid)}</Td>
-                  <Td className={`ltr-nums whitespace-nowrap ${st.overdue ? "font-semibold text-red-600" : ""}`}>{i.dueDate}</Td>
+                  <Td className={`ltr-nums whitespace-nowrap ${st.overdue ? "font-semibold text-red-600" : ""}`}>{fmtDate(i.dueDate)}</Td>
                   <Td>
                     <Badge tone={PURCHASE_STATUS[i.status].tone}>{PURCHASE_STATUS[i.status].label}</Badge>
                   </Td>
@@ -269,6 +270,7 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
                       <Icon name="expand" className="size-4" />
                     </Link>
                   </Td>
+                  <EdgeCell tone={st.pay?.tone ?? PURCHASE_STATUS[i.status].tone} />
                 </tr>
               );
             })}

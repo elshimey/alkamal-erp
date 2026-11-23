@@ -136,7 +136,7 @@ export default async function PurchaseRequestsPage({ searchParams }: { searchPar
         {rows.map(({ r, plate, by }) => (
           <tr key={r.id}>
             <Td className="ltr-nums font-medium whitespace-nowrap">{r.number}</Td>
-            <Td className="ltr-nums whitespace-nowrap">{r.requestDate}</Td>
+            <Td className="ltr-nums whitespace-nowrap">{fmtDate(r.requestDate)}</Td>
             <Td className="text-xs">
               {linesOf(r.id).map((l) => (
                   <div key={l.id}>

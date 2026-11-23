@@ -21,7 +21,7 @@ import { Badge, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/
 import { MaintenanceTabs } from "./tabs";
 import { OrderPanel } from "./order-panel";
 import { approveOrder, bulkOrders, completeOrder, revertOrder, saveOrderSheet } from "./actions";
-import { fmt } from "@/lib/format";
+import { fmt, fmtDate } from "@/lib/format";
 import { AccountField } from "@/components/account-field";
 import { toAccountOptions } from "@/lib/lookups";
 
@@ -193,7 +193,7 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
                   <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
                     <span className="ltr-nums whitespace-nowrap">{o.number}</span>
                     <span className="text-gray-300">|</span>
-                    <span className="ltr-nums whitespace-nowrap">{o.orderDate}</span>
+                    <span className="ltr-nums whitespace-nowrap">{fmtDate(o.orderDate)}</span>
                     <span className="line-clamp-1">{supplier ?? MAINTENANCE_PROVIDERS.internal}</span>
                     <span className="ms-auto">
                       <Badge tone={MAINTENANCE_STATUS[o.status].tone}>{MAINTENANCE_STATUS[o.status].label}</Badge>
@@ -294,7 +294,7 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
                     </Link>
                     {o.supplierInvoiceNo && <div className="ltr-nums text-xs font-normal text-gray-400">{o.supplierInvoiceNo}</div>}
                   </Td>
-                  <Td className="ltr-nums whitespace-nowrap">{o.orderDate}</Td>
+                  <Td className="ltr-nums whitespace-nowrap">{fmtDate(o.orderDate)}</Td>
                   <Td className="font-medium whitespace-nowrap">
                     <Link href={open} scroll={false} className="hover:text-brand-700">
                       {plate}

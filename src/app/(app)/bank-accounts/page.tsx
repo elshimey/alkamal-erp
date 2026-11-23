@@ -10,7 +10,7 @@ import { todayRiyadh } from "@/lib/dates";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Card, Field, Input, PageHeader, Select } from "@/components/ui";
 import { createBank, saveBankDetails } from "./actions";
-import { fmt } from "@/lib/format";
+import { fmt, fmtDate } from "@/lib/format";
 
 const ibanFmt = (v: string) => v.replace(/(.{4})/g, "$1 ").trim();
 
@@ -66,7 +66,7 @@ export default async function BankAccountsPage() {
                   <div className="text-end text-[11px] text-gray-400">
                     {r.lastDate ? (
                       <>
-                        آخر حركة <span className="ltr-nums">{r.lastDate}</span>
+                        آخر حركة <span className="ltr-nums">{fmtDate(r.lastDate)}</span>
                       </>
                     ) : (
                       "لا حركات"

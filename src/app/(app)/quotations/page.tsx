@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { EdgeCell } from "@/components/desk-list";
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
@@ -9,7 +10,7 @@ import { routeOptions } from "@/lib/lookups";
 import { getCompany, getInvoiceTemplate } from "@/lib/company";
 import { todayRiyadh } from "@/lib/dates";
 import { listHref } from "@/lib/doc-filters";
-import { fmt } from "@/lib/format";
+import { fmt, fmtDate } from "@/lib/format";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { ClickRow } from "@/components/click-row";
 import { ActionsMenu, type MenuItem } from "@/components/actions-menu";
@@ -254,7 +255,7 @@ export default async function QuotationsPage({ searchParams }: { searchParams: P
                   <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
                     <span className="ltr-nums whitespace-nowrap">{q.number}</span>
                     <span className="text-gray-300">|</span>
-                    <span className="ltr-nums whitespace-nowrap">{q.quoteDate}</span>
+                    <span className="ltr-nums whitespace-nowrap">{fmtDate(q.quoteDate)}</span>
                     <span className="ms-auto">
                       <Badge tone={QUOTE_STATUS[q.status].tone}>{QUOTE_STATUS[q.status].label}</Badge>
                     </span>
@@ -333,8 +334,8 @@ export default async function QuotationsPage({ searchParams }: { searchParams: P
               </span>
             </ActionForm>
           )}
-          <Table head={[(canUpdate || canDelete) && rows.length ? <SelectAll key="all" form={BULK_FORM} /> : "", "الرقم", "التاريخ", "صالح حتى", "العميل", "نوع الشحن", "المرجع", "الإجمالي", "الحالة", "الفاتورة", ""]}>
-            {rows.length === 0 && <EmptyRow cols={11}>{filter.q || filter.status || filter.from ? "لا توجد عروض بهذه الشروط" : "لا توجد عروض أسعار بعد؛ اضغط «إنشاء»"}</EmptyRow>}
+          <Table head={[(canUpdate || canDelete) && rows.length ? <SelectAll key="all" form={BULK_FORM} /> : "", "الرقم", "التاريخ", "صالح حتى", "العميل", "نوع الشحن", "المرجع", "الإجمالي", "الحالة", "الفاتورة", "", ""]}>
+            {rows.length === 0 && <EmptyRow cols={12}>{filter.q || filter.status || filter.from ? "لا توجد عروض بهذه الشروط" : "لا توجد عروض أسعار بعد؛ اضغط «إنشاء»"}</EmptyRow>}
             <LimitRow cols={11} shown={rows.length} limit={500} />
             {rows.map(({ q, customer, invoice }) => {
               const open = listUrl({ open: String(q.id) });
@@ -347,7 +348,7 @@ export default async function QuotationsPage({ searchParams }: { searchParams: P
                       {q.number}
                     </Link>
                   </Td>
-                  <Td className="ltr-nums whitespace-nowrap">{q.quoteDate}</Td>
+                  <Td className="ltr-nums whitespace-nowrap">{fmtDate(q.quoteDate)}</Td>
                   <Td className={`ltr-nums whitespace-nowrap ${expired ? "font-semibold text-red-600" : ""}`}>{q.validUntil}</Td>
                   <Td>
                     <Link href={open} scroll={false} className="hover:text-brand-700">
@@ -376,6 +377,7 @@ export default async function QuotationsPage({ searchParams }: { searchParams: P
                       <Icon name="expand" className="size-4" />
                     </Link>
                   </Td>
+                  <EdgeCell tone={expired ? "red" : QUOTE_STATUS[q.status].tone} />
                 </ClickRow>
               );
             })}

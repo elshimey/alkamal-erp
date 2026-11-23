@@ -12,7 +12,7 @@ import { ListActions } from "@/components/list-actions";
 import { Badge, Card, EmptyRow, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { ProductFields } from "./product-fields";
 import { addProduct, editProduct } from "./actions";
-import { fmt } from "@/lib/format";
+import { fmt, fmtDate } from "@/lib/format";
 
 const qfmt = (v: number) => v.toLocaleString("en", { maximumFractionDigits: 3 });
 
@@ -162,7 +162,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
                       )}
                       {card.map(({ m, warehouse, balance, balanceValue }) => (
                         <tr key={m.id} className="border-t border-gray-100">
-                          <td className="ltr-nums p-2 whitespace-nowrap">{m.moveDate}</td>
+                          <td className="ltr-nums p-2 whitespace-nowrap">{fmtDate(m.moveDate)}</td>
                           <td className="p-2">
                             <Link href={SOURCE_HREF[m.sourceType]?.(m.sourceId) ?? "#"} className="text-brand-700 hover:underline">
                               {m.description}

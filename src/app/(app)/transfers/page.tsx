@@ -7,7 +7,7 @@ import { todayRiyadh } from "@/lib/dates";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Card, EmptyRow, Field, Input, PageHeader, Table, Td } from "@/components/ui";
 import { removeTransfer, saveTransfer } from "./actions";
-import { fmt } from "@/lib/format";
+import { fmt, fmtDate } from "@/lib/format";
 import { toAccountOptions } from "@/lib/lookups";
 import { AccountField } from "@/components/account-field";
 import { AddModeBar, ListActions } from "@/components/list-actions";
@@ -72,7 +72,7 @@ export default async function TransfersPage({ searchParams }: { searchParams: Pr
         {rows.map(({ t, from, fromCode, fromCur, to, toCode, toCur, entry }) => (
           <tr key={t.id}>
             <Td className="ltr-nums font-medium whitespace-nowrap">{t.number}</Td>
-            <Td className="ltr-nums whitespace-nowrap">{t.transferDate}</Td>
+            <Td className="ltr-nums whitespace-nowrap">{fmtDate(t.transferDate)}</Td>
             <Td>
               <span className="ltr-nums text-xs text-gray-400">{fromCode}</span> {from}
             </Td>

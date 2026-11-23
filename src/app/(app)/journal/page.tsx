@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { EdgeCell } from "@/components/desk-list";
 import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
@@ -17,7 +18,7 @@ import { JournalVoucher } from "@/components/journal-voucher";
 import { Badge, EmptyRow, PageHeader, Pager, Table, Td } from "@/components/ui";
 import { DocSheet, type DocSheetRow } from "@/components/doc-sheet";
 import { post, remove, revert, saveEntrySheet } from "./actions";
-import { fmt } from "@/lib/format";
+import { fmt, fmtDate } from "@/lib/format";
 
 const SORTS = { date_desc: "الأحدث أولاً", date_asc: "الأقدم أولاً", amount_desc: "الأعلى مبلغاً", amount_asc: "الأقل مبلغاً" } as const;
 const BASE = "/journal";
@@ -111,7 +112,7 @@ export default async function JournalPage({ searchParams }: { searchParams: Prom
                   </div>
                   <div className="mt-1 flex items-center gap-2 text-xs text-gray-500">
                     <span className="ltr-nums">{e.number}</span>
-                    <span className="ltr-nums">{e.entryDate}</span>
+                    <span className="ltr-nums">{fmtDate(e.entryDate)}</span>
                     <span className="ms-auto">{sourceCell(e)}</span>
                   </div>
                 </Link>
@@ -170,13 +171,13 @@ export default async function JournalPage({ searchParams }: { searchParams: Prom
           <div className="mb-2 flex justify-end">
             <BulkPdfButton kind="journal" ids={list.map((x) => x.e.id)} label="تصدير القيود PDF (ملف مضغوط)" />
           </div>
-          <Table head={["التاريخ", "الرقم", "الوصف", "المصدر", "المرجع", "السطور", "المبلغ", "الحالة"]}>
-            {list.length === 0 && <EmptyRow cols={8}>{f.q || f.status || f.from ? "لا توجد قيود بهذه الشروط" : "لا توجد قيود بعد"}</EmptyRow>}
+          <Table head={["التاريخ", "الرقم", "الوصف", "المصدر", "المرجع", "السطور", "المبلغ", "الحالة", ""]}>
+            {list.length === 0 && <EmptyRow cols={9}>{f.q || f.status || f.from ? "لا توجد قيود بهذه الشروط" : "لا توجد قيود بعد"}</EmptyRow>}
             {list.map(({ e, total, lines }) => {
               const open = listHref(BASE, sp, { open: String(e.id) });
               return (
                 <tr key={e.id} className="transition hover:bg-brand-50/40">
-                  <Td className="ltr-nums whitespace-nowrap">{e.entryDate}</Td>
+                  <Td className="ltr-nums whitespace-nowrap">{fmtDate(e.entryDate)}</Td>
                   <Td className="whitespace-nowrap">
                     <Link href={open} scroll={false} className="ltr-nums font-medium text-brand-700 hover:underline">
                       {e.number}
@@ -194,6 +195,7 @@ export default async function JournalPage({ searchParams }: { searchParams: Prom
                   <Td>
                     <Badge tone={ENTRY_STATUS[e.status].tone}>{ENTRY_STATUS[e.status].label}</Badge>
                   </Td>
+                  <EdgeCell tone={ENTRY_STATUS[e.status].tone} />
                 </tr>
               );
             })}

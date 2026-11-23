@@ -109,7 +109,7 @@ export default async function AssignmentsPage({ searchParams }: { searchParams: 
           <tr key={a.id}>
             <Td className="font-medium">{plate}</Td>
             <Td>{driver}</Td>
-            <Td className="ltr-nums">{a.fromDate}</Td>
+            <Td className="ltr-nums">{fmtDate(a.fromDate)}</Td>
             <Td className="ltr-nums">{a.odometerStart?.toLocaleString("en") ?? "—"}</Td>
             <Td>
               {canEdit && (
@@ -151,8 +151,8 @@ export default async function AssignmentsPage({ searchParams }: { searchParams: 
           <tr key={a.id}>
             <Td>{plate}</Td>
             <Td>{driver}</Td>
-            <Td className="ltr-nums">{a.fromDate}</Td>
-            <Td className="ltr-nums">{a.toDate}</Td>
+            <Td className="ltr-nums">{fmtDate(a.fromDate)}</Td>
+            <Td className="ltr-nums">{fmtDate(a.toDate)}</Td>
             <Td className="ltr-nums">
               {a.odometerEnd != null && a.odometerStart != null ? (a.odometerEnd - a.odometerStart).toLocaleString("en") : "—"}
             </Td>

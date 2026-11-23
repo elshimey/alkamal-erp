@@ -8,7 +8,7 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Icon } from "@/components/icons";
 import { Badge, EmptyRow, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { postDoc, removeDoc, revertDoc, saveCounted } from "../actions";
-import { fmt } from "@/lib/format";
+import { fmt, fmtDate } from "@/lib/format";
 
 const qfmt = (v: number | string) => Number(v).toLocaleString("en", { maximumFractionDigits: 3 });
 
@@ -65,7 +65,7 @@ export default async function StockDocsPage({ searchParams }: { searchParams: Pr
             <span className="text-sm">{STOCK_DOC_KINDS[doc.d.kind].label}</span>
             <Badge tone={doc.d.status === "posted" ? "green" : "amber"}>{doc.d.status === "posted" ? "مرحّل" : "مسودة"}</Badge>
             <span className="text-xs text-gray-500">
-              <span className="ltr-nums">{doc.d.docDate}</span> · {doc.warehouse.nameAr}
+              <span className="ltr-nums">{fmtDate(doc.d.docDate)}</span> · {doc.warehouse.nameAr}
               {doc.toWarehouse && <> ← {doc.toWarehouse.nameAr}</>}
               {doc.d.reason && <> · {doc.d.reason}</>}
               {doc.entry && (
@@ -183,7 +183,7 @@ export default async function StockDocsPage({ searchParams }: { searchParams: Pr
                 {d.number}
               </Link>
             </Td>
-            <Td className="ltr-nums whitespace-nowrap">{d.docDate}</Td>
+            <Td className="ltr-nums whitespace-nowrap">{fmtDate(d.docDate)}</Td>
             <Td>{STOCK_DOC_KINDS[d.kind].label}</Td>
             <Td>
               {warehouse}

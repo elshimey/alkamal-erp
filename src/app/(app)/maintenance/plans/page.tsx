@@ -21,7 +21,7 @@ import { Badge, Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } fr
 import { PlanPanel } from "../plan-panel";
 import { MaintenanceTabs } from "../tabs";
 import { bulkPlanOrders, savePlans } from "../actions";
-import { fmt } from "@/lib/format";
+import { fmt, fmtDate } from "@/lib/format";
 
 const BASE = "/maintenance/plans";
 const BULK_FORM = "plan-orders";
@@ -176,7 +176,7 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
                       {h.number}
                     </Link>
                   </Td>
-                  <Td className="ltr-nums">{h.orderDate}</Td>
+                  <Td className="ltr-nums">{fmtDate(h.orderDate)}</Td>
                   <Td className="ltr-nums">{h.completedDate ?? "—"}</Td>
                   <Td className="ltr-nums">{fmt(h.total)}</Td>
                   <Td>

@@ -11,7 +11,7 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { LinesEditor } from "@/components/lines-editor";
 import { Badge, EmptyRow, Field, Input, PageHeader, Table, Td } from "@/components/ui";
 import { saveOrder } from "../purchase-requests/actions";
-import { fmt } from "@/lib/format";
+import { fmt, fmtDate } from "@/lib/format";
 
 export default async function PurchaseOrdersPage({ searchParams }: { searchParams: Promise<{ request?: string }> }) {
   const user = await requirePermission("purchase_invoices", "view");
@@ -88,7 +88,7 @@ export default async function PurchaseOrdersPage({ searchParams }: { searchParam
                 {o.number}
               </Link>
             </Td>
-            <Td className="ltr-nums whitespace-nowrap">{o.orderDate}</Td>
+            <Td className="ltr-nums whitespace-nowrap">{fmtDate(o.orderDate)}</Td>
             <Td>{supplier}</Td>
             <Td className="ltr-nums">{request ?? "—"}</Td>
             <Td>{plate ?? "—"}</Td>

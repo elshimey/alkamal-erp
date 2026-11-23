@@ -13,7 +13,7 @@ import { Badge, Card, Input, PageHeader, Table, Td } from "@/components/ui";
 import { purchaseInvoiceDoc } from "@/lib/purchases";
 import { listAttachments } from "@/lib/attachments";
 import { post, remove, revert } from "../actions";
-import { fmt } from "@/lib/format";
+import { fmt, fmtDate } from "@/lib/format";
 
 export default async function PurchasePage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requirePermission("purchase_invoices", "view");
@@ -86,7 +86,7 @@ export default async function PurchasePage({ params }: { params: Promise<{ id: s
                 {allocations.map(({ a, p }) => (
                   <tr key={p.id}>
                     <Td className="ltr-nums">{p.number}</Td>
-                    <Td className="ltr-nums">{p.paymentDate}</Td>
+                    <Td className="ltr-nums">{fmtDate(p.paymentDate)}</Td>
                     <Td>{PAYMENT_METHODS[p.method]}</Td>
                     <Td className="ltr-nums font-medium">{fmt(a.amount)}</Td>
                   </tr>

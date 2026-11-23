@@ -15,7 +15,7 @@ import { getCompany, getInvoiceTemplate, invoiceReadiness } from "@/lib/company"
 import { invoiceQrSvg } from "@/lib/zatca-qr";
 import { clearedQr, getSettings, latestDocument, sendBlocker } from "@/lib/zatca/service";
 import { ZatcaPanel } from "@/components/zatca-panel";
-import { listHref, parseDocFilter, type DocListParams } from "@/lib/doc-filters";
+import { listHref, parseDocFilter, type DocListParams, type PayFilter } from "@/lib/doc-filters";
 import { todayRiyadh } from "@/lib/dates";
 import { INVOICE_STATUS, ZATCA_STATUS, paymentState } from "@/data/sales";
 import { ActionForm, SubmitButton } from "@/components/action-form";
@@ -39,6 +39,8 @@ import { bulkInvoiceOps, invoiceAll, invoiceCustomer, issue, saveInvoicePanel, s
 import { ActionsMenu, type MenuItem } from "@/components/actions-menu";
 import { DocCard, DocCards, SheetFacts, SheetMoney, sheetBtn, sheetPrimary } from "@/components/doc-card";
 import { MobileSheet } from "@/components/mobile-sheet";
+import { BulkBar, EdgeCell, NextStepCell, NumDateCell, PaidBar, StatusCell, StatusTabs, Sub } from "@/components/desk-list";
+import { DeskDrawer } from "@/components/desk-drawer";
 import { fmt, fmtDate } from "@/lib/format";
 import { toAccountOptions } from "@/lib/lookups";
 import { taxCodesFor } from "@/lib/tax-codes";
@@ -52,6 +54,15 @@ const plusDays = (d: string, n: number) => {
   return x.toISOString().slice(0, 10);
 };
 const STATUSES = { draft: INVOICE_STATUS.draft.label, issued: INVOICE_STATUS.issued.label };
+const drawerBtn = "inline-flex h-10 items-center gap-1.5 rounded-xl border border-gray-300 bg-white px-3 text-sm text-gray-700 shadow-sm hover:bg-gray-50";
+const INV_TABS: { key: string; label: string; status?: string; pay?: PayFilter; attn?: boolean }[] = [
+  { key: "", label: "الكل" },
+  { key: "draft", label: "مسودة", status: "draft", attn: true },
+  { key: "unpaid", label: "غير مسددة", pay: "unpaid" },
+  { key: "partial", label: "مسددة جزئياً", pay: "partial" },
+  { key: "overdue", label: "متأخرة", pay: "overdue", attn: true },
+  { key: "paid", label: "مسددة", pay: "paid" },
+];
 
 export default async function InvoicesPage({ searchParams }: { searchParams: Promise<DocListParams & { new?: string; edit?: string; add?: string }> }) {
   const user = await requirePermission("sales_invoices", "view");
@@ -76,6 +87,8 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
     getCompany(db),
     getInvoiceTemplate(db),
   ]);
+  // أزرار الحالات بعددها (بنفس البحث والفترة)؛ الأصفر لما ينتظر إجراءً: مسودة تُصدر، ومتأخرة تُحصّل
+  const tabCounts = await Promise.all(INV_TABS.map((t) => summarizeSalesInvoices(db, { ...filter, status: t.status, pay: t.pay }).then((r) => r.n)));
   const [zatca, zatcaDoc, blocker] = openDoc ? await Promise.all([getSettings(db), latestDocument(db, { invoiceId: openDoc.i.id }), sendBlocker(db, { invoiceId: openDoc.i.id })]) : [null, null, null];
   const qrSvg = openDoc ? await invoiceQrSvg(company, openDoc.i, await clearedQr(db, openDoc.i.id)) : null;
   const listUrl = (patch: Partial<Record<keyof DocListParams, string | undefined>> = {}) => listHref(BASE, lp, patch);
@@ -349,6 +362,110 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
     </MobileSheet>
   );
 
+  // الكمبيوتر: معاينة جانبية فوق القائمة بمبالغها وأزرارها، وتحتها الفاتورة نفسها (قرار أحمد 2026-11-23)
+  const deskDrawer = openDoc && openState && (
+    <DeskDrawer
+      closeHref={listHref(BASE, sp, { open: undefined })}
+      label={`معاينة الفاتورة ${openDoc.i.number}`}
+      header={
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-display text-lg font-semibold text-brand-900">
+              فاتورة <span className="ltr-nums">{openDoc.i.number}</span>
+            </span>
+            <Badge tone={INVOICE_STATUS[openDoc.i.status].tone}>{INVOICE_STATUS[openDoc.i.status].label}</Badge>
+            {openState.pay && <Badge tone={openState.pay.tone}>{openState.pay.label}</Badge>}
+            {openDoc.trips.length > 0 && (
+              <Badge tone={openDoc.trips.every((w) => w.sentAt) ? "blue" : openDoc.trips.some((w) => w.sentAt) ? "amber" : "gray"}>
+                {openDoc.trips.every((w) => w.sentAt) ? "✓ أُرسلت للسائق" : openDoc.trips.some((w) => w.sentAt) ? `أُرسلت ${openDoc.trips.filter((w) => w.sentAt).length} من ${openDoc.trips.length} للسائق` : "لم تُرسل للسائق"}
+              </Badge>
+            )}
+          </div>
+          <p className="mt-0.5 truncate text-sm text-gray-600">
+            {openDoc.customer.nameAr}
+            {openDoc.i.status === "issued" && ` · ${ZATCA_STATUS[openDoc.i.zatcaStatus]}`}
+          </p>
+        </>
+      }
+      footer={
+        <>
+          {openDoc.i.status === "draft" && canIssue && (
+            <ActionForm action={issue.bind(null, openDoc.i.id)} resetOnSuccess={false}>
+              <SubmitButton pendingLabel="جارٍ الإصدار…">اعتماد وإصدار</SubmitButton>
+            </ActionForm>
+          )}
+          {openDoc.i.status === "issued" && openState.paid < openState.total && canReceive && (
+            <Link href={`/receipts/new?customer=${openDoc.i.customerId}&invoice=${openDoc.i.id}`} className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-brand-600 px-4 text-sm font-semibold text-brand-900 shadow-sm hover:bg-brand-500">
+              <Icon name="cash" className="size-4" />
+              تسجيل دفعة
+            </Link>
+          )}
+          <Link href={`/invoices/${openDoc.i.id}`} className={drawerBtn}>
+            <Icon name="expand" className="size-4" />
+            فتح كاملة
+          </Link>
+          {openDoc.i.status === "draft" && canUpdate && (
+            <Link href={withParam(listUrl({ open: String(openDoc.i.id) }), "edit", String(openDoc.i.id))} scroll={false} className={drawerBtn}>
+              <Icon name="pencil" className="size-4" />
+              تعديل
+            </Link>
+          )}
+          <Link href={`/invoices/${openDoc.i.id}?print=1`} target="_blank" className={drawerBtn}>
+            <Icon name="printer" className="size-4" />
+            طباعة
+          </Link>
+          {openDoc.i.status !== "draft" && <SendDocument kind="invoices" id={openDoc.i.id} label={`فاتورة ضريبية رقم ${openDoc.i.number}`} company={company.nameAr} phone={openDoc.customer.mobile} email={openDoc.customer.email} />}
+          {openDoc.i.status === "issued" && can(user.perms, "sales_invoices", "create") && (
+            <Link href={`/notes/sales/new?kind=sales_credit&party=${openDoc.i.customerId}&invoice=${openDoc.i.id}`} className={drawerBtn}>
+              إشعار دائن
+            </Link>
+          )}
+          {invoiceMenu(openDoc).length > 0 && (
+            <span className="ms-auto">
+              <ActionsMenu items={invoiceMenu(openDoc)} label="العمليات" />
+            </span>
+          )}
+        </>
+      }
+    >
+      <SheetFacts
+        items={[
+          ["التاريخ", <span key="d" className="ltr-nums">{fmtDate(openDoc.i.invoiceDate)}</span>],
+          ["الاستحقاق", <span key="u" className={`ltr-nums ${openState.overdue ? "text-st-bad-fg" : ""}`}>{fmtDate(openDoc.i.dueDate)}</span>],
+          ["الشحنات", openDoc.trips.length ? `${openDoc.trips.length}` : "دون شحنة"],
+          ["هيئة الزكاة", openDoc.i.status === "issued" ? ZATCA_STATUS[openDoc.i.zatcaStatus] : "بعد الإصدار"],
+        ]}
+      />
+      <SheetMoney
+        lines={[
+          ["قبل الضريبة", fmt(openDoc.i.subtotal)],
+          ["الضريبة", fmt(openDoc.i.vatTotal)],
+          ["الإجمالي", fmt(openState.total)],
+          ["المسدد", fmt(openState.paid)],
+        ]}
+        total={["المتبقي", `${fmt(openState.total - openState.paid)} ${openDoc.i.currencyCode}`]}
+      />
+      <div className="mt-5 overflow-hidden rounded-2xl bg-gray-100/70 shadow-inner">
+        <ReadinessBar company={company} />
+        <div className="p-3">
+          {openDoc.i.status === "issued" && <ZatcaPanel doc={zatcaDoc} connected={!!zatca?.token} blocker={blocker} partyHref={`/records/parties/${openDoc.i.customerId}`} send={canIssue ? sendToZatca.bind(null, openDoc.i.id) : undefined} />}
+          <TaxInvoiceDocument company={company} invoice={openDoc.i} customer={openDoc.customer} lines={openDoc.lines} qrSvg={qrSvg} template={template} photos={openDoc.photos} compact />
+        </div>
+      </div>
+    </DeskDrawer>
+  );
+  const rowNext = (i: (typeof invoices)[number]["i"], st: ReturnType<typeof state>): { item?: MenuItem; label?: string; go?: boolean; note?: string } => {
+    if (i.status === "draft")
+      return canIssue
+        ? { item: { label: "أصدرها", action: issue.bind(null, i.id), confirm: { title: `اعتماد وإصدار ${i.number}`, text: "تأخذ الفاتورة رقمها الرسمي ويُرحّل قيد الإيراد والضريبة.", submit: "إصدار" } }, go: true }
+        : { note: "تنتظر الإصدار" };
+    if (i.status !== "issued") return {};
+    if (st.paid >= st.total - 0.005) return { note: "اكتملت" };
+    return canReceive ? { item: { label: "سجّل تحصيل", href: `/receipts/new?customer=${i.customerId}&invoice=${i.id}` }, go: st.overdue } : { note: "بانتظار التحصيل" };
+  };
+  const dayMs = 86_400_000;
+  const daysLate = (due: string) => Math.round((Date.parse(today) - Date.parse(due)) / dayMs);
+
   if (bulkAdding) {
     return (
       <>
@@ -454,10 +571,40 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
         </details>
       )}
 
-      <DocToolbar base={BASE} params={sp} statuses={STATUSES} exportName="فواتير-المبيعات" count={summary.n} />
-      <div className="mb-2 flex justify-end">
-        <BulkPdfButton kind="invoices" ids={invoices.map((x) => x.i.id)} />
-      </div>
+      <StatusTabs
+        label="حالة الفواتير"
+        tabs={INV_TABS.map((t, k) => ({
+          key: t.key,
+          label: t.label,
+          href: listUrl({ status: t.status, pay: t.pay, open: undefined, page: undefined }),
+          count: tabCounts[k],
+          attn: t.attn,
+          active: (sp.status ?? undefined) === t.status && (sp.pay ?? undefined) === t.pay,
+        }))}
+        summary={
+          summary.n > 0 ? (
+            <>
+              الإجمالي <b className="ltr-nums font-display text-sm font-semibold text-asphalt-900">{fmt(summary.total)}</b> · المتبقي{" "}
+              <b className="ltr-nums font-display text-sm font-semibold text-asphalt-900">{fmt(summary.due)}</b>
+            </>
+          ) : null
+        }
+      />
+      <DocToolbar
+        base={BASE}
+        params={sp}
+        statuses={{}}
+        pay={false}
+        exportName="فواتير-المبيعات"
+        count={summary.n}
+        extra={
+          view !== "sheet" && invoices.length > 0 ? (
+            <span className="max-md:hidden">
+              <BulkPdfButton kind="invoices" ids={invoices.map((x) => x.i.id)} />
+            </span>
+          ) : null
+        }
+      />
 
       {view === "sheet" ? (
         <>
@@ -509,117 +656,18 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
         />
           <Pager page={page} size={PAGE_SIZE} total={summary.n} hrefFor={(p) => listUrl({ page: p > 1 ? String(p) : undefined })} />
         </>
-      ) : openDoc ? (
-        <>
-        {mobileList}
-        {mobileSheet}
-        <div className="grid items-start gap-4 max-md:hidden lg:grid-cols-[minmax(17rem,22rem)_1fr]">
-          {/* القائمة المختصرة بجانب المعاينة */}
-          <ul className="hidden max-h-[calc(100vh-9rem)] lg:block divide-y divide-gray-100 overflow-y-auto rounded-2xl border border-black/[0.06] bg-white shadow-sm print:hidden lg:sticky lg:top-4">
-            {invoices.map(({ i, customer }) => {
-              const st = state(i);
-              const active = i.id === openId;
-              return (
-                <li key={i.id}>
-                  <Link
-                    href={listHref(BASE, sp, { open: String(i.id) })}
-                    scroll={false}
-                    className={`block border-s-4 px-4 py-3 transition ${active ? "border-brand-500 bg-brand-50/70" : "border-transparent hover:bg-gray-50"}`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="line-clamp-1 text-sm font-semibold text-gray-800">{customer}</span>
-                      <span className="ltr-nums shrink-0 text-sm font-semibold text-brand-900">{fmt(st.total)}</span>
-                    </div>
-                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
-                      <span className="ltr-nums whitespace-nowrap">{i.number}</span>
-                      <span className="text-gray-300">|</span>
-                      <span className="ltr-nums whitespace-nowrap">{i.invoiceDate}</span>
-                      <span className="ms-auto flex gap-1">
-                        <Badge tone={INVOICE_STATUS[i.status].tone}>{INVOICE_STATUS[i.status].label}</Badge>
-                        {st.pay && <Badge tone={st.pay.tone}>{st.pay.label}</Badge>}
-                      </span>
-                    </div>
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-
-          <section className="animate-flyout min-w-0 rounded-2xl bg-gray-100/70 shadow-inner">
-            <div className="flex flex-wrap items-center gap-3 rounded-t-2xl border-b border-gray-200 bg-white px-5 py-3">
-              <Link href={listHref(BASE, sp, { open: undefined })} scroll={false} aria-label="إغلاق المعاينة" className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100">
-                <Icon name="close" className="size-4" />
-              </Link>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-display text-lg font-semibold text-brand-900">
-                    فاتورة <span className="ltr-nums">{openDoc.i.number}</span>
-                  </span>
-                  <Badge tone={INVOICE_STATUS[openDoc.i.status].tone}>{INVOICE_STATUS[openDoc.i.status].label}</Badge>
-                  {openDoc.trips.length > 0 && (
-                    <Badge tone={openDoc.trips.every((w) => w.sentAt) ? "blue" : openDoc.trips.some((w) => w.sentAt) ? "amber" : "gray"}>
-                      {openDoc.trips.every((w) => w.sentAt) ? "✓ أُرسلت للسائق" : openDoc.trips.some((w) => w.sentAt) ? `أُرسلت ${openDoc.trips.filter((w) => w.sentAt).length} من ${openDoc.trips.length} للسائق` : "لم تُرسل للسائق"}
-                    </Badge>
-                  )}
-                </div>
-                <div className="text-xs text-gray-500">
-                  {openDoc.customer.nameAr}
-                  {openDoc.i.status === "issued" && ` · ${ZATCA_STATUS[openDoc.i.zatcaStatus]}`}
-                </div>
-              </div>
-              <div className="ms-auto flex flex-wrap items-center gap-2">
-                {openDoc.i.status !== "draft" && <SendDocument kind="invoices" id={openDoc.i.id} label={`فاتورة ضريبية رقم ${openDoc.i.number}`} company={company.nameAr} phone={openDoc.customer.mobile} email={openDoc.customer.email} />}
-                <Link href={`/invoices/${openDoc.i.id}?print=1`} target="_blank" className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
-                  طباعة
-                </Link>
-                {openDoc.i.status === "draft" && canUpdate ? (
-                  <Link href={withParam(listUrl({ open: String(openDoc.i.id) }), "edit", String(openDoc.i.id))} scroll={false} className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
-                    تعديل
-                  </Link>
-                ) : (
-                  <Link href={`/invoices/${openDoc.i.id}`} className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
-                    فتح الفاتورة
-                  </Link>
-                )}
-                {openDoc.i.status === "issued" && Number(openDoc.i.paidAmount) < Number(openDoc.i.total) && canReceive && (
-                  <Link href={`/receipts/new?customer=${openDoc.i.customerId}&invoice=${openDoc.i.id}`} className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-brand-900 shadow-sm hover:bg-brand-500">
-                    تسجيل دفعة
-                  </Link>
-                )}
-                {openDoc.i.status === "issued" && can(user.perms, "sales_invoices", "create") && (
-                  <Link href={`/notes/sales/new?kind=sales_credit&party=${openDoc.i.customerId}&invoice=${openDoc.i.id}`} className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
-                    إشعار دائن
-                  </Link>
-                )}
-                {openDoc.i.status === "draft" && canIssue && (
-                  <ActionForm action={issue.bind(null, openDoc.i.id)} resetOnSuccess={false}>
-                    <SubmitButton>اعتماد وإصدار</SubmitButton>
-                  </ActionForm>
-                )}
-                {invoiceMenu(openDoc).length > 0 && <ActionsMenu items={invoiceMenu(openDoc)} label="العمليات" />}
-              </div>
-            </div>
-            <ReadinessBar company={company} />
-            <div className="p-4 sm:p-6">
-              <div className="mx-auto max-w-3xl">
-                {openDoc.i.status === "issued" && <ZatcaPanel doc={zatcaDoc} connected={!!zatca?.token} blocker={blocker} partyHref={`/records/parties/${openDoc.i.customerId}`} send={canIssue ? sendToZatca.bind(null, openDoc.i.id) : undefined} />}
-                <TaxInvoiceDocument company={company} invoice={openDoc.i} customer={openDoc.customer} lines={openDoc.lines} qrSvg={qrSvg} template={template} photos={openDoc.photos} compact />
-              </div>
-            </div>
-          </section>
-        </div>
-        </>
       ) : (
         <>
           {mobileList}
+          {mobileSheet}
           <div className="max-md:hidden">
           {(canIssue || canUpdate || canRevert || canDelete) && (
-            <ActionForm id={BULK_FORM} action={bulkInvoiceOps} resetOnSuccess={false} className="mb-3 rounded-2xl bg-white px-4 py-2.5 shadow-sm">
+            <ActionForm id={BULK_FORM} action={bulkInvoiceOps} resetOnSuccess={false}>
               <input type="hidden" name="op" defaultValue="" />
-              <SelectionGate form={BULK_FORM} empty={<span className="text-sm text-gray-500">حدد فاتورة أو أكثر من الجدول لتظهر العمليات: الاعتماد، والإرجاع لمسودة، والدمج، وفك الدمج، والحذف.</span>}>
-                <div className="flex flex-wrap items-center gap-2.5">
+              <SelectionGate form={BULK_FORM} empty={null}>
+                <BulkBar>
                   <SelectionTotal form={BULK_FORM} noun="فاتورة" />
-                  <span className="mx-1 h-6 w-px bg-gray-200" aria-hidden />
+                  <span className="mx-1 h-6 w-px bg-white/15" aria-hidden />
                   {canIssue && (
                     <SubmitButton op="issue" pendingLabel="جارٍ الاعتماد…" className="!py-1.5">
                       اعتماد وإصدار
@@ -634,9 +682,9 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
                     <details data-dropdown className="relative">
                       <summary className="flex cursor-pointer list-none items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
                         عمليات أخرى
-                        <span aria-hidden className="text-xs text-gray-400">▾</span>
+                        <span aria-hidden className="text-xs text-gray-400">▴</span>
                       </summary>
-                      <div className="absolute start-0 z-30 mt-1 flex w-56 flex-col rounded-xl border border-gray-200 bg-white p-1 shadow-lg">
+                      <div className="absolute start-0 bottom-full z-30 mb-2 flex w-56 flex-col rounded-xl border border-gray-200 bg-white p-1 text-gray-800 shadow-lg">
                         {canSend && (
                           <>
                             <ConfirmSubmit
@@ -703,73 +751,49 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
                       </div>
                     </details>
                   )}
-                  <span className="ms-auto">
-                    <BulkPdfButton kind="invoices" ids={invoices.map((x) => x.i.id)} />
-                  </span>
-                </div>
+                </BulkBar>
               </SelectionGate>
             </ActionForm>
           )}
-          <Table
-            head={[
-              invoices.length && (canIssue || canUpdate || canRevert || canDelete) ? <SelectAll key="all" form={BULK_FORM} /> : "",
-              "الرقم",
-              "التاريخ",
-              "الاستحقاق",
-              "العميل",
-              "الإجمالي",
-              "المتبقي",
-              "الحالة",
-              "السداد",
-              "",
-            ]}
-          >
-            {invoices.length === 0 && <EmptyRow cols={10}>{filter.q || filter.status || filter.pay || filter.from ? "لا توجد فواتير بهذه الشروط" : "لا توجد فواتير بعد"}</EmptyRow>}
+          <Table head={[invoices.length && (canIssue || canUpdate || canRevert || canDelete) ? <SelectAll key="all" form={BULK_FORM} /> : "", "الفاتورة", "العميل والاستحقاق", "المبلغ والتحصيل", "الحالة", "الخطوة التالية", ""]}>
+            {invoices.length === 0 && <EmptyRow cols={7}>{filter.q || filter.status || filter.pay || filter.from ? "لا توجد فواتير بهذه الشروط" : "لا توجد فواتير بعد"}</EmptyRow>}
             {invoices.map(({ i, customer, waybills, parts, trips, tripsSent }) => {
               const st = state(i);
               const open = listUrl({ open: String(i.id) });
+              const due = st.total - st.paid;
+              const late = st.overdue ? daysLate(i.dueDate) : 0;
+              const tone = st.pay?.tone ?? INVOICE_STATUS[i.status].tone;
               return (
-                <ClickRow key={i.id} href={open} className="transition hover:bg-brand-50/40">
+                <ClickRow key={i.id} href={open} className={`transition hover:bg-brand-50/40 ${i.id === openId ? "bg-brand-50/70" : ""}`}>
                   <Td>{(canIssue || canUpdate || canRevert || canDelete) && <RowCheck form={BULK_FORM} id={i.id} amount={i.total} />}</Td>
-                  <Td className="font-medium whitespace-nowrap">
-                    <Link href={open} scroll={false} className="ltr-nums text-brand-700 hover:underline">
-                      {i.number}
-                    </Link>
-                  </Td>
-                  <Td className="ltr-nums whitespace-nowrap">{i.invoiceDate}</Td>
-                  <Td className={`ltr-nums whitespace-nowrap ${st.overdue ? "font-semibold text-red-600" : ""}`}>{i.dueDate}</Td>
+                  <NumDateCell number={i.number} date={i.invoiceDate} href={open} />
                   <Td>
-                    <Link href={open} scroll={false} className="hover:text-brand-700">
-                      {customer}
-                    </Link>
+                    <span className="font-medium text-gray-800">{customer}</span>
+                    <Sub className={st.overdue ? "font-semibold !text-st-bad-fg" : ""}>
+                      {i.status === "draft" ? (waybills > 0 ? (waybills === 1 ? "شحنة واحدة" : `${waybills} شحنات`) : "دون شحنة") : st.overdue ? `متأخرة ${late} يوم · استحقت ${fmtDate(i.dueDate)}` : due > 0.005 ? `تستحق ${fmtDate(i.dueDate)}` : "مسددة"}
+                    </Sub>
                   </Td>
-                  <Td className="ltr-nums font-semibold whitespace-nowrap">
-                    {fmt(st.total)} <span className="text-xs font-normal text-gray-400">{i.currencyCode}</span>
+                  <Td className="whitespace-nowrap">
+                    <span className="ltr-nums font-display font-semibold text-asphalt-900">{fmt(st.total)}</span> <span className="text-xs text-gray-400">{i.currencyCode}</span>
+                    {i.status === "issued" && (
+                      <>
+                        <PaidBar total={st.total} paid={st.paid} />
+                        <Sub>{due > 0.005 ? <>باقي <span className="ltr-nums">{fmt(due)}</span></> : "حُصّلت كاملة"}</Sub>
+                      </>
+                    )}
                   </Td>
-                  <Td className="ltr-nums">{fmt(st.total - st.paid)}</Td>
-                  <Td>
-                    <Badge tone={INVOICE_STATUS[i.status].tone}>{INVOICE_STATUS[i.status].label}</Badge>
-                    {parts > 1 && i.status === "draft" && <span className="mt-0.5 block text-xs whitespace-nowrap text-sky-700">مدمجة{waybills > 1 ? ` · ${waybills} شحنات` : ""}</span>}
+                  <StatusCell status={INVOICE_STATUS[i.status]} sub={st.pay ? st.pay.label : parts > 1 && i.status === "draft" ? `مدمجة${waybills > 1 ? ` · ${waybills} شحنات` : ""}` : null}>
                     <DriverSentTag fleet={trips > 0} sentAt={tripsSent > 0 ? "1" : null} partial={tripsSent > 0 && tripsSent < trips ? `أُرسلت ${tripsSent} من ${trips} رحلات للسائق` : undefined} />
-                  </Td>
-                  <Td>{st.pay ? <Badge tone={st.pay.tone}>{st.pay.label}</Badge> : "—"}</Td>
-                  <Td>
-                    <Link href={open} scroll={false} aria-label="معاينة" className="inline-flex rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-brand-700">
-                      <Icon name="expand" className="size-4" />
-                    </Link>
-                  </Td>
+                  </StatusCell>
+                  <NextStepCell {...rowNext(i, st)} />
+                  <EdgeCell tone={tone} />
                 </ClickRow>
               );
             })}
           </Table>
           <Pager page={page} size={PAGE_SIZE} total={summary.n} hrefFor={(p) => listUrl({ page: p > 1 ? String(p) : undefined, open: undefined })} />
           </div>
-          {summary.n > 0 && (
-            <p className="mt-3 text-xs text-gray-500">
-              إجمالي الفواتير بهذه الشروط <span className="ltr-nums font-semibold text-gray-700">{fmt(summary.total)}</span> ريال، والمتبقي منه{" "}
-              <span className="ltr-nums font-semibold text-gray-700">{fmt(summary.due)}</span> ريال.
-            </p>
-          )}
+          {deskDrawer}
         </>
       )}
 

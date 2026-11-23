@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { fmtDate } from "@/lib/format";
 import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
@@ -150,8 +151,8 @@ export default async function LeavesPage({ searchParams }: { searchParams: Promi
                   {type}
                   {!paid && <div className="text-xs text-red-600">تُخصم من الراتب</div>}
                 </Td>
-                <Td className="ltr-nums whitespace-nowrap">{l.fromDate}</Td>
-                <Td className="ltr-nums whitespace-nowrap">{l.toDate}</Td>
+                <Td className="ltr-nums whitespace-nowrap">{fmtDate(l.fromDate)}</Td>
+                <Td className="ltr-nums whitespace-nowrap">{fmtDate(l.toDate)}</Td>
                 <Td className="ltr-nums font-semibold">{l.days}</Td>
                 <Td>
                   {l.reason}

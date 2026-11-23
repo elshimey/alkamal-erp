@@ -303,7 +303,7 @@ export default async function CustodyPage({ searchParams }: { searchParams: Prom
                 </Link>
                 {c.isOpening && <div className="text-xs font-normal text-gray-400">افتتاحية</div>}
               </Td>
-              <Td className="ltr-nums whitespace-nowrap">{c.docDate}</Td>
+              <Td className="ltr-nums whitespace-nowrap">{fmtDate(c.docDate)}</Td>
               <Td className="font-medium">
                 {employee}
                 <div className="text-xs font-normal text-gray-500">{isDriver ? "سائق" : "إداري"}</div>
@@ -321,7 +321,7 @@ export default async function CustodyPage({ searchParams }: { searchParams: Prom
               </Td>
               <Td>
                 <Badge tone={CUSTODY_STATUS[c.status].tone}>{CUSTODY_STATUS[c.status].label}</Badge>
-                {c.closeDate && <div className="ltr-nums text-[11px] text-gray-400">{c.closeDate}</div>}
+                {c.closeDate && <div className="ltr-nums text-[11px] text-gray-400">{fmtDate(c.closeDate)}</div>}
               </Td>
               <Td>
                 <Link href={href} scroll={false} aria-label="معاينة" className="inline-flex rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-brand-700">

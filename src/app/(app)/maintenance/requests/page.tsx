@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { fmtDate } from "@/lib/format";
 import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
 import { can } from "@/lib/permissions";
@@ -215,7 +216,7 @@ export default async function BreakdownRequestsPage({ searchParams }: { searchPa
                   {r.number}
                 </Link>
               </Td>
-              <Td className="ltr-nums whitespace-nowrap">{r.reportDate}</Td>
+              <Td className="ltr-nums whitespace-nowrap">{fmtDate(r.reportDate)}</Td>
               <Td className="font-medium">
                 {plate}
                 {driver && <div className="text-xs font-normal text-gray-500">{driver}</div>}

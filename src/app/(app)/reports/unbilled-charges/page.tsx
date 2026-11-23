@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { fmtDate } from "@/lib/format";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
@@ -46,7 +47,7 @@ export default async function UnbilledChargesReport() {
                 {r.waybill}
               </Link>
             </C>
-            <C className="ltr-nums">{r.waybillDate}</C>
+            <C className="ltr-nums">{fmtDate(r.waybillDate)}</C>
             <C>{r.status ? (WAYBILL_STATUS[r.status]?.label ?? r.status) : "فاتورة مباشرة"}</C>
             <C>
               {r.type}
