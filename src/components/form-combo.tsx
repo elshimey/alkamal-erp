@@ -19,6 +19,7 @@ export function FormCombo({
   onChange,
   autoVehicle,
   keepOnReset,
+  moreOptions,
 }: {
   name: string;
   options: QuickOption[];
@@ -32,6 +33,8 @@ export function FormCombo({
   autoVehicle?: AutoVehicle;
   /** تبقى القيمة المختارة بعد الحفظ وتفريغ النموذج (فئة الأصل عند إدخال أصول متتالية) */
   keepOnReset?: boolean;
+  /** باقي الشجرة: بند «عرض كل الشجرة» داخل القائمة */
+  moreOptions?: QuickOption[];
 }) {
   const [value, setValue] = useState(defaultValue);
   const hidden = useRef<HTMLInputElement>(null);
@@ -59,6 +62,7 @@ export function FormCombo({
       <ComboBox
         value={value}
         options={options}
+        moreOptions={moreOptions}
         create={create}
         scope={scope}
         placeholder={placeholder}
