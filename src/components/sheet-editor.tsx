@@ -1,5 +1,6 @@
 "use client";
 
+import { MsgText } from "@/components/msg-text";
 // شيت إدخال على طريقة وافق: تكتب الصفوف مباشرة أو تلصقها من Excel، ثم تحفظ الكل دفعة واحدة.
 // الصفوف المحفوظة تُزال، والصفوف المرفوضة تبقى مع سبب الرفض لتصحيحها.
 
@@ -155,12 +156,12 @@ export function SheetEditor({
         <ul className="list-inside list-disc rounded-lg bg-red-50 px-4 py-2 text-sm text-red-700">
           {Object.entries(errors).map(([r, e]) => (
             <li key={r}>
-              الصف {Number(r) + 1}: {e}
+              الصف {Number(r) + 1}: <MsgText text={e} />
             </li>
           ))}
         </ul>
       )}
-      {message.error && Object.keys(errors).length === 0 && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{message.error}</p>}
+      {message.error && Object.keys(errors).length === 0 && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700"><MsgText text={message.error} /></p>}
       {message.ok && <p className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-800">{message.ok}</p>}
     </div>
   );

@@ -1,5 +1,6 @@
 "use client";
 
+import { MsgText } from "@/components/msg-text";
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import type { FormState } from "@/components/action-form";
@@ -152,7 +153,7 @@ export function ReconcileTable(props: { id: number; editable: boolean; statement
           {!balanced && <span className="text-xs text-gray-500">يكتمل حين يصبح الفرق صفراً</span>}
         </div>
       )}
-      {state?.error && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{state.error}</p>}
+      {state?.error && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700"><MsgText text={state.error} /></p>}
       {state?.ok && <p className="mt-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-800">{state.ok}</p>}
     </>
   );

@@ -1,5 +1,6 @@
 "use client";
 
+import { MsgText } from "@/components/msg-text";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { applyAdvanceAction } from "../../actions";
@@ -42,7 +43,7 @@ export function ApplyForm({ receiptId, remaining, invoices, today, minDate, post
   if (!posted) return <p className="rounded-xl bg-amber-50 p-4 text-sm text-amber-800">رحّل الدفعة المقدمة أولاً ثم طبّقها على الفواتير.</p>;
   return (
     <div className="max-w-3xl rounded-2xl border border-black/[0.06] bg-white p-5 shadow-sm">
-      {error && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">{error}</div>}
+      {error && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800"><MsgText text={error} /></div>}
       <div className="mb-3 flex flex-wrap items-center gap-3 text-sm">
         <label className="flex items-center gap-2">
           تاريخ التطبيق

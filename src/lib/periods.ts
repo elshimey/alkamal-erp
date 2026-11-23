@@ -61,7 +61,7 @@ export async function setPeriodStatus(db: Db, id: number, status: "open" | "clos
       .select({ id: s.journalEntries.id })
       .from(s.journalEntries)
       .where(and(eq(s.journalEntries.sourceType, YEAR_CLOSE_SOURCE), eq(s.journalEntries.sourceId, p.year)));
-    if (closing) throw new Error(`السنة ${p.year} مقفلة بقيد إقفال؛ ألغِ إقفال السنة أولاً`);
+    if (closing) throw new Error(`السنة ${p.year} مقفلة بقيد إقفال؛ ألغِ إقفال السنة من «الفترات والإقفال» أولاً`);
   }
   await db
     .update(s.fiscalPeriods)
@@ -95,7 +95,7 @@ export async function closeYear(db: Db, year: number, userId?: number) {
     const periods = await tx.select().from(s.fiscalPeriods).where(eq(s.fiscalPeriods.year, year)).for("update");
     if (periods.length !== 12) throw new Error(`أشهر السنة ${year} غير مكتملة`);
     const dec = periods.find((p) => p.month === 12)!;
-    if (dec.status === "closed") throw new Error("افتح شهر ديسمبر ليُرحّل فيه قيد الإقفال");
+    if (dec.status === "closed") throw new Error("افتح شهر ديسمبر من «الفترات والإقفال» ليُرحّل فيه قيد الإقفال");
     const [drafts] = (await tx.execute(sql`
       select count(*)::int as n from journal_entries
       where status = 'draft' and entry_date between ${`${year}-01-01`} and ${`${year}-12-31`}`)) as unknown as { n: number }[];

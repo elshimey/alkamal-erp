@@ -1,5 +1,6 @@
 "use client";
 
+import { MsgText } from "@/components/msg-text";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import type { ReceiptKind } from "@/lib/receipts";
@@ -185,7 +186,7 @@ export function ReceiptForm({
         </div>
       </div>
 
-      {error && <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>}
+      {error && <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"><MsgText text={error} /></div>}
 
       <section className="rounded-2xl border border-black/[0.06] bg-white shadow-sm">
         <div className="flex items-center justify-between rounded-t-2xl bg-gray-50 px-5 py-2.5 text-sm">

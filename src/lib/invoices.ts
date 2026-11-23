@@ -822,7 +822,10 @@ export async function removeInvoiceLine(db: Db, invoiceId: number, lineId: numbe
   });
 }
 
-export const PENDING_CHARGES_MESSAGE = "مصاريف على العميل لم تُعتمد بعد؛ اعتمدها من «سندات صرف تحت المراجعة» ثم أصدر الفاتورة";
+export const PENDING_CHARGES_MESSAGE = "مصاريف على العميل لم تُعتمد بعد";
+/** رسالة منع الإصدار برابط «سندات صرف تحت المراجعة» مصفّاة على الفاتورة، وزر العودة لها (`msgSegments`) */
+const pendingChargesMessage = (invoiceId: number, labels: string[]) =>
+  `${PENDING_CHARGES_MESSAGE}: ${labels.join("، ")}. اعتمدها من [سندات صرف تحت المراجعة](/payments/review?tab=charges&invoice=${invoiceId}&back=${encodeURIComponent(`/invoices/${invoiceId}`)}) ثم أصدر الفاتورة`;
 
 /** مصاريف الفاتورة «لم يُدفع بعد» التي لم تُعتمد (تمنع الإصدار). */
 export async function pendingInvoiceCharges(db: Db | Tx, invoiceId: number) {
@@ -849,7 +852,7 @@ export async function issueInvoice(db: Db, invoiceId: number, userId?: number) {
     if (!lines.length || !(num(inv.total) > 0)) throw new Error("الفاتورة فارغة أو مبلغها صفر");
     // مصروف على العميل «لم يُدفع بعد» يُعتمد أولاً (قيد التزامه على 1114)، وإلا أقفل الإصدار 1114 دون مقابل
     const pendingCharges = await pendingInvoiceCharges(tx, invoiceId);
-    if (pendingCharges.length) throw new Error(`${PENDING_CHARGES_MESSAGE}: ${pendingCharges.map((c) => c.label).join("، ")}`);
+    if (pendingCharges.length) throw new Error(pendingChargesMessage(invoiceId, pendingCharges.map((c) => c.label)));
     const waybillIds = [...new Set(lines.map((l) => l.waybillId).filter((v): v is number => v != null))];
     const locked = await tx.select({ id: s.waybills.id, number: s.waybills.number, status: s.waybills.status }).from(s.waybills).where(inArray(s.waybills.id, waybillIds)).for("update");
     const notApproved = locked.filter((w) => w.status !== "approved");

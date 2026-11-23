@@ -1,5 +1,7 @@
 "use client";
 
+import { toast } from "./toast";
+import { MsgText } from "./msg-text";
 import Link from "next/link";
 import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -28,20 +30,13 @@ export interface MenuItem {
   disabled?: string | false;
 }
 
-function toast(message: string, error = false) {
-  const el = document.createElement("div");
-  el.setAttribute("role", error ? "alert" : "status");
-  el.textContent = message;
-  el.className = `fixed bottom-20 left-1/2 z-[95] max-w-[90vw] -translate-x-1/2 rounded-xl px-4 py-2.5 text-sm whitespace-pre-line text-white shadow-xl sm:bottom-6 ${error ? "bg-red-700" : "bg-asphalt-900"}`;
-  document.body.appendChild(el);
-  setTimeout(() => el.remove(), error ? 6000 : 3500);
-}
-
 /** تنفيذ عنصر عمليات: التأكيد في نافذة البرنامج إن طُلب، ثم الإجراء ورسالته. يشترك فيه القائمة وزر الإجراء الواحد. */
 function useMenuRunner() {
   const [confirming, setConfirming] = useState<MenuItem | null>(null);
   const [pending, start] = useTransition();
   const dialog = useRef<HTMLDialogElement>(null);
+  // خطأ الإجراء من نافذة التأكيد يظهر داخلها: الرسالة أسفل الشاشة تكون تحت النافذة فلا يُضغط رابطها
+  const [dialogError, setDialogError] = useState("");
 
   useEffect(() => {
     if (confirming) dialog.current?.showModal();
@@ -50,8 +45,10 @@ function useMenuRunner() {
   const run = (item: MenuItem, data = new FormData()) =>
     start(async () => {
       const res = await item.action!(data);
-      if (res?.error) toast(res.error, true);
-      else {
+      if (res?.error) {
+        if (dialog.current?.open) setDialogError(res.error);
+        else toast(res.error, true);
+      } else {
         if (res?.ok) toast(res.ok);
         setConfirming(null);
         dialog.current?.close();
@@ -74,7 +71,10 @@ function useMenuRunner() {
       return;
     }
     if (!item.action) return;
-    if (item.confirm) setConfirming(item);
+    if (item.confirm) {
+      setDialogError("");
+      setConfirming(item);
+    }
     else run(item);
   };
 
@@ -102,6 +102,11 @@ function useMenuRunner() {
           </div>
           {confirming.confirm!.text && <p className="text-sm text-gray-600">{confirming.confirm!.text}</p>}
           {confirming.confirm!.fields && <div className="mt-3 space-y-3">{confirming.confirm!.fields}</div>}
+          {dialogError && (
+            <p role="alert" className="shake mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm whitespace-pre-line text-red-700">
+              <MsgText text={dialogError} />
+            </p>
+          )}
           <div className="mt-5 flex justify-end gap-2 border-t border-gray-100 pt-3">
             <button type="button" onClick={() => dialog.current?.close()} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
               إلغاء
