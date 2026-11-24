@@ -11,12 +11,13 @@ import { HandoverForm } from "./handover-form";
 import { HandoverDocument } from "@/components/handover-document";
 import { Icon } from "@/components/icons";
 import { getCompany, getInvoiceTemplate } from "@/lib/company";
-import { handoverByAssignment, handoverDoc, handoverItemNames, itemsOfAssignment } from "@/lib/handovers";
+import { handoverByAssignment, handoverDoc, handoverForEdit, handoverItemNames, itemsOfAssignment, type HandoverTarget } from "@/lib/handovers";
 import { HANDOVER_KIND } from "@/data/handovers";
 import { DocCards, sheetBtn, sheetPrimary } from "@/components/doc-card";
 import { RecordCardFace, TapCard, cardShell } from "@/components/list-card";
 import { fmtDate } from "@/lib/format";
-import { saveHandoverAction } from "./actions";
+import { saveHandoverAction, saveHandoverEditAction } from "./actions";
+import { HandoverEditForm } from "./handover-edit-form";
 
 const baseQuery = () =>
   db
@@ -26,7 +27,7 @@ const baseQuery = () =>
     .innerJoin(s.drivers, eq(s.drivers.id, s.vehicleAssignments.driverId))
     .innerJoin(s.employees, eq(s.employees.id, s.drivers.employeeId));
 
-export default async function AssignmentsPage({ searchParams }: { searchParams: Promise<{ new?: string; release?: string; handover?: string; doc?: string }> }) {
+export default async function AssignmentsPage({ searchParams }: { searchParams: Promise<{ new?: string; release?: string; handover?: string; doc?: string; edit?: string; prep?: string; side?: string }> }) {
   const user = await requirePermission("vehicles", "view");
   const canEdit = can(user.perms, "vehicles", "update");
   const today = todayRiyadh();
@@ -77,6 +78,46 @@ export default async function AssignmentsPage({ searchParams }: { searchParams: 
         ),
       }
     : null;
+  // تعديل محضر أو إنشاء محضر لإسناد سابق (سُجّل قبل المحاضر)
+  const editTarget: HandoverTarget | null = !canEdit
+    ? null
+    : sp.edit
+      ? { docId: Number(sp.edit) }
+      : sp.prep
+        ? { assignmentId: Number(sp.prep), side: sp.side === "closed" ? "closed" : "opened" }
+        : null;
+  const editDoc = editTarget ? await handoverForEdit(db, editTarget).catch(() => null) : null;
+  const editData = editDoc
+    ? {
+        itemNames: await handoverItemNames(db),
+        drivers: await db
+          .select({ id: s.drivers.id, name: s.employees.nameAr, nid: s.employees.nationalId, status: s.drivers.status })
+          .from(s.drivers)
+          .innerJoin(s.employees, eq(s.employees.id, s.drivers.employeeId))
+          .orderBy(asc(s.employees.nameAr)),
+      }
+    : null;
+  const editLink = (href: string, label: string) => (
+    <Link href={href} scroll={false} prefetch={false} className="text-xs text-gray-500 hover:text-brand-800 hover:underline">
+      {label}
+    </Link>
+  );
+  /** خانة المحضر في الصف: رقمه للطباعة و«تعديل»، أو «إنشاء المحضر» لإسناد سابق */
+  const docCell = (d: { id: number; number: string } | undefined, assignmentId: number, side: "opened" | "closed", label?: string) =>
+    d ? (
+      <span className="flex flex-wrap items-center gap-x-2">
+        {label && <span className="text-xs text-gray-400">{label}</span>}
+        {printLink(d.id, d.number)}
+        {canEdit && editLink(`/assignments?edit=${d.id}`, "تعديل")}
+      </span>
+    ) : canEdit ? (
+      <Link href={`/assignments?prep=${assignmentId}&side=${side}`} scroll={false} prefetch={false} className="inline-flex items-center gap-1 text-sm text-gray-600 hover:text-brand-800 hover:underline">
+        <Icon name="document" className="size-3.5" />
+        {label ? `${label}: إنشاء المحضر` : "إنشاء المحضر"}
+      </Link>
+    ) : (
+      <span className="text-gray-400">—</span>
+    );
   const printLink = (id: number, label: string) => (
     <Link href={`/assignments?doc=${id}`} scroll={false} prefetch={false} className="inline-flex items-center gap-1 text-sm text-brand-800 hover:underline">
       <Icon name="document" className="size-3.5" />
@@ -98,6 +139,11 @@ export default async function AssignmentsPage({ searchParams }: { searchParams: 
             <span className="ltr-nums font-display text-lg font-semibold text-brand-900">{openDoc.h.number}</span>
             <span className="text-sm text-gray-500">{HANDOVER_KIND[openDoc.h.kind].title} · {openDoc.plate}</span>
             <div className="ms-auto flex flex-wrap items-center gap-2">
+              {canEdit && (
+                <Link href={`/assignments?edit=${openDoc.h.id}`} scroll={false} className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
+                  تعديل المحضر
+                </Link>
+              )}
               <Link href={`/print/handovers?ids=${openDoc.h.id}&print=1`} target="_blank" className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-brand-900 shadow-sm hover:bg-brand-500">
                 طباعة المحضر
               </Link>
@@ -144,9 +190,18 @@ export default async function AssignmentsPage({ searchParams }: { searchParams: 
                     <Link href={`/assignments?release=${a.id}`} scroll={false} className={sheetBtn}>
                       تسليم للشركة
                     </Link>
-                    {docs.opened.get(a.id) && (
-                      <Link href={`/assignments?doc=${docs.opened.get(a.id)!.id}`} scroll={false} className={sheetBtn}>
-                        طباعة المحضر
+                    {docs.opened.get(a.id) ? (
+                      <>
+                        <Link href={`/assignments?doc=${docs.opened.get(a.id)!.id}`} scroll={false} className={sheetBtn}>
+                          طباعة المحضر
+                        </Link>
+                        <Link href={`/assignments?edit=${docs.opened.get(a.id)!.id}`} scroll={false} className={sheetBtn}>
+                          تعديل المحضر
+                        </Link>
+                      </>
+                    ) : (
+                      <Link href={`/assignments?prep=${a.id}&side=opened`} scroll={false} className={sheetBtn}>
+                        إنشاء محضر الاستلام
                       </Link>
                     )}
                   </>
@@ -165,7 +220,7 @@ export default async function AssignmentsPage({ searchParams }: { searchParams: 
             <Td>{driver}</Td>
             <Td className="ltr-nums">{fmtDate(a.fromDate)}</Td>
             <Td className="ltr-nums">{a.odometerStart?.toLocaleString("en") ?? "—"}</Td>
-            <Td>{docs.opened.get(a.id) ? printLink(docs.opened.get(a.id)!.id, docs.opened.get(a.id)!.number) : <span className="text-gray-400">—</span>}</Td>
+            <Td>{docCell(docs.opened.get(a.id), a.id, "opened")}</Td>
             <Td>
               {canEdit && (
                 <span className="flex flex-wrap gap-2">
@@ -194,7 +249,8 @@ export default async function AssignmentsPage({ searchParams }: { searchParams: 
                 ["الفترة", <span key="p" className="ltr-nums">{fmtDate(a.fromDate)} – {a.toDate ? fmtDate(a.toDate) : ""}</span>],
                 ["الكيلومترات", a.odometerEnd != null && a.odometerStart != null ? (a.odometerEnd - a.odometerStart).toLocaleString("en") : "—"],
                 ...(a.notes ? ([["ملاحظات", a.notes]] as [string, string][]) : []),
-                ...(docs.closed.get(a.id) ? ([["محضر التسليم", <Link key="d" href={`/assignments?doc=${docs.closed.get(a.id)!.id}`} className="ltr-nums text-brand-800 underline">{docs.closed.get(a.id)!.number}</Link>]] as [string, React.ReactNode][]) : []),
+                ["محضر الاستلام", docCell(docs.opened.get(a.id), a.id, "opened")],
+                ["محضر التسليم", docCell(docs.closed.get(a.id), a.id, "closed")],
               ]}
             />
           </div>
@@ -215,8 +271,8 @@ export default async function AssignmentsPage({ searchParams }: { searchParams: 
             <Td className="text-xs text-gray-500">{a.notes ?? ""}</Td>
             <Td>
               <span className="flex flex-col gap-1">
-                {docs.opened.get(a.id) && printLink(docs.opened.get(a.id)!.id, docs.opened.get(a.id)!.number)}
-                {docs.closed.get(a.id) && printLink(docs.closed.get(a.id)!.id, docs.closed.get(a.id)!.number)}
+                {docCell(docs.opened.get(a.id), a.id, "opened", "الاستلام")}
+                {docCell(docs.closed.get(a.id), a.id, "closed", "التسليم")}
               </span>
             </Td>
           </tr>
@@ -224,6 +280,21 @@ export default async function AssignmentsPage({ searchParams }: { searchParams: 
       </Table>
       </div>
 
+      {editTarget && editDoc && editData && (
+        <HandoverEditForm
+          key={"docId" in editTarget ? `e${editTarget.docId}` : `p${editTarget.assignmentId}-${editTarget.side}`}
+          action={saveHandoverEditAction.bind(null, editTarget)}
+          closeHref="/assignments"
+          doc={editDoc}
+          isNew={editDoc.h.id === 0}
+          drivers={editData.drivers.filter((d) => d.status === "active" || d.id === editDoc.h.toDriverId).map((d) => ({ value: String(d.id), label: d.name }))}
+          driverIds={Object.fromEntries(editData.drivers.map((d) => [String(d.id), d.nid]))}
+          itemNames={editData.itemNames}
+          rep={user.name}
+          company={company}
+          template={template}
+        />
+      )}
       {formKind && formData && (
         <HandoverForm
           key={`${formKind}-${releasing?.a.id ?? handing?.a.id ?? 0}`}

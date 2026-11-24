@@ -1,4 +1,4 @@
-import { asc, desc, eq, inArray, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, ne, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { Db, Tx } from "@/db";
 import * as s from "@/db/schema";
@@ -120,6 +120,186 @@ export async function createHandover(db: Db | Tx, input: HandoverInput, opts: { 
   });
 }
 
+export type HandoverTarget = { docId: number } | { assignmentId: number; side: "opened" | "closed" };
+
+export interface HandoverEditInput {
+  /** السائق المستلم (الاستلام ولسائق آخر)؛ فارغ = كما هو */
+  driverId?: number | null;
+  date: string;
+  odometer?: number | null;
+  fuelLevel?: FuelLevel | null;
+  condition?: "good" | "notes" | null;
+  companyRep?: string | null;
+  notes?: string | null;
+  items?: HandoverItemInput[];
+  userId?: number;
+}
+
+/**
+ * هيكل محضر لإسناد سُجّل قبل المحاضر (أو المحضر الموجود له): «opened» = محضر الاستلام الذي بدأه
+ * (لسائق آخر إن انتهى إسناد سابق للمركبة في اليوم نفسه)، و«closed» = محضر التسليم الذي أنهاه
+ * (لسائق آخر إن بدأ بعده إسناد للمركبة في اليوم نفسه). لا يغيّر شيئاً.
+ */
+export async function handoverDraftFor(db: Db | Tx, assignmentId: number, side: "opened" | "closed") {
+  const [a] = await db.select().from(s.vehicleAssignments).where(eq(s.vehicleAssignments.id, assignmentId));
+  if (!a) throw new Error("الإسناد غير موجود");
+  if (side === "closed" && !a.toDate) throw new Error("المركبة ما زالت مسندة؛ سجّل تسليمها أولاً");
+  const linked = side === "opened" ? eq(s.vehicleHandovers.assignmentId, a.id) : eq(s.vehicleHandovers.closedAssignmentId, a.id);
+  const [existing] = await db.select({ id: s.vehicleHandovers.id }).from(s.vehicleHandovers).where(linked).orderBy(desc(s.vehicleHandovers.id)).limit(1);
+  // الطرف الآخر في التسليم لسائق آخر: إسناد للمركبة نفسها ينتهي (أو يبدأ) في اليوم نفسه
+  const day = side === "opened" ? a.fromDate : a.toDate!;
+  const [other] = await db
+    .select()
+    .from(s.vehicleAssignments)
+    .where(
+      and(
+        eq(s.vehicleAssignments.vehicleId, a.vehicleId),
+        ne(s.vehicleAssignments.id, a.id),
+        side === "opened" ? eq(s.vehicleAssignments.toDate, day) : eq(s.vehicleAssignments.fromDate, day),
+      ),
+    )
+    .orderBy(desc(s.vehicleAssignments.id))
+    .limit(1);
+  const opened = side === "opened" ? a : other;
+  const closed = side === "closed" ? a : other;
+  return {
+    existingId: existing?.id ?? null,
+    kind: (other ? "transfer" : side === "opened" ? "receive" : "return") as HandoverKind,
+    vehicleId: a.vehicleId,
+    fromDriverId: closed?.driverId ?? null,
+    toDriverId: opened?.driverId ?? null,
+    date: day,
+    odometer: side === "opened" ? a.odometerStart : (a.odometerEnd ?? other?.odometerStart ?? null),
+    assignmentId: opened?.id ?? null,
+    closedAssignmentId: closed?.id ?? null,
+  };
+}
+
+/** يتأكد أن فترة الإسناد بعد التعديل لا تتداخل مع إسناد آخر للمركبة نفسها أو السائق نفسه. */
+async function assertNoOverlap(tx: Tx, id: number) {
+  const [a] = await tx.select().from(s.vehicleAssignments).where(eq(s.vehicleAssignments.id, id));
+  if (!a) return;
+  const end = a.toDate ?? "9999-12-31";
+  const [clash] = await tx
+    .select({ id: s.vehicleAssignments.id, vehicleId: s.vehicleAssignments.vehicleId })
+    .from(s.vehicleAssignments)
+    .where(
+      and(
+        ne(s.vehicleAssignments.id, a.id),
+        or(eq(s.vehicleAssignments.vehicleId, a.vehicleId), eq(s.vehicleAssignments.driverId, a.driverId)),
+        sql`${s.vehicleAssignments.fromDate} < ${end}`,
+        sql`coalesce(${s.vehicleAssignments.toDate}, '9999-12-31') > ${a.fromDate}`,
+      ),
+    )
+    .limit(1);
+  if (clash) {
+    throw new Error(clash.vehicleId === a.vehicleId ? "التاريخ يتداخل مع إسناد آخر لهذه المركبة في السجل" : "التاريخ يتداخل مع إسناد آخر لهذا السائق في السجل");
+  }
+}
+
+/**
+ * تعديل محضر أو إنشاء محضر لإسناد قديم ثم طباعته (طلب أحمد 2026-11-24): التاريخ والعداد يُعدَّلان في
+ * الإسناد نفسه (بداية المفتوح ونهاية المغلق)، والسائق المستلم في الإسناد الذي بدأه المحضر، والباقي في المحضر.
+ * النوع والمركبة ثابتان. لا يتداخل الإسناد مع غيره بعد التعديل.
+ */
+export async function saveHandoverEdit(db: Db | Tx, target: HandoverTarget, input: HandoverEditInput) {
+  const items = cleanHandoverItems(input.items);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) throw new Error("أدخل التاريخ");
+  return db.transaction(async (tx) => {
+    let base: {
+      existingId: number | null;
+      kind: HandoverKind;
+      vehicleId: number;
+      fromDriverId: number | null;
+      toDriverId: number | null;
+      assignmentId: number | null;
+      closedAssignmentId: number | null;
+    };
+    if ("docId" in target) {
+      const [h] = await tx.select().from(s.vehicleHandovers).where(eq(s.vehicleHandovers.id, target.docId)).for("update");
+      if (!h) throw new Error("المحضر غير موجود");
+      base = { existingId: h.id, ...h };
+    } else {
+      base = await handoverDraftFor(tx, target.assignmentId, target.side);
+    }
+    const odometer = input.odometer ?? null;
+    let toDriverId = base.toDriverId;
+    if (base.assignmentId) {
+      const [a] = await tx.select().from(s.vehicleAssignments).where(eq(s.vehicleAssignments.id, base.assignmentId));
+      if (input.driverId && input.driverId !== a.driverId) {
+        if (input.driverId === base.fromDriverId) throw new Error("السائق المستلم هو نفسه المسلِّم");
+        const [d] = await tx.select({ status: s.drivers.status }).from(s.drivers).where(eq(s.drivers.id, input.driverId));
+        if (!d) throw new Error("السائق غير موجود");
+        if (!a.toDate) {
+          const [busy] = await tx
+            .select({ id: s.vehicleAssignments.id })
+            .from(s.vehicleAssignments)
+            .where(and(eq(s.vehicleAssignments.driverId, input.driverId), sql`${s.vehicleAssignments.toDate} is null`));
+          if (busy) throw new Error("السائق مسند لمركبة أخرى؛ سجّل تسليمها أولاً");
+        }
+        toDriverId = input.driverId;
+      }
+      if (a.toDate && input.date > a.toDate) throw new Error("تاريخ الاستلام بعد تاريخ تسليم هذا الإسناد");
+      await tx
+        .update(s.vehicleAssignments)
+        .set({ fromDate: input.date, odometerStart: odometer ?? a.odometerStart, driverId: toDriverId ?? a.driverId })
+        .where(eq(s.vehicleAssignments.id, a.id));
+    }
+    if (base.closedAssignmentId) {
+      const [c] = await tx.select().from(s.vehicleAssignments).where(eq(s.vehicleAssignments.id, base.closedAssignmentId));
+      if (input.date < c.fromDate) throw new Error("تاريخ التسليم قبل تاريخ الاستلام");
+      if (odometer != null && c.odometerStart != null && odometer < c.odometerStart) throw new Error(`قراءة العداد أقل من قراءة الاستلام (${c.odometerStart})`);
+      await tx
+        .update(s.vehicleAssignments)
+        .set({ toDate: input.date, odometerEnd: odometer ?? c.odometerEnd })
+        .where(eq(s.vehicleAssignments.id, c.id));
+    }
+    for (const id of [base.assignmentId, base.closedAssignmentId]) if (id) await assertNoOverlap(tx, id);
+    if (odometer != null) {
+      await tx
+        .update(s.vehicles)
+        .set({ odometer: sql`greatest(${s.vehicles.odometer}, ${odometer})`, updatedAt: new Date() })
+        .where(eq(s.vehicles.id, base.vehicleId));
+    }
+
+    const fields = {
+      toDriverId,
+      handoverDate: input.date,
+      odometer,
+      fuelLevel: input.fuelLevel ?? null,
+      condition: input.condition ?? null,
+      companyRep: input.companyRep?.trim() || null,
+      notes: input.notes?.trim() || null,
+    };
+    let docId = base.existingId;
+    if (docId) {
+      await tx.update(s.vehicleHandovers).set(fields).where(eq(s.vehicleHandovers.id, docId));
+      await tx.delete(s.vehicleHandoverItems).where(eq(s.vehicleHandoverItems.handoverId, docId));
+    } else {
+      const number = await nextDocumentNumber(tx, "vehicle_handover", "HO", Number(input.date.slice(0, 4)));
+      const [doc] = await tx
+        .insert(s.vehicleHandovers)
+        .values({
+          number,
+          kind: base.kind,
+          vehicleId: base.vehicleId,
+          fromDriverId: base.fromDriverId,
+          assignmentId: base.assignmentId,
+          closedAssignmentId: base.closedAssignmentId,
+          createdBy: input.userId,
+          ...fields,
+        })
+        .returning();
+      docId = doc.id;
+    }
+    if (items.length) {
+      await tx.insert(s.vehicleHandoverItems).values(items.map((it, i) => ({ handoverId: docId!, lineNo: i + 1, ...it })));
+    }
+    const [doc] = await tx.select().from(s.vehicleHandovers).where(eq(s.vehicleHandovers.id, docId));
+    return doc;
+  });
+}
+
 /** العدد والأدوات التي استلمها السائق مع إسناده الحالي، لتأتي جاهزة عند تسليمه المركبة. */
 export async function itemsOfAssignment(db: Db | Tx, assignmentId: number) {
   const [doc] = await db
@@ -211,4 +391,56 @@ export async function recentHandovers(db: Db | Tx, limit = 50) {
     .leftJoin(toEmp, eq(toEmp.id, toDrv.employeeId))
     .orderBy(desc(s.vehicleHandovers.id))
     .limit(limit);
+}
+
+/** المحضر للتعديل: الموجود كما هو، أو هيكله من الإسناد القديم بالأسماء والمركبة (والأدوات من محضر استلامه عند التسليم). */
+export async function handoverForEdit(db: Db | Tx, target: HandoverTarget) {
+  if ("docId" in target) return handoverDoc(db, target.docId);
+  const d = await handoverDraftFor(db, target.assignmentId, target.side);
+  if (d.existingId) return handoverDoc(db, d.existingId);
+  const [v] = await db
+    .select({ plate: s.vehicles.plate, make: s.vehicles.make, model: s.vehicles.model, year: s.vehicles.year, chassis: s.vehicles.chassis })
+    .from(s.vehicles)
+    .where(eq(s.vehicles.id, d.vehicleId));
+  const person = async (driverId: number | null) => {
+    if (!driverId) return { name: null, nid: null };
+    const [p] = await db
+      .select({ name: s.employees.nameAr, nid: s.employees.nationalId })
+      .from(s.drivers)
+      .innerJoin(s.employees, eq(s.employees.id, s.drivers.employeeId))
+      .where(eq(s.drivers.id, driverId));
+    return p ?? { name: null, nid: null };
+  };
+  const [from, to] = await Promise.all([person(d.fromDriverId), person(d.toDriverId)]);
+  const items = d.closedAssignmentId ? await itemsOfAssignment(db, d.closedAssignmentId) : [];
+  return {
+    h: {
+      id: 0,
+      number: "HO-…",
+      kind: d.kind,
+      vehicleId: d.vehicleId,
+      fromDriverId: d.fromDriverId,
+      toDriverId: d.toDriverId,
+      handoverDate: d.date,
+      odometer: d.odometer,
+      fuelLevel: null,
+      condition: null,
+      companyRep: null,
+      notes: null,
+      assignmentId: d.assignmentId,
+      closedAssignmentId: d.closedAssignmentId,
+      createdBy: null,
+      createdAt: new Date(0),
+    } as typeof s.vehicleHandovers.$inferSelect,
+    plate: v?.plate ?? "",
+    make: v?.make ?? null,
+    model: v?.model ?? null,
+    year: v?.year ?? null,
+    chassis: v?.chassis ?? null,
+    fromName: from.name,
+    fromId: from.nid,
+    toName: to.name,
+    toId: to.nid,
+    items: items.map((it, i) => ({ id: i, handoverId: 0, lineNo: i + 1, ...it })),
+  };
 }
