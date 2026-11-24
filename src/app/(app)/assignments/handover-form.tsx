@@ -108,9 +108,6 @@ export function HandoverForm({
   const shown = checkVehicle || checkDriver ? warnings : [];
 
   const items = lines.filter((l) => l.name.trim());
-  const used = new Set(lines.map((l) => l.name.trim()));
-  const setLine = (key: number, patch: Partial<Line>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
-  const addLine = (name = "") => setLines((ls) => [...ls, { key: ++seq, name, qty: "1", condition: "" }]);
 
   const doc: HandoverDocData = {
       h: {
@@ -239,58 +236,8 @@ export function HandoverForm({
             )}
           </PanelSection>
 
-          <PanelSection title="العدد والأدوات" optional open hint="ما يُسلَّم مع المركبة">
-            <div className="flex flex-wrap gap-1.5">
-              {itemNames
-                .filter((n) => !used.has(n))
-                .slice(0, 12)
-                .map((n) => (
-                  <button key={n} type="button" onClick={() => addLine(n)} className="rounded-full border border-dashed border-gray-300 bg-gray-50 px-3 py-1 text-xs text-gray-700 hover:border-brand-500 hover:bg-brand-50">
-                    + {n}
-                  </button>
-                ))}
-            </div>
-            {lines.length > 0 && (
-              <div className="flex flex-col gap-2">
-                <div className="grid grid-cols-[minmax(0,1.6fr)_4.5rem_minmax(0,1fr)_2rem] gap-2 text-xs font-medium text-gray-500 max-sm:grid-cols-[minmax(0,1fr)_4rem_2rem]">
-                  <span>الصنف</span>
-                  <span>العدد</span>
-                  <span className="max-sm:hidden">الحالة / الرقم التسلسلي</span>
-                  <span />
-                </div>
-                {lines.map((l) => (
-                  <div key={l.key} className="line-in grid grid-cols-[minmax(0,1.6fr)_4.5rem_minmax(0,1fr)_2rem] items-center gap-2 max-sm:grid-cols-[minmax(0,1fr)_4rem_2rem]">
-                    <input aria-label="الصنف" list="handover-items" value={l.name} onChange={(e) => setLine(l.key, { name: e.target.value })} className={field} />
-                    <input aria-label="العدد" type="number" min={1} dir="ltr" value={l.qty} onChange={(e) => setLine(l.key, { qty: e.target.value })} className={field} />
-                    <input aria-label="الحالة" placeholder="جيد" value={l.condition} onChange={(e) => setLine(l.key, { condition: e.target.value })} className={`${field} max-sm:col-span-2`} />
-                    <button type="button" aria-label="حذف الصنف" onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))} className="rounded-lg p-1.5 text-gray-500 hover:bg-red-50 hover:text-red-700 max-sm:row-start-1 max-sm:col-start-3">
-                      ×
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <datalist id="handover-items">
-              {itemNames.map((n) => (
-                <option key={n} value={n} />
-              ))}
-            </datalist>
-            <button type="button" onClick={() => addLine()} className="rounded-xl border border-dashed border-gray-300 py-2 text-sm font-semibold text-brand-800 hover:bg-brand-50">
-              + إضافة صنف
-            </button>
-          </PanelSection>
-
-          <PanelSection title="الحالة والملاحظات" optional open>
-            <PanelField label="الحالة العامة">
-              <Segmented label="الحالة العامة" value={condition} onChange={setCondition} options={(Object.keys(CONDITION) as ("good" | "notes")[]).map((c) => ({ value: c, label: CONDITION[c] }))} />
-            </PanelField>
-            <PanelField label="مندوب الشركة" hint="يوقّع على المحضر">
-              <Input name="companyRep" value={companyRep} onChange={(e) => setCompanyRep(e.target.value)} className="w-full" />
-            </PanelField>
-            <PanelField label="ملاحظات">
-              <textarea name="notes" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="خدوش، حالة الإطارات…" className={field} />
-            </PanelField>
-          </PanelSection>
+          <ToolsSection itemNames={itemNames} lines={lines} setLines={setLines} />
+          <StatusSection condition={condition} setCondition={setCondition} companyRep={companyRep} setCompanyRep={setCompanyRep} notes={notes} setNotes={setNotes} />
         </div>
         {preview && (
           <div className="min-w-0 xl:sticky xl:top-4">
@@ -302,3 +249,84 @@ export function HandoverForm({
     </RecordPanel>
   );
 }
+
+/** العدد والأدوات بنوداً، بأزرار سريعة وما كُتب سابقاً (مشترك بين محضر جديد وتعديله). */
+export function ToolsSection({ itemNames, lines, setLines }: { itemNames: string[]; lines: Line[]; setLines: React.Dispatch<React.SetStateAction<Line[]>> }) {
+  const used = new Set(lines.map((l) => l.name.trim()));
+  const setLine = (key: number, patch: Partial<Line>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+  const addLine = (name = "") => setLines((ls) => [...ls, { key: ++seq, name, qty: "1", condition: "" }]);
+  return (
+    <PanelSection title="العدد والأدوات" optional open hint="ما يُسلَّم مع المركبة">
+      <div className="flex flex-wrap gap-1.5">
+        {itemNames
+          .filter((n) => !used.has(n))
+          .slice(0, 12)
+          .map((n) => (
+            <button key={n} type="button" onClick={() => addLine(n)} className="rounded-full border border-dashed border-gray-300 bg-gray-50 px-3 py-1 text-xs text-gray-700 hover:border-brand-500 hover:bg-brand-50">
+              + {n}
+            </button>
+          ))}
+      </div>
+      {lines.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <div className="grid grid-cols-[minmax(0,1.6fr)_4.5rem_minmax(0,1fr)_2rem] gap-2 text-xs font-medium text-gray-500 max-sm:grid-cols-[minmax(0,1fr)_4rem_2rem]">
+            <span>الصنف</span>
+            <span>العدد</span>
+            <span className="max-sm:hidden">الحالة / الرقم التسلسلي</span>
+            <span />
+          </div>
+          {lines.map((l) => (
+            <div key={l.key} className="line-in grid grid-cols-[minmax(0,1.6fr)_4.5rem_minmax(0,1fr)_2rem] items-center gap-2 max-sm:grid-cols-[minmax(0,1fr)_4rem_2rem]">
+              <input aria-label="الصنف" list="handover-items" value={l.name} onChange={(e) => setLine(l.key, { name: e.target.value })} className={field} />
+              <input aria-label="العدد" type="number" min={1} dir="ltr" value={l.qty} onChange={(e) => setLine(l.key, { qty: e.target.value })} className={field} />
+              <input aria-label="الحالة" placeholder="جيد" value={l.condition} onChange={(e) => setLine(l.key, { condition: e.target.value })} className={`${field} max-sm:col-span-2`} />
+              <button type="button" aria-label="حذف الصنف" onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))} className="rounded-lg p-1.5 text-gray-500 hover:bg-red-50 hover:text-red-700 max-sm:row-start-1 max-sm:col-start-3">
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <datalist id="handover-items">
+        {itemNames.map((n) => (
+          <option key={n} value={n} />
+        ))}
+      </datalist>
+      <button type="button" onClick={() => addLine()} className="rounded-xl border border-dashed border-gray-300 py-2 text-sm font-semibold text-brand-800 hover:bg-brand-50">
+        + إضافة صنف
+      </button>
+    </PanelSection>
+  );
+}
+
+export function StatusSection({
+  condition,
+  setCondition,
+  companyRep,
+  setCompanyRep,
+  notes,
+  setNotes,
+}: {
+  condition: "good" | "notes";
+  setCondition: (c: "good" | "notes") => void;
+  companyRep: string;
+  setCompanyRep: (v: string) => void;
+  notes: string;
+  setNotes: (v: string) => void;
+}) {
+  return (
+    <PanelSection title="الحالة والملاحظات" optional open>
+      <PanelField label="الحالة العامة">
+        <Segmented label="الحالة العامة" value={condition} onChange={setCondition} options={(Object.keys(CONDITION) as ("good" | "notes")[]).map((c) => ({ value: c, label: CONDITION[c] }))} />
+      </PanelField>
+      <PanelField label="مندوب الشركة" hint="يوقّع على المحضر">
+        <Input name="companyRep" value={companyRep} onChange={(e) => setCompanyRep(e.target.value)} className="w-full" />
+      </PanelField>
+      <PanelField label="ملاحظات">
+        <textarea name="notes" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="خدوش، حالة الإطارات…" className={field} />
+      </PanelField>
+    </PanelSection>
+  );
+}
+
+export { toLines, field as handoverField, type Line as HandoverLine };
