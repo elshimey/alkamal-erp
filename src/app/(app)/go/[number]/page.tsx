@@ -37,6 +37,7 @@ const TARGETS: Record<string, Target[]> = {
     { table: s.bankReconciliations, href: (id) => `/bank-accounts/reconcile/${id}` },
     { table: s.breakdownRequests, href: () => `/maintenance/requests` },
   ],
+  HO: [{ table: s.vehicleHandovers, href: (id) => `/assignments?doc=${id}` }],
   FC: [{ table: s.fuelCardStatements, href: (id) => `/fuel-cards/${id}` }],
 };
 

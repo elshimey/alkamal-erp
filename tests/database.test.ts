@@ -59,6 +59,7 @@ import { lastOfficeEventId, officeEvents } from "@/lib/office-notify";
 import { claimDailyJob, days, pushStage, sendDocumentAlerts } from "@/lib/doc-alerts";
 
 import { driverCanSeeDocument, driverDocuments, driverTrailer } from "@/lib/driver-docs";
+import { createHandover, handoverByAssignment, handoverDoc, handoverItemNames, itemsOfAssignment } from "@/lib/handovers";
 import { cancelTripRequest, convertTripRequestTx, driverTripRequest, driverTripRequests, linkTripRequest, linkableWaybills, listTripRequests, recordRequestStage, rejectTripRequest, startTripRequest, undoRequestStage } from "@/lib/driver-trip-requests";
 import { removePushSubscription, savePushSubscription, usersWithPermission } from "@/lib/push";
 import { runImport } from "@/lib/importers";
@@ -1875,6 +1876,46 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       await expect(handoverVehicle(db, { assignmentId: b.id, driverId: d3.id, date: `${YEAR}-11-20`, odometer: 1200 })).rejects.toThrow();
       const [still] = await db.select().from(s.vehicleAssignments).where(eq(s.vehicleAssignments.id, b.id));
       expect(still.toDate).toBeNull();
+    });
+
+    it("محضر استلام وتسليم المركبة: الاستلام ثم لسائق آخر ثم للشركة، مع العدد والأدوات", async () => {
+      const v = await createVehicle(db, { plate: "م ح ض 77", odometer: 2000, make: "فولفو", model: "FH" });
+      const d1 = await createDriver(db, { nameAr: "سائق المحضر الأول" });
+      const d2 = await createDriver(db, { nameAr: "سائق المحضر الثاني" });
+      await expect(createHandover(db, { kind: "receive", vehicleId: v.id, driverId: d1.id, date: `${YEAR}-11-01`, items: [{ name: "رافعة", qty: 0 }] })).rejects.toThrow("العدد");
+      const r = await createHandover(db, {
+        kind: "receive",
+        vehicleId: v.id,
+        driverId: d1.id,
+        date: `${YEAR}-11-01`,
+        fuelLevel: "half",
+        condition: "good",
+        companyRep: "مندوب",
+        items: [{ name: "إطار احتياطي", qty: 1, condition: "جيد" }, { name: " " }, { name: "صنف المحضر الخاص", qty: 2 }],
+      });
+      expect(r.number).toMatch(/^HO-\d{4}-\d{6}$/);
+      expect(r).toMatchObject({ kind: "receive", toDriverId: d1.id, fromDriverId: null, odometer: 2000 });
+      const items = await itemsOfAssignment(db, r.assignmentId!);
+      expect(items.map((i) => i.name)).toEqual(["إطار احتياطي", "صنف المحضر الخاص"]);
+      expect(await handoverItemNames(db)).toContain("صنف المحضر الخاص");
+
+      const t = await createHandover(db, { kind: "transfer", assignmentId: r.assignmentId, driverId: d2.id, date: `${YEAR}-11-10`, odometer: 2500, items });
+      expect(t).toMatchObject({ kind: "transfer", fromDriverId: d1.id, toDriverId: d2.id, closedAssignmentId: r.assignmentId, odometer: 2500 });
+      const doc = await handoverDoc(db, t.id);
+      expect(doc).toMatchObject({ plate: "م ح ض 77", fromName: "سائق المحضر الأول", toName: "سائق المحضر الثاني" });
+      expect(doc!.items).toHaveLength(2);
+      const [closed] = await db.select().from(s.vehicleAssignments).where(eq(s.vehicleAssignments.id, r.assignmentId!));
+      expect(closed.toDate).toBe(`${YEAR}-11-10`);
+
+      // فشل المحضر لا يترك إسناداً مغلقاً ولا رقماً مستهلكاً بلا مستند
+      await expect(createHandover(db, { kind: "return", assignmentId: t.assignmentId, date: `${YEAR}-11-05` })).rejects.toThrow("قبل تاريخ الاستلام");
+      const back = await createHandover(db, { kind: "return", assignmentId: t.assignmentId, date: `${YEAR}-11-20`, odometer: 2600 });
+      expect(back).toMatchObject({ kind: "return", fromDriverId: d2.id, toDriverId: null, assignmentId: null });
+      await expect(createHandover(db, { kind: "return", assignmentId: t.assignmentId, date: `${YEAR}-11-21` })).rejects.toThrow("مسبقاً");
+      const map = await handoverByAssignment(db, [r.assignmentId!, t.assignmentId!]);
+      expect(map.opened.get(r.assignmentId!)?.id).toBe(r.id);
+      expect(map.closed.get(r.assignmentId!)?.id).toBe(t.id);
+      expect(map.closed.get(t.assignmentId!)?.id).toBe(back.id);
     });
 
     it("وثائق الموردين، والجدول الموحد بالحالات والناقصة", async () => {

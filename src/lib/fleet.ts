@@ -300,7 +300,7 @@ export async function releaseAssignment(
  * بتاريخ وعداد التسليم، ويبدأ إسناد السائق الجديد من التاريخ والعداد نفسيهما.
  */
 export async function handoverVehicle(
-  db: Db,
+  db: Db | Tx,
   input: { assignmentId: number; driverId: number; date: string; odometer?: number | null; notes?: string | null; userId?: number },
   opts: { canOverride?: boolean; overrideReason?: string | null } = {},
 ) {
