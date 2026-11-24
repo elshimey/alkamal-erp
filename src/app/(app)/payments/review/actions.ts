@@ -5,7 +5,7 @@ import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
 import { approveExpense } from "@/lib/purchases";
-import { approveCharges, payAccrued } from "@/lib/unpaid";
+import { approveCharges, payAccrued, updateUnpaidCharge } from "@/lib/unpaid";
 import { disburseTripCustody } from "@/lib/trip-dispatch";
 import type { FormState } from "@/components/action-form";
 
@@ -60,6 +60,21 @@ export async function disburseAction(id: number, _: FormState, fd: FormData): Pr
     const r = await disburseTripCustody(db, id, { cashAccountId: cashOf(fd), userId: user.id });
     refresh();
     return { ok: `صُرفت عهدة الرحلة ${r.number} بالسند ${r.paymentNumber}` };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+}
+
+/** تعديل مصروف على العميل «لم يُدفع بعد» قبل اعتماده: المبلغ والبيان والمستفيد. */
+export async function updateChargeAction(id: number, _: FormState, fd: FormData): Promise<FormState> {
+  await requirePermission("expenses", "update");
+  try {
+    const amount = Number(String(fd.get("amount") ?? "").replace(/,/g, ""));
+    const note = String(fd.get("note") ?? "").trim() || null;
+    const partyId = Number(fd.get("partyId")) || null;
+    await updateUnpaidCharge(db, id, { amount, note, partyId });
+    refresh();
+    return { ok: "حُفظ تعديل المصروف، وتحدّث سطره في مسودة الفاتورة إن وُجد" };
   } catch (err) {
     return { error: errorMessage(err) };
   }

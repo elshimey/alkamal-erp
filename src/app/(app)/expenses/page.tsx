@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { EdgeCell } from "@/components/desk-list";
-import { and, desc, eq, gte, type SQL } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, inArray, lte, or, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import * as s from "@/db/schema";
@@ -17,7 +17,11 @@ import { SheetEditor } from "@/components/sheet-editor";
 import { AddModeBar, ListActions } from "@/components/list-actions";
 import { Badge, Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { DialogButton } from "@/components/dialog-button";
-import { approve, approveMany, approveReviewed, reject, remove, revert, saveExpenses } from "./actions";
+import { approve, approveMany, approveReviewed, reject, remove, revert, saveExpenseSheet, saveExpenses } from "./actions";
+import { DocSheet, type DocSheetRow } from "@/components/doc-sheet";
+import { DocToolbar } from "@/components/doc-toolbar";
+import { DeskDrawer } from "@/components/desk-drawer";
+import { periodRange, PERIODS, type Period } from "@/lib/doc-filters";
 import { fmt, fmtDate } from "@/lib/format";
 import { DocCards, Plate } from "@/components/doc-card";
 import { DocCardFace, Facts, SheetActions, TapCard } from "@/components/list-card";
@@ -27,9 +31,23 @@ import { payFromSheetOptions, payFromTree, toAccountOptions } from "@/lib/lookup
 
 type Status = keyof typeof EXPENSE_STATUS;
 
-export default async function ExpensesPage({ searchParams }: { searchParams: Promise<{ status?: string; add?: string; new?: string }> }) {
+type Search = { status?: string; add?: string; new?: string; edit?: string; open?: string; view?: string; q?: string; period?: string; back?: string };
+const drawerBtn = "inline-flex h-10 items-center gap-1.5 rounded-xl border border-gray-300 bg-white px-3 text-sm text-gray-700 shadow-sm hover:bg-gray-50";
+
+export default async function ExpensesPage({ searchParams }: { searchParams: Promise<Search> }) {
   const user = await requirePermission("expenses", "view");
-  const { status: raw, add, new: isNew } = await searchParams;
+  const sp = await searchParams;
+  const { status: raw, add, new: isNew } = sp;
+  const view = sp.view === "sheet" ? "sheet" : "table";
+  const q = sp.q?.trim() || undefined;
+  const period: Period = sp.period && sp.period in PERIODS ? (sp.period as Period) : "all";
+  // رابط القائمة بنفس الفلاتر مع تغيير بعضها (فتح المعاينة، التعديل، الشيت)
+  const href = (patch: Partial<Search> = {}) => {
+    const p = new URLSearchParams(Object.entries({ status: raw, view: sp.view, q: sp.q, period: sp.period, ...patch }).filter((e): e is [string, string] => !!e[1]));
+    return p.size ? `/expenses?${p}` : "/expenses";
+  };
+  const canUpdate = can(user.perms, "expenses", "update");
+  const canRevert = can(user.perms, "expenses", "revert");
   const canCreate = can(user.perms, "expenses", "create");
   const adding = add === "1" && canCreate;
   const creating = isNew === "1" && canCreate;
@@ -39,6 +57,17 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
   const cash = alias(s.accounts, "cash");
   const where: SQL[] = [];
   if (status) where.push(eq(s.expenses.status, status));
+  if (q) {
+    const like = `%${q}%`;
+    where.push(or(ilike(s.expenses.number, like), ilike(s.expenses.description, like), ilike(s.accounts.nameAr, like), ilike(s.vehicles.plate, like), ilike(s.employees.nameAr, like), ilike(s.expenses.vendorName, like), ilike(s.expenses.reference, like), ilike(s.expenses.amount, like))!);
+  }
+  const range = periodRange(period, today);
+  if (range.from) where.push(gte(s.expenses.expenseDate, range.from));
+  if (range.to) where.push(lte(s.expenses.expenseDate, range.to));
+  const editId = canUpdate ? Number(sp.edit) || null : null;
+  const openId = Number(sp.open) || null;
+  // فُتح التعديل من صفحة أخرى (تحت المراجعة): الإغلاق يعود إليها (رابط داخلي فقط)
+  const back = sp.back?.startsWith("/") && !sp.back.startsWith("//") ? sp.back : undefined;
 
   const [accounts, drivers, vehicles, cashes, waybills, custody, list, payees] = await Promise.all([
     expenseAccountOptions(db),
@@ -75,8 +104,15 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
       .where(where.length ? and(...where) : undefined)
       .orderBy(desc(s.expenses.expenseDate), desc(s.expenses.id))
       .limit(300),
-    adding ? supplierOptions(db) : Promise.resolve([]),
+    adding || view === "sheet" ? supplierOptions(db) : Promise.resolve([]),
   ]);
+  // شحنات المصروفات الظاهرة تبقى في قائمة الشيت ولو أقدم من 60 يوماً
+  const missing = [...new Set(list.map((r) => r.e.waybillId).filter((id): id is number => !!id && !waybills.some((w) => w.id === id)))];
+  if (missing.length)
+    waybills.push(...(await db.select({ id: s.waybills.id, number: s.waybills.number, date: s.waybills.waybillDate }).from(s.waybills).where(inArray(s.waybills.id, missing))));
+  const editing = editId ? ((await db.select().from(s.expenses).where(eq(s.expenses.id, editId)))[0] ?? null) : null;
+  /** يُعدَّل المصروف ما لم يُسدد بسند صرف أو يُلغه السائق؛ المعتمد يحتاج صلاحية الإرجاع لأن قيده يُعاد. */
+  const editable = (e: (typeof list)[number]["e"]) => canUpdate && e.status !== "voided" && !e.paymentId && !e.maintenanceOrderId && (e.status !== "approved" || canRevert);
   const [cashOpts, tree, sheetCash] = await Promise.all([toAccountOptions(cashes), payFromTree(), payFromSheetOptions(cashes)]);
   const photos = new Map((await listAttachments(db, "expenses", list.map((r) => r.e.id))).map((a) => [a.entityId, a.id]));
   // مصروف قال السائق إن الشركة دفعته لا يُعتمد جماعياً؛ يحدد المعتمد صندوقه أولاً
@@ -86,6 +122,11 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
   type Row = (typeof list)[number];
   const rowActions = ({ e, driver, waybill }: Pick<Row, "e" | "driver" | "waybill">) => (
     <>
+                {editable(e) && (
+                  <Link href={href({ edit: String(e.id), open: undefined })} scroll={false} className="inline-flex items-center rounded-lg border border-brand-600 bg-brand-50 px-3 py-1.5 text-sm font-semibold text-brand-900 hover:bg-brand-100">
+                    تعديل
+                  </Link>
+                )}
                 {e.status === "pending" && canApprove && (
                   <>
                     {e.driverKind ? (
@@ -157,6 +198,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
                 )}
     </>
   );
+  const openRow = openId ? list.find((r) => r.e.id === openId) : undefined;
   const payerText = ({ e, driver, cash: box }: Row) =>
     e.payer === "driver_custody" ? `عهدة ${driver ?? ""}` : e.payer === "unpaid" ? (e.paymentId ? "سُدد بسند صرف" : "لم يُدفع بعد") : box;
 
@@ -233,7 +275,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
         {[{ key: undefined, label: "الكل" }, ...(Object.keys(EXPENSE_STATUS) as Status[]).map((k) => ({ key: k, label: EXPENSE_STATUS[k].label }))].map((t) => (
           <Link
             key={t.label}
-            href={t.key ? `/expenses?status=${t.key}` : "/expenses"}
+            href={href({ status: t.key, open: undefined })}
             className={`rounded-full px-3.5 py-1.5 transition ${t.key === status ? "bg-asphalt-900 font-semibold text-brand-500" : "bg-white text-gray-600 shadow-sm hover:bg-brand-50"}`}
           >
             {t.label}
@@ -246,6 +288,66 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
         )}
       </div>
 
+      <DocToolbar
+        base="/expenses"
+        params={{ status: raw, view: sp.view, q: sp.q, period: sp.period }}
+        statuses={{}}
+        exportName="المصروفات"
+        count={list.length}
+        noun="مصروف"
+        pay={false}
+        sorts={{ date_desc: "الأحدث أولاً" }}
+        exportable={view !== "sheet"}
+        placeholder="ابحث بالرقم أو البيان أو النوع أو اللوحة أو السائق أو المبلغ"
+      />
+      {view === "sheet" ? (
+        <DocSheet
+          action={saveExpenseSheet}
+          emptyText={q || status || period !== "all" ? "لا توجد مصروفات بهذه الشروط" : "لا توجد مصروفات بعد"}
+          openLabel="فتح نافذة المصروف"
+          addRows={canCreate ? { label: "مصروف جديد", defaults: { date: today, payer: "cash", cashAccountId: String((cashes.find((a) => a.code.startsWith("1101")) ?? cashes[0])?.id ?? "") } } : undefined}
+          columns={[
+            { key: "status", label: "الحالة", type: "badge", width: "7rem" },
+            { key: "number", label: "الرقم", ltr: true, width: "8rem" },
+            { key: "date", label: "التاريخ", type: "date", editable: true, width: "8.5rem" },
+            { key: "accountId", label: "نوع المصروف", type: "select", editable: true, options: accounts, create: "account", width: "13rem" },
+            { key: "description", label: "البيان", editable: true, width: "12rem" },
+            { key: "driverId", label: "السائق", type: "select", editable: true, options: drivers, create: "driver", width: "9rem", autoVehicle: { key: "vehicleId", dateKey: "date" } },
+            { key: "vehicleId", label: "المركبة", type: "select", editable: true, options: vehicles, create: "vehicle", width: "8rem" },
+            { key: "waybillId", label: "الشحنة", type: "select", editable: true, options: waybills.map((w) => ({ value: String(w.id), label: `${w.number} · ${w.date}` })), width: "11rem" },
+            { key: "payer", label: "الدافع", type: "select", editable: true, options: Object.entries(EXPENSE_PAYERS).map(([value, label]) => ({ value, label })), width: "9rem" },
+            { key: "cashAccountId", label: "دُفع من (الشركة)", type: "select", editable: true, options: sheetCash, create: "account", width: "11rem" },
+            { key: "partyId", label: "المستفيد (لم يُدفع)", type: "select", editable: true, options: payees, create: "supplier", width: "10rem" },
+            { key: "amount", label: "المبلغ قبل الضريبة", type: "number", editable: true, width: "7rem" },
+            { key: "vat", label: "الضريبة", type: "number", editable: true, width: "5.5rem" },
+            { key: "vendor", label: "المحل", editable: true, width: "8rem" },
+            { key: "reference", label: "رقم الإيصال", ltr: true, editable: true, width: "7rem" },
+          ]}
+          rows={list.map(({ e }): DocSheetRow => ({
+            id: e.id,
+            href: href({ edit: String(e.id) }),
+            editable: editable(e),
+            cells: {
+              number: e.number,
+              date: e.expenseDate,
+              accountId: String(e.accountId),
+              description: e.description,
+              driverId: e.driverId ? String(e.driverId) : "",
+              vehicleId: e.vehicleId ? String(e.vehicleId) : "",
+              waybillId: e.waybillId ? String(e.waybillId) : "",
+              payer: e.payer,
+              cashAccountId: e.cashAccountId ? String(e.cashAccountId) : "",
+              partyId: e.partyId ? String(e.partyId) : "",
+              amount: e.amount,
+              vat: e.vatAmount,
+              vendor: e.vendorName,
+              reference: e.reference,
+            },
+            badges: { status: { label: EXPENSE_STATUS[e.status].label, tone: EXPENSE_STATUS[e.status].tone } },
+          }))}
+        />
+      ) : (
+      <>
       <DocCards empty="لا توجد مصروفات">
         {list.map((row) => {
           const { e, account, code, plate, driver, waybill, entry, maintenance } = row;
@@ -309,7 +411,11 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
         {list.length === 0 && <EmptyRow cols={11}>لا توجد مصروفات</EmptyRow>}
         {list.map(({ e, account, code, plate, driver, cash: box, waybill, entry, maintenance }) => (
           <tr key={e.id}>
-            <Td className="ltr-nums font-medium whitespace-nowrap">{e.number}</Td>
+            <Td className="ltr-nums font-medium whitespace-nowrap">
+              <Link href={href({ open: String(e.id) })} scroll={false} className="text-brand-800 hover:underline">
+                {e.number}
+              </Link>
+            </Td>
             <Td className="ltr-nums whitespace-nowrap">{fmtDate(e.expenseDate)}</Td>
             <Td>
               <span className="ltr-nums text-xs text-gray-400">{code}</span> {account}
@@ -350,9 +456,60 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
         ))}
       </Table>
       </div>
+      </>
+      )}
         </>
       )}
-      {creating && <ExpensePanel closeHref={status ? `/expenses?status=${status}` : "/expenses"} canApprove={canApprove} />}
+      {openRow && !editing && (
+        <DeskDrawer
+          closeHref={href({ open: undefined })}
+          label={`معاينة المصروف ${openRow.e.number}`}
+          header={
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-display text-lg font-semibold text-brand-900">
+                مصروف <span className="ltr-nums">{openRow.e.number}</span>
+              </span>
+              <Badge tone={EXPENSE_STATUS[openRow.e.status].tone}>{EXPENSE_STATUS[openRow.e.status].label}</Badge>
+            </div>
+          }
+          footer={
+            <>
+              {editable(openRow.e) && (
+                <Link href={href({ edit: String(openRow.e.id), open: undefined })} scroll={false} className={`${drawerBtn} !border-brand-600 !bg-brand-500 font-semibold !text-brand-900`}>
+                  تعديل
+                </Link>
+              )}
+              {!editable(openRow.e) && openRow.e.paymentId && <span className="text-xs text-gray-500">سُدد بسند صرف؛ أرجع السند من «سندات الصرف» لتعديله.</span>}
+              <span className="flex flex-wrap gap-2">{rowActions(openRow)}</span>
+            </>
+          }
+        >
+          <Facts
+            items={[
+              ["التاريخ", fmtDate(openRow.e.expenseDate)],
+              ["نوع المصروف", <span key="c"><span className="ltr-nums text-gray-500">{openRow.code}</span> {openRow.account}</span>],
+              ["البيان", openRow.e.description || "—"],
+              ["المبلغ", <span key="a" className="ltr-nums font-semibold">{fmt(openRow.e.amount)}</span>],
+              ["الضريبة", Number(openRow.e.vatAmount) ? fmt(openRow.e.vatAmount) : "—"],
+              ["المركبة", openRow.plate ?? "—"],
+              ["السائق", openRow.driver ?? "—"],
+              ["الشحنة", openRow.waybill ?? "—"],
+              ["الدافع", payerText(openRow) ?? "—"],
+              ["المحل", openRow.e.vendorName ?? "—"],
+              ["رقم الإيصال", openRow.e.reference ?? "—"],
+              ...(openRow.entry ? ([["القيد", <span key="en" className="ltr-nums">{openRow.entry}</span>]] as [string, React.ReactNode][]) : []),
+            ]}
+          />
+          {openRow.e.billToCustomer && <p className="mt-3 text-sm font-medium text-amber-700">على العميل: يُفوتر مع الشحنة.</p>}
+          {openRow.e.rejectReason && <p className="mt-3 text-sm text-red-600">سبب الرفض: {openRow.e.rejectReason}</p>}
+          {photos.has(openRow.e.id) && (
+            <a href={`/files/${photos.get(openRow.e.id)}`} target="_blank" rel="noreferrer" className="mt-3 inline-block text-sm font-medium text-brand-700 underline">
+              📷 عرض الإيصال
+            </a>
+          )}
+        </DeskDrawer>
+      )}
+      {(creating || editing) && <ExpensePanel closeHref={back ?? href({ edit: undefined, new: undefined })} canApprove={canApprove} expense={editing} />}
     </>
   );
 }

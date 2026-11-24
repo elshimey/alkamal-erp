@@ -379,67 +379,127 @@ export interface ExpenseInput {
   billToCustomer?: boolean;
 }
 
+/** يتحقق من خانات المصروف ويحسب مركبته وسائقه ومركز تكلفته؛ نفسه للإضافة والتعديل فلا يختلف القيد. */
+async function expenseFields(tx: Tx, input: ExpenseInput) {
+  if (!(input.amount > 0)) throw new Error("المبلغ إلزامي");
+  const account = await expenseAccount(tx, input.accountId);
+  let driverId = input.driverId ?? null;
+  let vehicleId = input.vehicleId ?? null;
+  if (input.waybillId) {
+    const [w] = await tx.select().from(s.waybills).where(eq(s.waybills.id, input.waybillId));
+    if (!w) throw new Error("الشحنة غير موجودة");
+    vehicleId ??= w.vehicleId;
+    driverId ??= w.driverId;
+  }
+  if (input.payer === "driver_custody" && !driverId) throw new Error("اختر السائق صاحب العهدة");
+  if (input.billToCustomer && !input.waybillId) throw new Error("المصروف على العميل يحتاج الشحنة التي يُفوتر معها");
+  if (input.payer === "cash") {
+    await payFromAccountFor(tx, input.cashAccountId, "اختر صندوقاً أو بنكاً أو عهدة موظف");
+  }
+  if (input.payer === "unpaid" && input.partyId) await payableAccountFor(tx, input.partyId);
+  const vehicleCc = await vehicleCostCenter(tx, vehicleId);
+  if (account.requiresCostCenter && !vehicleCc) throw new Error(`الحساب ${account.nameAr} يتطلب المركبة`);
+  let costCenterId = vehicleCc;
+  if (!vehicleId && input.costCenterId) {
+    const [cc] = await tx.select().from(s.costCenters).where(eq(s.costCenters.id, input.costCenterId));
+    if (!cc || !cc.isActive) throw new Error("مركز التكلفة غير موجود أو موقوف");
+    if (cc.type === "vehicle") throw new Error("مركز تكلفة المركبة يُختار باختيار المركبة نفسها");
+    costCenterId = cc.id;
+  }
+  const vat = round2(input.vatAmount ?? 0);
+  if (vat < 0 || vat > round2(input.amount * 0.15) + 0.01) throw new Error("الضريبة أكبر من 15% من المبلغ");
+  const currency = input.currencyCode ?? "SAR";
+  return {
+    expenseDate: input.expenseDate,
+    payer: input.payer,
+    // السائق يُحفظ مع أي دافع لتحليل التكلفة؛ عهدته تُخصم فقط إن كان الدافع «عهدة السائق»
+    driverId,
+    cashAccountId: input.payer === "cash" ? input.cashAccountId! : null,
+    partyId: input.payer === "unpaid" ? (input.partyId ?? null) : null,
+    accountId: account.id,
+    vehicleId,
+    costCenterId,
+    waybillId: input.waybillId ?? null,
+    description: input.description.trim() || account.nameAr,
+    amount: String(round2(input.amount)),
+    vatAmount: String(vat),
+    currencyCode: currency,
+    exchangeRate: String(input.exchangeRate ?? (await rateOn(tx, currency, input.expenseDate))),
+    vendorName: input.vendorName || null,
+    reference: input.reference || null,
+    billToCustomer: !!input.billToCustomer,
+  };
+}
+
 export async function createExpense(db: Db | Tx, input: ExpenseInput) {
   return db.transaction(async (tx) => {
-    if (!(input.amount > 0)) throw new Error("المبلغ إلزامي");
-    const account = await expenseAccount(tx, input.accountId);
-    let driverId = input.driverId ?? null;
-    let vehicleId = input.vehicleId ?? null;
-    if (input.waybillId) {
-      const [w] = await tx.select().from(s.waybills).where(eq(s.waybills.id, input.waybillId));
-      if (!w) throw new Error("الشحنة غير موجودة");
-      vehicleId ??= w.vehicleId;
-      driverId ??= w.driverId;
-    }
-    if (input.payer === "driver_custody" && !driverId) throw new Error("اختر السائق صاحب العهدة");
-    if (input.billToCustomer && !input.waybillId) throw new Error("المصروف على العميل يحتاج الشحنة التي يُفوتر معها");
-    if (input.payer === "cash") {
-      await payFromAccountFor(tx, input.cashAccountId, "اختر صندوقاً أو بنكاً أو عهدة موظف");
-    }
-    if (input.payer === "unpaid" && input.partyId) await payableAccountFor(tx, input.partyId);
-    const vehicleCc = await vehicleCostCenter(tx, vehicleId);
-    if (account.requiresCostCenter && !vehicleCc) throw new Error(`الحساب ${account.nameAr} يتطلب المركبة`);
-    let costCenterId = vehicleCc;
-    if (!vehicleId && input.costCenterId) {
-      const [cc] = await tx.select().from(s.costCenters).where(eq(s.costCenters.id, input.costCenterId));
-      if (!cc || !cc.isActive) throw new Error("مركز التكلفة غير موجود أو موقوف");
-      if (cc.type === "vehicle") throw new Error("مركز تكلفة المركبة يُختار باختيار المركبة نفسها");
-      costCenterId = cc.id;
-    }
-    const vat = round2(input.vatAmount ?? 0);
-    if (vat > round2(input.amount * 0.15) + 0.01) throw new Error("الضريبة أكبر من 15% من المبلغ");
-    const currency = input.currencyCode ?? "SAR";
+    const fields = await expenseFields(tx, input);
     const number = await nextDocumentNumber(tx, "expense", "EX", Number(input.expenseDate.slice(0, 4)));
     const [e] = await tx
       .insert(s.expenses)
       .values({
         number,
-        expenseDate: input.expenseDate,
-        payer: input.payer,
-        // السائق يُحفظ مع أي دافع لتحليل التكلفة؛ عهدته تُخصم فقط إن كان الدافع «عهدة السائق»
-        driverId,
-        cashAccountId: input.payer === "cash" ? input.cashAccountId! : null,
-        partyId: input.payer === "unpaid" ? (input.partyId ?? null) : null,
-        accountId: account.id,
-        vehicleId,
-        costCenterId,
-        waybillId: input.waybillId ?? null,
-        description: input.description.trim() || account.nameAr,
-        amount: String(round2(input.amount)),
-        vatAmount: String(vat),
-        currencyCode: currency,
-        exchangeRate: String(input.exchangeRate ?? (await rateOn(tx, currency, input.expenseDate))),
-        vendorName: input.vendorName || null,
-        reference: input.reference || null,
+        ...fields,
         driverKind: input.driverKind ?? null,
         reportedPayer: input.reportedPayer ?? null,
         maintenanceTypeId: input.maintenanceTypeId ?? null,
-        billToCustomer: !!input.billToCustomer,
         createdBy: input.userId,
       })
       .returning();
     if (input.approve) await approveExpenseTx(tx, e.id, input.userId);
     return e;
+  });
+}
+
+/** خانات المصروف الحالية بصيغة الإدخال، لتعديل بعضها (الشيت) مع بقاء الباقي. */
+export function expenseToInput(e: typeof s.expenses.$inferSelect): ExpenseInput {
+  return {
+    expenseDate: e.expenseDate,
+    payer: e.payer,
+    driverId: e.driverId,
+    cashAccountId: e.cashAccountId,
+    partyId: e.partyId,
+    accountId: e.accountId,
+    vehicleId: e.vehicleId,
+    costCenterId: e.vehicleId ? null : e.costCenterId,
+    waybillId: e.waybillId,
+    description: e.description,
+    amount: num(e.amount),
+    vatAmount: num(e.vatAmount),
+    currencyCode: e.currencyCode,
+    vendorName: e.vendorName,
+    reference: e.reference,
+    billToCustomer: e.billToCustomer,
+  };
+}
+
+/**
+ * تعديل مصروف (طلب أحمد 2026-11-24): المعلّق والمرفوض يُعدَّلان مباشرة (والمرفوض يعود بانتظار الاعتماد)،
+ * والمعتمد يُلغى قيده ويُعدَّل ويُرحَّل قيد جديد في عملية واحدة، فتبقى قاعدة «المرحّل لا يُعدَّل» داخل القاعدة نفسها
+ * (والفترة المقفلة تمنع). لا يُعدَّل ما سُدد بسند صرف (يُرجع السند أولاً)، ولا طلب صيانة اعتُمد ديناً على ورشة.
+ */
+export async function updateExpense(db: Db | Tx, id: number, input: ExpenseInput) {
+  return db.transaction(async (tx) => {
+    const e = await lockExpense(tx, id);
+    if (e.status === "voided") throw new Error(`المصروف ${e.number} ألغاه السائق لأنه رُفع بالخطأ`);
+    if (e.paymentId) throw new Error(`المصروف ${e.number} سُدد بسند صرف؛ أرجع السند من «سندات الصرف» أولاً ثم عدّله`);
+    if (e.maintenanceOrderId) throw new Error(`المصروف ${e.number} طلب صيانة اعتُمد ديناً على ورشة؛ عدّل أمر الصيانة أو أرجع الطلب`);
+    const wasApproved = e.status === "approved";
+    if (wasApproved) await revertExpense(tx, id);
+    const fields = await expenseFields(tx, input);
+    await tx
+      .update(s.expenses)
+      .set({
+        ...fields,
+        // ما دام المكتب حدد الدافع فقرار السائق لم يعد يمنع الاعتماد
+        reportedPayer: e.driverKind ? (fields.payer === "driver_custody" ? "custody" : "company") : e.reportedPayer,
+        status: "pending",
+        rejectReason: null,
+      })
+      .where(eq(s.expenses.id, id));
+    if (wasApproved) await approveExpenseTx(tx, id, input.userId);
+    const [row] = await tx.select().from(s.expenses).where(eq(s.expenses.id, id));
+    return row;
   });
 }
 
@@ -600,55 +660,103 @@ export interface PaymentInput {
   userId?: number;
 }
 
+/** يتحقق من خانات سند الصرف ويحدد الحساب المدين؛ نفسه للإضافة والتعديل. */
+async function paymentFields(tx: Tx, input: PaymentInput) {
+  if (!(input.amount > 0)) throw new Error("المبلغ إلزامي");
+  const [cash] = await tx.select().from(s.accounts).where(eq(s.accounts.id, input.cashAccountId));
+  // يُسدد من أي حساب تفصيلي نشط في الأصول أو الالتزامات (قرار أحمد 2026-11-23، نفس الآلية في كل الأقسام)
+  if (!cash || !cash.isPostable || !cash.isActive || !isPayFromCode(cash.code)) throw new Error("اختر الحساب الذي يُسدد منه (حساباً تفصيلياً نشطاً)");
+  const currency = input.currencyCode ?? "SAR";
+  if (cash.currencyCode && cash.currencyCode !== currency) throw new Error(`الحساب ${cash.nameAr} بعملة ${cash.currencyCode}`);
+  let debitAccountId: number;
+  if (input.kind === "expense" || input.kind === "installment") {
+    if (!input.debitAccountId) throw new Error("حساب الالتزام مطلوب");
+    debitAccountId = input.debitAccountId;
+  } else if (input.kind === "supplier") {
+    if (!input.partyId) throw new Error("اختر المورد");
+    debitAccountId = await payableAccountFor(tx, input.partyId);
+    if (input.invoiceId) {
+      const [inv] = await tx.select().from(s.purchaseInvoices).where(eq(s.purchaseInvoices.id, input.invoiceId));
+      if (!inv || inv.supplierId !== input.partyId) throw new Error("الفاتورة المختارة ليست لهذا المورد");
+      debitAccountId = inv.payableAccountId;
+    }
+  } else {
+    if (!input.driverId) throw new Error("اختر السائق");
+    const [d] = await tx.select({ custody: s.drivers.custodyAccountId }).from(s.drivers).where(eq(s.drivers.id, input.driverId));
+    if (!d?.custody) throw new Error("لا يوجد حساب عهدة لهذا السائق");
+    debitAccountId = d.custody;
+  }
+  if (debitAccountId === cash.id) throw new Error("لا يُسدد الحساب من نفسه؛ اختر حساباً آخر");
+  return {
+    paymentDate: input.paymentDate,
+    kind: input.kind,
+    partyId: input.kind === "custody" ? null : (input.partyId ?? null),
+    driverId: input.kind === "custody" ? input.driverId! : null,
+    debitAccountId,
+    amount: String(round2(input.amount)),
+    currencyCode: currency,
+    exchangeRate: String(input.exchangeRate ?? (await rateOn(tx, currency, input.paymentDate))),
+    method: input.method,
+    cashAccountId: cash.id,
+    reference: input.reference || null,
+    notes: input.notes || null,
+  };
+}
+
 export async function createPayment(db: Db, input: PaymentInput) {
   return db.transaction(async (tx) => {
-    if (!(input.amount > 0)) throw new Error("المبلغ إلزامي");
-    const [cash] = await tx.select().from(s.accounts).where(eq(s.accounts.id, input.cashAccountId));
-    // يُسدد من أي حساب تفصيلي نشط في الأصول أو الالتزامات (قرار أحمد 2026-11-23، نفس الآلية في كل الأقسام)
-    if (!cash || !cash.isPostable || !cash.isActive || !isPayFromCode(cash.code)) throw new Error("اختر الحساب الذي يُسدد منه (حساباً تفصيلياً نشطاً)");
-    const currency = input.currencyCode ?? "SAR";
-    if (cash.currencyCode && cash.currencyCode !== currency) throw new Error(`الحساب ${cash.nameAr} بعملة ${cash.currencyCode}`);
-    let debitAccountId: number;
-    if (input.kind === "expense" || input.kind === "installment") {
-      if (!input.debitAccountId) throw new Error("حساب الالتزام مطلوب");
-      debitAccountId = input.debitAccountId;
-    } else if (input.kind === "supplier") {
-      if (!input.partyId) throw new Error("اختر المورد");
-      debitAccountId = await payableAccountFor(tx, input.partyId);
-      if (input.invoiceId) {
-        const [inv] = await tx.select().from(s.purchaseInvoices).where(eq(s.purchaseInvoices.id, input.invoiceId));
-        if (!inv || inv.supplierId !== input.partyId) throw new Error("الفاتورة المختارة ليست لهذا المورد");
-        debitAccountId = inv.payableAccountId;
-      }
-    } else {
-      if (!input.driverId) throw new Error("اختر السائق");
-      const [d] = await tx.select({ custody: s.drivers.custodyAccountId }).from(s.drivers).where(eq(s.drivers.id, input.driverId));
-      if (!d?.custody) throw new Error("لا يوجد حساب عهدة لهذا السائق");
-      debitAccountId = d.custody;
-    }
-    if (debitAccountId === cash.id) throw new Error("لا يُسدد الحساب من نفسه؛ اختر حساباً آخر");
+    const fields = await paymentFields(tx, input);
     const number = await nextDocumentNumber(tx, "payment", "PV", Number(input.paymentDate.slice(0, 4)));
     const [p] = await tx
       .insert(s.payments)
-      .values({
-        number,
-        paymentDate: input.paymentDate,
-        kind: input.kind,
-        partyId: input.kind === "custody" ? null : (input.partyId ?? null),
-        driverId: input.kind === "custody" ? input.driverId! : null,
-        debitAccountId,
-        amount: String(round2(input.amount)),
-        currencyCode: currency,
-        exchangeRate: String(input.exchangeRate ?? (await rateOn(tx, currency, input.paymentDate))),
-        method: input.method,
-        cashAccountId: cash.id,
-        reference: input.reference || null,
-        notes: input.notes || null,
-        createdBy: input.userId,
-      })
+      .values({ number, ...fields, createdBy: input.userId })
       .returning();
     if (input.post) await postPaymentTx(tx, p.id, { invoiceId: input.invoiceId, userId: input.userId });
     return p;
+  });
+}
+
+/** خانات السند الحالية بصيغة الإدخال، مع الفاتورة التي خُصص عليها إن كانت واحدة. */
+export async function paymentToInput(db: Db | Tx, p: typeof s.payments.$inferSelect): Promise<PaymentInput> {
+  const allocs = await db.select({ invoiceId: s.paymentAllocations.invoiceId }).from(s.paymentAllocations).where(eq(s.paymentAllocations.paymentId, p.id));
+  return {
+    paymentDate: p.paymentDate,
+    kind: p.kind,
+    debitAccountId: p.debitAccountId,
+    partyId: p.partyId,
+    driverId: p.driverId,
+    amount: num(p.amount),
+    currencyCode: p.currencyCode,
+    method: p.method,
+    cashAccountId: p.cashAccountId,
+    reference: p.reference,
+    notes: p.notes,
+    invoiceId: allocs.length === 1 ? allocs[0].invoiceId : null,
+  };
+}
+
+/**
+ * تعديل سند الصرف (طلب أحمد 2026-11-24): المسودة تُعدَّل مباشرة، والمرحّل يُرجع ويُعدَّل ويُرحَّل ويُعاد تخصيصه
+ * في عملية واحدة. سند سداد القسط أو المصروف المستحق مربوط بمبلغه وجهته، فيُعدَّل تاريخه وحسابه وطريقته ومرجعه فقط.
+ */
+export async function updatePayment(db: Db, id: number, input: PaymentInput) {
+  return db.transaction(async (tx) => {
+    const [p] = await tx.select().from(s.payments).where(eq(s.payments.id, id)).for("update");
+    if (!p) throw new Error("السند غير موجود");
+    let patch = input;
+    if (p.kind === "expense" || p.kind === "installment") {
+      const [payoff] = await tx.select({ name: s.installmentPlans.name }).from(s.installmentPlans).where(eq(s.installmentPlans.payoffPaymentId, id));
+      if (payoff) throw new Error(`هذا سند سداد مبكر لجدول «${payoff.name}»؛ عدّله من صفحة الأقساط`);
+      if (round2(input.amount) !== round2(num(p.amount)) || input.kind !== p.kind) throw new Error(`مبلغ السند ${p.number} مربوط ب${p.kind === "expense" ? "المصروف المستحق" : "القسط"}؛ يُعدَّل تاريخه وحسابه وطريقته ومرجعه فقط`);
+      patch = { ...input, kind: p.kind, debitAccountId: p.debitAccountId, partyId: p.partyId, driverId: p.driverId, currencyCode: p.currencyCode, invoiceId: null };
+    } else if (input.kind === "expense" || input.kind === "installment") throw new Error("هذا النوع يُنشأ من «تحت المراجعة» أو «الأقساط»");
+    const wasPosted = p.status === "posted";
+    if (wasPosted) await revertPaymentTx(tx, id);
+    const fields = await paymentFields(tx, patch);
+    await tx.update(s.payments).set(fields).where(eq(s.payments.id, id));
+    if (wasPosted) await postPaymentTx(tx, id, { invoiceId: patch.invoiceId, userId: input.userId });
+    const [row] = await tx.select().from(s.payments).where(eq(s.payments.id, id));
+    return row;
   });
 }
 

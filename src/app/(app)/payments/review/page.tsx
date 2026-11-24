@@ -8,9 +8,11 @@ import { undisbursedCustody, unpaidCharges, unpaidExpenses } from "@/lib/unpaid"
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { CashAccountField } from "@/components/cash-account-field";
 import { DialogButton } from "@/components/dialog-button";
-import { Badge, Card, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
+import { Badge, Card, EmptyRow, Input, PageHeader, Table, Td } from "@/components/ui";
 import { fmt } from "@/lib/format";
-import { approveChargeAction, approveExpenseAction, disburseAction, payAction } from "./actions";
+import { approveChargeAction, approveExpenseAction, disburseAction, payAction, updateChargeAction } from "./actions";
+import { supplierOptions } from "@/lib/purchases";
+import { FormCombo } from "@/components/form-combo";
 
 const TABS = {
   charges: "مصاريف على العميل",
@@ -32,7 +34,15 @@ export default async function PaymentsReviewPage({ searchParams }: { searchParam
   const back = sp.back?.startsWith("/") && !sp.back.startsWith("//") ? sp.back : undefined;
   const canApprove = can(user.perms, "expenses", "approve");
   const canPay = can(user.perms, "payments", "create");
-  const [charges, expenses, custody, cashes] = await Promise.all([unpaidCharges(db, { invoiceId }), unpaidExpenses(db), undisbursedCustody(db), payFromAccounts(db)]);
+  const canUpdate = can(user.perms, "expenses", "update");
+  const canRevert = can(user.perms, "expenses", "revert");
+  const [charges, expenses, custody, cashes, payees] = await Promise.all([
+    unpaidCharges(db, { invoiceId }),
+    unpaidExpenses(db),
+    undisbursedCustody(db),
+    payFromAccounts(db),
+    canUpdate && tab === "charges" ? supplierOptions(db) : Promise.resolve([]),
+  ]);
   const counts: Record<Tab, number> = { charges: charges.length, expenses: expenses.length, custody: custody.length };
   const href = (t: Tab) => `/payments/review?tab=${t}${back ? `&back=${encodeURIComponent(back)}` : ""}`;
   const payField = <CashAccountField options={cashes} label="يُسدد من" />;
@@ -45,6 +55,9 @@ export default async function PaymentsReviewPage({ searchParams }: { searchParam
       </ActionForm>
     </DialogButton>
   );
+  // التعديل يعود لهذه الصفحة نفسها بعد الحفظ أو الإغلاق
+  const here = `${href(tab)}${invoiceId ? `&invoice=${invoiceId}` : ""}`;
+  const editLink = "rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50";
   const status = (approved: boolean) => (approved ? <Badge tone="blue">معتمد، لم يُسدد</Badge> : <Badge tone="amber">بانتظار الاعتماد</Badge>);
 
   return (
@@ -116,12 +129,34 @@ export default async function PaymentsReviewPage({ searchParams }: { searchParam
                 </Td>
                 <Td>{status(c.approved)}</Td>
                 <Td>
+                  <div className="flex flex-wrap items-center gap-2">
+                  {!c.approved && canUpdate && (
+                    <DialogButton label="تعديل" title={`تعديل ${c.type} – ${c.waybill ?? c.invoice ?? ""}`}>
+                      <ActionForm action={updateChargeAction.bind(null, c.id)} resetOnSuccess={false} className="flex flex-col gap-3 text-sm">
+                        <label className="flex flex-col gap-1">
+                          <span className="font-medium">المبلغ {c.currencyCode !== "SAR" && c.currencyCode}</span>
+                          <Input name="amount" type="number" min={0.01} step="0.01" required dir="ltr" defaultValue={c.amount} />
+                        </label>
+                        <label className="flex flex-col gap-1">
+                          <span className="font-medium">البيان</span>
+                          <Input name="note" defaultValue={c.note ?? ""} />
+                        </label>
+                        <label className="flex flex-col gap-1">
+                          <span className="font-medium">المستفيد</span>
+                          <FormCombo name="partyId" defaultValue={c.payeeId ? String(c.payeeId) : ""} options={payees} create="supplier" placeholder="فارغ = المصروفات المستحقة 2106" />
+                        </label>
+                        <p className="text-xs text-gray-500">يُعدَّل قبل الاعتماد فقط، ويتحدث سطره في مسودة الفاتورة. الفاتورة الصادرة تمنع التعديل.</p>
+                        <SubmitButton>حفظ</SubmitButton>
+                      </ActionForm>
+                    </DialogButton>
+                  )}
                   {!c.approved && canApprove && (
                     <ActionForm action={approveChargeAction.bind(null, c.id)} resetOnSuccess={false}>
                       <SubmitButton variant="secondary">اعتماد</SubmitButton>
                     </ActionForm>
                   )}
                   {c.approved && canPay && payButton("charge", c.id, `سداد ${c.type} – ${c.waybill ?? c.invoice}`)}
+                  </div>
                 </Td>
               </tr>
             ))}
@@ -163,12 +198,19 @@ export default async function PaymentsReviewPage({ searchParams }: { searchParam
                 </Td>
                 <Td>{status(e.approved)}</Td>
                 <Td>
+                  <div className="flex flex-wrap items-center gap-2">
+                  {canUpdate && (!e.approved || canRevert) && (
+                    <Link href={`/expenses?edit=${e.id}&back=${encodeURIComponent(here)}`} className={editLink}>
+                      تعديل
+                    </Link>
+                  )}
                   {!e.approved && canApprove && (
                     <ActionForm action={approveExpenseAction.bind(null, e.id)} resetOnSuccess={false}>
                       <SubmitButton variant="secondary">اعتماد</SubmitButton>
                     </ActionForm>
                   )}
                   {e.approved && canPay && payButton("expense", e.id, `سداد المصروف ${e.number}`)}
+                  </div>
                 </Td>
               </tr>
             ))}

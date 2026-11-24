@@ -3657,6 +3657,56 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       await expect(createExpense(db, { expenseDate: D, payer: "cash", cashAccountId: acc["110101"], costCenterId: vehicle.costCenterId, accountId: office.id, description: "x", amount: 5 })).rejects.toThrow("باختيار المركبة");
     });
 
+    it("تعديل المصروف وسند الصرف ومصروف العميل تحت المراجعة: المعتمد يُعاد ترحيله، والمسدد والمربوط يُمنع", async () => {
+      const { updateExpense, expenseToInput, updatePayment, paymentToInput } = await import("@/lib/purchases");
+      const { approveCharges, payAccrued, updateUnpaidCharge } = await import("@/lib/unpaid");
+      const { addInvoiceChargesTx } = await import("@/lib/invoices");
+      const [office] = await db.select().from(s.accounts).where(sql`${s.accounts.code} like '6%' and ${s.accounts.isPostable}`).limit(1);
+      const row = async (id: number) => (await db.select().from(s.expenses).where(eq(s.expenses.id, id)))[0];
+      // معلّق: يُعدَّل ويبقى معلّقاً بلا قيد
+      const pend = await createExpense(db, { expenseDate: D, payer: "unpaid", accountId: office.id, description: "صيانة مكيف", amount: 100 });
+      const p1 = await updateExpense(db, pend.id, { ...expenseToInput(await row(pend.id)), amount: 150, description: "صيانة مكيف معدّلة" });
+      expect([p1.status, Number(p1.amount), p1.journalEntryId, p1.description]).toEqual(["pending", 150, null, "صيانة مكيف معدّلة"]);
+      // معتمد: القيد القديم يُلغى ويُرحّل جديد بالمبلغ الجديد
+      const appr = await createExpense(db, { expenseDate: D, payer: "cash", cashAccountId: acc["110101"], accountId: office.id, description: "قرطاسية", amount: 300, approve: true });
+      const oldEntry = (await row(appr.id)).journalEntryId!;
+      const a1 = await updateExpense(db, appr.id, { ...expenseToInput(await row(appr.id)), amount: 350 });
+      expect(a1.status).toBe("approved");
+      expect(a1.journalEntryId).not.toBe(oldEntry);
+      expect((await db.select().from(s.journalEntries).where(eq(s.journalEntries.id, oldEntry))).length).toBe(0);
+      expect((await entryLines(a1.journalEntryId!)).find((l) => l.code === "110101")?.credit).toBe(350);
+      // المسدد بسند صرف لا يُعدَّل
+      const paid = await createExpense(db, { expenseDate: D, payer: "unpaid", accountId: office.id, description: "كهرباء", amount: 80, approve: true });
+      const pv = await payAccrued(db, { kind: "expense", id: paid.id, cashAccountId: acc["110101"], date: D });
+      await expect(updateExpense(db, paid.id, { ...expenseToInput(await row(paid.id)), amount: 90 })).rejects.toThrow("سُدد");
+      // سند سداد المصروف المستحق: التاريخ والمرجع فقط، لا المبلغ
+      const [pvRow] = await db.select().from(s.payments).where(eq(s.payments.id, pv.id));
+      await expect(updatePayment(db, pv.id, { ...(await paymentToInput(db, pvRow)), amount: 70 })).rejects.toThrow("مربوط");
+      const pv2 = await updatePayment(db, pv.id, { ...(await paymentToInput(db, pvRow)), reference: "CHQ-9" });
+      expect([pv2.status, pv2.reference, Number(pv2.amount)]).toEqual(["posted", "CHQ-9", 80]);
+      // سند صرف عهدة مرحّل: تعديل المبلغ يعيد الترحيل
+      const cv = await createPayment(db, { paymentDate: D, kind: "custody", driverId, amount: 400, method: "cash", cashAccountId: acc["110101"], post: true });
+      const [cvRow] = await db.select().from(s.payments).where(eq(s.payments.id, cv.id));
+      const cv2 = await updatePayment(db, cv.id, { ...(await paymentToInput(db, cvRow)), amount: 450 });
+      expect(cv2.status).toBe("posted");
+      expect((await entryLines(cv2.journalEntryId!)).find((l) => l.code === "110101")?.credit).toBe(450);
+      // مصروف على العميل «لم يُدفع بعد» في مسودة فاتورة: يُعدَّل قبل الاعتماد ويتحدث سطره
+      const [customs] = await db.select().from(s.chargeTypes).where(eq(s.chargeTypes.nameAr, "رسوم جمركية باسم العميل"));
+      const inv = await db.transaction(async (tx) => {
+        const saved = await createDirectInvoice(tx as unknown as Db, { customerId, invoiceDate: D, dueDate: D, currencyCode: "SAR", lines: [], hasCharges: true });
+        await addInvoiceChargesTx(tx, saved.id, [{ chargeTypeId: customs.id, amount: 70, payer: "unpaid" }]);
+        return saved;
+      });
+      const [ch] = await db.select().from(s.waybillExpenses).where(eq(s.waybillExpenses.invoiceId, inv.id));
+      await updateUnpaidCharge(db, ch.id, { amount: 95, note: "أرضيات", partyId: null });
+      const lines = await db.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.waybillExpenseId, ch.id));
+      expect(lines.map((l) => Number(l.amount))).toEqual([95]);
+      expect(lines[0].description).toContain("أرضيات");
+      expect(Number((await db.select().from(s.salesInvoices).where(eq(s.salesInvoices.id, inv.id)))[0].subtotal)).toBe(95);
+      await approveCharges(db, [ch.id]);
+      await expect(updateUnpaidCharge(db, ch.id, { amount: 99, note: null, partyId: null })).rejects.toThrow("معتمد");
+    });
+
     it("مركز تكلفة يدوي (المقطورات) واستيراد الأصول الثابتة من Excel (ملاحظات التشغيل 9 و10 و11 و17)", async () => {
       const { createCostCenter } = await import("@/lib/cost-centers");
       const trailers = await createCostCenter(db, { nameAr: "المقطورات اختبار" });
