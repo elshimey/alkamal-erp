@@ -514,9 +514,48 @@ aside:hover > .road-line {
 /* الطباعة من أي شاشة (Ctrl+P): لا أزرار ولا نماذج إدخال ولا شيتات على الورق، فلا تخرج خانات مقصوصة فوق بعضها.
    المستند الرسمي يُطبع من زر «طباعة» الخاص به. */
 @media print {
-  main button,
+  /* إلا الرقم المحسوب الذي يفتح معادلته (FormulaDrill زر لا رابط): هو بيانات التقرير نفسها، فاختفاؤه أفرغ أعمدة
+     صافي الربح والهامش والمجاميع على الورق (ملاحظة أحمد 2026-11-25). data-print-keep لأي زر آخر يحمل بيانات. */
+  main button:not(.drill):not(.drill-card):not([data-print-keep]),
   main form:has(input:not([type="hidden"]), select, textarea),
   main div:has(> table.select-none) {
+    display: none !important;
+  }
+}
+
+/* القوائم (الشحنات، الفواتير، المصروفات، المركبات…) على الورق: عرض ورقة A4 الطولية أقل من 768 فكانت تُطبع
+   بطاقات الجوال (md:hidden) ويختفي جدولها (max-md:hidden). الورقة ليست جوالاً: يُطبع الجدول دائماً، بلا مربعات
+   التحديد، وبخط أصغر تلتف فيه الخانات فلا يخرج عمود عن الورقة (ملاحظة أحمد 2026-11-25). */
+@media print and (width < 48rem) {
+  main div.max-md\:hidden {
+    display: block !important;
+  }
+  main span.max-md\:hidden {
+    display: inline !important;
+  }
+  main .md\:hidden {
+    display: none !important;
+  }
+}
+@media print {
+  main .scroll-table > table:is(.stack-table, .sticky-first) {
+    font-size: 9.5px !important;
+  }
+  main .scroll-table > table:is(.stack-table, .sticky-first) :is(th, td) {
+    padding: 3px 4px !important;
+    white-space: normal !important;
+  }
+  main .scroll-table > table:is(.stack-table, .sticky-first) :is(th, td):has(> input[type="checkbox"], > label > input[type="checkbox"]) {
+    display: none !important;
+  }
+  main .scroll-table > table:is(.stack-table, .sticky-first) .whitespace-nowrap {
+    white-space: normal !important;
+  }
+  main .scroll-table > table:is(.stack-table, .sticky-first) tr[hidden] {
+    display: table-row !important;
+  }
+  /* أزرار الصف (تعديل، الخطوة التالية) روابط بشكل زر: إجراءات لا بيانات */
+  main .scroll-table > table:is(.stack-table, .sticky-first) a:is(.rounded-lg, .rounded-md, .rounded-full):is(.border, [class*="bg-brand"], [class*="bg-asphalt"]) {
     display: none !important;
   }
 }
@@ -542,7 +581,7 @@ table[data-report]:not([data-noserial]) > thead > tr:first-child::before {
   color: inherit;
   font-weight: 500;
 }
-table[data-report]:not([data-noserial]) > tbody > tr:not(.font-bold):not(.font-semibold):not(:has(> td[colspan]))::before {
+table[data-report]:not([data-noserial]) > tbody > tr:not(.font-bold):not(.font-semibold):not([data-noserial]):not(:has(> td[colspan]))::before {
   counter-increment: report-row;
   content: counter(report-row);
 }
@@ -550,6 +589,8 @@ table[data-report]:not([data-noserial]) > tbody > tr:not(.font-bold):not(.font-s
   table[data-report]:not([data-noserial]) > * > tr::before {
     border: 1px solid #9ca3af;
     color: #333;
+    padding: 3px 2px;
+    width: 1.75rem;
   }
   table[data-report]:not([data-noserial]) > thead > tr::before {
     background: #f3f4f6;
@@ -638,5 +679,8 @@ table[data-report]:not([data-noserial]) > tbody > tr:not(.font-bold):not(.font-s
 @media print {
   .drill {
     text-decoration: none;
+  }
+  .drill-card {
+    box-shadow: none;
   }
 }

@@ -161,7 +161,7 @@ export default async function Dashboard({
         </div>
         <div className="absolute inset-x-0 bottom-0 h-12 overflow-hidden rounded-b-2xl bg-asphalt-800">
           <div className="road-line-h road-moving-h absolute inset-x-0 bottom-3 opacity-80" />
-          <div className="drive-across absolute bottom-2">
+          <div className="drive-across absolute bottom-2 print:hidden">
             <Truck className="truck-bump w-16" spinning />
           </div>
         </div>

@@ -27,7 +27,7 @@ export default async function UnbilledChargesReport() {
   return (
     <>
       <ReportHeader title="مصاريف على العملاء لم تُفوتر (1114)" period="حتى اليوم" filename="مصاريف-العملاء-غير-المفوترة" />
-      <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3 print:hidden">
+      <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3 print:mb-3 print:grid-cols-3 print:gap-2 print:[&>*]:border print:[&>*]:border-gray-300 print:[&>*]:p-2 print:[&>*]:shadow-none">
         <div className="rounded-2xl bg-white p-4 shadow-sm">
           <div className="text-xs text-gray-500">إجمالي غير المفوتر</div>
           <div className="ltr-nums mt-1 text-xl font-semibold">{money(total, false)}</div>

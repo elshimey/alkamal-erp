@@ -3,6 +3,7 @@ import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Sans_Arabic, Readex_Pro } from "next/font/google";
 import { RouteProgress } from "@/components/route-progress";
 import { DropdownDismiss } from "@/components/dropdown-dismiss";
+import { PrintPrep } from "@/components/print-prep";
 import { getBrand } from "@/lib/brand";
 import "./globals.css";
 
@@ -24,11 +25,12 @@ export const viewport: Viewport = { themeColor: "#ffffff", width: "device-width"
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ar" dir="rtl" className={`${body.variable} ${display.variable}`}>
-      <body className="min-h-screen font-sans antialiased">
+      <body className="min-h-screen font-sans antialiased print:min-h-0">
         <Suspense>
           <RouteProgress />
         </Suspense>
         <DropdownDismiss />
+        <PrintPrep />
         {children}
       </body>
     </html>

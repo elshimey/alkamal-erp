@@ -131,7 +131,7 @@ export function StatusTabs({
   return (
     <nav
       aria-label={label}
-      className="-mx-4 mb-3 flex gap-2 overflow-x-auto px-4 pb-1 text-sm [scrollbar-width:none] md:mx-0 md:items-end md:gap-1 md:overflow-visible md:border-b md:border-gray-200 md:px-0 md:pb-0 [&::-webkit-scrollbar]:hidden"
+      className="-mx-4 mb-3 flex gap-2 overflow-x-auto px-4 pb-1 text-sm [scrollbar-width:none] md:mx-0 md:items-end md:gap-1 md:overflow-visible md:border-b md:border-gray-200 md:px-0 md:pb-0 [&::-webkit-scrollbar]:hidden print:mx-0 print:flex-wrap print:overflow-visible print:px-0"
     >
       {tabs.map((t) => {
         const attn = !!t.attn && (t.count ?? 0) > 0;
@@ -184,7 +184,7 @@ export function BulkBar({ children }: { children: ReactNode }) {
     <div
       role="toolbar"
       aria-label="عمليات المحدد"
-      className="animate-rise fixed inset-x-0 bottom-14 z-[60] mx-auto flex w-fit max-w-[calc(100vw-2rem)] flex-wrap items-center gap-2 rounded-2xl bg-asphalt-900 px-3.5 py-2 text-white shadow-[0_18px_40px_-12px_rgba(0,0,0,0.5)] print:hidden [&>div>.text-brand-900]:text-brand-500 [&>div>.text-gray-500]:text-white/60"
+      className="animate-rise fixed inset-x-0 bottom-14 z-[60] print:hidden mx-auto flex w-fit max-w-[calc(100vw-2rem)] flex-wrap items-center gap-2 rounded-2xl bg-asphalt-900 px-3.5 py-2 text-white shadow-[0_18px_40px_-12px_rgba(0,0,0,0.5)] print:hidden [&>div>.text-brand-900]:text-brand-500 [&>div>.text-gray-500]:text-white/60"
     >
       {children}
     </div>

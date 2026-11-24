@@ -23,7 +23,7 @@ export default async function SharedDocPage({ params }: { params: Promise<{ toke
   });
   if (!doc) notFound();
   return (
-    <div className="min-h-screen bg-concrete px-3 py-6 print:bg-white print:p-0">
+    <div className="min-h-screen bg-concrete px-3 py-6 print:min-h-0 print:bg-white print:p-0">
       <div className="mx-auto max-w-4xl">
         <SharedDocTools name={doc.name} company={doc.company} />
         <div data-doc={doc.name} className="bg-white">
