@@ -15,7 +15,7 @@ export function ExportButton({ filename, label = "تصدير Excel" }: { filenam
         const cells = Array.from(tr.cells).map((c) => q(c.innerText));
         if (serial) {
           const head = tr.parentElement?.tagName === "THEAD";
-          const data = !head && !tr.matches(".font-bold, .font-semibold") && !tr.querySelector(":scope > td[colspan]");
+          const data = !head && !tr.matches(".font-bold, .font-semibold, [data-noserial]") && !tr.querySelector(":scope > td[colspan]");
           cells.unshift(q(head ? (tr === t.tHead?.rows[0] ? "م" : "") : data ? String(++n) : ""));
         }
         lines.push(cells.join(","));

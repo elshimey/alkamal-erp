@@ -20,8 +20,8 @@ export default async function DriverLayout({ children }: { children: React.React
   const office = user.roles.some((r) => r.key !== "driver");
   const [brand, unread, tenant, docFiles] = await Promise.all([getBrand(true), driver ? unreadCount(db, driver.id) : 0, getTenant(), driver ? driverDocumentFiles(db, driver, todayRiyadh()) : []]);
   return (
-    <div dir={isRtl(lang) ? "rtl" : "ltr"} lang={lang} className="min-h-screen bg-concrete pb-24">
-      <header className="relative overflow-hidden bg-asphalt-900 px-4 pt-[calc(env(safe-area-inset-top)+0.75rem)] pb-4 text-white">
+    <div dir={isRtl(lang) ? "rtl" : "ltr"} lang={lang} className="min-h-screen bg-concrete pb-24 print:min-h-0 print:bg-white print:pb-0">
+      <header className="relative overflow-hidden bg-asphalt-900 px-4 print:hidden pt-[calc(env(safe-area-inset-top)+0.75rem)] pb-4 text-white">
         <div className="road-line-h road-moving-h absolute inset-x-0 bottom-0 opacity-60" />
         <div className="mx-auto flex max-w-md items-center gap-3">
           <BrandMark logo={brand.logo} size={34} />

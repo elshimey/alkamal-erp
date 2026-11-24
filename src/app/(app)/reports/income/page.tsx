@@ -105,7 +105,7 @@ function SectionRows({
         )}
       </tr>
       {sec.lines.length === 0 && (
-        <tr>
+        <tr data-noserial>
           <C />
           <C className="text-gray-400">لا توجد حركة</C>
           <C num>—</C>

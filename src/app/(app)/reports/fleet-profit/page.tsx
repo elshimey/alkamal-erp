@@ -117,7 +117,7 @@ export default async function FleetProfitPage({ searchParams }: { searchParams: 
             ))}
             <C num>
               {r.other.length ? (
-                <details>
+                <details data-print-open>
                   <summary className="cursor-pointer text-brand-700">{money(r.otherTotal)}</summary>
                   <ul className="mt-1 space-y-0.5 text-start text-xs text-gray-600">
                     {r.other.map((o) => (

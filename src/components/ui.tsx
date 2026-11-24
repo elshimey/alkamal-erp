@@ -87,7 +87,8 @@ export function Table({ head, children, stack = true }: { head: ReactNode[]; chi
         <thead className="border-b border-gray-200 bg-[#faf9f5] text-gray-500">
           <tr>
             {head.map((h, i) => (
-              <th key={i} className="px-4 py-2.5 text-start text-xs font-medium whitespace-nowrap">
+              // عمود «الخطوة التالية» أزرار لا بيانات، وخلاياه لا تُطبع (NextStepCell)، فلا يُطبع عنوانه
+              <th key={i} className={`px-4 py-2.5 text-start text-xs font-medium whitespace-nowrap ${h === "الخطوة التالية" ? "print:hidden" : ""}`}>
                 {h}
               </th>
             ))}

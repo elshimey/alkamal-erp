@@ -90,7 +90,7 @@ export function SheetPanel({
   const closeCls = "grid size-9 shrink-0 place-items-center rounded-full bg-concrete text-gray-600";
 
   return createPortal(
-    <div className="fixed inset-0 z-[70] md:hidden" dir="rtl">
+    <div className="fixed inset-0 z-[70] md:hidden print:hidden" dir="rtl">
       {closeHref ? (
         <Link href={closeHref} scroll={false} replace aria-label="إغلاق المعاينة" tabIndex={-1} className="absolute inset-0 block bg-asphalt-900/45" />
       ) : (

@@ -8,7 +8,7 @@ export function TabBar({ tabs }: { tabs: { href: string; label: string; icon: Ic
   const path = usePathname();
   const active = (href: string) => (href === "/driver" ? path === "/driver" || path.startsWith("/driver/trips") : path.startsWith(href));
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-asphalt-900/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
+    <nav className="fixed inset-x-0 bottom-0 z-40 print:hidden border-t border-white/10 bg-asphalt-900/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
       <div className="road-line-h absolute inset-x-0 top-0 opacity-50" />
       <ul className="mx-auto grid max-w-md grid-cols-4">
         {tabs.map((tab) => {
