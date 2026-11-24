@@ -13,6 +13,28 @@ test("اختيار السائق في الشحنة يملأ المركبة الم
   await expect(form.getByRole("combobox", { name: "المركبة*" })).toHaveValue(E2E.plate);
 });
 
+test("اختيار المركبة يملأ سائقها المسند في كل النماذج والشيتات", async ({ page }) => {
+  await officeLogin(page);
+  // النوافذ: الشحنة والمصروف والمخالفة وبلاغ العطل
+  for (const url of ["/waybills?new=1", "/expenses?new=1", "/violations?new=1", "/maintenance/requests?new=1"]) {
+    await page.goto(url);
+    const form = page.getByRole("dialog");
+    const driver = form.getByRole("combobox", { name: /^السائق/ }).first();
+    await expect(driver, url).toHaveValue("");
+    // خيارات القائمة المفتوحة فقط (في الصفحة قوائم فلترة فيها اللوحات نفسها)
+    const box = form.getByRole("combobox", { name: /^المركبة/ }).first();
+    await box.click();
+    await box.fill(E2E.plate);
+    await page.getByRole("listbox").getByRole("option", { name: E2E.plate }).first().click();
+    await expect(driver, url).toHaveValue(E2E.driver.name);
+  }
+  // الشيت الجماعي للشحنات
+  await page.goto("/waybills?add=1");
+  const grid = page.locator("main");
+  await pick(page, grid, "المركبة — صف 1", E2E.plate);
+  await expect(grid.getByRole("combobox", { name: "السائق — صف 1" })).toHaveValue(E2E.driver.name);
+});
+
 test("Esc داخل التقويم يغلقه وحده، والإغلاق مع تعديلات يسأل بنافذة البرنامج", async ({ page }) => {
   // تأكيد المتصفح يوقف الصفحة: يجب ألا يظهر أبداً
   page.on("dialog", (d) => {

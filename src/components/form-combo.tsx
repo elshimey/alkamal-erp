@@ -18,6 +18,7 @@ export function FormCombo({
   placeholder = "اكتب للبحث…",
   onChange,
   autoVehicle,
+  autoDriver,
   keepOnReset,
   moreOptions,
 }: {
@@ -31,6 +32,8 @@ export function FormCombo({
   onChange?: (value: string) => void;
   /** خانة السائق: اختياره يملأ خانة المركبة بالمسندة له في تاريخ المستند */
   autoVehicle?: AutoVehicle;
+  /** خانة المركبة: اختيارها يملأ خانة السائق بالمسند لها في تاريخ المستند */
+  autoDriver?: AutoVehicle;
   /** تبقى القيمة المختارة بعد الحفظ وتفريغ النموذج (فئة الأصل عند إدخال أصول متتالية) */
   keepOnReset?: boolean;
   /** باقي الشجرة: بند «عرض كل الشجرة» داخل القائمة */
@@ -74,7 +77,7 @@ export function FormCombo({
           onChange?.(v);
           // تحديث القيمة المخفية لا يُطلق حدث تغيير؛ نُبلغ النموذج (مؤشر «تعديلات لم تُحفظ» وغيره)
           notify();
-          link(o ?? options.find((x) => x.value === v), autoVehicle);
+          link(o ?? options.find((x) => x.value === v), autoVehicle ?? autoDriver);
         }}
       />
     </>

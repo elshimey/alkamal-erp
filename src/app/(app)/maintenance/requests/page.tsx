@@ -78,8 +78,8 @@ export default async function BreakdownRequestsPage({ searchParams }: { searchPa
             initialRows={4}
             columns={[
               { key: "date", label: "التاريخ", type: "date", placeholder: today },
-              { key: "vehicleId", label: "المركبة", type: "select", required: true, options: vehicles, width: "9rem", create: "vehicle" },
-              { key: "driverId", label: "السائق", type: "select", options: drivers, width: "10rem" },
+              { key: "vehicleId", label: "المركبة", type: "select", required: true, options: vehicles, width: "9rem", create: "vehicle", autoDriver: { key: "driverId", dateKey: "date" } },
+              { key: "driverId", label: "السائق", type: "select", options: drivers, width: "10rem", autoVehicle: { key: "vehicleId", dateKey: "date" } },
               { key: "description", label: "وصف العطل", required: true, width: "20rem" },
               { key: "priority", label: "الأولوية", type: "select", options: Object.entries(PRIORITIES).map(([value, p]) => ({ value, label: p.label })), width: "7rem", placeholder: "عادية" },
               { key: "estimatedCost", label: "التكلفة التقديرية", type: "number", width: "8rem" },

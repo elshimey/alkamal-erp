@@ -88,7 +88,7 @@ export async function ExpensePanel({ closeHref, canApprove, expense }: { closeHr
           <FormCombo name="driverId" defaultValue={val(e?.driverId)} options={drivers} create="driver" placeholder="اكتب اسم السائق…" autoVehicle={{ name: "vehicleId", dateName: "date" }} />
         </PanelField>
         <PanelField label="المركبة" hint="حسابات التشغيل (5xxx) تشترط المركبة">
-          <FormCombo name="vehicleId" defaultValue={val(e?.vehicleId)} options={vehicles} create="vehicle" placeholder="اكتب اللوحة…" />
+          <FormCombo name="vehicleId" defaultValue={val(e?.vehicleId)} options={vehicles} create="vehicle" placeholder="اكتب اللوحة…" autoDriver={{ name: "driverId", dateName: "date" }} />
         </PanelField>
         <PanelField label="الشحنة" hint="تربط المصروف بالرحلة وتملأ المركبة والسائق إن تُركا فارغين">
           <FormCombo name="waybillId" defaultValue={val(e?.waybillId)} options={waybills.map((w) => ({ value: String(w.id), label: `${w.number} · ${w.date}` }))} placeholder="رقم الشحنة…" />
