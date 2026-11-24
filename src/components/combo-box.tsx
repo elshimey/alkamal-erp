@@ -502,6 +502,7 @@ export function ComboField({
   placeholder,
   onChange,
   autoVehicle,
+  autoDriver,
 }: {
   name: string;
   options: QuickOption[];
@@ -512,6 +513,8 @@ export function ComboField({
   onChange?: (value: string) => void;
   /** خانة السائق: اختياره يملأ خانة المركبة بالمسندة له في تاريخ المستند */
   autoVehicle?: AutoVehicle;
+  /** خانة المركبة: اختيارها يملأ خانة السائق بالمسند لها في تاريخ المستند */
+  autoDriver?: AutoVehicle;
 }) {
   const [value, setValue] = useState(defaultValue);
   const hidden = useRef<HTMLInputElement>(null);
@@ -530,7 +533,7 @@ export function ComboField({
         onChange={(v, o) => {
           setValue(v);
           onChange?.(v);
-          link(o ?? options.find((x) => x.value === v), autoVehicle);
+          link(o ?? options.find((x) => x.value === v), autoVehicle ?? autoDriver);
         }}
         inputProps={{ required: required && !value, "aria-required": required }}
         className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"

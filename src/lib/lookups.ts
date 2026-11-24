@@ -53,7 +53,16 @@ export async function vehicleOptions(kind?: "head" | "trailer") {
     .from(s.vehicles)
     .where(kind ? and(eq(s.vehicles.assetKind, kind), ne(s.vehicles.status, "sold")) : undefined)
     .orderBy(asc(s.vehicles.plate));
-  return rows.map((r) => ({ value: String(r.id), label: r.plate }));
+  // فترات إسناد كل مركبة لسائقيها (النشطين): اختيارها في أي نموذج يملأ سائقها في تاريخ المستند
+  const periods = new Map<number, VehiclePeriod[]>();
+  const assigned = await db
+    .select({ vehicleId: s.vehicleAssignments.vehicleId, d: s.vehicleAssignments.driverId, from: s.vehicleAssignments.fromDate, to: s.vehicleAssignments.toDate })
+    .from(s.vehicleAssignments)
+    .innerJoin(s.drivers, eq(s.drivers.id, s.vehicleAssignments.driverId))
+    .where(eq(s.drivers.status, "active"))
+    .orderBy(asc(s.vehicleAssignments.fromDate));
+  for (const a of assigned) periods.set(a.vehicleId, [...(periods.get(a.vehicleId) ?? []), { v: String(a.d), from: a.from, to: a.to }]);
+  return rows.map((r) => ({ value: String(r.id), label: r.plate, ...(periods.has(r.id) ? { periods: periods.get(r.id) } : {}) }));
 }
 
 export async function countryOptions() {

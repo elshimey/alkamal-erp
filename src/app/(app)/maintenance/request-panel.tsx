@@ -26,7 +26,7 @@ export async function RequestPanel({ closeHref, savedHref }: { closeHref: string
           <Input type="date" name="date" defaultValue={todayRiyadh()} required className="w-full" />
         </PanelField>
         <PanelField label="المركبة" required>
-          <FormCombo name="vehicleId" options={vehicles} create="vehicle" required placeholder="اكتب اللوحة…" />
+          <FormCombo name="vehicleId" options={vehicles} create="vehicle" required placeholder="اكتب اللوحة…" autoDriver={{ name: "driverId", dateName: "date" }} />
         </PanelField>
         <PanelField label="وصف العطل" required>
           <textarea name="description" rows={3} required className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm" />

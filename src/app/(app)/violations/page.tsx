@@ -125,7 +125,7 @@ export default async function ViolationsPage({ searchParams }: { searchParams: P
             initialRows={4}
             columns={[
               { key: "date", label: "تاريخ المخالفة", type: "date", placeholder: today },
-              { key: "vehicleId", label: "المركبة", type: "select", required: true, options: vehicles, width: "8rem", create: "vehicle" },
+              { key: "vehicleId", label: "المركبة", type: "select", required: true, options: vehicles, width: "8rem", create: "vehicle", autoDriver: { key: "driverId", dateKey: "date" } },
               { key: "reference", label: "رقم المخالفة", ltr: true, width: "8rem" },
               { key: "type", label: "نوع المخالفة", type: "select", required: true, width: "11rem", placeholder: "سرعة، وقوف، حمولة…", options: violationTypes, create: "violation_type" },
               { key: "location", label: "الموقع", width: "9rem" },
@@ -141,7 +141,7 @@ export default async function ViolationsPage({ searchParams }: { searchParams: P
                   { value: "company", label: "الشركة" },
                 ],
               },
-              { key: "driverId", label: "السائق (اختياري)", type: "select", options: drivers, width: "9rem", create: "driver" },
+              { key: "driverId", label: "السائق (اختياري)", type: "select", options: drivers, width: "9rem", create: "driver", autoVehicle: { key: "vehicleId", dateKey: "date" } },
               { key: "notes", label: "ملاحظات", width: "9rem" },
             ]}
           />

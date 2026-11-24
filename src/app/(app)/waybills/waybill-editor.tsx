@@ -260,7 +260,7 @@ export function WaybillEditor({
             {fleet ? (
               <>
                 <PanelField label="المركبة" required>
-                  <ComboField key="v" name="vehicleId" options={vehicles} defaultValue={d.vehicleId} create="vehicle" required placeholder="رقم اللوحة" onChange={(v) => set("vehicleId", v)} />
+                  <ComboField key="v" name="vehicleId" options={vehicles} defaultValue={d.vehicleId} create="vehicle" required placeholder="رقم اللوحة" onChange={(v) => set("vehicleId", v)} autoDriver={{ name: "driverId", dateName: "date" }} />
                 </PanelField>
                 {trailers.length > 0 && (
                   <PanelField label="المقطورة">

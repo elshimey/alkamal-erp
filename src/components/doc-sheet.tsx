@@ -30,6 +30,8 @@ export interface DocSheetColumn {
   calc?: { multiply: string[]; vatPercent?: string };
   /** عمود السائق: اختياره يملأ عمود المركبة بالمسندة له في تاريخ المستند (ويبقى تغييرها ممكناً) */
   autoVehicle?: { key: string; dateKey?: string };
+  /** عمود المركبة: اختيارها يملأ عمود السائق بالمسند لها في تاريخ المستند (ويبقى تغييره ممكناً) */
+  autoDriver?: { key: string; dateKey?: string };
 }
 
 export interface DocSheetLine {
@@ -200,9 +202,10 @@ export function DocSheet({
       v = hit.value;
     }
     const key = keyOf(vr, col);
-    // اختيار السائق يملأ مركبته في تاريخ المستند
-    const auto = col.autoVehicle && v ? columns.find((x) => x.key === col.autoVehicle!.key) : undefined;
-    const date = col.autoVehicle?.dateKey ? columns.find((x) => x.key === col.autoVehicle!.dateKey) : undefined;
+    // اختيار السائق يملأ مركبته في تاريخ المستند، واختيار المركبة يملأ سائقها
+    const link = col.autoVehicle ?? col.autoDriver;
+    const auto = link && v ? columns.find((x) => x.key === link.key) : undefined;
+    const date = link?.dateKey ? columns.find((x) => x.key === link.dateKey) : undefined;
     const vehicle = auto && auto.editable && hasCell(vr, auto) ? vehicleOnDate(col.options?.find((o) => o.value === v)?.periods, date ? raw(vr, date) : null) : "";
     setEdits((e) => {
       const next = { ...e };

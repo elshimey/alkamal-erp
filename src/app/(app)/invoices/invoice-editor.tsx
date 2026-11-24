@@ -599,7 +599,7 @@ function TripSections({
               {sent ? (
                 <span className={`${field} block ${locked}`}>{vehicles.find((v) => v.value === trip.vehicleId)?.label}</span>
               ) : (
-                <ComboField key="v" name="tripVehicleId" options={vehicles} defaultValue={trip.vehicleId} create="vehicle" required placeholder="رقم اللوحة" onChange={(v) => setTrip({ vehicleId: v })} />
+                <ComboField key="v" name="tripVehicleId" options={vehicles} defaultValue={trip.vehicleId} create="vehicle" required placeholder="رقم اللوحة" onChange={(v) => setTrip({ vehicleId: v })} autoDriver={{ name: "tripDriverId", dateName: "invoiceDate" }} />
               )}
             </PanelField>
             {trip.priced && trailers.length > 0 && (
