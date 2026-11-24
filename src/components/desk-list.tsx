@@ -40,9 +40,13 @@ export function Sub({ children, className = "" }: { children: ReactNode; classNa
 }
 
 /** الرقم (رابط المعاينة) وتحته التاريخ يوم/شهر/سنة */
-export function NumDateCell({ number, date, href, extra }: { number: string; date: string | null; href?: string; extra?: ReactNode }) {
+export function NumDateCell({ number, date, href, extra, kid }: { number: string; date: string | null; href?: string; extra?: ReactNode; kid?: "mid" | "last" }) {
+  // kid: شحنة داخل صف مدمج، مزاحة بخط متقطع يربطها بصف الفاتورة
+  const tree = kid
+    ? `relative !ps-12 before:absolute before:top-0 before:start-7 before:border-s-2 before:border-dashed before:border-[#d7cba8] ${kid === "last" ? "before:h-1/2" : "before:bottom-0"} after:absolute after:top-1/2 after:start-7 after:w-3.5 after:border-t-2 after:border-dashed after:border-[#d7cba8]`
+    : "";
   return (
-    <td className="px-4 py-2.5 whitespace-nowrap">
+    <td className={`px-4 py-2.5 whitespace-nowrap ${tree}`}>
       {href ? (
         <Link href={href} scroll={false} className="ltr-nums font-semibold text-asphalt-900 hover:text-brand-700 hover:underline">
           {number}
@@ -95,10 +99,14 @@ const nextPlain = `${nextBase} border border-gray-200 bg-white text-gray-700 hov
  * زر «الخطوة التالية» في الصف: نفس بند قائمة العمليات (نفس التأكيد والرسالة) باسم قصير.
  * go = ينتظر إجراءً منا (أصفر). دون بند يظهر نص هادئ (اكتملت، عند السائق…).
  */
-export function NextStepCell({ item, label, go, note }: { item?: MenuItem | null; label?: string; go?: boolean; note?: string | null }) {
+export function NextStepCell({ item, label, go, note, href }: { item?: MenuItem | null; label?: string; go?: boolean; note?: string | null; href?: string }) {
   return (
     <td className="px-4 py-2.5 print:hidden">
-      {item ? (
+      {href && label ? (
+        <Link href={href} className={go ? nextGo : nextPlain}>
+          {label}
+        </Link>
+      ) : item ? (
         <ActionButton item={{ ...item, label: label ?? item.label, icon: undefined }} className={go ? nextGo : nextPlain} />
       ) : note ? (
         <span className="text-xs whitespace-nowrap text-gray-400">{note}</span>

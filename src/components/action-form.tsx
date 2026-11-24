@@ -4,6 +4,7 @@ import { MsgText } from "@/components/msg-text";
 import { Truck } from "./icons";
 import { newOpId } from "@/lib/op-id";
 import { toast } from "./toast";
+import { clearSelection } from "./row-selection";
 import { createContext, startTransition, useActionState, useContext, useEffect, useRef, type ReactNode } from "react";
 
 export type FormState = { error?: string; ok?: string } | undefined;
@@ -88,12 +89,14 @@ export function ActionForm({
   useEffect(() => {
     if (state?.error !== RETRY_MESSAGE) op.current = "";
     if (resetOnSuccess && state?.ok) formRef.current?.reset();
+    // إجراء جماعي نجح (دمج، اعتماد، إرسال…): يزول تحديد الصفوف ويختفي شريط العمليات
+    if (state?.ok && id) clearSelection(id);
     // رسالة النجاح أسفل نموذج طويل لا تُرى (بيانات المنشأة): تظهر أيضاً أسفل الشاشة
     if (state?.ok) {
       const msg = formRef.current?.querySelector(":scope > [role=status]")?.getBoundingClientRect();
       if (!msg || msg.top < 0 || msg.bottom > window.innerHeight) toast(state.ok);
     }
-  }, [state, resetOnSuccess]);
+  }, [state, resetOnSuccess, id]);
   return (
     <PendingContext.Provider value={pending}>
       <form

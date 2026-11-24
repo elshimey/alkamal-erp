@@ -14,7 +14,7 @@ import { fundingAccounts } from "@/lib/invoices";
 import { listHref, type DocListParams } from "@/lib/doc-filters";
 import { PAGE_SIZE, pageOf } from "@/lib/paging";
 import { fmt, fmtDate } from "@/lib/format";
-import { EDITABLE, listWaybills, parseWaybillFilter, waybillComponents, waybillDoc } from "@/lib/waybills";
+import { EDITABLE, groupMergedWaybills, listWaybills, parseWaybillFilter, waybillComponents, waybillDoc, type WaybillListItem } from "@/lib/waybills";
 import { customListOptions } from "@/lib/custom-lists";
 import { joinCustom } from "@/data/custom-lists";
 import { taxCodeOptions } from "@/lib/tax-codes";
@@ -22,7 +22,7 @@ import { WAYBILL_SORTS, WAYBILL_STATUS, type WaybillStatus } from "@/data/waybil
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { ConfirmSubmit } from "@/components/confirm-submit";
 import { ActionButton, ActionsMenu, type MenuItem } from "@/components/actions-menu";
-import { DocCard, DocCards, Plate, SheetFacts, SheetMoney, SheetTrack, sheetBtn, sheetPrimary } from "@/components/doc-card";
+import { DocCard, DocCards, DocGroupCard, Plate, SheetFacts, SheetMoney, SheetTrack, sheetBtn, sheetPrimary } from "@/components/doc-card";
 import { MobileSheet } from "@/components/mobile-sheet";
 import { BulkPdfButton } from "@/components/bulk-pdf";
 import { ClickRow } from "@/components/click-row";
@@ -33,6 +33,7 @@ import { DriverSentTag } from "@/components/driver-sent";
 import { CashAccountField } from "@/components/cash-account-field";
 import { Icon } from "@/components/icons";
 import { RowCheck, SelectAll, SelectionGate, SelectionTotal } from "@/components/row-selection";
+import { GroupCheck, GroupToggle } from "@/components/merged-group";
 import { SendDocument } from "@/components/send-document";
 import { SheetEditor } from "@/components/sheet-editor";
 import { AddModeBar } from "@/components/list-actions";
@@ -128,6 +129,8 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
     getCompany(db),
     getInvoiceTemplate(db),
   ]);
+  // الشحنات المدمجة في فاتورة واحدة: صف واحد بسهم يفتح شحناتها (قرار أحمد 2026-11-24)
+  const items: WaybillListItem[] = view === "table" ? await groupMergedWaybills(db, rows, filter) : rows.map((row) => ({ kind: "one", row }));
   const cashOpts = canUpdate ? await fundingAccounts(db) : [];
   const pendingRequests = canCreate ? await pendingTripRequestsCount(db) : 0;
   const cashField = <CashAccountField options={cashOpts} deferrable />;
@@ -378,7 +381,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
   const initial = draft();
   const returnTo = view === "sheet" ? listUrl() : listUrl({ open: "{id}", page: creating ? undefined : lp.page }).replace("%7Bid%7D", "{id}");
   const filtered = !!(filter.q || filter.tab || filter.from);
-  const openRow = openDoc ? rows.find((r) => r.w.id === openDoc.w.id) : undefined;
+  const openRow = openDoc ? items.flatMap((i) => (i.kind === "one" ? [i.row] : i.rows)).find((r) => r.w.id === openDoc.w.id) : undefined;
   const openInvoiceId = openRow?.invoiceId ?? null;
   const vatOf = (w: Row["w"]) => (w.isInternational ? 0 : 15);
   const exec = (r: Row) => r.plate ?? (r.carrier ? `${r.carrier} (ناقل)` : "—");
@@ -418,7 +421,36 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
   const mobileList = (
     <div className="md:hidden">
       <DocCards empty={filtered ? "لا توجد شحنات بهذه الشروط" : "لا توجد شحنات بعد؛ اضغط «إنشاء»"}>
-        {rows.map((r) => {
+        {items.map((it) => {
+          if (it.kind === "group") {
+            const g = it;
+            const issued = g.invoice.status === "issued";
+            const routes = new Set(g.rows.map((r) => r.route)).size;
+            return (
+              <DocGroupCard
+                key={`inv-${g.invoice.id}`}
+                number={g.invoice.number}
+                href={`/invoices?open=${g.invoice.id}`}
+                status={issued ? { label: "مفوترة", tone: "green" } : { label: "مدمجة", tone: "blue" }}
+                count={g.rows.length}
+                party={g.rows[0].customer}
+                meta={`${issued ? "فاتورة صادرة" : "مسودة فاتورة"} · ${routes} ${routes === 1 ? "مسار" : "مسارات"}`}
+                amount={showPrices ? fmt(g.rows.reduce((t, r) => t + Number(r.w.amount), 0)) : null}
+                currency={g.rows[0].w.currencyCode}
+                next={issued ? null : canIssueInvoice ? "أصدرها" : null}
+                open={g.rows.some((r) => r.w.id === openId)}
+                kids={g.rows.map((r) => ({
+                  key: r.w.id,
+                  href: listUrl({ open: String(r.w.id) }),
+                  number: r.w.number,
+                  line: `${r.route} · ${exec(r)} · ${fmtDate(r.w.waybillDate)}`,
+                  amount: showPrices ? fmt(r.w.amount) : null,
+                  active: r.w.id === openId,
+                }))}
+              />
+            );
+          }
+          const r = it.row;
           const { w } = r;
           const st = waybillState(w.status, r.invoiceId, r.invoiceWaybills);
           return (
@@ -450,6 +482,96 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
       <Pager page={page} size={PAGE_SIZE} total={listTotal.n} hrefFor={(p) => listUrl({ page: p > 1 ? String(p) : undefined, open: undefined })} />
     </div>
   );
+  type ListRow = (typeof rows)[number];
+  const deskRow = (r: ListRow, kid?: { of: string; open: boolean; last: boolean }) => {
+                  const { w } = r;
+                  const open = listUrl({ open: String(w.id) });
+                  const st = waybillState(w.status, r.invoiceId, r.invoiceWaybills);
+                  const nx = rowNext(r);
+                  return (
+                    <ClickRow key={w.id} href={open} kidOf={kid?.of} hidden={kid ? !kid.open : undefined} className={`transition hover:bg-brand-50/40 ${w.id === openId ? "bg-brand-50/70" : kid ? "bg-[#fcfaf4]" : ""}`}>
+                      <Td>{(canUpdate || canApprove || canInvoice) && <RowCheck form={BULK_FORM} id={w.id} amount={showPrices ? w.amount : "0"} group={kid?.of} />}</Td>
+                      <NumDateCell number={w.number} date={w.waybillDate} href={open} kid={kid ? (kid.last ? "last" : "mid") : undefined} />
+                      <Td>
+                        <span className="font-medium text-gray-800">{r.customer}</span>
+                        <RouteLine {...splitRoute(r.route)} international={w.isInternational} />
+                      </Td>
+                      <Td className="whitespace-nowrap">
+                        {r.plate ? <Plate>{r.plate}</Plate> : r.carrier ? <span className="rounded-md bg-gray-100 px-1.5 py-0.5 text-xs text-gray-700">ناقل: {r.carrier}</span> : "—"}
+                        <Sub>{r.driver ?? w.carrierDriverName ?? "—"}</Sub>
+                      </Td>
+                      {showPrices && (
+                        <Td className="whitespace-nowrap">
+                          <span className="ltr-nums font-display font-semibold text-asphalt-900">{fmt(w.amount)}</span> <span className="text-xs text-gray-400">{w.currencyCode}</span>
+                          <Sub>قبل الضريبة</Sub>
+                        </Td>
+                      )}
+                      <StatusCell status={st} sub={w.status === "rejected" ? w.rejectionReason : "sub" in st ? st.sub : null}>
+                        {r.invoiceId ? (
+                          <Sub className="whitespace-nowrap">
+                            فاتورة{" "}
+                            <Link href={`/invoices?open=${r.invoiceId}`} className="ltr-nums text-brand-700 hover:underline">
+                              {r.invoice}
+                            </Link>
+                          </Sub>
+                        ) : (
+                          <DriverSentTag sentAt={w.sentToDriverAt} acceptedAt={w.driverAcceptedAt} fleet={w.execution === "fleet" && (w.status === "draft" || w.status === "in_transit")} />
+                        )}
+                      </StatusCell>
+                      <NextStepCell {...nx} />
+                      <EdgeCell tone={st.tone} />
+                    </ClickRow>
+                  );
+  };
+  // صف الفاتورة المدمجة: رقمها وعدد شحناتها ومجموعها، والسهم يفتح الشحنات تحته
+  const deskGroup = (g: Extract<WaybillListItem, { kind: "group" }>) => {
+    const key = `inv-${g.invoice.id}`;
+    const issued = g.invoice.status === "issued";
+    const st = issued ? { label: "مفوترة", tone: "green" as const } : { label: "مدمجة", tone: "blue" as const };
+    const href = `/invoices?open=${g.invoice.id}`;
+    const routes = [...new Set(g.rows.map((r) => r.route))];
+    const plates = new Set(g.rows.map((r) => r.plate ?? r.carrier).filter(Boolean)).size;
+    const dates = g.rows.map((r) => r.w.waybillDate).sort();
+    const startOpen = g.rows.some((r) => r.w.id === openId);
+    const total = g.rows.reduce((t, r) => t + Number(r.w.amount), 0);
+    return [
+      <tr key={key} className="bg-[#f6f3ea] transition hover:bg-[#f1ecdd]" data-merged-group={g.invoice.number}>
+        <Td>{(canUpdate || canApprove || canInvoice) && <GroupCheck form={BULK_FORM} group={key} />}</Td>
+        <td className="px-4 py-2.5 whitespace-nowrap">
+          <span className="flex items-center">
+            <GroupToggle group={key} count={g.rows.length} defaultOpen={startOpen} />
+            <span>
+              <Link href={href} className="ltr-nums font-semibold text-asphalt-900 hover:text-brand-700 hover:underline">
+                {g.invoice.number}
+              </Link>
+              <span className="ms-1.5 rounded-full bg-asphalt-900 px-2 py-px text-[11px] font-semibold text-brand-500">{g.rows.length} شحنات</span>
+              <Sub>
+                {issued ? "فاتورة صادرة" : "مسودة فاتورة"} · <span className="ltr-nums">{dates[0] === dates[dates.length - 1] ? fmtDate(dates[0]) : `${fmtDate(dates[0])} - ${fmtDate(dates[dates.length - 1])}`}</span>
+              </Sub>
+            </span>
+          </span>
+        </td>
+        <Td>
+          <span className="font-medium text-gray-800">{g.rows[0].customer}</span>
+          <RouteLine {...splitRoute(routes[0])} />
+          {routes.length > 1 && <Sub>و{routes.length - 1} {routes.length - 1 === 1 ? "مسار آخر" : "مسارات أخرى"}</Sub>}
+        </Td>
+        <Td className="whitespace-nowrap">
+          <Sub>{plates > 1 ? `${plates} مركبات` : (g.rows[0].plate ?? g.rows[0].carrier ?? "—")}</Sub>
+        </Td>
+        {showPrices && (
+          <Td className="whitespace-nowrap">
+            <span className="ltr-nums font-display font-semibold text-asphalt-900">{fmt(total)}</span> <span className="text-xs text-gray-400">{g.rows[0].w.currencyCode}</span>
+            <Sub>قبل الضريبة</Sub>
+          </Td>
+        )}
+        <StatusCell status={st} sub={`${g.rows.length} شحنات في فاتورة واحدة`} />
+        {issued ? <NextStepCell note="اكتملت" /> : canIssueInvoice ? <NextStepCell href={href} label="أصدرها" go /> : <NextStepCell note="في مسودة فاتورة" />}
+        <EdgeCell tone={st.tone} />
+      </tr>,
+      ...g.rows.map((r, i) => deskRow(r, { of: key, open: startOpen, last: i === g.rows.length - 1 })),
+    ];
+  };
   // الخطوة الرئيسية في معاينة الجوال: أول ما ينطبق من هذه، والباقي في «العمليات»
   const PRIMARY = ["إرسال للسائق", "اعتماد الشحنة", "إنشاء فاتورة مسودة", "تم التسليم", "فتح الفاتورة"];
   const openMenu = openDoc ? menu(openDoc.w, openInvoiceId, openRow?.invoice ?? null, openDoc.driverMobile) : [];
@@ -887,46 +1009,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
               )}
               <Table head={[(canUpdate || canApprove || canInvoice) && rows.length ? <SelectAll key="all" form={BULK_FORM} /> : "", "الشحنة", "العميل والمسار", "التنفيذ", ...(showPrices ? ["المبلغ"] : []), "الحالة", "الخطوة التالية", ""]}>
                 {rows.length === 0 && <EmptyRow cols={showPrices ? 8 : 7}>{filtered ? "لا توجد شحنات بهذه الشروط" : "لا توجد شحنات بعد؛ اضغط «إنشاء»"}</EmptyRow>}
-                {rows.map((r) => {
-                  const { w } = r;
-                  const open = listUrl({ open: String(w.id) });
-                  const st = waybillState(w.status, r.invoiceId, r.invoiceWaybills);
-                  const nx = rowNext(r);
-                  return (
-                    <ClickRow key={w.id} href={open} className={`transition hover:bg-brand-50/40 ${w.id === openId ? "bg-brand-50/70" : ""}`}>
-                      <Td>{(canUpdate || canApprove || canInvoice) && <RowCheck form={BULK_FORM} id={w.id} amount={showPrices ? w.amount : "0"} />}</Td>
-                      <NumDateCell number={w.number} date={w.waybillDate} href={open} />
-                      <Td>
-                        <span className="font-medium text-gray-800">{r.customer}</span>
-                        <RouteLine {...splitRoute(r.route)} international={w.isInternational} />
-                      </Td>
-                      <Td className="whitespace-nowrap">
-                        {r.plate ? <Plate>{r.plate}</Plate> : r.carrier ? <span className="rounded-md bg-gray-100 px-1.5 py-0.5 text-xs text-gray-700">ناقل: {r.carrier}</span> : "—"}
-                        <Sub>{r.driver ?? w.carrierDriverName ?? "—"}</Sub>
-                      </Td>
-                      {showPrices && (
-                        <Td className="whitespace-nowrap">
-                          <span className="ltr-nums font-display font-semibold text-asphalt-900">{fmt(w.amount)}</span> <span className="text-xs text-gray-400">{w.currencyCode}</span>
-                          <Sub>قبل الضريبة</Sub>
-                        </Td>
-                      )}
-                      <StatusCell status={st} sub={w.status === "rejected" ? w.rejectionReason : "sub" in st ? st.sub : null}>
-                        {r.invoiceId ? (
-                          <Sub className="whitespace-nowrap">
-                            فاتورة{" "}
-                            <Link href={`/invoices?open=${r.invoiceId}`} className="ltr-nums text-brand-700 hover:underline">
-                              {r.invoice}
-                            </Link>
-                          </Sub>
-                        ) : (
-                          <DriverSentTag sentAt={w.sentToDriverAt} acceptedAt={w.driverAcceptedAt} fleet={w.execution === "fleet" && (w.status === "draft" || w.status === "in_transit")} />
-                        )}
-                      </StatusCell>
-                      <NextStepCell {...nx} />
-                      <EdgeCell tone={st.tone} />
-                    </ClickRow>
-                  );
-                })}
+                {items.map((it) => (it.kind === "one" ? deskRow(it.row) : deskGroup(it)))}
               </Table>
               <Pager page={page} size={PAGE_SIZE} total={listTotal.n} hrefFor={(p) => listUrl({ page: p > 1 ? String(p) : undefined, open: undefined })} />
               </div>

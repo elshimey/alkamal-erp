@@ -3,8 +3,18 @@
 import { useEffect, useState, type ReactNode } from "react";
 
 // تحديد صفوف جدول لإجراء جماعي: مربعات الصفوف تتبع نموذجاً بخاصية form فتُرسل معه.
-const EVENT = "row-selection";
-const boxes = (form: string) => Array.from(document.querySelectorAll<HTMLInputElement>(`input[type=checkbox][name=ids][form="${form}"]`));
+export const EVENT = "row-selection";
+export const boxes = (form: string) => Array.from(document.querySelectorAll<HTMLInputElement>(`input[type=checkbox][name=ids][form="${form}"]`));
+
+/** يزيل كل تحديد في قائمة النموذج (بعد نجاح إجراء جماعي) فيختفي شريط العمليات. */
+export function clearSelection(form: string) {
+  for (const b of boxes(form)) b.checked = false;
+  for (const b of document.querySelectorAll<HTMLInputElement>(`input[type=checkbox][data-select-all="${form}"]`)) {
+    b.checked = false;
+    b.indeterminate = false;
+  }
+  document.dispatchEvent(new Event(EVENT));
+}
 
 /** تحديد الكل في رأس الجدول. */
 export function SelectAll({ form }: { form: string }) {
@@ -12,6 +22,7 @@ export function SelectAll({ form }: { form: string }) {
     <input
       type="checkbox"
       aria-label="تحديد الكل"
+      data-select-all={form}
       className="size-4 accent-brand-600"
       onChange={(e) => {
         for (const b of boxes(form)) b.checked = e.currentTarget.checked;
@@ -21,7 +32,8 @@ export function SelectAll({ form }: { form: string }) {
   );
 }
 
-export function RowCheck({ form, id, amount }: { form: string; id: number; amount: string }) {
+/** group: رقم مجموعة الشحنات المدمجة التي ينتمي لها الصف (يحددها مربع المجموعة كلها). */
+export function RowCheck({ form, id, amount, group }: { form: string; id: number; amount: string; group?: string }) {
   return (
     <input
       type="checkbox"
@@ -29,6 +41,7 @@ export function RowCheck({ form, id, amount }: { form: string; id: number; amoun
       value={id}
       form={form}
       data-amount={amount}
+      data-group={group}
       aria-label="تحديد"
       className="size-4 accent-brand-600"
       onChange={() => document.dispatchEvent(new Event(EVENT))}

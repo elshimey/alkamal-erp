@@ -6,6 +6,8 @@ export const E2E = {
   beta: { code: "beta", login: "beta_admin", password: "e2e-beta-pass", secretCustomer: "عميل بيتا السري" },
   customer: "عميل الاختبار",
   linkCustomer: "عميل رابط المراجعة",
+  mergeCustomer: "عميل الشحنات المدمجة",
+  mergePlate: "د ر س 5678",
   plate: "ا ب ج 1234",
   price: 2500,
 };
