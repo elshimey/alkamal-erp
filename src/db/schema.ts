@@ -547,7 +547,7 @@ export const vehicleHandovers = pgTable(
     toDriverId: ref("to_driver_id").references(() => drivers.id),
     handoverDate: date("handover_date").notNull(),
     odometer: integer("odometer"),
-    fuelLevel: varchar("fuel_level", { length: 12 }).$type<"quarter" | "half" | "three_quarters" | "full">(),
+    fuelLevel: varchar("fuel_level", { length: 20 }).$type<"quarter" | "half" | "three_quarters" | "full">(),
     condition: varchar("condition", { length: 10 }).$type<"good" | "notes">(),
     companyRep: text("company_rep"),
     notes: text("notes"),
