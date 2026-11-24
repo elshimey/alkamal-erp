@@ -611,6 +611,19 @@ export async function detachChargeTx(tx: Tx, waybillExpenseId: number) {
   await recomputeTotals(tx, line.invoiceId);
 }
 
+/** بعد تعديل مبلغ مصروف على العميل أو بيانه: يُعاد بناء سطره في مسودة فاتورته (يُمنع إن كانت صادرة). */
+export async function refreshChargeLineTx(tx: Tx, waybillExpenseId: number) {
+  const [line] = await tx
+    .select({ invoiceId: s.salesInvoiceLines.invoiceId })
+    .from(s.salesInvoiceLines)
+    .where(eq(s.salesInvoiceLines.waybillExpenseId, waybillExpenseId));
+  if (!line) return;
+  await detachChargeTx(tx, waybillExpenseId);
+  const lines = await chargeLines(tx, line.invoiceId, [waybillExpenseId]);
+  if (lines.length) await insertLines(tx, line.invoiceId, lines);
+  await recomputeTotals(tx, line.invoiceId);
+}
+
 // ───────────── مصاريف على العميل في الفاتورة المباشرة ─────────────
 // تُقيد عند الحفظ مدين 1114 دائن من دفع، وتظهر سطراً مستقلاً يُقفل 1114 عند الإصدار (مثل الشحنة تماماً).
 

@@ -6,6 +6,7 @@ import { todayRiyadh } from "@/lib/dates";
 import { createPayment, payableAccountFor } from "@/lib/purchases";
 import { postChargeTx } from "@/lib/customer-charges";
 import { lockWaybill, waybillAccountIds } from "@/lib/waybills";
+import { refreshChargeLineTx } from "@/lib/invoices";
 import { WAYBILL_ACCOUNTS } from "@/data/waybills";
 
 // «سندات صرف تحت المراجعة» (خطة التقارير والمصروفات 2026-11-21، الخطوة 2):
@@ -123,6 +124,30 @@ async function lockCharge(tx: Tx, id: number) {
   if (!e) throw new Error("المصروف غير موجود");
   if (e.payer !== "unpaid") throw new Error("المصروف ليس «لم يُدفع بعد»");
   return e;
+}
+
+/**
+ * تعديل مصروف «لم يُدفع بعد» قبل اعتماده (طلب أحمد 2026-11-24): المبلغ والبيان والمستفيد.
+ * لا قيد قبل الاعتماد، فيكفي تحديثه وإعادة بناء سطره في مسودة الفاتورة (الصادرة تمنع).
+ */
+export async function updateUnpaidCharge(db: Db, id: number, input: { amount: number; note: string | null; partyId: number | null }) {
+  if (!(input.amount > 0)) throw new Error("المبلغ يجب أن يكون أكبر من صفر");
+  return db.transaction(async (tx) => {
+    const e = await lockCharge(tx, id);
+    if (e.journalEntryId) throw new Error("المصروف معتمد؛ عدّله قبل الاعتماد فقط");
+    if (e.paymentId) throw new Error("المصروف مسدد بسند صرف");
+    if (e.waybillId) {
+      const w = await lockWaybill(tx, e.waybillId);
+      if (w.status === "rejected") throw new Error(`الشحنة ${w.number} مرفوضة`);
+    }
+    const [row] = await tx
+      .update(s.waybillExpenses)
+      .set({ amount: String(input.amount), note: input.note || null, partyId: input.partyId })
+      .where(eq(s.waybillExpenses.id, id))
+      .returning();
+    await refreshChargeLineTx(tx, id);
+    return row;
+  });
 }
 
 /** اعتماد مصروف على العميل «لم يُدفع بعد»: قيد مدين 1114 (أو التكلفة) دائن ذمة المستفيد أو 2106. */

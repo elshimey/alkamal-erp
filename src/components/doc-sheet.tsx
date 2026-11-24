@@ -86,11 +86,47 @@ const toIsoDate = (raw: string) => {
  * سطراً لكل بند وبيانات رأسه في أول سطر. التعديلات تُعلَّم بالأصفر حتى «حفظ»، والحفظ يمر
  * على قواعد المستند نفسها في الخادم.
  */
-export function DocSheet({ columns: baseColumns, rows, action, emptyText, openLabel = "اضغط لعرض الاستمارة" }: { columns: DocSheetColumn[]; rows: DocSheetRow[]; action: (payload: string) => Promise<DocSheetResult>; emptyText: string; openLabel?: string }) {
+export function DocSheet({
+  columns: baseColumns,
+  rows: baseRows,
+  action,
+  emptyText,
+  openLabel = "اضغط لعرض الاستمارة",
+  addRows,
+}: {
+  columns: DocSheetColumn[];
+  rows: DocSheetRow[];
+  action: (payload: string) => Promise<DocSheetResult>;
+  emptyText: string;
+  openLabel?: string;
+  /** سطور جديدة تُكتب في الشيت نفسه وتُحفظ مع التعديلات (رقمها سالب في الحفظ = مستند جديد). طلب أحمد 2026-11-24 */
+  addRows?: { label: string; defaults?: Record<string, string> };
+}) {
   const router = useRouter();
   const withCreated = useCreatedOptions();
   const columns = baseColumns.map((c) => (c.type === "select" ? { ...c, options: withCreated(c.create, c.options) } : c));
   const [edits, setEdits] = useState<Record<string, string>>({});
+  // السطور الجديدة: أرقام سالبة حتى تُحفظ
+  const [newIds, setNewIds] = useState<number[]>([]);
+  const rows = useMemo<DocSheetRow[]>(
+    () => [
+      ...baseRows,
+      ...newIds.map((id) => ({
+        id,
+        href: "",
+        editable: true,
+        cells: { ...addRows?.defaults },
+        badges: Object.fromEntries(baseColumns.filter((c) => c.type === "badge").map((c) => [c.key, { label: "جديد", tone: "amber" as const }])),
+      })),
+    ],
+    [baseRows, newIds, addRows?.defaults, baseColumns],
+  );
+  const addRow = (n = 1) => setNewIds((ids) => [...ids, ...Array.from({ length: n }, (_, i) => Math.min(0, ...ids) - 1 - i)]);
+  const dropRow = (id: number) => {
+    setNewIds((ids) => ids.filter((x) => x !== id));
+    setEdits((e) => Object.fromEntries(Object.entries(e).filter(([key]) => Number(key.split(":")[0]) !== id)));
+    setErrors((e) => Object.fromEntries(Object.entries(e).filter(([key]) => Number(key) !== id)));
+  };
   const [errors, setErrors] = useState<Record<number, string>>({});
   const [sel, setSel] = useState({ r: 0, c: 0 });
   const [anchor, setAnchor] = useState<{ r: number; c: number } | null>(null);
@@ -278,10 +314,14 @@ export function DocSheet({ columns: baseColumns, rows, action, emptyText, openLa
         }
         byDoc.set(Number(id), change);
       }
+      // السطر الجديد يُرسل بقيمه الافتراضية (التاريخ، الحساب…) مع ما كُتب فيه
+      for (const change of byDoc.values()) if (change.id < 0) change.values = { ...addRows?.defaults, ...change.values };
       const res = await action(JSON.stringify([...byDoc.values()]));
       const failed = res.errors ?? {};
       setErrors(failed);
       setEdits((e) => Object.fromEntries(Object.entries(e).filter(([key]) => failed[Number(key.split(":")[0])])));
+      // السطر الجديد المحفوظ صار مستنداً في القائمة؛ يبقى ما فشل فقط للتصحيح
+      setNewIds((ids) => ids.filter((id) => failed[id]));
       setMessage(res.ok);
       router.refresh();
     });
@@ -308,8 +348,13 @@ export function DocSheet({ columns: baseColumns, rows, action, emptyText, openLa
         </span>
         {message && <span className="font-medium text-green-700">{message}</span>}
         <div className="ms-auto flex items-center gap-2">
-          {dirty > 0 && (
-            <button type="button" onClick={() => (setEdits({}), setErrors({}), setMessage(undefined))} className="rounded-lg px-3 py-1.5 text-gray-600 hover:bg-gray-100">
+          {addRows && (
+            <button type="button" onClick={() => addRow(1)} className="rounded-lg border border-gray-300 px-3 py-1.5 font-medium text-gray-700 hover:bg-gray-50">
+              + {addRows.label}
+            </button>
+          )}
+          {(dirty > 0 || newIds.length > 0) && (
+            <button type="button" onClick={() => (setEdits({}), setErrors({}), setNewIds([]), setMessage(undefined))} className="rounded-lg px-3 py-1.5 text-gray-600 hover:bg-gray-100">
               تراجع
             </button>
           )}
@@ -365,7 +410,11 @@ export function DocSheet({ columns: baseColumns, rows, action, emptyText, openLa
               return (
                 <tr key={`${vr.doc.id}:${vr.line?.id ?? "h"}`} className="group">
                   <td className={`sticky start-0 z-[5] border-e border-gray-100 px-1.5 text-center ${lastOfDoc ? "border-b border-b-gray-200" : ""} ${errors[vr.doc.id] ? "bg-red-50" : "bg-white"}`} title={errors[vr.doc.id]}>
-                    {vr.first && (
+                    {vr.first && vr.doc.id < 0 ? (
+                      <button type="button" onClick={() => dropRow(vr.doc.id)} className="text-gray-400 hover:text-red-600" aria-label="حذف السطر الجديد" title="حذف السطر الجديد">
+                        ×
+                      </button>
+                    ) : vr.first && (
                       <Link href={vr.doc.href} scroll={false} className="inline-flex text-gray-400 hover:text-brand-700" aria-label={openLabel} title={openLabel}>
                         <Icon name={vr.doc.editable ? "expand" : "lock"} className="size-3.5" />
                       </Link>
@@ -392,8 +441,9 @@ export function DocSheet({ columns: baseColumns, rows, action, emptyText, openLa
                           }
                           setAnchor(null);
                           if (!active) {
-                            // خلية القائمة: نمنع المتصفح من نقل التركيز للجدول بعد أن يأخذه حقل البحث فتُغلق القائمة
-                            if (editable && col.type === "select") e.preventDefault();
+                            // نمنع المتصفح من نقل التركيز للجدول بعد أن يأخذه حقل الخلية (البحث في القائمة أو الكتابة)،
+                            // فيُكتب الحرف الأول في الخلية مباشرة ولا تُغلق القائمة
+                            if (editable) e.preventDefault();
                             commit();
                             setClicked(true);
                             setSel({ r, c });
@@ -435,7 +485,7 @@ export function DocSheet({ columns: baseColumns, rows, action, emptyText, openLa
                               {...keyHandlers}
                               className={`absolute inset-0 w-full px-2.5 text-sm outline-none ${editing ? "bg-white outline-2 -outline-offset-2 outline-brand-600" : "bg-transparent"} ${numeric ? "ltr-nums" : ""} ${col.type === "date" ? "pe-7" : ""} ${col.type === "number" ? "text-end" : ""}`}
                             />
-                            {col.type === "date" && <DatePickButton value={v} onPick={(d) => {
+                            {col.type === "date" && <DatePickButton value={v} autoOpen={clicked} onPick={(d) => {
                               setCell(r, c, d);
                               setEditing(null);
                             }} />}
@@ -463,11 +513,21 @@ export function DocSheet({ columns: baseColumns, rows, action, emptyText, openLa
           </tbody>
         </table>
       </div>
+      {addRows && (
+        <div className="flex gap-2 border-t border-gray-100 px-4 py-2 text-sm">
+          <button type="button" onClick={() => addRow(1)} className="rounded-lg px-2 py-1 font-medium text-brand-800 hover:bg-brand-50">
+            + {addRows.label}
+          </button>
+          <button type="button" onClick={() => addRow(5)} className="rounded-lg px-2 py-1 text-gray-600 hover:bg-gray-100">
+            + 5 سطور
+          </button>
+        </div>
+      )}
       {Object.keys(errors).length > 0 && (
         <ul className="space-y-1 border-t border-red-100 bg-red-50/60 px-4 py-2.5 text-xs text-red-700">
           {Object.entries(errors).map(([id, err]) => (
             <li key={id}>
-              <span className="ltr-nums font-semibold">{rows.find((r) => r.id === Number(id))?.cells.number}</span>: <MsgText text={err} />
+              <span className="ltr-nums font-semibold">{Number(id) < 0 ? `سطر جديد ${newIds.indexOf(Number(id)) + 1}` : rows.find((r) => r.id === Number(id))?.cells.number}</span>: <MsgText text={err} />
             </li>
           ))}
         </ul>

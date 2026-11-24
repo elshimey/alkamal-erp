@@ -123,6 +123,8 @@ export function DataGrid({
   const tableRef = useRef<HTMLTableElement>(null);
   const [anchor, setAnchor] = useState<Cell | null>(null);
   const [focus, setFocus] = useState<Cell | null>(null);
+  // خلية التاريخ المفتوح تقويمها: النقر على الخلية يفتحه فيُختار التاريخ دون كتابة
+  const [pick, setPick] = useState<string | null>(null);
   const dragging = useRef(false);
 
   useEffect(() => {
@@ -332,8 +334,9 @@ export function DataGrid({
                           className={`${cellCls} pe-7`}
                           placeholder={r === 0 && col.placeholder ? isoToDmy(col.placeholder) : "dd/mm/yyyy"}
                           onChange={(e) => setCell(r, col.key, e.target.value)}
+                          onClick={() => setPick(`${r}-${c}`)}
                         />
-                        <DatePickButton value={row[col.key] ?? ""} onPick={(d) => setCell(r, col.key, isoToDmy(d))} />
+                        <DatePickButton value={row[col.key] ?? ""} open={pick === `${r}-${c}`} onOpenChange={(o) => setPick(o ? `${r}-${c}` : null)} onPick={(d) => setCell(r, col.key, isoToDmy(d))} />
                       </span>
                     ) : (
                       <input
