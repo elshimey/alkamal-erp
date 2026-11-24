@@ -77,7 +77,7 @@ export async function addCustomerCharges(db: Db | Tx, items: { waybillId: number
   if (!items.length) return [];
   const run = async (tx: Tx) => {
     const out = [];
-    for (const it of items) out.push(await addWaybillChargeTx(tx, it.waybillId, { ...it.charge, billTo: "customer" }, userId));
+    for (const it of items) out.push(await addWaybillChargeTx(tx, it.waybillId, { ...it.charge, billTo: it.charge.billTo ?? "customer" }, userId));
     return out;
   };
   // داخل معاملة قائمة تصبح نقطة حفظ، فالخطأ يُرجع المصاريف وحدها أو المعاملة كلها حسب المستدعي
@@ -193,7 +193,7 @@ export function parseChargeRows(json: string, fallbackWaybillId?: number, opts?:
   rows.forEach((r, i) => {
     const amount = Number(String(r.amount ?? "").replace(/[,\s]/g, "")) || 0;
     if (!r.chargeTypeId && !amount) return;
-    const n = `مصروف العميل ${i + 1}`;
+    const n = `المصروف ${i + 1}`;
     if (!r.chargeTypeId) throw new Error(`${n}: اختر النوع`);
     if (!(amount > 0)) throw new Error(`${n}: اكتب المبلغ`);
     const waybillId = Number(r.waybillId) || fallbackWaybillId || 0;
@@ -206,7 +206,7 @@ export function parseChargeRows(json: string, fallbackWaybillId?: number, opts?:
       charge: {
         chargeTypeId: Number(r.chargeTypeId),
         amount,
-        billTo: "customer",
+        billTo: r.billTo === "company" ? "company" : "customer",
         payer,
         partyId: Number(r.partyId) || null,
         cashAccountId: Number(r.cashAccountId) || null,

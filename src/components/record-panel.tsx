@@ -3,7 +3,7 @@
 import { MsgText } from "@/components/msg-text";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, useSyncExternalStore, useTransition, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, useTransition, type KeyboardEvent as ReactKeyEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Icon, Truck } from "./icons";
 import { confirmDiscard, useUnsavedGuard } from "./unsaved-guard";
@@ -32,6 +32,7 @@ export function RecordPanel({
   wide = false,
   toolbar,
   altSubmit,
+  aside,
   children,
 }: {
   title: string;
@@ -51,6 +52,8 @@ export function RecordPanel({
   toolbar?: ReactNode;
   /** زر حفظ ثانٍ يرسل الحقل name=1 مع النموذج (مثل «حفظ واعتماد وإصدار فاتورة فوراً») */
   altSubmit?: { label: string; name: string };
+  /** تحت الفهرس الجانبي على الكمبيوتر (مجاميع المستند مثلاً) */
+  aside?: ReactNode;
   children: ReactNode;
 }) {
   const router = useRouter();
@@ -66,6 +69,84 @@ export function RecordPanel({
   const [error, setError] = useState<string>();
   const [saving, start] = useTransition();
   const [done, setDone] = useState<string | null>(null);
+  const [justSaved, setJustSaved] = useState(false);
+  const [secs, setSecs] = useState<SectionState[]>([]);
+  const [cur, setCur] = useState(0);
+
+  // الفهرس الجانبي: يقرأ أقسام النافذة وخاناتها، فيضع ✓ بجانب كل خانة صحيحة وكل قسم اكتمل
+  const scan = useCallback(() => {
+    const f = form.current;
+    if (!f) return;
+    f.querySelectorAll<HTMLElement>("[data-pf]").forEach((pf) => {
+      const ok = fieldOk(pf);
+      if (ok !== (pf.dataset.ok === "1")) pf.dataset.ok = ok ? "1" : "0";
+    });
+    const next = [...f.querySelectorAll<HTMLElement>("[data-panel-section]")]
+      .filter((el) => el.getClientRects().length > 0)
+      .map((el): SectionState => {
+        const req = [...el.querySelectorAll<HTMLElement>("[data-pf][data-req]")].filter((x) => x.getClientRects().length > 0);
+        const okN = req.filter((x) => x.dataset.ok === "1").length;
+        const optional = el.dataset.optional === "1";
+        const any = [...el.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>("input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=file]),select,textarea")].some((c) => c.value.trim() !== "");
+        return { title: el.dataset.panelSection ?? "", optional, done: req.length ? okN === req.length : any, note: req.length ? `${okN} من ${req.length}` : optional ? "اختياري" : "" };
+      });
+    setSecs((old) => (JSON.stringify(old) === JSON.stringify(next) ? old : next));
+  }, []);
+  const rescan = useCallback(() => {
+    requestAnimationFrame(scan);
+    setTimeout(scan, 120);
+  }, [scan]);
+  useEffect(() => {
+    rescan();
+    // القوائم المنسدلة والتقويم تغيّر الخانات المخفية بعد الرسم؛ فحص خفيف كل ثانية يلحقها
+    const t = setInterval(scan, 900);
+    return () => clearInterval(t);
+  }, [scan, rescan]);
+
+  const sectionEls = () => [...(form.current?.querySelectorAll<HTMLDetailsElement>("[data-panel-section]") ?? [])].filter((el) => el.getClientRects().length > 0);
+  const markCur = (i: number) => {
+    setCur(i);
+    sectionEls().forEach((el, k) => (el.dataset.cur = k === i ? "1" : "0"));
+  };
+  const onScroll = () => {
+    const b = body.current;
+    if (!b) return;
+    const top = b.getBoundingClientRect().top + 90;
+    let c = 0;
+    sectionEls().forEach((el, i) => {
+      if (el.getBoundingClientRect().top < top) c = i;
+    });
+    if (b.scrollTop + b.clientHeight >= b.scrollHeight - 4) c = Math.max(0, sectionEls().length - 1);
+    if (c !== cur) markCur(c);
+  };
+  const goSection = (i: number) => {
+    const el = sectionEls()[i];
+    if (!el) return;
+    el.open = true;
+    markCur(i);
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+    setTimeout(() => el.querySelector<HTMLElement>("input:not([type=hidden]):not([disabled]),select:not([disabled]),textarea")?.focus({ preventScroll: true }), 380);
+    rescan();
+  };
+
+  // Enter ينقل للخانة التالية (لا يحفظ)، وCtrl+Enter يحفظ. القائمة المنسدلة المفتوحة تأخذ Enter لنفسها
+  const onKey = (e: ReactKeyEvent<HTMLFormElement>) => {
+    if (e.key !== "Enter" || e.defaultPrevented || e.nativeEvent.isComposing) return;
+    const t = e.target as HTMLElement;
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      submit(false);
+      return;
+    }
+    if (!(t instanceof HTMLInputElement || t instanceof HTMLSelectElement) || (t instanceof HTMLInputElement && ["checkbox", "radio", "file", "submit", "button"].includes(t.type))) return;
+    if (document.querySelector("[role=listbox]")) return;
+    e.preventDefault();
+    const all = [...e.currentTarget.querySelectorAll<HTMLElement>("input:not([type=hidden]):not([type=file]):not([disabled]):not([readonly]),select:not([disabled]),textarea:not([disabled])")].filter((x) => x.getClientRects().length > 0);
+    const nx = all[all.indexOf(t) + 1];
+    if (!nx) return submit(false);
+    nx.focus();
+    nx.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  };
   useEffect(() => {
     if (done && !saving) router.replace(done, { scroll: false });
   }, [done, saving, router]);
@@ -113,18 +194,25 @@ export function RecordPanel({
         return;
       }
       setDirty(false);
+      setJustSaved(true);
+      setTimeout(() => setJustSaved(false), 3000);
       if (embed) return post({ type: "saved", id: res.id, label: res.label });
       toast(res.ok);
       if (again) {
         el.reset();
         body.current?.scrollTo({ top: 0 });
         el.querySelector<HTMLElement>("input:not([type=hidden]),select")?.focus();
+        rescan();
       } else {
         // يُغلق بعد انتهاء انتقال الإجراء (انظر التأثير أدناه)، وإلا غلبه تحديث الصفحة الحالية بعد الحفظ
         setDone(savedHref ? savedHref.replace("{id}", String(res.id)) : closeHref);
       }
     });
   };
+
+  const rail = secs.length >= 2;
+  const reqAll = secs.filter((x) => !x.optional).length;
+  const reqDone = secs.filter((x) => !x.optional && x.done).length;
 
   if (!mounted) return null;
   return createPortal(
@@ -137,7 +225,17 @@ export function RecordPanel({
           <h2 className="truncate font-display text-lg font-semibold text-gray-900">{title}</h2>
           {subtitle && <p className="truncate text-xs text-gray-500">{subtitle}</p>}
         </div>
-        <span className={`ms-2 hidden text-xs sm:inline ${dirty ? "font-semibold text-amber-700" : "text-gray-400"}`}>{dirty ? "تعديلات لم تُحفظ" : ""}</span>
+        {(dirty || justSaved) && (
+          <span
+            key={dirty ? "dirty" : "saved"}
+            role="status"
+            title={dirty ? "تعديلات لم تُحفظ" : "حُفظت"}
+            className={`saved-pop ms-1 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap ${dirty ? "bg-amber-50 text-amber-800" : "bg-emerald-50 text-emerald-800"}`}
+          >
+            {dirty ? <span className="size-1.5 animate-pulse rounded-full bg-amber-500" /> : <span className="ok-pop grid size-4 place-items-center rounded-full bg-emerald-600 text-white"><Icon name="check" className="size-3" /></span>}
+            <span className="hidden sm:inline">{dirty ? "تعديلات لم تُحفظ" : "حُفظت"}</span>
+          </span>
+        )}
         <div className="ms-auto flex items-center gap-2">
           {toolbar}
           {creating && !embed && (
@@ -162,7 +260,42 @@ export function RecordPanel({
           </button>
         </div>
       </header>
-      <div ref={body} className="flex-1 overflow-y-auto">
+      <div ref={body} onScroll={onScroll} className="flex-1 overflow-y-auto scroll-smooth">
+        {rail && (
+          <nav aria-label="أقسام النافذة" className={`sticky top-0 z-10 flex gap-1.5 overflow-x-auto border-b border-black/[0.06] bg-[#f7f6f3]/95 px-4 py-2 backdrop-blur [scrollbar-width:none] ${wide ? "2xl:hidden" : "lg:hidden"}`}>
+            {secs.map((x, i) => (
+              <button key={x.title} type="button" onClick={() => goSection(i)} aria-current={i === cur || undefined} className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs transition-colors ${i === cur ? "bg-white font-semibold text-gray-900 shadow-sm" : "text-gray-600"}`}>
+                <SecDot done={x.done && !x.optional} n={i + 1} cur={i === cur} />
+                {x.title}
+              </button>
+            ))}
+          </nav>
+        )}
+        <div className={`mx-auto flex w-full gap-6 px-4 sm:px-6 ${wide ? "max-w-[120rem]" : rail ? "max-w-[76rem]" : "max-w-4xl"}`}>
+          {rail && (
+            <nav aria-label="فهرس الأقسام" className={`sticky top-0 hidden w-56 shrink-0 flex-col gap-1 self-start py-6 ${wide ? "2xl:flex" : "lg:flex"}`}>
+              <div className="mb-2 px-2 text-xs text-gray-500">
+                اكتمل {reqDone} من {reqAll} أقسام مطلوبة
+                <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-gray-200">
+                  <i className="block h-full rounded-full bg-brand-500 transition-[width] duration-500" style={{ width: `${reqAll ? (reqDone / reqAll) * 100 : 100}%` }} />
+                </div>
+              </div>
+              {secs.map((x, i) => (
+                <button
+                  key={x.title}
+                  type="button"
+                  onClick={() => goSection(i)}
+                  aria-current={i === cur || undefined}
+                  className={`flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-start text-sm transition-all ${i === cur ? "bg-white font-semibold text-gray-900 shadow-sm" : "text-gray-600 hover:bg-white/60"}`}
+                >
+                  <SecDot done={x.done && !x.optional} n={i + 1} cur={i === cur} />
+                  <span className="min-w-0 flex-1 truncate">{x.title}</span>
+                  {x.note && <span className="text-[11px] font-normal text-gray-400">{x.note}</span>}
+                </button>
+              ))}
+              {aside && <div className="mt-3">{aside}</div>}
+            </nav>
+          )}
         <form
           ref={form}
           noValidate={false}
@@ -170,9 +303,21 @@ export function RecordPanel({
             e.preventDefault();
             submit(false);
           }}
-          onInput={() => setDirty(true)}
-          onChange={() => setDirty(true)}
-          className={`@container mx-auto w-full px-4 py-6 sm:px-6 ${wide ? "max-w-[120rem]" : "max-w-4xl"}`}
+          onKeyDown={onKey}
+          onFocus={(e) => {
+            const i = sectionEls().findIndex((el) => el.contains(e.target as Node));
+            if (i >= 0 && i !== cur) markCur(i);
+          }}
+          onInput={() => {
+            setDirty(true);
+            rescan();
+          }}
+          onChange={() => {
+            setDirty(true);
+            rescan();
+          }}
+          onClick={rescan}
+          className="@container min-w-0 flex-1 py-6"
         >
           {error && (
             <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm whitespace-pre-line text-red-800">
@@ -181,12 +326,32 @@ export function RecordPanel({
           )}
           {children}
           {footer && <div className="mt-2 flex flex-wrap gap-4 text-sm">{footer}</div>}
-          {/* Enter في حقل نصي يحفظ */}
           <button type="submit" className="hidden" aria-hidden tabIndex={-1} />
         </form>
+        </div>
       </div>
     </div>,
     document.body,
+  );
+}
+
+type SectionState = { title: string; optional: boolean; done: boolean; note: string };
+
+/** الخانة صحيحة: فيها قيمة وكل ضوابطها سليمة (القائمة المنسدلة تحفظ قيمتها في خانة مخفية). */
+function fieldOk(pf: HTMLElement) {
+  const ctrls = [...pf.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>("input,select,textarea")].filter((c) => !["file", "button", "submit"].includes(c.type));
+  const boxes = ctrls.filter((c) => c.type === "checkbox" || c.type === "radio") as HTMLInputElement[];
+  if (boxes.length === ctrls.length && boxes.length) return boxes.some((b) => b.checked);
+  const vals = ctrls.filter((c) => c.type !== "checkbox" && c.type !== "radio");
+  return vals.some((c) => c.value.trim() !== "" && c.value !== "[]") && vals.every((c) => c.checkValidity());
+}
+
+/** رقم القسم في الفهرس، يصير ✓ خضراء حين يكتمل. */
+function SecDot({ done, n, cur }: { done: boolean; n: number; cur: boolean }) {
+  return (
+    <span className={`grid size-5 shrink-0 place-items-center rounded-full border-2 text-[10px] font-bold transition-all duration-300 ${done ? "ok-pop border-emerald-600 bg-emerald-600 text-white" : cur ? "border-brand-600 text-gray-900" : "border-gray-300 text-gray-500"}`}>
+      {done ? <Icon name="check" className="size-3" /> : n}
+    </span>
   );
 }
 

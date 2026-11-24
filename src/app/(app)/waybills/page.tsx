@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { headers } from "next/headers";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
 import { supplierOptions, toTripExpense, tripExpensesForBilling } from "@/lib/purchases";
@@ -153,7 +153,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
           .from(s.waybillExpenses)
           .innerJoin(s.chargeTypes, eq(s.chargeTypes.id, s.waybillExpenses.chargeTypeId))
           .leftJoin(s.salesInvoiceLines, eq(s.salesInvoiceLines.waybillExpenseId, s.waybillExpenses.id))
-          .where(and(eq(s.waybillExpenses.waybillId, editRow.id), eq(s.waybillExpenses.billTo, "customer")))
+          .where(eq(s.waybillExpenses.waybillId, editRow.id))
           .orderBy(s.waybillExpenses.id)
       : Promise.resolve([]),
     editing && editRow ? tripExpensesForBilling(db, [editRow.id]) : Promise.resolve([]),
@@ -368,7 +368,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
         charges: [],
         billExpenses: [],
         tripExpenses: tripExpenses.map(toTripExpense),
-        savedCharges: savedCharges.map(({ e, label, line }) => ({ label: e.note ? `${label}: ${e.note}` : label, amount: e.amount, payer: e.payer, invoiced: !!line })),
+        savedCharges: savedCharges.map(({ e, label, line }) => ({ label: e.note ? `${label}: ${e.note}` : label, amount: e.amount, payer: e.payer, billTo: e.billTo, invoiced: !!line })),
       };
     }
     if (creating)

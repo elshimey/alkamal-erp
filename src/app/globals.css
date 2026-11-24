@@ -556,3 +556,53 @@ table[data-report]:not([data-noserial]) > tbody > tr:not(.font-bold):not(.font-s
     border-color: #6b7280;
   }
 }
+
+/* ───── نوافذ الإضافة الموحدة (الفهرس الجانبي، قرار أحمد 2026-11-24) ───── */
+/* علامة ✓ بجانب عنوان الخانة الصحيحة، تظهر بنبضة */
+.pf .pf-ok {
+  transform: scale(0);
+  opacity: 0;
+  transition:
+    transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 0.2s;
+}
+.pf[data-ok="1"] .pf-ok {
+  transform: scale(1);
+  opacity: 1;
+}
+.pf:focus-within > span:first-child {
+  color: var(--color-brand-700);
+}
+/* القسم الذي يكتب فيه المستخدم يضيء */
+.panel-sec[data-cur="1"] {
+  border-color: var(--color-brand-500);
+  box-shadow: 0 0 0 4px rgb(245 184 46 / 0.14);
+}
+/* البند الجديد ينزلق للداخل */
+@keyframes line-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.line-in {
+  animation: line-in 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes ok-pop {
+  0% {
+    transform: scale(0.4);
+  }
+  60% {
+    transform: scale(1.15);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.ok-pop {
+  animation: ok-pop 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}

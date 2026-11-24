@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { ComboBox, ComboField } from "@/components/combo-box";
 import { DateInput } from "@/components/date-input";
-import { PanelField, PanelSection } from "@/components/panel-ui";
+import { PanelField, PanelSection, PanelTotals } from "@/components/panel-ui";
 import { RecordPanel, type PanelResult } from "@/components/record-panel";
 import { WaybillDocument } from "@/components/waybill-document";
 import { Icon } from "@/components/icons";
@@ -50,7 +50,7 @@ export interface WaybillDraft {
   /** مصاريف جديدة على العميل تُضاف مع الحفظ */
   charges: ChargeDraft[];
   /** مصاريف العميل المسجلة من قبل (للعرض) */
-  savedCharges?: { label: string; amount: string; payer: keyof typeof PAYER_LABELS; invoiced: boolean }[];
+  savedCharges?: { label: string; amount: string; payer: keyof typeof PAYER_LABELS; billTo: "customer" | "company"; invoiced: boolean }[];
   /** إيصالات الرحلة المسجلة التي لم تُحمَّل على العميل بعد، وما علّمه المستخدم منها */
   tripExpenses?: TripExpense[];
   billExpenses: number[];
@@ -150,6 +150,8 @@ export function WaybillEditor({
   };
   const base = num(d.amount);
   const amount = Math.round((base + d.components.reduce((s, c) => s + compAmount(c), 0)) * 100) / 100;
+  const chargeSum = (b: "customer" | "company") =>
+    [...(d.savedCharges ?? []), ...d.charges].filter((c) => (c.billTo ?? "customer") === b).reduce((a, c) => a + num(c.amount), 0);
   const setComp = (i: number, patch: Partial<PriceComponentDraft>) => set("components", d.components.map((c, k) => (k === i ? { ...c, ...patch } : c)));
 
   const doc = {
@@ -199,6 +201,7 @@ export function WaybillEditor({
       action={action}
       creating={false}
       wide
+      aside={showPrices ? <PanelTotals rows={[["سعر النقل", amount], ["مصاريف على العميل", chargeSum("customer")], ["تتحملها الشركة", chargeSum("company")]]} /> : undefined}
       altSubmit={fromRequest?.canFinish ? { label: "حفظ واعتماد وإصدار فاتورة فوراً", name: "finishNow" } : undefined}
       toolbar={
         <button type="button" onClick={() => setPreview((p) => !p)} aria-label={preview ? "إخفاء المعاينة" : "إظهار المعاينة"} className="flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50">
@@ -302,7 +305,7 @@ export function WaybillEditor({
               <div className="space-y-2">
                 <span className="block text-sm text-gray-700">مكونات إضافية على السعر</span>
                 {d.components.map((c, i) => (
-                  <div key={i} className="grid grid-cols-[minmax(0,1fr)_4.5rem_6rem_auto] items-center gap-2">
+                  <div key={i} className="line-in grid grid-cols-[minmax(0,1fr)_4.5rem_6rem_auto] items-center gap-2">
                     <ComboBox value={c.kind} options={componentKinds} create="price_component" allowEmpty={false} placeholder="وزن زائد، كم، انتظار…" onChange={(v, o) => setComp(i, { kind: v, label: o?.label ?? "" })} className={field} />
                     <input value={c.quantity} onChange={(e) => setComp(i, { quantity: e.target.value })} inputMode="decimal" placeholder="الكمية" aria-label="الكمية" className={`${field} ltr-nums`} />
                     <input value={c.unitPrice} onChange={(e) => setComp(i, { unitPrice: e.target.value })} inputMode="decimal" placeholder="سعر الوحدة" aria-label="سعر الوحدة" className={`${field} ltr-nums`} />
@@ -351,8 +354,8 @@ export function WaybillEditor({
 
           {showPrices && (
             <PanelSection
-              title={`مصاريف على العميل${(d.savedCharges?.length ?? 0) + d.charges.length ? ` (${(d.savedCharges?.length ?? 0) + d.charges.length})` : ""}`}
-              hint="ما تدفعه عن العميل (جمارك، رسوم ميناء…) ويُفوتر عليه سطراً مستقلاً"
+              title={`المصاريف${(d.savedCharges?.length ?? 0) + d.charges.length ? ` (${(d.savedCharges?.length ?? 0) + d.charges.length})` : ""}`}
+              hint="على العميل (تُفوتر عليه) أو على الشركة (تكلفة الرحلة)، دُفعت أو لم تُدفع بعد"
               optional
               open={d.charges.length > 0 || !!d.savedCharges?.length || !!d.tripExpenses?.length}
             >
@@ -365,7 +368,7 @@ export function WaybillEditor({
                       <span>
                         {c.label}
                         <span className="block text-[11px] text-gray-500">
-                          دفعه: {PAYER_LABELS[c.payer]}
+                          {c.billTo === "company" ? "على الشركة" : "على العميل"} · {c.payer === "unpaid" ? "لم تُدفع بعد" : `دفعها: ${PAYER_LABELS[c.payer]}`}
                           {c.invoiced ? " · في الفاتورة" : ""}
                         </span>
                       </span>
