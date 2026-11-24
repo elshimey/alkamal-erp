@@ -127,6 +127,96 @@ export function DocCard({
   );
 }
 
+/**
+ * بطاقة الشحنات المدمجة على الجوال (قرار أحمد 2026-11-24): بطاقة واحدة متراكبة برقم الفاتورة وعدد شحناتها ومجموعها،
+ * وزر «عرض الشحنات» يفتح كل شحنة سطراً صغيراً يفتح معاينتها.
+ */
+export function DocGroupCard({
+  number,
+  href,
+  status,
+  count,
+  party,
+  meta,
+  amount,
+  currency,
+  next,
+  kids,
+  open,
+  date,
+  extraBadge,
+}: {
+  number: string;
+  href: string;
+  status: { label: string; tone: Tone };
+  date?: string;
+  extraBadge?: { label: string; tone: Tone } | null;
+  count: number;
+  party: ReactNode;
+  meta?: ReactNode;
+  amount?: string | null;
+  currency?: string;
+  next?: string | null;
+  kids: { key: string | number; href: string; number: string; line: ReactNode; amount?: string | null; active?: boolean }[];
+  open?: boolean;
+}) {
+  return (
+    <div data-doc-group className="relative mb-2 [&:has(details[open])]:mb-0">
+      <div aria-hidden className="absolute inset-x-5 -bottom-2.5 h-4 rounded-b-[16px] bg-[#e2dac3] [div:has(details[open])>&]:hidden" />
+      <div aria-hidden className="absolute inset-x-2.5 -bottom-1.5 h-4 rounded-b-[16px] bg-[#ece6d4] [div:has(details[open])>&]:hidden" />
+      <div className={`relative overflow-hidden rounded-[18px] bg-[#f6f3ea] px-3.5 pt-3.5 pb-3 shadow-[0_1px_2px_rgba(27,33,38,0.06),0_4px_14px_-6px_rgba(27,33,38,0.14)] before:absolute before:inset-y-3.5 before:right-0 before:w-[3px] before:rounded-e-[3px] ${STRIPE[status.tone]}`}>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <Link href={href} className="ltr-nums font-display text-sm font-semibold whitespace-nowrap text-brand-900 underline-offset-2 hover:underline">
+            {number}
+          </Link>
+          <span className="rounded-full bg-asphalt-900 px-2 py-px text-[11px] font-semibold text-brand-500">{count} شحنات</span>
+          <Badge tone={status.tone}>{status.label}</Badge>
+          {extraBadge && <Badge tone={extraBadge.tone}>{extraBadge.label}</Badge>}
+          {date && <span className="ltr-nums ms-auto shrink-0 text-[11.5px] text-gray-500">{fmtDate(date)}</span>}
+        </div>
+        <div className="mt-2.5 truncate text-[15px] font-semibold text-gray-900">{party}</div>
+        {meta && <div className="mt-1 flex flex-wrap gap-x-2.5 text-xs text-gray-500">{meta}</div>}
+        {(amount != null || next) && (
+          <div className="mt-3 flex items-center gap-2 border-t border-dashed border-gray-300 pt-2.5">
+            {amount != null && (
+              <span className="ltr-nums font-display text-[19px] font-semibold text-brand-900">
+                {amount}
+                {currency && <small className="ms-1 font-sans text-[11px] font-medium text-gray-500">{currency}</small>}
+              </span>
+            )}
+            {next && (
+              <Link href={href} className="ms-auto rounded-lg bg-brand-50 px-2 py-1 text-[11.5px] font-semibold text-brand-700">
+                {next}
+              </Link>
+            )}
+          </div>
+        )}
+        <details open={open} className="group mt-2.5">
+          <summary className="cursor-pointer list-none rounded-[10px] border border-dashed border-[#cdbf96] bg-[#fffdf6] py-1.5 text-center text-[12.5px] font-semibold text-brand-700">
+            <span className="group-open:hidden">عرض الشحنات ({count}) ▾</span>
+            <span className="hidden group-open:inline">إخفاء الشحنات ▴</span>
+          </summary>
+          <div className="mt-2 flex flex-col gap-1.5">
+            {kids.map((k) => (
+              <Link
+                key={k.key}
+                href={k.href}
+                scroll={false}
+                aria-current={k.active ? "true" : undefined}
+                className={`grid grid-cols-[1fr_auto] gap-x-2 gap-y-0.5 rounded-[10px] border border-gray-200 bg-white px-2.5 py-2 text-[12.5px] ${k.active ? "ring-2 ring-brand-500" : ""}`}
+              >
+                <span className="ltr-nums font-display font-semibold text-brand-900">{k.number}</span>
+                {k.amount != null && <span className="ltr-nums font-display font-semibold text-gray-900">{k.amount}</span>}
+                <span className="col-span-2 truncate text-[11.5px] text-gray-500">{k.line}</span>
+              </Link>
+            ))}
+          </div>
+        </details>
+      </div>
+    </div>
+  );
+}
+
 /** بطاقة «من ← إلى» بمراحل المستند وشاحنة تتقدم عليها. */
 export function SheetTrack({ from, to, steps, at, muted }: { from?: string; to?: string; steps: string[]; at: number; muted?: boolean }) {
   const pct = steps.length > 1 ? Math.max(0, Math.min(100, (at / (steps.length - 1)) * 100)) : 0;

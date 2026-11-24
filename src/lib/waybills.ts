@@ -927,6 +927,8 @@ export interface WaybillFilter {
   sort?: WaybillSort;
   /** السائق يرى شحناته فقط */
   driverUserId?: number;
+  /** شحنات هذه الفواتير فقط (أبناء صف الشحنات المدمجة) */
+  invoiceIds?: number[];
 }
 
 export function parseWaybillFilter(sp: { q?: string; status?: string; period?: string; sort?: string }, today: string): WaybillFilter {
@@ -951,6 +953,8 @@ const toLoc = alias(s.locations, "to_loc");
 function waybillWhere(f: WaybillFilter, opts: { tab: boolean }) {
   const where: (SQL | undefined)[] = [];
   if (f.driverUserId) where.push(eq(s.drivers.userId, f.driverUserId));
+  if (f.invoiceIds?.length)
+    where.push(sql`exists (select 1 from sales_invoice_lines l where l.waybill_id = ${WAYBILL_ID} and l.kind = 'waybill' and l.invoice_id in (${sql.join(f.invoiceIds.map((i) => sql`${i}`), sql`, `)}))`);
   if (f.from) where.push(gte(s.waybills.waybillDate, f.from));
   if (f.to) where.push(lte(s.waybills.waybillDate, f.to));
   if (f.q) {
@@ -1053,6 +1057,40 @@ export async function listWaybills(db: Db | Tx, f: WaybillFilter = {}, limit = 5
     else if (c.status === "approved") tabCounts.merged += c.n;
   }
   return { rows, counts: tabCounts, total: { n: sum.n, amount: Number(sum.amount) } };
+}
+
+type ListedWaybill = Awaited<ReturnType<typeof listWaybills>>["rows"][number];
+export type WaybillListItem =
+  | { kind: "one"; row: ListedWaybill }
+  | { kind: "group"; invoice: { id: number; number: string; status: "draft" | "issued" }; rows: ListedWaybill[] };
+
+/**
+ * الشحنات المدمجة في فاتورة واحدة تظهر صفاً واحداً (قرار أحمد 2026-11-24): المجموعة مكان أول شحنة منها في الصفحة،
+ * وفيها كل شحنات الفاتورة ولو كان بعضها في صفحة أخرى أو خارج البحث. الشحنة الوحيدة في فاتورتها تبقى صفاً عادياً.
+ */
+export async function groupMergedWaybills(db: Db | Tx, rows: ListedWaybill[], f: WaybillFilter = {}): Promise<WaybillListItem[]> {
+  const ids = [...new Set(rows.filter((r) => r.invoiceId != null && r.invoiceWaybills > 1).map((r) => r.invoiceId as number))];
+  if (!ids.length) return rows.map((row) => ({ kind: "one", row }));
+  const [{ rows: members }, invoices] = await Promise.all([
+    listWaybills(db, { invoiceIds: ids, sort: f.sort, driverUserId: f.driverUserId }, 2000),
+    db.select({ id: s.salesInvoices.id, number: s.salesInvoices.number, status: s.salesInvoices.status }).from(s.salesInvoices).where(inArray(s.salesInvoices.id, ids)),
+  ]);
+  const inv = new Map(invoices.map((i) => [i.id, i]));
+  const out: WaybillListItem[] = [];
+  const seen = new Set<number>();
+  for (const row of rows) {
+    const id = row.invoiceId;
+    const invoice = id != null && row.invoiceWaybills > 1 ? inv.get(id) : undefined;
+    const kids = invoice ? members.filter((m) => m.invoiceId === id) : [];
+    if (!invoice || kids.length < 2) {
+      out.push({ kind: "one", row });
+      continue;
+    }
+    if (seen.has(invoice.id)) continue;
+    seen.add(invoice.id);
+    out.push({ kind: "group", invoice, rows: kids });
+  }
+  return out;
 }
 
 // ───────────── دمج المحدد وفوترته ─────────────
