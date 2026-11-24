@@ -4,6 +4,8 @@ import { todayRiyadh } from "@/lib/dates";
 import { partyBalances } from "@/lib/reports";
 import { C, money, PeriodFilter, periodFrom, ReportHeader, ReportTabs, RTable, withParams, type ReportParams } from "../report-ui";
 import { SIDE, sideOf } from "../party-sides";
+import { Drill } from "@/components/drill";
+import { sourceHref } from "@/lib/source-lines";
 
 /** أرصدة العملاء أو الموردين في الفترة (مبيعات / مشتريات في مركز التقارير). */
 export default async function PartyBalancesPage({ searchParams }: { searchParams: Promise<ReportParams> }) {
@@ -15,6 +17,13 @@ export default async function PartyBalancesPage({ searchParams }: { searchParams
   const t = SIDE[side];
   const rows = await partyBalances(db, { side, from, to });
   const sum = (k: "opening" | "debit" | "credit" | "closing") => rows.reduce((a, r) => a + r[k], 0);
+  // «مصدر الرقم»: قيود حساب الجهة (0 = كل الجهات) بنفس الفترة
+  const dayBefore = new Date(Date.parse(from) - 86400000).toISOString().slice(0, 10);
+  const k = t.sign as 1 | -1;
+  const h = (partyId: number, name: string, col: "opening" | "debit" | "credit" | "closing", expected: number) =>
+    col === "debit" || col === "credit"
+      ? sourceHref({ title: `${name}: ${col === "debit" ? "مدين" : "دائن"}`, from, to, codes: [...t.codes], partyId, side: col === "debit" ? "d" : "c", mode: "net", sign: col === "debit" ? 1 : -1, expected })
+      : sourceHref({ title: `${name}: ${col === "opening" ? "الرصيد الافتتاحي" : t.balance}`, to: col === "opening" ? dayBefore : to, codes: [...t.codes], partyId, mode: "bal", sign: k, expected });
   return (
     <>
       <ReportHeader title={`أرصدة ${t.many}`} period={`من ${from} إلى ${to}`} filename={`أرصدة-${t.many}-${from}-${to}`}>
@@ -43,18 +52,34 @@ export default async function PartyBalancesPage({ searchParams }: { searchParams
                 {r.name}
               </a>
             </C>
-            <C num>{money(r.opening)}</C>
-            <C num>{money(r.debit)}</C>
-            <C num>{money(r.credit)}</C>
-            <C num className={`font-semibold ${r.closing < 0 ? "text-red-600" : ""}`}>{money(r.closing)}</C>
+            <C num>
+              <Drill href={h(r.id, r.name, "opening", r.opening)}>{money(r.opening)}</Drill>
+            </C>
+            <C num>
+              <Drill href={h(r.id, r.name, "debit", r.debit)}>{money(r.debit)}</Drill>
+            </C>
+            <C num>
+              <Drill href={h(r.id, r.name, "credit", r.credit)}>{money(r.credit)}</Drill>
+            </C>
+            <C num className={`font-semibold ${r.closing < 0 ? "text-red-600" : ""}`}>
+              <Drill href={h(r.id, r.name, "closing", r.closing)}>{money(r.closing)}</Drill>
+            </C>
           </tr>
         ))}
         <tr className="bg-asphalt-900/5 font-bold text-brand-900">
           <C>الإجمالي</C>
-          <C num>{money(sum("opening"), false)}</C>
-          <C num>{money(sum("debit"), false)}</C>
-          <C num>{money(sum("credit"), false)}</C>
-          <C num>{money(sum("closing"), false)}</C>
+          <C num>
+            <Drill href={h(0, `كل ${t.many}`, "opening", sum("opening"))}>{money(sum("opening"), false)}</Drill>
+          </C>
+          <C num>
+            <Drill href={h(0, `كل ${t.many}`, "debit", sum("debit"))}>{money(sum("debit"), false)}</Drill>
+          </C>
+          <C num>
+            <Drill href={h(0, `كل ${t.many}`, "credit", sum("credit"))}>{money(sum("credit"), false)}</Drill>
+          </C>
+          <C num>
+            <Drill href={h(0, `كل ${t.many}`, "closing", sum("closing"))}>{money(sum("closing"), false)}</Drill>
+          </C>
         </tr>
       </RTable>
       <p className="mt-2 text-xs text-gray-500">

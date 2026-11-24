@@ -105,7 +105,7 @@ export default async function WaybillsPage({ searchParams }: { searchParams: Pro
   const canIssueInvoice = can(user.perms, "sales_invoices", "approve");
   const canOverride = hasSpecial(user.perms, "override_controls");
   const view = sp.view === "sheet" ? "sheet" : "table";
-  const lp: DocListParams = { q: sp.q, status: sp.status, period: sp.period, sort: sp.sort, view: sp.view, page: sp.page };
+  const lp: DocListParams = { q: sp.q, status: sp.status, period: sp.period, from: sp.from, to: sp.to, sort: sp.sort, view: sp.view, page: sp.page };
   const { page, offset } = pageOf(sp.page);
   const bulkAdding = sp.add === "1" && canCreate;
   // «تحويل لشحنة» من رحلة بدأها السائق: نافذة الشحنة الجديدة نفسها معبأة بالسائق والمركبة والتاريخ

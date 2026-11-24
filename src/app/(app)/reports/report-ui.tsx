@@ -59,16 +59,18 @@ export const SOURCE: Record<string, { label: string; href?: (id: number) => stri
   year_close: { label: "إقفال السنة" },
 };
 
-export function SourceLink({ type, id }: { type: string | null; id: number | null }) {
+export function SourceLink({ type, id, entryId }: { type: string | null; id: number | null; entryId?: number | null }) {
   const src = type ? SOURCE[type] : undefined;
-  if (src?.href && id) {
-    return (
-      <a href={src.href(Number(id))} className="text-brand-700 hover:underline">
-        {src.label}
-      </a>
-    );
-  }
-  return <>{src?.label ?? "قيد يدوي"}</>;
+  const label = src?.label ?? (type ? "مستند" : "قيد يدوي");
+  // كل مستند يُفتح: صفحته أو قائمته مفتوحاً فيها، وما ليس له صفحة يفتح قيده
+  const href = type && id ? `/go/src/${type}/${id}${entryId ? `?je=${entryId}` : ""}` : entryId ? `/journal/${entryId}` : null;
+  return href ? (
+    <a href={href} className="drill">
+      {label}
+    </a>
+  ) : (
+    <>{label}</>
+  );
 }
 
 /**

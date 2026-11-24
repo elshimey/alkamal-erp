@@ -4,6 +4,8 @@ import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { todayRiyadh } from "@/lib/dates";
 import { stockMovement } from "@/lib/reports";
+import { Drill } from "@/components/drill";
+import { sourceHref } from "@/lib/source-lines";
 import { C, money, param, PeriodFilter, periodFrom, ReportHeader, RTable, type ReportParams } from "../report-ui";
 
 const qty = (v: number) => (Math.abs(v) < 0.0005 ? "—" : v.toLocaleString("en", { maximumFractionDigits: 3 }));
@@ -17,6 +19,11 @@ export default async function StockMovementPage({ searchParams }: { searchParams
   const warehouseId = Number(param(sp, "wh")) || null;
   const [rows, warehouses] = await Promise.all([stockMovement(db, { from, to, warehouseId }), db.select({ id: s.warehouses.id, name: s.warehouses.nameAr }).from(s.warehouses).orderBy(asc(s.warehouses.nameAr))]);
   const sum = (k: "openingValue" | "inValue" | "outValue" | "closingValue") => rows.reduce((a, r) => a + r[k], 0);
+  // «مصدر الرقم»: حركات المخزون نفسها (الفاتورة أو أمر الصيانة أو المستند المخزني) بنفس الصنف والمستودع
+  const LABEL = { open: "الافتتاحي", in: "الوارد", out: "الصادر", close: "الختامي" } as const;
+  const h = (productId: number | undefined, name: string, dir: keyof typeof LABEL, expected: number) =>
+    sourceHref({ title: `${name}: ${LABEL[dir]}`, from, to, doc: "stock", productId, warehouseId: warehouseId ?? undefined, dir, mode: "net", sign: 1, expected });
+  const v = (productId: number | undefined, name: string, dir: keyof typeof LABEL, value: number, text: string) => (Math.abs(value) < 0.005 ? text : <Drill href={h(productId, name, dir, value)}>{text}</Drill>);
   return (
     <>
       <ReportHeader title="حركة المخزون" period={`من ${from} إلى ${to}`} filename={`حركة-المخزون-${from}-${to}`} wide note="بالريال السعودي، بالمتوسط المرجّح">
@@ -48,29 +55,29 @@ export default async function StockMovementPage({ searchParams }: { searchParams
             <C>{r.name}</C>
             <C className="text-xs">{r.unit ?? ""}</C>
             <C num>{qty(r.openingQty)}</C>
-            <C num>{money(r.openingValue)}</C>
+            <C num>{v(r.id, r.name, "open", r.openingValue, money(r.openingValue))}</C>
             <C num>{qty(r.inQty)}</C>
-            <C num>{money(r.inValue)}</C>
+            <C num>{v(r.id, r.name, "in", r.inValue, money(r.inValue))}</C>
             <C num>{qty(r.outQty)}</C>
-            <C num>{money(r.outValue)}</C>
+            <C num>{v(r.id, r.name, "out", r.outValue, money(r.outValue))}</C>
             <C num className="font-semibold">
               {qty(r.closingQty)}
             </C>
             <C num className="font-semibold">
-              {money(r.closingValue)}
+              {v(r.id, r.name, "close", r.closingValue, money(r.closingValue))}
             </C>
           </tr>
         ))}
         <tr className="bg-asphalt-900/5 font-bold text-brand-900">
           <C colSpan={3}>الإجمالي</C>
           <C />
-          <C num>{money(sum("openingValue"), false)}</C>
+          <C num>{v(undefined, "كل الأصناف", "open", sum("openingValue"), money(sum("openingValue"), false))}</C>
           <C />
-          <C num>{money(sum("inValue"), false)}</C>
+          <C num>{v(undefined, "كل الأصناف", "in", sum("inValue"), money(sum("inValue"), false))}</C>
           <C />
-          <C num>{money(sum("outValue"), false)}</C>
+          <C num>{v(undefined, "كل الأصناف", "out", sum("outValue"), money(sum("outValue"), false))}</C>
           <C />
-          <C num>{money(sum("closingValue"), false)}</C>
+          <C num>{v(undefined, "كل الأصناف", "close", sum("closingValue"), money(sum("closingValue"), false))}</C>
         </tr>
       </RTable>
       <p className="mt-2 text-xs text-gray-500">التحويل بين المستودعات يظهر وارداً في مستودع وصادراً من الآخر بالقيمة نفسها، فلا يغيّر الختامي.</p>

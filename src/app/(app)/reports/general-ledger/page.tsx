@@ -5,6 +5,8 @@ import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { todayRiyadh } from "@/lib/dates";
 import { generalLedger } from "@/lib/reports";
+import { Drill } from "@/components/drill";
+import { sourceHref } from "@/lib/source-lines";
 import { C, money, param, PeriodFilter, periodFrom, ReportHeader, RTable, SourceLink, type ReportParams } from "../report-ui";
 
 /** الأستاذ العام: كل حساب تحرّك في الفترة بحركاته ورصيده المتحرك (للمحاسب). */
@@ -19,6 +21,9 @@ export default async function GeneralLedgerPage({ searchParams }: { searchParams
     generalLedger(db, { from, to, prefix, costCenterId: ccId }),
     db.select({ id: s.costCenters.id, name: s.costCenters.nameAr }).from(s.costCenters).orderBy(asc(s.costCenters.code)),
   ]);
+  // الرصيد الافتتاحي يفتح قيوده (كل ما قبل الفترة)، والسطور نفسها تفتح القيد والمستند
+  const dayBefore = new Date(Date.parse(from) - 86400000).toISOString().slice(0, 10);
+  const openingHref = (code: string, name: string, v: number) => sourceHref({ title: `${code} ${name}: رصيد افتتاحي`, to: dayBefore, codes: [code], costCenterId: ccId ?? undefined, mode: "bal", sign: 1, expected: v });
   return (
     <>
       <ReportHeader title="الأستاذ العام" period={`من ${from} إلى ${to}${prefix ? ` · الحسابات ${prefix}…` : ""}`} filename={`الأستاذ-العام-${from}-${to}`} wide>
@@ -52,18 +57,20 @@ export default async function GeneralLedgerPage({ searchParams }: { searchParams
                 </C>
                 <C />
                 <C />
-                <C num>{money(a.opening, false)}</C>
+                <C num>
+                  <Drill href={openingHref(a.account.code, a.account.nameAr, a.opening)}>{money(a.opening, false)}</Drill>
+                </C>
               </tr>
               {a.lines.map((l, i) => (
                 <tr key={i}>
                   <C className="ltr-nums whitespace-nowrap">{l.entry_date}</C>
                   <C className="ltr-nums text-xs whitespace-nowrap text-gray-500">
-                    <a href={`/journal?open=${l.entry_id}`} className="hover:underline">
+                    <a href={`/journal/${l.entry_id}`} className="drill" title="افتح القيد">
                       {l.number}
                     </a>
                   </C>
                   <C className="text-xs whitespace-nowrap">
-                    <SourceLink type={l.source_type} id={l.source_id} />
+                    <SourceLink type={l.source_type} id={l.source_id} entryId={l.entry_id} />
                   </C>
                   <C className="max-w-sm">{l.description}</C>
                   <C className="text-xs text-gray-500">{l.cost_center ?? ""}</C>

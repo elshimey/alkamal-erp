@@ -931,12 +931,15 @@ export interface WaybillFilter {
   invoiceIds?: number[];
 }
 
-export function parseWaybillFilter(sp: { q?: string; status?: string; period?: string; sort?: string }, today: string): WaybillFilter {
+export function parseWaybillFilter(sp: { q?: string; status?: string; period?: string; sort?: string; from?: string; to?: string }, today: string): WaybillFilter {
   const period: Period = sp.period && sp.period in PERIODS ? (sp.period as Period) : "all";
+  // from/to صريحان (من رقم في لوحة القيادة أو التقرير) يغلبان الفترة النسبية
+  const isDay = (v?: string) => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v);
+  const range = isDay(sp.from) && isDay(sp.to) ? { from: sp.from, to: sp.to } : periodRange(period, today);
   return {
     q: sp.q?.trim() || undefined,
     tab: (WAYBILL_TABS as readonly string[]).includes(sp.status ?? "") ? (sp.status as WaybillFilter["tab"]) : undefined,
-    ...periodRange(period, today),
+    ...range,
     sort: sp.sort && sp.sort in WAYBILL_SORTS ? (sp.sort as WaybillSort) : "date_desc",
   };
 }

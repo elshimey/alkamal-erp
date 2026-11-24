@@ -3,6 +3,8 @@ import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
 import { todayRiyadh } from "@/lib/dates";
 import { cashFlow } from "@/lib/dashboard";
+import { Drill, FormulaDrill } from "@/components/drill";
+import { cashDrills } from "@/lib/drill-formulas";
 import { C, money, PeriodFilter, periodFrom, ReportHeader, RTable, type ReportParams } from "../report-ui";
 
 /** قائمة التدفق النقدي (الطريقة المباشرة): الداخل والخارج من الصناديق والبنوك مصنّفاً بالحساب المقابل، ورصيد كل صندوق وبنك. */
@@ -12,6 +14,7 @@ export default async function CashFlowPage({ searchParams }: { searchParams: Pro
   const today = todayRiyadh();
   const { from, to } = periodFrom(sp, today);
   const cf = await cashFlow(db, from, to);
+  const d = cashDrills(cf, from, to, (v) => money(v, false));
   return (
     <>
       <ReportHeader title="التدفق النقدي" period={`من ${from} إلى ${to}`} filename={`التدفق-النقدي-${from}-${to}`}>
@@ -22,7 +25,9 @@ export default async function CashFlowPage({ searchParams }: { searchParams: Pro
           <C>النقد أول الفترة</C>
           <C />
           <C />
-          <C num>{money(cf.opening, false)}</C>
+          <C num>
+            <Drill href={d.opening}>{money(cf.opening, false)}</Drill>
+          </C>
         </tr>
         {cf.sections.map((sec) => (
           <Fragment key={sec.key}>
@@ -32,30 +37,42 @@ export default async function CashFlowPage({ searchParams }: { searchParams: Pro
             {sec.items.map((i) => (
               <tr key={i.key}>
                 <C className="ps-8">{i.href ? <a href={i.href} className="text-brand-700 hover:underline">{i.label}</a> : i.label}</C>
-                <C num>{money(i.in)}</C>
-                <C num>{money(i.out)}</C>
-                <C num>{money(i.net, false)}</C>
+                <C num>{i.in ? <Drill href={d.item(i, "in")}>{money(i.in)}</Drill> : money(i.in)}</C>
+                <C num>{i.out ? <Drill href={d.item(i, "out")}>{money(i.out)}</Drill> : money(i.out)}</C>
+                <C num>
+                  <Drill href={d.item(i, "net")}>{money(i.net, false)}</Drill>
+                </C>
               </tr>
             ))}
             <tr className="font-semibold">
               <C>صافي {sec.label}</C>
               <C />
               <C />
-              <C num>{money(sec.net, false)}</C>
+              <C num>
+                <Drill href={d.section(sec)}>{money(sec.net, false)}</Drill>
+              </C>
             </tr>
           </Fragment>
         ))}
         <tr className="font-semibold">
           <C>صافي التغير في النقد</C>
-          <C num>{money(cf.inflow, false)}</C>
-          <C num>{money(cf.outflow, false)}</C>
-          <C num>{money(cf.net, false)}</C>
+          <C num>
+            <Drill href={d.inflow}>{money(cf.inflow, false)}</Drill>
+          </C>
+          <C num>
+            <Drill href={d.outflow}>{money(cf.outflow, false)}</Drill>
+          </C>
+          <C num>
+            <FormulaDrill formula={d.net}>{money(cf.net, false)}</FormulaDrill>
+          </C>
         </tr>
         <tr className="bg-asphalt-900/5 font-bold text-brand-900">
           <C>النقد آخر الفترة</C>
           <C />
           <C />
-          <C num>{money(cf.closing, false)}</C>
+          <C num>
+            <FormulaDrill formula={d.closing}>{money(cf.closing, false)}</FormulaDrill>
+          </C>
         </tr>
       </RTable>
 
@@ -68,11 +85,13 @@ export default async function CashFlowPage({ searchParams }: { searchParams: Pro
                 <span className="ltr-nums">{a.code}</span> {a.name}
               </a>
             </C>
-            <C num>{money(a.opening, false)}</C>
-            <C num>{money(a.in)}</C>
-            <C num>{money(a.out)}</C>
+            <C num>
+              <Drill href={d.account(a, "opening")}>{money(a.opening, false)}</Drill>
+            </C>
+            <C num>{a.in ? <Drill href={d.account(a, "in")}>{money(a.in)}</Drill> : money(a.in)}</C>
+            <C num>{a.out ? <Drill href={d.account(a, "out")}>{money(a.out)}</Drill> : money(a.out)}</C>
             <C num className="font-semibold">
-              {money(a.closing, false)}
+              <Drill href={d.account(a, "closing")}>{money(a.closing, false)}</Drill>
             </C>
           </tr>
         ))}

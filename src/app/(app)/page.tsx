@@ -17,6 +17,9 @@ import { Icon, Truck, type IconName } from "@/components/icons";
 import { DateInput } from "@/components/date-input";
 import { currentSchema } from "@/db/tenant";
 import { AccessRequests } from "./users/access-requests";
+import { Drill, FormulaDrill, type Formula } from "@/components/drill";
+import { sourceHref } from "@/lib/source-lines";
+import { cashDrills, incomeFormulas, incomeStatementDrills, marginFormula, periodSource, type Src } from "@/lib/drill-formulas";
 
 const money = (v: number) => Math.round(v).toLocaleString("en");
 const pct = (part: number, whole: number) => (whole ? Math.round((part / whole) * 100) : 0);
@@ -122,6 +125,14 @@ export default async function Dashboard({
   const cur = fin?.current;
   const prev = fin?.previous;
 
+  // «مصدر الرقم»: كل رقم مالي يفتح قيوده بنفس الفترة، والمحسوب يفتح معادلته (لمن يرى التقارير المالية)
+  const per = `من ${period.from} إلى ${period.to}`;
+  const src = periodSource(period.from, period.to);
+  const incomeHref = `/reports/income?from=${period.from}&to=${period.to}`;
+  const fx = cur && canReports ? incomeFormulas({ revenue: cur.revenue, cost: cur.directCost, admin: cur.admin }, { from: period.from, to: period.to, period: per, fmt: money, reportHref: incomeHref }) : null;
+  const balHref = (title: string, codes: string[], sign: 1 | -1, expected: number) => (canReports ? sourceHref({ title, to: today, codes, mode: "bal", sign, expected }) : undefined);
+  const monthEnd = (ym: string) => new Date(Date.UTC(Number(ym.slice(0, 4)), Number(ym.slice(5)), 0)).toISOString().slice(0, 10);
+
   return (
     <>
       {can(user.perms, "users", "update") && <AccessRequests schema={await currentSchema()} compact />}
@@ -200,10 +211,10 @@ export default async function Dashboard({
           {/* المؤشرات المالية الرئيسية */}
           {cur && prev && (
             <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-              <Kpi i={0} label="الإيرادات المفوترة" value={cur.revenue} prev={prev.revenue} icon="chart" href="/invoices" unit="ر.س" note={ops ? `قيمة رحلات الفترة ${money(ops.value)}` : undefined} />
-              <Kpi i={1} label="تكاليف التشغيل" value={cur.directCost} prev={prev.directCost} icon="truck" href="/waybills?status=approved" unit="ر.س" invert />
-              <Kpi i={2} label="مجمل الربح" value={cur.gross} prev={prev.gross} icon="target" href={canReports ? "/reports/income" : undefined} unit="ر.س" note={marginNote(cur?.gross ?? 0, cur?.revenue ?? 0)} />
-              <Kpi i={3} label="صافي الربح" value={cur.net} prev={prev.net} icon="ledger" href={canReports ? "/reports/income" : "/accounts"} unit="ر.س" note={`بعد مصروفات إدارية ${money(cur.admin)}`} />
+              <Kpi i={0} label="الإيرادات المفوترة" value={cur.revenue} prev={prev.revenue} icon="chart" href={canReports ? src({ title: "الإيرادات المفوترة", codes: ["4"], sign: -1, expected: cur.revenue }) : "/invoices"} unit="ر.س" note={ops ? `قيمة رحلات الفترة ${money(ops.value)}` : undefined} />
+              <Kpi i={1} label="تكاليف التشغيل" value={cur.directCost} prev={prev.directCost} icon="truck" href={canReports ? src({ title: "تكاليف التشغيل", codes: ["5"], expected: cur.directCost }) : "/waybills?status=approved"} unit="ر.س" invert />
+              <Kpi i={2} label="مجمل الربح" value={cur.gross} prev={prev.gross} icon="target" formula={fx?.gross} unit="ر.س" note={marginNote(cur?.gross ?? 0, cur?.revenue ?? 0)} />
+              <Kpi i={3} label="صافي الربح" value={cur.net} prev={prev.net} icon="ledger" formula={fx?.dashNet} href={canReports ? undefined : "/accounts"} unit="ر.س" note={`بعد مصروفات إدارية ${money(cur.admin)}`} />
             </div>
           )}
 
@@ -213,7 +224,7 @@ export default async function Dashboard({
               {ops && prevOps && (
                 <Panel i={4} title="الرحلات والشحنات" icon="waybill" settings={setting("/routes", "routes")} href="/waybills" more="كل الشحنات">
                   <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-                    <Stat label="الرحلات" value={ops.trips} prev={prevOps.trips} />
+                    <Stat label="الرحلات" value={ops.trips} prev={prevOps.trips} href={`/waybills?from=${period.from}&to=${period.to}`} />
                     <Stat label="دولية (الكويت)" value={ops.international} sub={`${pct(ops.international, ops.trips)}%`} />
                     <Stat label="الكيلومترات" value={ops.km} prev={prevOps.km} />
                     <Stat label="الأطنان المنقولة" value={Math.round(ops.tons)} sub={`${ops.customers} عميل`} />
@@ -236,7 +247,7 @@ export default async function Dashboard({
                       </div>
                       <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-xs">
                         {(Object.keys(WAYBILL_STATUS) as WaybillStatus[]).map((st) => (
-                          <Link key={st} href={`/waybills?status=${st}`} className="flex items-center gap-1.5 text-gray-600 hover:text-brand-700">
+                          <Link key={st} href={`/waybills?status=${st}&from=${period.from}&to=${period.to}`} className="flex items-center gap-1.5 text-gray-600 hover:text-brand-700">
                             <span className={`size-2.5 rounded-full ${STAGE_COLOR[st]}`} />
                             {WAYBILL_STATUS[st].label}
                             <span className="ltr-nums font-semibold text-gray-800">{ops.byStatus[st] ?? 0}</span>
@@ -252,7 +263,7 @@ export default async function Dashboard({
               {/* الإيراد والتكلفة شهرياً */}
               {prevTrend && (
                 <Panel i={5} title="الإيراد والتكاليف آخر 6 أشهر" icon="chart" settings={setting("/accounts", "accounts")}>
-                  <TrendChart data={prevTrend} />
+                  <TrendChart data={prevTrend} hrefFor={canReports ? (m) => `/reports/income?from=${m}-01&to=${monthEnd(m)}` : undefined} />
                 </Panel>
               )}
 
@@ -266,7 +277,7 @@ export default async function Dashboard({
                       {fin.costs
                         .sort((a, b) => b.amount - a.amount)
                         .map((c, k) => (
-                          <Bar key={c.key} i={k} label={c.label} value={c.amount} total={cur!.directCost} highlight={c.key === "fuel"} />
+                          <Bar key={c.key} i={k} label={c.label} value={c.amount} total={cur!.directCost} highlight={c.key === "fuel"} href={canReports ? src({ title: c.label, codes: c.codes, expected: c.amount }) : undefined} />
                         ))}
                     </div>
                   )}
@@ -306,17 +317,34 @@ export default async function Dashboard({
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
-                          {vehicles.slice(0, 10).map((v) => (
-                            <tr key={v.id} className="hover:bg-brand-50/50">
-                              <td className="px-2 py-2 font-medium">{v.name}</td>
-                              <td className="ltr-nums px-2 py-2">{v.trips || "—"}</td>
-                              <td className="ltr-nums px-2 py-2">{money(v.revenue)}</td>
-                              <td className="ltr-nums px-2 py-2">{money(v.cost)}</td>
-                              <td className="ltr-nums px-2 py-2 text-gray-500">{money(v.fuel)}</td>
-                              <td className={`ltr-nums px-2 py-2 font-semibold ${v.profit < 0 ? "text-red-600" : "text-emerald-700"}`}>{money(v.profit)}</td>
-                              <td className="ltr-nums px-2 py-2 text-gray-500">{v.revenue > 0 ? `${pct(v.profit, v.revenue)}%` : "—"}</td>
-                            </tr>
-                          ))}
+                          {vehicles.slice(0, 10).map((v) => {
+                            const d = canReports ? vehicleDrill(v, src, per, period) : null;
+                            return (
+                              <tr key={v.id} className="hover:bg-brand-50/50">
+                                <td className="px-2 py-2 font-medium">
+                                  <Drill href={d?.report} tip="افتح ربحية هذه المركبة بالتفصيل">
+                                    {v.name}
+                                  </Drill>
+                                </td>
+                                <td className="ltr-nums px-2 py-2">
+                                  <Drill href={v.trips && v.vehicleId ? `/waybills?q=${encodeURIComponent(v.name)}&from=${period.from}&to=${period.to}` : undefined} tip="شحنات المركبة في الفترة">
+                                    {v.trips || "—"}
+                                  </Drill>
+                                </td>
+                                <td className="ltr-nums px-2 py-2">
+                                  <Drill href={d?.revenue}>{money(v.revenue)}</Drill>
+                                </td>
+                                <td className="ltr-nums px-2 py-2">
+                                  <Drill href={d?.cost}>{money(v.cost)}</Drill>
+                                </td>
+                                <td className="ltr-nums px-2 py-2 text-gray-500">
+                                  <Drill href={d?.fuel}>{money(v.fuel)}</Drill>
+                                </td>
+                                <td className={`ltr-nums px-2 py-2 font-semibold ${v.profit < 0 ? "text-red-600" : "text-emerald-700"}`}>{d ? <FormulaDrill formula={d.profit}>{money(v.profit)}</FormulaDrill> : money(v.profit)}</td>
+                                <td className="ltr-nums px-2 py-2 text-gray-500">{d && v.revenue > 0 ? <FormulaDrill formula={d.margin}>{`${pct(v.profit, v.revenue)}%`}</FormulaDrill> : v.revenue > 0 ? `${pct(v.profit, v.revenue)}%` : "—"}</td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -355,16 +383,20 @@ export default async function Dashboard({
               {bal && (
                 <Panel i={5} title="الوضع المالي الآن" icon="cash" settings={setting("/bank-accounts", "accounts")} href={canReports ? "/reports/balance-sheet" : undefined} more={canReports ? "المركز المالي" : undefined}>
                   <dl className="flex flex-col divide-y divide-gray-100 text-sm">
-                    <Line label="النقدية في الصناديق والبنوك" value={bal.cash} strong href="/receipts" />
-                    <Line label="مستحق من العملاء" value={bal.receivable} href="/invoices" />
-                    {unbilled && unbilled.count > 0 && <Line label={`رحلات منفذة لم تُفوتر (${unbilled.count})`} value={unbilled.value} href="/invoices" />}
-                    <Line label="عهد السائقين والموظفين" value={bal.custody} href="/expenses" />
-                    <Line label="مستحق للموردين والناقلين" value={bal.payable} href="/payments" />
-                    <Line label="ضريبة القيمة المضافة المستحقة" value={bal.vat} />
+                    <Line label="النقدية في الصناديق والبنوك" value={bal.cash} strong href={balHref("النقدية في الصناديق والبنوك", ["1101", "1102"], 1, bal.cash) ?? "/receipts"} />
+                    <Line label="مستحق من العملاء" value={bal.receivable} href={balHref("مستحق من العملاء", ["1103"], 1, bal.receivable) ?? "/invoices"} />
+                    {unbilled && unbilled.count > 0 && <Line label={`رحلات منفذة لم تُفوتر (${unbilled.count})`} value={unbilled.value} href="/waybills?status=approved" />}
+                    <Line label="عهد السائقين والموظفين" value={bal.custody} href={balHref("عهد السائقين والموظفين", ["1105"], 1, bal.custody) ?? "/expenses"} />
+                    <Line label="مستحق للموردين والناقلين" value={bal.payable} href={balHref("مستحق للموردين والناقلين", ["2101", "2102", "2103", "2104", "2105"], -1, bal.payable) ?? "/payments"} />
+                    <Line label="ضريبة القيمة المضافة المستحقة" value={bal.vat} href={balHref("ضريبة القيمة المضافة المستحقة", ["2109", "2110", "1108"], -1, bal.vat)} />
                   </dl>
                   {coll && (
                     <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-                      حُصّل {period.label}: {money(coll.total)} ر.س في {coll.count} سند.
+                      حُصّل {period.label}:{" "}
+                      <Drill href={canReports ? `/receipts` : undefined} tip="سندات القبض">
+                        {money(coll.total)} ر.س في {coll.count} سند
+                      </Drill>
+                      .
                     </p>
                   )}
                 </Panel>
@@ -375,28 +407,20 @@ export default async function Dashboard({
                 <Panel i={6} title="أعمار ذمم العملاء" icon="invoice" settings={setting("/contracts", "contracts")} href="/invoices" more="الفواتير">
                   <div className="flex flex-col gap-3">
                     {[
-                      {
-                        label: "لم تستحق بعد",
-                        value: aging.notDue,
-                        color: "bg-emerald-500",
-                      },
-                      {
-                        label: "متأخرة حتى 30 يوماً",
-                        value: aging.d30,
-                        color: "bg-brand-500",
-                      },
-                      {
-                        label: "31 إلى 60 يوماً",
-                        value: aging.d60,
-                        color: "bg-orange-500",
-                      },
-                      {
-                        label: "أكثر من 60 يوماً",
-                        value: aging.d90,
-                        color: "bg-red-500",
-                      },
+                      { label: "لم تستحق بعد", value: aging.notDue, color: "bg-emerald-500", dmax: 0 },
+                      { label: "متأخرة حتى 30 يوماً", value: aging.d30, color: "bg-brand-500", dmin: 1, dmax: 30 },
+                      { label: "31 إلى 60 يوماً", value: aging.d60, color: "bg-orange-500", dmin: 31, dmax: 60 },
+                      { label: "أكثر من 60 يوماً", value: aging.d90, color: "bg-red-500", dmin: 61 },
                     ].map((b, k) => (
-                      <Bar key={b.label} i={k} label={b.label} value={b.value} total={aging.notDue + aging.d30 + aging.d60 + aging.d90} color={b.color} />
+                      <Bar
+                        key={b.label}
+                        i={k}
+                        label={b.label}
+                        value={b.value}
+                        total={aging.notDue + aging.d30 + aging.d60 + aging.d90}
+                        color={b.color}
+                        href={canReports ? sourceHref({ title: `فواتير ${b.label}`, to: today, doc: "open", dmin: b.dmin, dmax: b.dmax, mode: "net", sign: 1, expected: b.value }) : undefined}
+                      />
                     ))}
                   </div>
                 </Panel>
@@ -425,8 +449,14 @@ export default async function Dashboard({
                     {customers.map((c, k) => (
                       <li key={c.id} className="flex items-center gap-3">
                         <span className="flex size-6 items-center justify-center rounded-full bg-asphalt-900 font-display text-xs text-brand-500">{k + 1}</span>
-                        <span className="flex-1 truncate">{c.name}</span>
-                        <span className="ltr-nums font-semibold">{money(c.revenue)}</span>
+                        <span className="min-w-0 flex-1 truncate">
+                          <Drill href={canReports ? `/reports/party-statement?party=${c.id}&from=${period.from}&to=${period.to}` : undefined} tip="كشف حساب العميل">
+                            {c.name}
+                          </Drill>
+                        </span>
+                        <span className="ltr-nums font-semibold">
+                          <Drill href={canReports ? sourceHref({ title: `فواتير ${c.name}`, from: period.from, to: period.to, partyId: c.id, doc: "inv", mode: "net", sign: 1, expected: c.revenue }) : undefined}>{money(c.revenue)}</Drill>
+                        </span>
                         {c.outstanding > 0.5 && <span className="ltr-nums text-xs text-amber-700">متبقي {money(c.outstanding)}</span>}
                       </li>
                     ))}
@@ -443,7 +473,7 @@ export default async function Dashboard({
 
 // ───────────── عناصر اللوحة ─────────────
 
-function Kpi({ i, label, value, prev, icon, href, unit, note, invert = false }: { i: number; label: string; value: number; prev: number; icon: IconName; href?: string; unit: string; note?: string; invert?: boolean }) {
+function Kpi({ i, label, value, prev, icon, href, formula, unit, note, invert = false }: { i: number; label: string; value: number; prev: number; icon: IconName; href?: string; formula?: Formula; unit: string; note?: string; invert?: boolean }) {
   const change = prev ? Math.round(((value - prev) / Math.abs(prev)) * 100) : null;
   // للتكاليف: الزيادة سيئة
   const good = change === null ? null : invert ? change <= 0 : change >= 0;
@@ -472,8 +502,12 @@ function Kpi({ i, label, value, prev, icon, href, unit, note, invert = false }: 
   );
   return (
     <div className="animate-rise stagger" style={delay(i)}>
-      {href ? (
-        <Link href={href} className="block h-full">
+      {formula ? (
+        <FormulaDrill formula={formula} className="block h-full rounded-2xl" card>
+          {body}
+        </FormulaDrill>
+      ) : href ? (
+        <Link href={href} prefetch={false} className="block h-full rounded-2xl">
           {body}
         </Link>
       ) : (
@@ -506,22 +540,29 @@ function Panel({ i, title, icon, href, more, sub, settings, children }: { i: num
   );
 }
 
-function Stat({ label, value, prev, sub }: { label: string; value: number; prev?: number; sub?: string }) {
+function Stat({ label, value, prev, sub, href }: { label: string; value: number; prev?: number; sub?: string; href?: string }) {
   const change = prev ? Math.round(((value - prev) / prev) * 100) : null;
-  return (
-    <div className="rounded-xl bg-concrete/70 p-3">
+  const box = (
+    <>
       <div className="text-xs text-gray-500">{label}</div>
       <CountUp value={value} className="mt-1 block font-display text-2xl font-semibold text-brand-900" />
       <div className="ltr-nums text-[11px] text-gray-500">{sub ?? (change === null ? "—" : `${change > 0 ? "▲" : change < 0 ? "▼" : "■"} ${Math.abs(change)}%`)}</div>
-    </div>
+    </>
+  );
+  return href ? (
+    <Drill href={href} card tip="اعرض القائمة" className="block rounded-xl bg-concrete/70 p-3">
+      {box}
+    </Drill>
+  ) : (
+    <div className="rounded-xl bg-concrete/70 p-3">{box}</div>
   );
 }
 
-function Bar({ i, label, value, total, highlight = false, color }: { i: number; label: string; value: number; total: number; highlight?: boolean; color?: string }) {
+function Bar({ i, label, value, total, highlight = false, color, href }: { i: number; label: string; value: number; total: number; highlight?: boolean; color?: string; href?: string }) {
   const share = pct(value, total);
-  return (
-    <div>
-      <div className="mb-1 flex items-center justify-between text-sm">
+  const inner = (
+    <>
+      <div className="mb-1 flex items-center justify-between gap-2 text-sm">
         <span className={highlight ? "font-semibold text-brand-900" : "text-gray-700"}>{label}</span>
         <span className="ltr-nums text-gray-600">
           {money(value)} <span className="text-xs text-gray-400">({share}%)</span>
@@ -530,7 +571,14 @@ function Bar({ i, label, value, total, highlight = false, color }: { i: number; 
       <div className="h-2.5 overflow-hidden rounded-full bg-gray-100">
         <div className={`grow-x h-full rounded-full ${color ?? (highlight ? "bg-brand-600" : "bg-asphalt-600")}`} style={{ ...delay(i), width: `${Math.max(share, 1)}%` }} />
       </div>
-    </div>
+    </>
+  );
+  return href ? (
+    <Drill href={href} card className="-m-1.5 block rounded-lg p-1.5">
+      {inner}
+    </Drill>
+  ) : (
+    <div>{inner}</div>
   );
 }
 
@@ -551,7 +599,7 @@ function Line({ label, value, strong = false, href }: { label: string; value: nu
     </>
   );
   return href ? (
-    <Link href={href} className="flex items-center justify-between py-2.5 hover:text-brand-700">
+    <Link href={href} prefetch={false} title="اعرض من أين جاء هذا الرقم" className="flex items-center justify-between gap-3 py-2.5 hover:text-brand-700 [&_dd]:underline [&_dd]:decoration-dotted [&_dd]:decoration-current/45 [&_dd]:underline-offset-4">
       {inner}
     </Link>
   ) : (
@@ -647,7 +695,7 @@ function Empty({ children }: { children: ReactNode }) {
 }
 
 /** أعمدة مزدوجة: الإيراد (أصفر) مقابل التكلفة (أسفلت) لكل شهر. */
-function TrendChart({ data }: { data: { month: string; revenue: number; cost: number }[] }) {
+function TrendChart({ data, hrefFor }: { data: { month: string; revenue: number; cost: number }[]; hrefFor?: (month: string) => string }) {
   const max = Math.max(1, ...data.flatMap((d) => [d.revenue, d.cost]));
   return (
     <div>
@@ -655,7 +703,7 @@ function TrendChart({ data }: { data: { month: string; revenue: number; cost: nu
         {data.map((d, k) => {
           const profit = d.revenue - d.cost;
           return (
-            <div key={d.month} className="group relative flex h-full flex-1 flex-col justify-end">
+            <Drill key={d.month} href={hrefFor?.(d.month)} tip={`قائمة دخل ${MONTHS[Number(d.month.slice(5)) - 1]}`} card className="group relative flex h-full flex-1 flex-col justify-end rounded-md">
               <div className="pointer-events-none absolute -top-2 left-1/2 z-10 hidden -translate-x-1/2 -translate-y-full rounded-lg bg-asphalt-900 px-3 py-2 text-xs whitespace-nowrap text-white shadow-lg group-hover:block">
                 <div>إيراد {money(d.revenue)}</div>
                 <div>تكلفة {money(d.cost)}</div>
@@ -665,7 +713,7 @@ function TrendChart({ data }: { data: { month: string; revenue: number; cost: nu
                 <div className="grow-y w-1/2 max-w-7 rounded-t-md bg-brand-500" style={{ ...delay(k), height: `${(d.revenue / max) * 100}%` }} />
                 <div className="grow-y w-1/2 max-w-7 rounded-t-md bg-asphalt-600" style={{ ...delay(k), height: `${(d.cost / max) * 100}%` }} />
               </div>
-            </div>
+            </Drill>
           );
         })}
       </div>
@@ -765,7 +813,7 @@ function Delta({ cur, prev, invert = false }: { cur: number; prev: number | null
 
 type Income = Awaited<ReturnType<typeof incomeStatement>>;
 
-function IncomeTab({ r, period, costs, canReports, settings }: { r: Income; period: Period; costs: { key: string; label: string; amount: number }[]; canReports: boolean; settings?: string }) {
+function IncomeTab({ r, period, costs, canReports, settings }: { r: Income; period: Period; costs: { key: string; label: string; amount: number; codes: string[] }[]; canReports: boolean; settings?: string }) {
   const sec = (k: string) => r.sections.find((x) => x.key === k)!;
   const revenue = sec("revenue").current;
   const prevRevenue = sec("revenue").previous ?? 0;
@@ -786,13 +834,17 @@ function IncomeTab({ r, period, costs, canReports, settings }: { r: Income; peri
   };
   const totalCost = costs.reduce((t, c) => t + c.amount, 0);
   const full = canReports ? `/reports/income?from=${period.from}&to=${period.to}` : undefined;
+  const per = `من ${period.from} إلى ${period.to}`;
+  const dr = canReports ? incomeStatementDrills(r.sections, { from: period.from, to: period.to, period: per, fmt: money, reportHref: full }) : null;
+  const src = periodSource(period.from, period.to);
+  const margin = (title: string, f: Formula | undefined, v: number) => (dr && f && revenue > 0 ? marginFormula(title, f, revenue, dr.revenueHref, `${v}%`, { fmt: money, period: per }) : undefined);
   return (
     <>
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Kpi i={0} label="الإيرادات" value={revenue} prev={prevRevenue} icon="chart" href="/invoices" unit="ر.س" />
-        <Kpi i={1} label="مجمل الربح" value={r.current.gross} prev={p?.gross ?? 0} icon="target" unit="ر.س" note={marginNote(r.current.gross, revenue)} />
-        <Kpi i={2} label="الربح التشغيلي" value={r.current.operating} prev={p?.operating ?? 0} icon="truck" unit="ر.س" note={marginNote(r.current.operating, revenue)} />
-        <Kpi i={3} label="صافي الربح" value={r.current.net} prev={p?.net ?? 0} icon="ledger" unit="ر.س" note={marginNote(r.current.net, revenue)} />
+        <Kpi i={0} label="الإيرادات" value={revenue} prev={prevRevenue} icon="chart" href={dr?.revenueHref ?? "/invoices"} unit="ر.س" />
+        <Kpi i={1} label="مجمل الربح" value={r.current.gross} prev={p?.gross ?? 0} icon="target" formula={dr?.formulas.gross} unit="ر.س" note={marginNote(r.current.gross, revenue)} />
+        <Kpi i={2} label="الربح التشغيلي" value={r.current.operating} prev={p?.operating ?? 0} icon="truck" formula={dr?.formulas.operating} unit="ر.س" note={marginNote(r.current.operating, revenue)} />
+        <Kpi i={3} label="صافي الربح" value={r.current.net} prev={p?.net ?? 0} icon="ledger" formula={dr?.formulas.net} unit="ر.س" note={marginNote(r.current.net, revenue)} />
       </div>
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
         <div className="min-w-0 xl:col-span-2">
@@ -826,9 +878,13 @@ function IncomeTab({ r, period, costs, canReports, settings }: { r: Income; peri
                               <tr key={l.code} className="border-b border-gray-50 hover:bg-brand-50/40">
                                 <td className="px-2 py-1.5 ps-4 text-gray-700">
                                   <span className="ltr-nums inline-block w-12 text-xs text-gray-400">{l.code}</span>
-                                  {l.name}
+                                  <Drill href={dr?.line(s, l)} tip="قيود هذا الحساب في الفترة">
+                                    {l.name}
+                                  </Drill>
                                 </td>
-                                <td className="ltr-nums px-2 py-1.5 text-end">{money(l.current)}</td>
+                                <td className="ltr-nums px-2 py-1.5 text-end">
+                                  <Drill href={dr?.line(s, l)}>{money(l.current)}</Drill>
+                                </td>
                                 <td className="ltr-nums px-2 py-1.5 text-end text-gray-500">{money(l.previous ?? 0)}</td>
                                 <td className="px-2 py-1.5 text-end">
                                   <Delta cur={l.current} prev={l.previous} invert={invert} />
@@ -838,7 +894,9 @@ function IncomeTab({ r, period, costs, canReports, settings }: { r: Income; peri
                             ))}
                             <tr className="text-gray-600">
                               <td className="px-2 py-1.5 ps-4 text-xs">إجمالي {s.label}</td>
-                              <td className="ltr-nums px-2 py-1.5 text-end font-medium">{money(s.current)}</td>
+                              <td className="ltr-nums px-2 py-1.5 text-end font-medium">
+                                <Drill href={dr?.section(s)}>{money(s.current)}</Drill>
+                              </td>
                               <td className="ltr-nums px-2 py-1.5 text-end text-gray-500">{money(s.previous ?? 0)}</td>
                               <td className="px-2 py-1.5 text-end">
                                 <Delta cur={s.current} prev={s.previous} invert={invert} />
@@ -850,7 +908,7 @@ function IncomeTab({ r, period, costs, canReports, settings }: { r: Income; peri
                         {sub && (
                           <tr className={`border-y-2 ${s.key === "zakat" ? "border-brand-500 bg-brand-50" : "border-gray-100"}`}>
                             <td className="px-2 py-2.5 font-semibold text-brand-900">{sub.label}</td>
-                            <td className={`ltr-nums px-2 py-2.5 text-end font-display text-base font-semibold ${sub.cur < 0 ? "text-red-600" : "text-brand-900"}`}>{money(sub.cur)}</td>
+                            <td className={`ltr-nums px-2 py-2.5 text-end font-display text-base font-semibold ${sub.cur < 0 ? "text-red-600" : "text-brand-900"}`}>{dr ? <FormulaDrill formula={dr.subtotal[s.key]}>{money(sub.cur)}</FormulaDrill> : money(sub.cur)}</td>
                             <td className="ltr-nums px-2 py-2.5 text-end text-gray-500">{money(sub.prev ?? 0)}</td>
                             <td className="px-2 py-2.5 text-end">
                               <Delta cur={sub.cur} prev={sub.prev} />
@@ -877,23 +935,13 @@ function IncomeTab({ r, period, costs, canReports, settings }: { r: Income; peri
           <Panel i={5} title="هوامش الربح" icon="target">
             <div className="flex flex-col gap-4">
               {[
-                {
-                  label: "هامش مجمل الربح",
-                  v: pct(r.current.gross, revenue),
-                  pv: pct(p?.gross ?? 0, prevRevenue),
-                },
-                {
-                  label: "هامش الربح التشغيلي",
-                  v: pct(r.current.operating, revenue),
-                  pv: pct(p?.operating ?? 0, prevRevenue),
-                },
-                {
-                  label: "هامش صافي الربح",
-                  v: pct(r.current.net, revenue),
-                  pv: pct(p?.net ?? 0, prevRevenue),
-                },
-              ].map((m, k) => (
-                <div key={m.label}>
+                { label: "هامش مجمل الربح", v: pct(r.current.gross, revenue), pv: pct(p?.gross ?? 0, prevRevenue), f: dr?.formulas.gross },
+                { label: "هامش الربح التشغيلي", v: pct(r.current.operating, revenue), pv: pct(p?.operating ?? 0, prevRevenue), f: dr?.formulas.operating },
+                { label: "هامش صافي الربح", v: pct(r.current.net, revenue), pv: pct(p?.net ?? 0, prevRevenue), f: dr?.formulas.net },
+              ].map((m, k) => {
+                const mf = margin(m.label, m.f, m.v);
+                const inner = (
+                <>
                   <div className="mb-1 flex items-center justify-between text-sm">
                     <span className="text-gray-700">{m.label}</span>
                     <span className="ltr-nums font-display font-semibold text-brand-900">
@@ -909,8 +957,16 @@ function IncomeTab({ r, period, costs, canReports, settings }: { r: Income; peri
                       }}
                     />
                   </div>
-                </div>
-              ))}
+                </>
+                );
+                return mf ? (
+                  <FormulaDrill key={m.label} formula={mf} card className="-m-1.5 block rounded-lg p-1.5">
+                    {inner}
+                  </FormulaDrill>
+                ) : (
+                  <div key={m.label}>{inner}</div>
+                );
+              })}
             </div>
           </Panel>
           <Panel i={6} title="تكاليف التشغيل" icon="fuel" href={canReports ? `/reports/fleet-profit?from=${period.from}&to=${period.to}` : undefined} more="حسب المركبة">
@@ -921,7 +977,7 @@ function IncomeTab({ r, period, costs, canReports, settings }: { r: Income; peri
                 {[...costs]
                   .sort((a, b) => b.amount - a.amount)
                   .map((c, k) => (
-                    <Bar key={c.key} i={k} label={c.label} value={c.amount} total={totalCost} highlight={c.key === "fuel"} />
+                    <Bar key={c.key} i={k} label={c.label} value={c.amount} total={totalCost} highlight={c.key === "fuel"} href={canReports ? src({ title: c.label, codes: c.codes, expected: c.amount }) : undefined} />
                   ))}
               </div>
             )}
@@ -942,13 +998,14 @@ type Cash = Awaited<ReturnType<typeof cashFlow>>;
 
 function CashTab({ r, period, canReports, settings }: { r: Cash; period: Period; canReports: boolean; settings?: string }) {
   const ledger = (id: number) => (canReports ? `/reports/ledger?from=${period.from}&to=${period.to}&account=${id}` : undefined);
+  const cd = canReports ? cashDrills(r, period.from, period.to, money) : null;
   return (
     <>
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <CashKpi i={0} label="رصيد أول الفترة" value={r.opening} icon="cash" />
-        <CashKpi i={1} label="المقبوضات" value={r.inflow} icon="cash" tone="in" />
-        <CashKpi i={2} label="المدفوعات" value={r.outflow} icon="invoice" tone="out" />
-        <CashKpi i={3} label="رصيد آخر الفترة" value={r.closing} icon="ledger" note={`صافي التغير ${r.net > 0 ? "+" : ""}${money(r.net)}`} />
+        <CashKpi i={0} label="رصيد أول الفترة" value={r.opening} icon="cash" href={cd?.opening} />
+        <CashKpi i={1} label="المقبوضات" value={r.inflow} icon="cash" tone="in" href={cd?.inflow} />
+        <CashKpi i={2} label="المدفوعات" value={r.outflow} icon="invoice" tone="out" href={cd?.outflow} />
+        <CashKpi i={3} label="رصيد آخر الفترة" value={r.closing} icon="ledger" formula={cd?.closing} note={`صافي التغير ${r.net > 0 ? "+" : ""}${money(r.net)}`} />
       </div>
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
         <div className="flex min-w-0 flex-col gap-6 xl:col-span-2">
@@ -971,7 +1028,9 @@ function CashTab({ r, period, canReports, settings }: { r: Cash; period: Period;
                       <td className="px-2 py-2 text-gray-600">رصيد النقدية أول الفترة</td>
                       <td />
                       <td />
-                      <td className="ltr-nums px-2 py-2 text-end font-medium">{money(r.opening)}</td>
+                      <td className="ltr-nums px-2 py-2 text-end font-medium">
+                        <Drill href={cd?.opening}>{money(r.opening)}</Drill>
+                      </td>
                     </tr>
                     {r.sections
                       .filter((s) => s.items.length)
@@ -993,24 +1052,32 @@ function CashTab({ r, period, canReports, settings }: { r: Cash; period: Period;
                                   l.label
                                 )}
                               </td>
-                              <td className="ltr-nums px-2 py-1.5 text-end text-emerald-700">{l.in ? money(l.in) : "—"}</td>
-                              <td className="ltr-nums px-2 py-1.5 text-end text-red-600">{l.out ? money(l.out) : "—"}</td>
-                              <td className={`ltr-nums px-2 py-1.5 text-end font-medium ${l.net < 0 ? "text-red-600" : ""}`}>{money(l.net)}</td>
+                              <td className="ltr-nums px-2 py-1.5 text-end text-emerald-700">{l.in ? <Drill href={cd?.item(l, "in")}>{money(l.in)}</Drill> : "—"}</td>
+                              <td className="ltr-nums px-2 py-1.5 text-end text-red-600">{l.out ? <Drill href={cd?.item(l, "out")}>{money(l.out)}</Drill> : "—"}</td>
+                              <td className={`ltr-nums px-2 py-1.5 text-end font-medium ${l.net < 0 ? "text-red-600" : ""}`}>
+                                <Drill href={cd?.item(l, "net")}>{money(l.net)}</Drill>
+                              </td>
                             </tr>
                           ))}
                           <tr className="border-y-2 border-gray-100">
                             <td className="px-2 py-2 font-semibold text-brand-900">صافي النقد من {s.label}</td>
                             <td />
                             <td />
-                            <td className={`ltr-nums px-2 py-2 text-end font-semibold ${s.net < 0 ? "text-red-600" : "text-brand-900"}`}>{money(s.net)}</td>
+                            <td className={`ltr-nums px-2 py-2 text-end font-semibold ${s.net < 0 ? "text-red-600" : "text-brand-900"}`}>
+                              <Drill href={cd?.section(s)}>{money(s.net)}</Drill>
+                            </td>
                           </tr>
                         </SectionRows>
                       ))}
                     <tr className="border-y-2 border-brand-500 bg-brand-50">
                       <td className="px-2 py-2.5 font-semibold text-brand-900">رصيد النقدية آخر الفترة</td>
-                      <td className="ltr-nums px-2 py-2.5 text-end text-emerald-700">{money(r.inflow)}</td>
-                      <td className="ltr-nums px-2 py-2.5 text-end text-red-600">{money(r.outflow)}</td>
-                      <td className={`ltr-nums px-2 py-2.5 text-end font-display text-base font-semibold ${r.closing < 0 ? "text-red-600" : "text-brand-900"}`}>{money(r.closing)}</td>
+                      <td className="ltr-nums px-2 py-2.5 text-end text-emerald-700">
+                        <Drill href={cd?.inflow}>{money(r.inflow)}</Drill>
+                      </td>
+                      <td className="ltr-nums px-2 py-2.5 text-end text-red-600">
+                        <Drill href={cd?.outflow}>{money(r.outflow)}</Drill>
+                      </td>
+                      <td className={`ltr-nums px-2 py-2.5 text-end font-display text-base font-semibold ${r.closing < 0 ? "text-red-600" : "text-brand-900"}`}>{cd ? <FormulaDrill formula={cd.closing}>{money(r.closing)}</FormulaDrill> : money(r.closing)}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -1019,7 +1086,7 @@ function CashTab({ r, period, canReports, settings }: { r: Cash; period: Period;
             <p className="mt-3 text-xs text-gray-400">التحويل بين الصناديق والبنوك لا يظهر هنا لأنه لا يغيّر رصيد النقدية.</p>
           </Panel>
           <Panel i={5} title={r.daily ? "المقبوضات والمدفوعات يومياً" : "المقبوضات والمدفوعات شهرياً"} icon="chart">
-            {r.series.length === 0 ? <Empty>لا توجد حركة في هذه الفترة.</Empty> : <CashChart data={r.series} daily={r.daily} />}
+            {r.series.length === 0 ? <Empty>لا توجد حركة في هذه الفترة.</Empty> : <CashChart data={r.series} daily={r.daily} hrefFor={canReports ? (k) => (k.length === 10 ? `/reports/cash-flow?from=${k}&to=${k}` : `/reports/cash-flow?from=${k}-01&to=${new Date(Date.UTC(Number(k.slice(0, 4)), Number(k.slice(5, 7)), 0)).toISOString().slice(0, 10)}`) : undefined} />}
           </Panel>
         </div>
         <div className="flex flex-col gap-6">
@@ -1059,7 +1126,7 @@ function CashTab({ r, period, canReports, settings }: { r: Cash; period: Period;
             )}
           </Panel>
           <Panel i={7} title="من أين جاء النقد وأين ذهب" icon="target">
-            <FlowSplit sections={r.sections} />
+            <FlowSplit sections={r.sections} hrefFor={cd?.item} />
           </Panel>
         </div>
       </div>
@@ -1067,9 +1134,8 @@ function CashTab({ r, period, canReports, settings }: { r: Cash; period: Period;
   );
 }
 
-function CashKpi({ i, label, value, icon, tone, note }: { i: number; label: string; value: number; icon: IconName; tone?: "in" | "out"; note?: string }) {
-  return (
-    <div className="animate-rise stagger" style={delay(i)}>
+function CashKpi({ i, label, value, icon, tone, note, href, formula }: { i: number; label: string; value: number; icon: IconName; tone?: "in" | "out"; note?: string; href?: string; formula?: Formula }) {
+  const card = (
       <div className="relative h-full overflow-hidden rounded-2xl border border-black/[0.06] bg-white p-5 shadow-[0_4px_16px_-8px_rgba(27,33,38,0.1)]">
         <div className="flex items-start justify-between gap-3">
           <div className="text-sm text-gray-500">{label}</div>
@@ -1083,12 +1149,27 @@ function CashKpi({ i, label, value, icon, tone, note }: { i: number; label: stri
         </div>
         {note && <div className="ltr-nums mt-2 text-xs text-gray-500">{note}</div>}
       </div>
+  );
+  return (
+    <div className="animate-rise stagger" style={delay(i)}>
+      {formula ? (
+        <FormulaDrill formula={formula} card className="block h-full rounded-2xl">
+          {card}
+        </FormulaDrill>
+      ) : href ? (
+        <Drill href={href} card className="block h-full rounded-2xl">
+          {card}
+        </Drill>
+      ) : (
+        card
+      )}
     </div>
   );
 }
 
+
 /** نسبة كل نشاط من المقبوضات والمدفوعات. */
-function FlowSplit({ sections }: { sections: Cash["sections"] }) {
+function FlowSplit({ sections, hrefFor }: { sections: Cash["sections"]; hrefFor?: (l: Cash["sections"][number]["items"][number], side: "in" | "out") => string }) {
   const items = sections.flatMap((s) => s.items);
   const tin = items.reduce((t, l) => t + l.in, 0);
   const tout = items.reduce((t, l) => t + l.out, 0);
@@ -1100,12 +1181,14 @@ function FlowSplit({ sections }: { sections: Cash["sections"] }) {
           title: "المقبوضات",
           total: tin,
           pick: (l: (typeof items)[number]) => l.in,
+          side: "in" as const,
           color: "bg-emerald-500",
         },
         {
           title: "المدفوعات",
           total: tout,
           pick: (l: (typeof items)[number]) => l.out,
+          side: "out" as const,
           color: "bg-asphalt-600",
         },
       ].map((g) => (
@@ -1117,7 +1200,7 @@ function FlowSplit({ sections }: { sections: Cash["sections"] }) {
               .sort((a, b) => g.pick(b) - g.pick(a))
               .slice(0, 5)
               .map((l, k) => (
-                <Bar key={l.key} i={k} label={l.label} value={g.pick(l)} total={g.total} color={g.color} />
+                <Bar key={l.key} i={k} label={l.label} value={g.pick(l)} total={g.total} color={g.color} href={hrefFor?.(l, g.side)} />
               ))}
           </div>
         </div>
@@ -1126,14 +1209,14 @@ function FlowSplit({ sections }: { sections: Cash["sections"] }) {
   );
 }
 
-function CashChart({ data, daily }: { data: { key: string; in: number; out: number }[]; daily: boolean }) {
+function CashChart({ data, daily, hrefFor }: { data: { key: string; in: number; out: number }[]; daily: boolean; hrefFor?: (key: string) => string }) {
   const max = Math.max(1, ...data.flatMap((d) => [d.in, d.out]));
   const label = (k: string) => (daily ? String(Number(k.slice(8))) : MONTHS[Number(k.slice(5, 7)) - 1]);
   return (
     <div>
       <div className={`flex h-48 items-end border-b border-gray-200 pb-px ${daily ? "gap-1" : "gap-3 sm:gap-6"}`}>
         {data.map((d, k) => (
-          <div key={d.key} className="group relative flex h-full flex-1 flex-col justify-end">
+          <Drill key={d.key} href={hrefFor?.(d.key)} tip="التدفق النقدي لهذه الفترة" card className="group relative flex h-full flex-1 flex-col justify-end rounded-md">
             <div className="pointer-events-none absolute -top-2 left-1/2 z-10 hidden -translate-x-1/2 -translate-y-full rounded-lg bg-asphalt-900 px-3 py-2 text-xs whitespace-nowrap text-white shadow-lg group-hover:block">
               <div className="ltr-nums text-white/60">{d.key}</div>
               <div>مقبوض {money(d.in)}</div>
@@ -1144,7 +1227,7 @@ function CashChart({ data, daily }: { data: { key: string; in: number; out: numb
               <div className="grow-y w-1/2 max-w-7 rounded-t-md bg-emerald-500" style={{ ...delay(k % 12), height: `${(d.in / max) * 100}%` }} />
               <div className="grow-y w-1/2 max-w-7 rounded-t-md bg-asphalt-600" style={{ ...delay(k % 12), height: `${(d.out / max) * 100}%` }} />
             </div>
-          </div>
+          </Drill>
         ))}
       </div>
       <div className={`mt-2 flex ${daily ? "gap-1" : "gap-3 sm:gap-6"}`}>
@@ -1164,4 +1247,26 @@ function CashChart({ data, daily }: { data: { key: string; in: number; out: numb
       </div>
     </div>
   );
+}
+
+/** روابط ومعادلات صف مركبة في «ربحية المركبات»: كل رقم على مركز تكلفتها بنفس الفترة. */
+function vehicleDrill(v: { id: number; vehicleId: number | null; name: string; revenue: number; cost: number; fuel: number; profit: number }, src: Src, per: string, period: Period) {
+  const report = `/reports/fleet-profit?from=${period.from}&to=${period.to}${v.vehicleId ? `&id=${v.vehicleId}` : ""}`;
+  const revenue = src({ title: `إيراد ${v.name}`, codes: ["4"], costCenterId: v.id, sign: -1, expected: v.revenue });
+  const cost = src({ title: `تكاليف ${v.name}`, codes: ["5"], costCenterId: v.id, expected: v.cost });
+  const fuel = src({ title: `ديزل ${v.name}`, codes: ["5101"], costCenterId: v.id, expected: v.fuel });
+  const profit: Formula = {
+    title: `ربح ${v.name}`,
+    value: money(v.profit),
+    period: per,
+    rows: [
+      { label: "الإيراد", note: "حسابات 4 على مركز تكلفتها", value: money(v.revenue), href: revenue },
+      { op: "−", label: "تكاليف التشغيل", note: "حسابات 5 على مركز تكلفتها", value: money(v.cost), href: cost },
+    ],
+    allHref: src({ title: `ربح ${v.name}`, codes: ["4", "5"], costCenterId: v.id, sign: -1, expected: v.profit }),
+    reportHref: report,
+    reportLabel: "ربحية المركبة بالتفصيل",
+  };
+  const margin = marginFormula(`هامش ${v.name}`, profit, v.revenue, revenue, `${pct(v.profit, v.revenue)}%`, { fmt: money, period: per });
+  return { report, revenue, cost, fuel, profit, margin };
 }

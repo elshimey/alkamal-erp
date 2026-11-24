@@ -606,3 +606,37 @@ table[data-report]:not([data-noserial]) > tbody > tr:not(.font-bold):not(.font-s
 .ok-pop {
   animation: ok-pop 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
+
+/*
+ * «مصدر الرقم» (طلب أحمد 2026-11-24): كل رقم أو اسم يُنقر ليفتح ما حُسب منه عليه خط منقط،
+ * ويضيء بالمرور. التلميح من title (لا يغطي شيئاً)، ولا خط على الورق.
+ */
+.drill {
+  color: inherit;
+  text-decoration: underline dotted;
+  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 4px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background-color 0.15s, text-decoration-color 0.15s;
+}
+.drill:hover {
+  background-color: color-mix(in srgb, var(--color-brand-500) 22%, transparent);
+  text-decoration-color: var(--color-brand-600);
+}
+.drill:focus-visible {
+  outline: 2px solid var(--color-brand-600);
+  outline-offset: 2px;
+}
+.drill-card {
+  cursor: pointer;
+}
+.drill-card:hover {
+  box-shadow: 0 0 0 2px var(--color-brand-500);
+}
+@media print {
+  .drill {
+    text-decoration: none;
+  }
+}

@@ -5,6 +5,8 @@ import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import { todayRiyadh } from "@/lib/dates";
 import { trialBalance } from "@/lib/reports";
+import { Drill } from "@/components/drill";
+import { sourceHref } from "@/lib/source-lines";
 import { C, money, param, PeriodFilter, periodFrom, ReportHeader, RTable } from "../report-ui";
 
 const LEVELS = [
@@ -28,6 +30,16 @@ export default async function TrialBalancePage({ searchParams }: { searchParams:
   const shown = tb.rows.filter((r) => r.account.level <= level && (r.opening || r.debit || r.credit || r.closing));
   const dc = (v: number) => [money(Math.max(v, 0)), money(Math.max(-v, 0))];
   const balanced = tb.totals.debit === tb.totals.credit;
+  // «مصدر الرقم» لكل خانة: الافتتاحي رصيد اليوم السابق للفترة، والحركة مدينها أو دائنها، والختامي رصيد آخرها
+  const dayBefore = new Date(Date.parse(from) - 86400000).toISOString().slice(0, 10);
+  const cc = ccId ?? undefined;
+  const cell = (code: string, name: string, kind: "od" | "oc" | "d" | "c" | "cd" | "cc", expected: number) => {
+    const t = `${code} ${name}`;
+    const credit = kind === "oc" || kind === "c" || kind === "cc";
+    if (kind === "d" || kind === "c") return sourceHref({ title: `${t}: حركة ${credit ? "دائن" : "مدين"}`, from, to, codes: [code], costCenterId: cc, side: credit ? "c" : "d", mode: "net", sign: credit ? -1 : 1, expected });
+    return sourceHref({ title: `${t}: رصيد ${kind[0] === "o" ? "افتتاحي" : "ختامي"}`, to: kind[0] === "o" ? dayBefore : to, codes: [code], costCenterId: cc, mode: "bal", sign: credit ? -1 : 1, expected });
+  };
+  const num = (v: string, href: string) => (v === "—" || v === "0" || v === "" ? v : <Drill href={href}>{v}</Drill>);
 
   return (
     <>
@@ -82,12 +94,12 @@ export default async function TrialBalancePage({ searchParams }: { searchParams:
                   )}
                 </span>
               </C>
-              <C num>{od}</C>
-              <C num>{oc}</C>
-              <C num>{money(r.debit)}</C>
-              <C num>{money(r.credit)}</C>
-              <C num>{cd}</C>
-              <C num>{ccr}</C>
+              <C num>{num(od, cell(r.account.code, r.account.nameAr, "od", Math.max(r.opening, 0)))}</C>
+              <C num>{num(oc, cell(r.account.code, r.account.nameAr, "oc", Math.max(-r.opening, 0)))}</C>
+              <C num>{num(money(r.debit), cell(r.account.code, r.account.nameAr, "d", r.debit))}</C>
+              <C num>{num(money(r.credit), cell(r.account.code, r.account.nameAr, "c", r.credit))}</C>
+              <C num>{num(cd, cell(r.account.code, r.account.nameAr, "cd", Math.max(r.closing, 0)))}</C>
+              <C num>{num(ccr, cell(r.account.code, r.account.nameAr, "cc", Math.max(-r.closing, 0)))}</C>
             </tr>
           );
         })}
