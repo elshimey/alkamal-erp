@@ -10,7 +10,8 @@ import { ContactPanel } from "./contact-panel";
 import { PartyPanel } from "./party-panel";
 import { AddMenu } from "@/components/add-menu";
 import { DocCards } from "@/components/doc-card";
-import { RecordCardFace, cardShell } from "@/components/list-card";
+import { RecordCardFace } from "@/components/list-card";
+import { cardShell } from "@/components/card-styles";
 
 const BASE = "/parties";
 type Params = { q?: string; tab?: string; country?: string; sort?: string; open?: string; ptab?: string; from?: string; to?: string; new?: string };

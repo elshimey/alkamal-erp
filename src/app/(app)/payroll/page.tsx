@@ -12,7 +12,8 @@ import { PayrollTabs } from "./tabs";
 import { createRun } from "./actions";
 import { fmt } from "@/lib/format";
 import { DocCards } from "@/components/doc-card";
-import { cardShell, DocCardFace, Facts, STRIPE } from "@/components/list-card";
+import { DocCardFace, Facts } from "@/components/list-card";
+import { cardShell, STRIPE } from "@/components/card-styles";
 
 export default async function PayrollPage() {
   const user = await requirePermission("payroll", "view");
