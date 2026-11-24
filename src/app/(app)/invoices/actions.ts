@@ -435,7 +435,7 @@ export async function bulkInvoiceOps(_: FormState, fd: FormData): Promise<FormSt
   const verb = { revert: "أُرجعت لمسودة", unmerge: "فُك دمج", delete: "حُذفت" }[op as "revert" | "unmerge" | "delete"];
   const msg = done.length ? `${verb} ${done.length} فاتورة: ${done.join("، ")}` : "";
   if (!done.length) return { error: errors.join("\n") };
-  return errors.length ? { error: `${msg}\nولم يُنفذ:\n${errors.join("\n")}` } : { ok: msg };
+  return errors.length ? { ok: msg, error: `ولم يُنفذ:\n${errors.join("\n")}` } : { ok: msg };
 }
 
 /** إرسال رحلات الفواتير للسائقين أو إلغاء إرسالها (رحلة الفاتورة المباشرة والشحنات التي فيها). */
@@ -447,7 +447,7 @@ async function dispatchInvoices(invoiceIds: number[], op: "send" | "unsend", fd?
   refresh();
   const what = op === "send" ? `أُرسلت ${res.done.length} رحلة للسائق (${res.done.join("، ")})` : `أُلغي إرسال ${res.done.length} رحلة وسُحبت من تطبيق السائق`;
   if (!res.done.length) return { error: res.skipped.join("\n") };
-  return res.skipped.length ? { error: `${what}، ولم يُنفذ:\n${res.skipped.join("\n")}` } : { ok: what };
+  return res.skipped.length ? { ok: what, error: `ولم يُنفذ:\n${res.skipped.join("\n")}` } : { ok: what };
 }
 
 export async function sendInvoiceToDriver(id: number, fd: FormData): Promise<FormState> {

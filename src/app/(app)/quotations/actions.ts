@@ -141,7 +141,7 @@ export async function bulkQuotations(_: FormState, fd: FormData): Promise<FormSt
   done();
   const what = op === "delete" ? "حُذف" : `أصبح «${QUOTE_STATUS[op as QuoteStatus].label}»`;
   if (!ok) return { error: failed.join("\n") };
-  return failed.length ? { error: `${what} ${ok} عرض، ولم يُنفذ على ${failed.length}:\n${failed.join("\n")}` } : { ok: `${what} ${ok} عرض` };
+  return failed.length ? { ok: `${what} ${ok} عرض`, error: `ولم يُنفذ على ${failed.length}:\n${failed.join("\n")}` } : { ok: `${what} ${ok} عرض` };
 }
 
 /** حفظ الورقة: خلايا الرأس وخلايا البنود لكل عرض. */

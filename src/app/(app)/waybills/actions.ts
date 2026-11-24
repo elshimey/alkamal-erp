@@ -590,7 +590,7 @@ async function issueWaybills(ids: number[], invoiceDate: string): Promise<FormSt
     revalidatePath("/");
     const msg = res.issued.length ? `صدرت ${res.issued.length === 1 ? "الفاتورة" : `${res.issued.length} فواتير`} ورُحّل القيد: ${res.issued.map((i) => i.number).join("، ")}${notes.length ? `\nملاحظة: ${notes.join("\n")}` : ""}` : "";
     if (!res.issued.length) return { error: res.skipped.join("\n") || "لم تصدر فاتورة" };
-    return res.skipped.length ? { error: `${msg}\nولم يُنفذ:\n${res.skipped.join("\n")}` } : { ok: msg };
+    return res.skipped.length ? { ok: msg, error: `ولم يُنفذ:\n${res.skipped.join("\n")}` } : { ok: msg };
   } catch (err) {
     return { error: errorMessage(err) };
   }
@@ -604,7 +604,7 @@ async function unmergeWaybills(ids: number[]): Promise<FormState> {
   revalidatePath("/invoices");
   const msg = res.done.length ? `فُك دمج ${res.done.length} شحنة وعادت «بانتظار الفوترة»` : "";
   if (!res.done.length) return { error: res.skipped.join("\n") || "لا توجد شحنات مدمجة في المحدد" };
-  return res.skipped.length ? { error: `${msg}\nولم يُنفذ:\n${res.skipped.join("\n")}` } : { ok: msg };
+  return res.skipped.length ? { ok: msg, error: `ولم يُنفذ:\n${res.skipped.join("\n")}` } : { ok: msg };
 }
 
 export async function issueOne(id: number, fd: FormData): Promise<FormState> {
@@ -640,7 +640,7 @@ export async function bulkWaybillOps(_: FormState, fd: FormData): Promise<FormSt
       const made = res.created.map((c) => `${c.number} (${c.count} شحنة)`).join("، ");
       const msg = made ? `دُمجت في ${res.created.length === 1 ? "الفاتورة المسودة" : "الفواتير المسودة"}: ${made}` : "";
       if (!res.created.length) return { error: res.skipped.join("\n") || "لم تُنشأ فاتورة" };
-      return res.skipped.length ? { error: `${msg}\nولم تُدمج:\n${res.skipped.join("\n")}` } : { ok: `${msg}. الخطوة التالية: «فوترة المحدد» أو اعتمادها من الفواتير` };
+      return res.skipped.length ? { ok: msg, error: `ولم تُدمج:\n${res.skipped.join("\n")}` } : { ok: `${msg}. الخطوة التالية: «فوترة المحدد» أو اعتمادها من الفواتير` };
     } catch (err) {
       return { error: errorMessage(err) };
     }
@@ -654,7 +654,7 @@ export async function bulkWaybillOps(_: FormState, fd: FormData): Promise<FormSt
     revalidatePath("/payments/review");
     const what = op === "send_driver" ? `أُرسلت ${res.done.length} شحنة للسائقين؛ تظهر في تطبيقاتهم` : `أُلغي إرسال ${res.done.length} شحنة وسُحبت من تطبيق السائق`;
     if (!res.done.length) return { error: res.skipped.join("\n") };
-    return res.skipped.length ? { error: `${what}، ولم يُنفذ على ${res.skipped.length}:\n${res.skipped.join("\n")}` } : { ok: what };
+    return res.skipped.length ? { ok: what, error: `ولم يُنفذ على ${res.skipped.length}:\n${res.skipped.join("\n")}` } : { ok: what };
   }
   if (!isFlow(op)) return { error: "اختر العملية" };
   const user = await guard(op === "approved" ? "approve" : "update");
@@ -674,7 +674,7 @@ export async function bulkWaybillOps(_: FormState, fd: FormData): Promise<FormSt
   refresh();
   const what = `أصبحت «${WAYBILL_STATUS[op].label}» ${ok} شحنة`;
   if (!ok) return { error: failed.join("\n") };
-  return failed.length ? { error: `${what}، ولم يُنفذ على ${failed.length}:\n${failed.join("\n")}` } : { ok: what };
+  return failed.length ? { ok: what, error: `ولم يُنفذ على ${failed.length}:\n${failed.join("\n")}` } : { ok: what };
 }
 
 // ───────────── رحلات بدأها السائقون ─────────────

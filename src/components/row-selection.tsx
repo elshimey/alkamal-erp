@@ -6,12 +6,23 @@ import { useEffect, useState, type ReactNode } from "react";
 const EVENT = "row-selection";
 const boxes = (form: string) => Array.from(document.querySelectorAll<HTMLInputElement>(`input[type=checkbox][name=ids][form="${form}"]`));
 
+/** يزيل كل تحديد في قائمة النموذج (بعد نجاح إجراء جماعي) فيختفي شريط العمليات. */
+export function clearSelection(form: string) {
+  for (const b of boxes(form)) b.checked = false;
+  for (const b of document.querySelectorAll<HTMLInputElement>(`input[type=checkbox][data-select-all="${form}"]`)) {
+    b.checked = false;
+    b.indeterminate = false;
+  }
+  document.dispatchEvent(new Event(EVENT));
+}
+
 /** تحديد الكل في رأس الجدول. */
 export function SelectAll({ form }: { form: string }) {
   return (
     <input
       type="checkbox"
       aria-label="تحديد الكل"
+      data-select-all={form}
       className="size-4 accent-brand-600"
       onChange={(e) => {
         for (const b of boxes(form)) b.checked = e.currentTarget.checked;

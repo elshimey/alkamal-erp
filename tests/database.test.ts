@@ -3739,6 +3739,10 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(byDriver.rows.some((r) => r.other.some((o) => o.amount === 70))).toBe(false);
       // فلتر سائق واحد
       expect((await fleetProfitability(db, { from: D2, to: D2, by: "driver", id: b.id })).rows.map((r) => r.id)).toEqual([b.id]);
+      // عدة سائقين محددين (مربعات التحديد)، و«دون سائق» لا يدخل مع التحديد
+      const many = (await fleetProfitability(db, { from: D2, to: D2, by: "driver", ids: [a.id, b.id] })).rows.map((r) => r.id);
+      expect(new Set(many)).toEqual(new Set([a.id, b.id]));
+      expect((await fleetProfitability(db, { from: D2, to: D2, by: "driver", ids: [] })).rows.length).toBe(byDriver.rows.length);
     });
 
     it("جدول أقساط الدائنين: توليد ولصق، تكلفة التمويل يوم الاستحقاق، سداد كامل وجزئي ومبكر، الفرق مع الرصيد، وإعادة تصنيف 2201 (ملاحظة التشغيل 16)", async () => {
