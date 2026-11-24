@@ -11,6 +11,8 @@ import { entryDoc } from "@/lib/journal";
 import { violationDoc } from "@/lib/violations";
 import { orderDoc, requestDoc } from "@/lib/maintenance";
 import { custodyDoc } from "@/lib/hr";
+import { handoverDoc } from "@/lib/handovers";
+import { HandoverDocument } from "@/components/handover-document";
 import { waybillDoc } from "@/lib/waybills";
 import { orderDoc as purchaseOrderDoc } from "@/lib/purchasing";
 import { quotationDoc } from "@/lib/quotations";
@@ -120,6 +122,14 @@ export const DOC_KINDS: Record<string, DocKind> = {
     render: async (id, c, t) => {
       const d = await custodyDoc(db, id);
       return d && { name: d.c.number, node: <CustodyDocument company={c} doc={d} template={t} /> };
+    },
+  },
+  handovers: {
+    title: "محاضر استلام وتسليم المركبات",
+    entity: "vehicles",
+    render: async (id, c, t) => {
+      const d = await handoverDoc(db, id);
+      return d && { name: d.h.number, node: <HandoverDocument company={c} doc={d} template={t} /> };
     },
   },
   violations: {

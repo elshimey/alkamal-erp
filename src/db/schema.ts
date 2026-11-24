@@ -532,6 +532,50 @@ export const vehicleAssignments = pgTable(
 );
 
 
+// محضر استلام/تسليم المركبة: مستند عهدة يُطبع ويوقّعه السائق (والسائقان في التسليم لسائق آخر)،
+// ومعه العدد والأدوات المسلَّمة مع المركبة. receive يفتح إسناداً، return يغلقه، transfer يغلق ويفتح.
+export type HandoverKind = "receive" | "return" | "transfer";
+export const vehicleHandovers = pgTable(
+  "vehicle_handovers",
+  {
+    id: id(),
+    number: varchar("number", { length: 30 }).notNull().unique(),
+    kind: varchar("kind", { length: 10 }).$type<HandoverKind>().notNull(),
+    vehicleId: ref("vehicle_id").notNull().references(() => vehicles.id),
+    // المسلِّم (فارغ في الاستلام من الشركة) والمستلم (فارغ في التسليم للشركة)
+    fromDriverId: ref("from_driver_id").references(() => drivers.id),
+    toDriverId: ref("to_driver_id").references(() => drivers.id),
+    handoverDate: date("handover_date").notNull(),
+    odometer: integer("odometer"),
+    fuelLevel: varchar("fuel_level", { length: 12 }).$type<"quarter" | "half" | "three_quarters" | "full">(),
+    condition: varchar("condition", { length: 10 }).$type<"good" | "notes">(),
+    companyRep: text("company_rep"),
+    notes: text("notes"),
+    // الإسناد الذي فتحه المحضر (الاستلام ولسائق آخر)، والذي أغلقه (التسليم ولسائق آخر)
+    assignmentId: ref("assignment_id").references(() => vehicleAssignments.id, { onDelete: "set null" }),
+    closedAssignmentId: ref("closed_assignment_id").references(() => vehicleAssignments.id, { onDelete: "set null" }),
+    createdBy: ref("created_by").references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("vehicle_handovers_vehicle_idx").on(t.vehicleId, t.handoverDate),
+    check("vehicle_handovers_kind", sql`${t.kind} in ('receive', 'return', 'transfer')`),
+  ],
+);
+
+export const vehicleHandoverItems = pgTable(
+  "vehicle_handover_items",
+  {
+    id: id(),
+    handoverId: ref("handover_id").notNull().references(() => vehicleHandovers.id, { onDelete: "cascade" }),
+    lineNo: integer("line_no").notNull(),
+    name: text("name").notNull(),
+    qty: integer("qty").notNull().default(1),
+    condition: text("condition"),
+  },
+  (t) => [index("vehicle_handover_items_doc_idx").on(t.handoverId), check("vehicle_handover_items_qty", sql`${t.qty} > 0`)],
+);
+
 // ───────────── سجل الوثائق ─────────────
 
 export const documentOwnerKind = pgEnum("document_owner_kind", ["vehicle", "trailer", "driver", "employee", "company", "customer", "supplier"]);

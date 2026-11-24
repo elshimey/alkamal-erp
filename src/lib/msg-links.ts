@@ -50,7 +50,7 @@ const LABELS: Record<string, string> = Object.fromEntries([
 ]);
 
 /** رقم مستند بصيغة البرنامج: بادئة ثم السنة ثم التسلسل */
-const DOC_NUMBER = /\b(?:WB|INV|DRF|RC|RF|JE|MO|PI|PO|QT|PR|PV|EX|VIO|ADV|CAR|FA|TR|BR|FC)-\d{4}-\d{3,}\b/;
+const DOC_NUMBER = /\b(?:WB|INV|DRF|RC|RF|JE|MO|PI|PO|QT|PR|PV|EX|VIO|ADV|CAR|FA|TR|BR|FC|HO)-\d{4}-\d{3,}\b/;
 const EXPLICIT = /\[([^\]\n]+)\]\((\/[^)\s]*)\)/;
 const QUOTED = /«([^»\n]+)»/g;
 

@@ -1,11 +1,11 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import * as s from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
-import { assignVehicle, handoverVehicle, releaseAssignment } from "@/lib/fleet";
+import { createHandover, type HandoverItemInput, type HandoverKind } from "@/lib/handovers";
+import { FUEL_LEVEL, HANDOVER_KIND, type FuelLevel } from "@/data/handovers";
 import { blockingDocumentIssues } from "@/lib/documents";
 import { errorMessage } from "@/lib/errors";
 import { hasSpecial } from "@/lib/permissions";
@@ -30,59 +30,45 @@ export async function assignmentWarnings(vehicleId: number | null, driverId: num
   return issues.map((i) => i.message);
 }
 
-export async function startAssignmentAction(data: FormData): Promise<PanelResult> {
+/** محضر استلام أو تسليم: يسجل أثره على الإسناد ويحفظ المحضر برقمه ليُطبع. */
+export async function saveHandoverAction(data: FormData): Promise<PanelResult> {
   const user = await requirePermission("vehicles", "update");
-  const vehicleId = num(data.get("vehicleId"));
-  const driverId = num(data.get("driverId"));
-  const fromDate = String(data.get("fromDate") ?? "");
-  if (!vehicleId) return { error: "اختر المركبة" };
-  if (!driverId) return { error: "اختر السائق" };
-  if (!fromDate) return { error: "أدخل تاريخ الاستلام" };
+  const kind = String(data.get("kind") ?? "") as HandoverKind;
+  if (!["receive", "return", "transfer"].includes(kind)) return { error: "اختر نوع المحضر" };
+  const date = String(data.get("date") ?? "");
+  if (!date) return { error: "أدخل التاريخ" };
+  let items: HandoverItemInput[] = [];
   try {
-    const row = await assignVehicle(
+    const raw = JSON.parse(String(data.get("items") || "[]"));
+    if (Array.isArray(raw)) items = raw.map((r) => ({ name: String(r?.name ?? ""), qty: r?.qty == null ? null : Number(r.qty), condition: r?.condition ? String(r.condition) : null }));
+  } catch {
+    return { error: "بنود العدد والأدوات غير صحيحة" };
+  }
+  const fuel = text(data.get("fuelLevel"));
+  const cond = text(data.get("condition"));
+  try {
+    const doc = await createHandover(
       db,
-      { vehicleId, driverId, fromDate, odometerStart: num(data.get("odometerStart")), notes: text(data.get("notes")), userId: user.id },
+      {
+        kind,
+        vehicleId: num(data.get("vehicleId")),
+        assignmentId: num(data.get("assignmentId")),
+        driverId: num(data.get("driverId")),
+        date,
+        odometer: num(data.get("odometer")),
+        fuelLevel: fuel && fuel in FUEL_LEVEL ? (fuel as FuelLevel) : null,
+        condition: cond === "good" || cond === "notes" ? cond : null,
+        companyRep: text(data.get("companyRep")),
+        notes: text(data.get("notes")),
+        items,
+        userId: user.id,
+      },
       { canOverride: hasSpecial(user.perms, "override_controls"), overrideReason: text(data.get("overrideReason")) },
     );
-    const [v] = await db.select({ plate: s.vehicles.plate }).from(s.vehicles).where(eq(s.vehicles.id, vehicleId));
-    revalidatePath("/assignments");
-    return { ok: `سُجّل استلام المركبة ${v?.plate ?? ""}`, id: row.id, label: v?.plate ?? "" };
-  } catch (err) {
-    return { error: errorMessage(err) };
-  }
-}
-
-export async function endAssignmentAction(assignmentId: number, data: FormData): Promise<PanelResult> {
-  await requirePermission("vehicles", "update");
-  const toDate = String(data.get("toDate") ?? "");
-  if (!toDate) return { error: "أدخل تاريخ التسليم" };
-  try {
-    await releaseAssignment(db, { assignmentId, toDate, odometerEnd: num(data.get("odometerEnd")), notes: text(data.get("notes")) });
-    revalidatePath("/assignments");
-    revalidatePath("/vehicles");
-    return { ok: "سُجّل التسليم", id: assignmentId, label: "" };
-  } catch (err) {
-    return { error: errorMessage(err) };
-  }
-}
-
-/** تسليم المركبة من سائقها الحالي لسائق آخر (تسليم واستلام في خطوة واحدة). */
-export async function handoverAssignmentAction(assignmentId: number, data: FormData): Promise<PanelResult> {
-  const user = await requirePermission("vehicles", "update");
-  const driverId = num(data.get("driverId"));
-  const date = String(data.get("fromDate") ?? "");
-  if (!driverId) return { error: "اختر السائق الجديد" };
-  if (!date) return { error: "أدخل تاريخ التسليم" };
-  try {
-    const row = await handoverVehicle(
-      db,
-      { assignmentId, driverId, date, odometer: num(data.get("odometerStart")), notes: text(data.get("notes")), userId: user.id },
-      { canOverride: hasSpecial(user.perms, "override_controls"), overrideReason: text(data.get("overrideReason")) },
-    );
-    const [v] = await db.select({ plate: s.vehicles.plate }).from(s.vehicles).where(eq(s.vehicles.id, row.vehicleId));
-    revalidatePath("/assignments");
-    revalidatePath("/vehicles");
-    return { ok: `سُلّمت المركبة ${v?.plate ?? ""} للسائق الجديد`, id: row.id, label: v?.plate ?? "" };
+    const [v] = await db.select({ plate: s.vehicles.plate }).from(s.vehicles).where(eq(s.vehicles.id, doc.vehicleId));
+    // دون إعادة تحميل المسار: تحديث الصفحة فوراً يغلق النافذة (المركبة لم تعد مسندة) قبل أن تنتقل لعرض المحضر؛
+    // والانتقال إلى ?doc= يجلب الصفحة من جديد
+    return { ok: `سُجّل ${HANDOVER_KIND[kind].title} ${v?.plate ?? ""} برقم ${doc.number}`, id: doc.id, label: doc.number };
   } catch (err) {
     return { error: errorMessage(err) };
   }

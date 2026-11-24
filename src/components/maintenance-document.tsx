@@ -10,7 +10,7 @@ import { fmt } from "@/lib/format";
 type Order = NonNullable<Awaited<ReturnType<typeof orderDoc>>>;
 type Request = NonNullable<Awaited<ReturnType<typeof requestDoc>>>;
 
-export function Frame({ company, template: t, compact, title, en, meta, children, signatures }: { company: CompanyProfile; template: InvoiceTemplate; compact: boolean; title: string; en: string; meta: [string, string][]; children: ReactNode; signatures: string[] }) {
+export function Frame({ company, template: t, compact, title, en, meta, children, signatures }: { company: CompanyProfile; template: InvoiceTemplate; compact: boolean; title: string; en: string; meta: [string, string][]; children: ReactNode; signatures: ReactNode[] }) {
   const accent = TEMPLATE_ACCENTS[t.accent];
   const vars = { "--inv-accent": accent.main, "--inv-dark": accent.dark } as CSSProperties;
   return (
@@ -39,9 +39,9 @@ export function Frame({ company, template: t, compact, title, en, meta, children
         </dl>
       </div>
       {children}
-      <footer className="mt-10 grid grid-cols-3 gap-6 text-center text-xs text-gray-500">
-        {signatures.map((label) => (
-          <div key={label}>
+      <footer className="mt-10 grid grid-cols-1 gap-6 text-center text-xs text-gray-500 @md:grid-cols-3">
+        {signatures.map((label, i) => (
+          <div key={i}>
             <div className="mb-1 h-10 border-b border-dashed border-gray-300" />
             {label}
           </div>
@@ -51,14 +51,14 @@ export function Frame({ company, template: t, compact, title, en, meta, children
   );
 }
 
-export function Facts({ rows }: { rows: [string, ReactNode][] }) {
+export function Facts({ rows }: { rows: [ReactNode, ReactNode][] }) {
   return (
     // العنوان بجانب القيمة حين يتسع المكان، وفوقها في المعاينة الضيقة والجوال فلا تتداخل الكلمات
     <dl className="@container min-w-0 divide-y divide-gray-100 rounded-xl border border-gray-200 text-sm">
       {rows
         .filter((r) => r[1])
-        .map(([k, val]) => (
-          <div key={k} className="grid gap-0.5 px-4 py-2 @[20rem]:grid-cols-[minmax(5rem,9rem)_minmax(0,1fr)] @[20rem]:gap-3">
+        .map(([k, val], i) => (
+          <div key={i} className="grid gap-0.5 px-4 py-2 @[20rem]:grid-cols-[minmax(5rem,9rem)_minmax(0,1fr)] @[20rem]:gap-3">
             <dt className="text-gray-500 @max-[20rem]:text-xs">{k}</dt>
             <dd className="min-w-0 break-words">
               <bdi>{val}</bdi>

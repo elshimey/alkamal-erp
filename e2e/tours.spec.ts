@@ -88,7 +88,7 @@ test("زر «كيف أعمل هذا؟» يبدأ جولة الشاشة من مك
   await page.evaluate((k) => localStorage.removeItem(k), KEY);
   await page.goto("/assignments");
   await page.getByRole("button", { name: /كيف أعمل هذا/ }).click();
-  await expect(card(page)).toContainText("استلام مركبة");
+  await expect(card(page)).toContainText("محضر استلام");
   await expect(ring(page)).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.locator("[data-tour-ui]")).toHaveCount(0);
