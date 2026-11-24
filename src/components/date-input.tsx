@@ -186,8 +186,18 @@ export function DateInput({ value, defaultValue, onChange, name, required, min, 
  * زر التقويم وحده لخلايا الشيتات (شيت الإضافة والتعديل الجماعي): يفتح التقويم نفسه الذي في النماذج.
  * value بصيغة 2026-10-25 أو 25/10/2026، وonPick يعيد 2026-10-25.
  */
-export function DatePickButton({ value, onPick, className }: { value: string; onPick: (iso: string) => void; className?: string }) {
-  const [open, setOpen] = useState(false);
+/**
+ * زر التقويم داخل خلية الشيت. autoOpen يفتحه مع ظهوره (النقر على خلية التاريخ يفتح التقويم مباشرة،
+ * قرار أحمد 2026-11-24: التاريخ في الشيت يُختار ولا يحتاج كتابة)، وopen/onOpenChange للتحكم من الخارج.
+ */
+export function DatePickButton({ value, onPick, className, autoOpen = false, open: openProp, onOpenChange }: { value: string; onPick: (iso: string) => void; className?: string; autoOpen?: boolean; open?: boolean; onOpenChange?: (open: boolean) => void }) {
+  const [openState, setOpenState] = useState(autoOpen);
+  const open = openProp ?? openState;
+  const setOpen = (next: boolean | ((o: boolean) => boolean)) => {
+    const v = typeof next === "function" ? next(open) : next;
+    setOpenState(v);
+    onOpenChange?.(v);
+  };
   const box = useRef<HTMLSpanElement>(null);
   const iso = /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : (dmyToIso(value) ?? "");
   return (
@@ -228,9 +238,14 @@ function Calendar({ anchor: anchorRef, value, min, max, onPick, onClose }: { anc
   const ref = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
-    const anchor = anchorRef.current;
-    if (!anchor) return;
+    let raf = 0;
     const place = () => {
+      const anchor = anchorRef.current;
+      // التقويم المفتوح مع زره (خلية الشيت عند النقر): مكان الزر يُعرف بعد التركيب
+      if (!anchor) {
+        raf = requestAnimationFrame(place);
+        return;
+      }
       const r = anchor.getBoundingClientRect();
       // داخل نافذة مفتوحة يُعرض التقويم فيها (ما خارجها لا يستجيب للنقر)
       const host = (anchor.closest("dialog[open]") as HTMLElement | null) ?? document.body;
@@ -248,16 +263,16 @@ function Calendar({ anchor: anchorRef, value, min, max, onPick, onClose }: { anc
     window.addEventListener("resize", place);
     window.addEventListener("scroll", place, true);
     return () => {
+      cancelAnimationFrame(raf);
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", place, true);
     };
   }, [anchorRef]);
 
   useEffect(() => {
-    const anchor = anchorRef.current;
     const outside = (e: MouseEvent) => {
       const t = e.target as Node;
-      if (ref.current?.contains(t) || anchor?.contains(t)) return;
+      if (ref.current?.contains(t) || anchorRef.current?.contains(t)) return;
       onClose();
       // النقر على عنوان قسم لإغلاق التقويم يغلقه فقط، ولا يطوي القسم فيختفي ما بعده (ملاحظة التشغيل 5)
       const header = (t as Element).closest?.("summary");
@@ -279,9 +294,11 @@ function Calendar({ anchor: anchorRef, value, min, max, onPick, onClose }: { anc
       e.stopPropagation();
       onClose();
     };
-    document.addEventListener("mousedown", outside);
+    // التقويم الذي فتحه النقر على خلية (الشيت) يُفتح أثناء ضغطة الفأرة نفسها؛ لا تُحسب نقرةً خارجه
+    const armed = setTimeout(() => document.addEventListener("mousedown", outside));
     window.addEventListener("keydown", esc, true);
     return () => {
+      clearTimeout(armed);
       document.removeEventListener("mousedown", outside);
       window.removeEventListener("keydown", esc, true);
     };
