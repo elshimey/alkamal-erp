@@ -59,3 +59,34 @@ test("نافذة المحضر على الجوال دون سحب جانبي، و�
   expect(wide).toBeLessThanOrEqual(1);
   await ctx.close();
 });
+
+test("إسناد سابق بلا محضر: إنشاء محضره من الصف ثم تعديله وطباعته", async ({ page }) => {
+  await officeLogin(page);
+  const [a] = await sql`select va.id from vehicle_assignments va
+    where not exists (select 1 from vehicle_handovers h where h.assignment_id = va.id) order by va.id limit 1`;
+  test.skip(!a, "لا يوجد إسناد سابق بلا محضر");
+  await page.goto("/assignments");
+  await page.locator(`a[href="/assignments?prep=${a.id}&side=opened"]:visible`).first().click();
+  const form = page.getByRole("dialog");
+  await expect(form.getByRole("heading", { name: /محضر لإسناد سابق/ })).toBeVisible();
+  await form.getByRole("button", { name: "+ طفاية حريق" }).click();
+  await form.getByRole("radio", { name: "ممتلئ" }).click();
+  await form.getByRole("button", { name: "حفظ", exact: true }).click();
+  await page.waitForURL(/[?&]doc=\d+/);
+  const docId = Number(new URL(page.url()).searchParams.get("doc"));
+  const [h] = await sql`select number, kind, assignment_id, fuel_level from vehicle_handovers where id = ${docId}`;
+  expect(h).toMatchObject({ assignment_id: a.id, fuel_level: "full" });
+
+  // التعديل من شريط المحضر، والمعاينة تتغير، ثم الحفظ يعود للمحضر نفسه
+  await page.getByRole("link", { name: "تعديل المحضر" }).click();
+  const f2 = page.getByRole("dialog");
+  await expect(f2.getByRole("heading", { name: `تعديل المحضر ${h.number}` })).toBeVisible();
+  await f2.getByRole("textbox", { name: "ملاحظات" }).fill("خدش في الباب الأيمن");
+  await expect(f2.getByText("خدش في الباب الأيمن").last()).toBeVisible();
+  await f2.getByRole("button", { name: "حفظ", exact: true }).click();
+  await page.waitForURL(new RegExp(`[?&]doc=${docId}`));
+  const [after] = await sql`select notes, (select count(*)::int from vehicle_handover_items where handover_id = ${docId}) as n from vehicle_handovers where id = ${docId}`;
+  expect(after).toMatchObject({ notes: "خدش في الباب الأيمن", n: 1 });
+  await page.goto(`/print/handovers?ids=${docId}`);
+  await expect(page.getByText("خدش في الباب الأيمن").first()).toBeVisible();
+});

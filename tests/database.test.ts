@@ -59,7 +59,7 @@ import { lastOfficeEventId, officeEvents } from "@/lib/office-notify";
 import { claimDailyJob, days, pushStage, sendDocumentAlerts } from "@/lib/doc-alerts";
 
 import { driverCanSeeDocument, driverDocuments, driverTrailer } from "@/lib/driver-docs";
-import { createHandover, handoverByAssignment, handoverDoc, handoverItemNames, itemsOfAssignment } from "@/lib/handovers";
+import { createHandover, handoverByAssignment, handoverDoc, handoverForEdit, handoverItemNames, itemsOfAssignment, saveHandoverEdit } from "@/lib/handovers";
 import { cancelTripRequest, convertTripRequestTx, driverTripRequest, driverTripRequests, linkTripRequest, linkableWaybills, listTripRequests, recordRequestStage, rejectTripRequest, startTripRequest, undoRequestStage } from "@/lib/driver-trip-requests";
 import { removePushSubscription, savePushSubscription, usersWithPermission } from "@/lib/push";
 import { runImport } from "@/lib/importers";
@@ -1916,6 +1916,49 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect(map.opened.get(r.assignmentId!)?.id).toBe(r.id);
       expect(map.closed.get(r.assignmentId!)?.id).toBe(t.id);
       expect(map.closed.get(t.assignmentId!)?.id).toBe(back.id);
+    });
+
+    it("محضر لإسناد سابق يُنشأ ويُعدَّل ويُطبع، والتاريخ والعداد يتعدلان في الإسناد دون تداخل", async () => {
+      const v = await createVehicle(db, { plate: "ق د م 55", odometer: 1000 });
+      const d1 = await createDriver(db, { nameAr: "سائق قديم أول" });
+      const d2 = await createDriver(db, { nameAr: "سائق قديم ثان" });
+      const d3 = await createDriver(db, { nameAr: "سائق قديم ثالث" });
+      // إسنادات سُجّلت قبل المحاضر
+      const a1 = await assignVehicle(db, { vehicleId: v.id, driverId: d1.id, fromDate: `${YEAR}-03-01`, odometerStart: 1000 });
+      const a2 = await handoverVehicle(db, { assignmentId: a1.id, driverId: d2.id, date: `${YEAR}-03-15`, odometer: 1800 });
+      expect((await handoverByAssignment(db, [a1.id, a2.id])).opened.size).toBe(0);
+
+      // هيكل محضر الاستلام الأول: استلام؛ وتسليم الأول لسائق آخر يُعرف من الإسناد التالي في اليوم نفسه
+      const draft = await handoverForEdit(db, { assignmentId: a1.id, side: "opened" });
+      expect(draft).toMatchObject({ toName: "سائق قديم أول", fromName: null, h: { id: 0, kind: "receive", handoverDate: `${YEAR}-03-01`, odometer: 1000 } });
+      const rec = await saveHandoverEdit(db, { assignmentId: a1.id, side: "opened" }, { date: `${YEAR}-03-02`, odometer: 1010, fuelLevel: "full", items: [{ name: "طفاية حريق", qty: 1 }] });
+      expect(rec).toMatchObject({ kind: "receive", toDriverId: d1.id, assignmentId: a1.id, closedAssignmentId: null, handoverDate: `${YEAR}-03-02` });
+      expect(rec.number).toMatch(/^HO-/);
+      let [x1] = await db.select().from(s.vehicleAssignments).where(eq(s.vehicleAssignments.id, a1.id));
+      expect(x1).toMatchObject({ fromDate: `${YEAR}-03-02`, odometerStart: 1010 });
+
+      const tr = await handoverForEdit(db, { assignmentId: a1.id, side: "closed" });
+      expect(tr).toMatchObject({ fromName: "سائق قديم أول", toName: "سائق قديم ثان", h: { kind: "transfer", odometer: 1800 } });
+      expect(tr!.items.map((i) => i.name)).toEqual(["طفاية حريق"]);
+      // الطرفان يصلان للمحضر نفسه: إنشاؤه من جهة الإسناد الثاني لا يكرره
+      const t1 = await saveHandoverEdit(db, { assignmentId: a1.id, side: "closed" }, { date: `${YEAR}-03-15`, odometer: 1800, items: tr!.items });
+      expect(t1).toMatchObject({ kind: "transfer", fromDriverId: d1.id, toDriverId: d2.id, closedAssignmentId: a1.id, assignmentId: a2.id });
+      const again = await saveHandoverEdit(db, { assignmentId: a2.id, side: "opened" }, { date: `${YEAR}-03-16`, odometer: 1850, companyRep: "مندوب", items: [{ name: "رافعة", qty: 2 }] });
+      expect(again.id).toBe(t1.id);
+      [x1] = await db.select().from(s.vehicleAssignments).where(eq(s.vehicleAssignments.id, a1.id));
+      const [x2] = await db.select().from(s.vehicleAssignments).where(eq(s.vehicleAssignments.id, a2.id));
+      expect(x1).toMatchObject({ toDate: `${YEAR}-03-16`, odometerEnd: 1850 });
+      expect(x2).toMatchObject({ fromDate: `${YEAR}-03-16`, odometerStart: 1850 });
+      expect((await handoverDoc(db, t1.id))!.items.map((i) => i.name)).toEqual(["رافعة"]);
+
+      // تغيير السائق المستلم يغيّر سائق الإسناد، والتاريخ لا يتداخل مع إسناد آخر
+      await saveHandoverEdit(db, { docId: t1.id }, { driverId: d3.id, date: `${YEAR}-03-16`, odometer: 1850 });
+      expect((await db.select().from(s.vehicleAssignments).where(eq(s.vehicleAssignments.id, a2.id)))[0].driverId).toBe(d3.id);
+      await expect(saveHandoverEdit(db, { docId: t1.id }, { driverId: d1.id, date: `${YEAR}-03-16` })).rejects.toThrow("نفسه المسلِّم");
+      await expect(saveHandoverEdit(db, { docId: rec.id }, { date: `${YEAR}-03-20` })).rejects.toThrow("بعد تاريخ تسليم");
+      await expect(saveHandoverEdit(db, { docId: rec.id }, { date: `${YEAR}-03-01`, items: [{ name: "رافعة", qty: -1 }] })).rejects.toThrow("العدد");
+      // الإسناد المفتوح لا يُطلب محضر تسليمه
+      await expect(handoverForEdit(db, { assignmentId: a2.id, side: "closed" })).rejects.toThrow("ما زالت مسندة");
     });
 
     it("وثائق الموردين، والجدول الموحد بالحالات والناقصة", async () => {
