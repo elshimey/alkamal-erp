@@ -7,6 +7,8 @@ import { contactStatement } from "@/lib/contacts";
 import { customerOptions } from "@/lib/lookups";
 import { supplierOptions } from "@/lib/purchases";
 import { FormCombo } from "@/components/form-combo";
+import { Drill } from "@/components/drill";
+import { sourceHref } from "@/lib/source-lines";
 import { C, money, param, PeriodFilter, periodFrom, ReportHeader, ReportTabs, RTable, SourceLink, withParams, type ReportParams } from "../report-ui";
 import { SIDE, sideOf } from "../party-sides";
 
@@ -29,6 +31,8 @@ export default async function PartyStatementPage({ searchParams }: { searchParam
   ]);
   const st = party ? await contactStatement(db, party.id, from, to, side) : null;
   const k = side === "customer" ? 1 : -1;
+  const dayBefore = new Date(Date.parse(from) - 86400000).toISOString().slice(0, 10);
+  const openingHref = st && party ? sourceHref({ title: `${party.name}: رصيد افتتاحي`, to: dayBefore, codes: [...t.codes], partyId: party.id, mode: "bal", sign: k, expected: st.opening * k }) : undefined;
   // الملخص: سطر لكل قيد بمجموع سطوره
   type Row = NonNullable<typeof st>["rows"][number];
   const rows: Row[] = !st
@@ -74,15 +78,21 @@ export default async function PartyStatementPage({ searchParams }: { searchParam
             <C>رصيد افتتاحي</C>
             <C />
             <C />
-            <C num>{money(st.opening * k, false)}</C>
+            <C num>
+              <Drill href={openingHref}>{money(st.opening * k, false)}</Drill>
+            </C>
           </tr>
           {rows.map((r, i) => (
             <tr key={i}>
               <C className="ltr-nums whitespace-nowrap">{String(r.entry_date).slice(0, 10)}</C>
               <C className="text-xs whitespace-nowrap">
-                <SourceLink type={r.source_type} id={r.source_id} />
+                <SourceLink type={r.source_type} id={r.source_id} entryId={r.entry_id} />
               </C>
-              <C className="ltr-nums text-xs whitespace-nowrap text-gray-500">{r.number}</C>
+              <C className="ltr-nums text-xs whitespace-nowrap text-gray-500">
+                <a href={`/journal/${r.entry_id}`} className="drill" title="افتح القيد">
+                  {r.number}
+                </a>
+              </C>
               <C className="max-w-md">{r.description}</C>
               <C num>{money(r.debit)}</C>
               <C num>{money(r.credit)}</C>

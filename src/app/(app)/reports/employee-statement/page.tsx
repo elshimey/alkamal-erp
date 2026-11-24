@@ -6,6 +6,8 @@ import { todayRiyadh } from "@/lib/dates";
 import { accountLedger } from "@/lib/reports";
 import { employeeOptions } from "@/lib/lookups";
 import { FormCombo } from "@/components/form-combo";
+import { Drill } from "@/components/drill";
+import { sourceHref } from "@/lib/source-lines";
 import { C, money, param, PeriodFilter, periodFrom, ReportHeader, RTable, SourceLink, type ReportParams } from "../report-ui";
 
 /**
@@ -31,6 +33,7 @@ export default async function EmployeeStatementPage({ searchParams }: { searchPa
   ]);
   const accountIds = emp ? [emp.payable, emp.driverCustody ?? emp.custody].filter((x): x is number => !!x) : [];
   const ledgers = await Promise.all(accountIds.map((accountId) => accountLedger(db, { accountId, from, to })));
+  const dayBefore = new Date(Date.parse(from) - 86400000).toISOString().slice(0, 10);
   return (
     <>
       <ReportHeader title={emp ? `كشف حساب الموظف: ${emp.name}` : "كشف حساب موظف وعهدته"} period={`من ${from} إلى ${to}`} filename={`كشف-موظف-${emp?.name ?? ""}-${from}-${to}`}>
@@ -65,15 +68,17 @@ export default async function EmployeeStatementPage({ searchParams }: { searchPa
                   <C>رصيد افتتاحي</C>
                   <C />
                   <C />
-                  <C num>{money(l.opening * k, false)}</C>
+                  <C num>
+                    <Drill href={sourceHref({ title: `${l.account.code} ${l.account.nameAr}: رصيد افتتاحي`, to: dayBefore, codes: [`=${l.account.code}`], mode: "bal", sign: k as 1 | -1, expected: l.opening * k })}>{money(l.opening * k, false)}</Drill>
+                  </C>
                 </tr>
                 {l.lines.map((x, i) => (
                   <tr key={i}>
                     <C className="ltr-nums whitespace-nowrap">{x.entry_date}</C>
                     <C className="text-xs whitespace-nowrap">
-                      <SourceLink type={x.source_type} id={x.source_id} />
+                      <SourceLink type={x.source_type} id={x.source_id} entryId={x.entry_id} />
                     </C>
-                    <C className="ltr-nums text-xs text-gray-500">{x.number}</C>
+                    <C className="ltr-nums text-xs text-gray-500"><a href={`/journal/${x.entry_id}`} className="drill">{x.number}</a></C>
                     <C className="max-w-md">{x.description ?? x.entry_description}</C>
                     <C num>{money(x.debit)}</C>
                     <C num>{money(x.credit)}</C>

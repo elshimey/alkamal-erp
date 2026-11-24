@@ -44,6 +44,9 @@ export interface DocListParams {
   status?: string;
   pay?: string;
   period?: string;
+  /** مدى صريح (من رقم في لوحة القيادة أو التقرير) يغلب `period`. */
+  from?: string;
+  to?: string;
   sort?: string;
   view?: string;
   open?: string;

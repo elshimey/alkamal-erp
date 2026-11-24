@@ -6,6 +6,9 @@ import { requirePermission } from "@/lib/auth";
 import { unbilledCharges } from "@/lib/customer-charges";
 import { EXPENSE_PAYERS } from "@/data/waybills";
 import { WAYBILL_STATUS } from "@/data/waybills";
+import { Drill } from "@/components/drill";
+import { sourceHref } from "@/lib/source-lines";
+import { todayRiyadh } from "@/lib/dates";
 import { C, money, ReportHeader, RTable } from "../report-ui";
 
 /** متابعة الحساب 1114: كل مصروف دُفع على عميل ولم يدخل فاتورة صادرة بعد، فلا يضيع مصروف. */
@@ -33,10 +36,10 @@ export default async function UnbilledChargesReport() {
           <div className="text-xs text-gray-500">منه مقيد (شحنات معتمدة وفواتير مباشرة)</div>
           <div className="ltr-nums mt-1 text-xl font-semibold">{money(posted, false)}</div>
         </div>
-        <div className="rounded-2xl bg-white p-4 shadow-sm">
+        <Drill href={sourceHref({ title: "رصيد الحساب 1114", to: todayRiyadh(), codes: ["=1114"], mode: "bal", sign: 1, expected: Number(ledger?.balance ?? 0) })} card className="block rounded-2xl bg-white p-4 shadow-sm">
           <div className="text-xs text-gray-500">رصيد الحساب 1114 في الدفتر</div>
           <div className="ltr-nums mt-1 text-xl font-semibold">{money(Number(ledger?.balance ?? 0), false)}</div>
-        </div>
+        </Drill>
       </div>
       <RTable name="مصاريف على العملاء لم تُفوتر" head={["العميل", "الشحنة", "التاريخ", "الحالة", "المصروف", "دفعه", "المبلغ", "بالريال", "مسودة الفاتورة"]}>
         {rows.map((r) => (
@@ -58,7 +61,7 @@ export default async function UnbilledChargesReport() {
               {money(Number(r.amount))} {r.currencyCode}
             </C>
             <C num>{money(Number(r.base))}</C>
-            <C className="ltr-nums">{r.draftInvoice ?? "—"}</C>
+            <C className="ltr-nums">{r.draftInvoice ? <Drill href={`/go/${encodeURIComponent(r.draftInvoice)}`} tip="افتح مسودة الفاتورة">{r.draftInvoice}</Drill> : "—"}</C>
           </tr>
         ))}
         {!rows.length && (

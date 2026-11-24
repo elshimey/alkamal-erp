@@ -3786,6 +3786,72 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       expect((await fleetProfitability(db, { from: D2, to: D2, by: "driver", ids: [] })).rows.length).toBe(byDriver.rows.length);
     });
 
+    it("مصدر الرقم: مجموع القيود أو المستندات بنفس شروط الرقم يساوي ما في اللوحة والتقارير، والرابط يُقرأ كما كُتب", async () => {
+      const R = await import("@/lib/reports");
+      const SL = await import("@/lib/source-lines");
+      const { fleetProfitability } = R;
+      const D3 = `${YEAR + 1}-11-22`;
+      const from = `${YEAR + 1}-11-01`;
+      const to = `${YEAR + 1}-11-30`;
+      const v = await createVehicle(db, { plate: "م ص د 5512" });
+      const drv = await createDriver(db, { nameAr: "سائق مصدر الرقم" });
+      await assignVehicle(db, { vehicleId: v.id, driverId: drv.id, fromDate: from });
+      const cust = await createParty(db, { nameAr: "عميل مصدر الرقم", roles: ["customer"] });
+      const post = (lines: Parameters<typeof createJournalEntry>[1]["lines"]) => createJournalEntry(db, { entryDate: D3, post: true, lines });
+      await post([{ accountId: acc["110101"], debit: 2000 }, { accountId: acc["4101"], credit: 2000, costCenterId: v.costCenterId }]);
+      await post([{ accountId: acc["5101"], debit: 450, costCenterId: v.costCenterId }, { accountId: acc["110101"], credit: 450 }]);
+      await post([{ accountId: acc["6105"], debit: 90, costCenterId: v.costCenterId }, { accountId: acc["110101"], credit: 90 }]);
+      const inv = await createDirectInvoice(db, { customerId: cust.id, invoiceDate: D3, dueDate: D3, currencyCode: "SAR", lines: [{ description: "نقل", quantity: 1, unitPrice: 800, discountPercent: 0, amount: 800, vatRate: 15, vatAmount: 120, taxCodeId: null, accountId: acc["4101"], costCenterId: v.costCenterId }] });
+      await issueInvoice(db, inv.id);
+      const val = async (f: Omit<import("@/lib/source-lines").SourceFilter, "title" | "mode" | "sign"> & { mode?: "net" | "bal"; sign?: 1 | -1 }) =>
+        (await SL.sourceLines(db, { title: "اختبار", mode: "net", sign: 1, ...f })).value;
+
+      // ربحية المركبة: كل خانة = قيودها على مركز تكلفتها
+      const fp = (await fleetProfitability(db, { from, to, by: "vehicle", id: v.id })).rows[0];
+      expect(await val({ from, to, codes: ["4"], vehicleId: v.id, sign: -1, noClose: true })).toBe(fp.revenue);
+      expect(await val({ from, to, codes: ["=5101"], vehicleId: v.id, noClose: true })).toBe(fp.direct["5101"]);
+      expect(await val({ from, to, codes: ["6", "7"], vehicleId: v.id, noClose: true })).toBe(fp.otherTotal);
+      expect(await val({ from, to, codes: ["4", "5", "6", "7"], vehicleId: v.id, sign: -1, noClose: true })).toBe(fp.profit);
+      // السائق بالإسناد في تاريخ القيد كما في التقرير
+      const fd = (await fleetProfitability(db, { from, to, by: "driver", id: drv.id })).rows[0];
+      expect(await val({ from, to, codes: ["4", "5", "6", "7"], driverId: drv.id, fleet: "d", sign: -1, noClose: true })).toBe(fd.profit);
+      // مجموع كل المركبات = مجموع صفوف التقرير
+      const all = (await fleetProfitability(db, { from, to, by: "vehicle" })).rows;
+      expect(await val({ from, to, codes: ["4"], fleet: "v", sign: -1, noClose: true })).toBeCloseTo(all.reduce((a, r) => a + r.revenue, 0), 2);
+
+      // قائمة الدخل: كل حساب ومجموع ومجمل الربح
+      const is = await R.incomeStatement(db, { from, to });
+      const rev = is.sections.find((x) => x.key === "revenue")!;
+      expect(await val({ from, to, codes: ["4101"], sign: -1, noClose: true })).toBe(rev.lines.find((l) => l.code === "4101")!.current);
+      expect(await val({ from, to, codes: ["4", "5"], sign: -1, noClose: true })).toBe(is.current.gross);
+
+      // المركز المالي: رصيد العملاء في التاريخ، والجهة 0 = السطور المربوطة بجهة
+      const pb = (await R.partyBalances(db, { side: "customer", from, to })).find((x) => x.id === cust.id)!;
+      expect(await val({ to, codes: ["=1103"], partyId: cust.id, mode: "bal" })).toBe(pb.closing);
+      expect(await val({ from, to, codes: ["=1103"], partyId: cust.id, side: "d" })).toBe(pb.debit);
+      const allCust = await R.partyBalances(db, { side: "customer", from, to });
+      expect(await val({ to, codes: ["=1103"], partyId: 0, mode: "bal" })).toBeCloseTo(allCust.reduce((a, r) => a + r.closing, 0), 2);
+
+      // التدفق النقدي: الطرف المقابل للصناديق والبنوك
+      const cf = await cashFlow(db, from, to);
+      const codes = cf.sections.flatMap((x) => x.items.flatMap((l) => l.codes));
+      expect(await val({ from, to, codes, touch: ["1101", "1102"], side: "c", sign: -1, noClose: true })).toBeCloseTo(cf.inflow, 2);
+      expect(await val({ from, to, codes, touch: ["1101", "1102"], side: "d", noClose: true })).toBeCloseTo(cf.outflow, 2);
+
+      // أعمار الديون وأكبر العملاء من المستندات نفسها
+      const docs = await SL.sourceDocs(db, { title: "فواتير", to: D3, doc: "open", partyId: cust.id, mode: "net", sign: 1 });
+      expect(docs.map((d) => d.amount)).toEqual([920]);
+      expect(docs[0].href).toBe(`/invoices/${inv.id}`);
+      const invs = await SL.sourceDocs(db, { title: "فواتير", from, to, doc: "inv", partyId: cust.id, mode: "net", sign: 1 });
+      expect(invs.reduce((a, d) => a + d.amount, 0)).toBe(800);
+
+      // الرابط يُقرأ كما كُتب، والقيم الغريبة تُهمل
+      const href = SL.sourceHref({ title: "إيراد م", from, to, codes: ["4", "=5101"], costCenterId: 0, partyId: 0, driverId: 0, fleet: "d", touch: ["1101"], side: "c", noClose: true, mode: "bal", sign: -1, expected: 12.5 });
+      const back = SL.parseSource(Object.fromEntries(new URL(href, "http://x").searchParams), D3);
+      expect(back).toMatchObject({ title: "إيراد م", from, to, codes: ["4", "=5101"], costCenterId: 0, partyId: 0, driverId: 0, fleet: "d", touch: ["1101"], side: "c", noClose: true, mode: "bal", sign: -1, expected: 12.5 });
+      expect(SL.parseSource({ c: "4;drop table", from: "x", veh: "-3" }, D3)).toMatchObject({ codes: [], from: undefined, vehicleId: undefined, to: D3 });
+    });
+
     it("جدول أقساط الدائنين: توليد ولصق، تكلفة التمويل يوم الاستحقاق، سداد كامل وجزئي ومبكر، الفرق مع الرصيد، وإعادة تصنيف 2201 (ملاحظة التشغيل 16)", async () => {
       const ins = await import("@/lib/installments");
       const sched = await import("@/lib/installment-schedule");

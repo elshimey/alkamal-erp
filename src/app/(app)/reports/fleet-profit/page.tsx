@@ -4,6 +4,8 @@ import { todayRiyadh } from "@/lib/dates";
 import { driverOptions, vehicleOptions } from "@/lib/lookups";
 import { fleetProfitability, type FleetBy } from "@/lib/reports";
 import { MultiCheck } from "@/components/multi-check";
+import { Drill, FormulaDrill, type Formula } from "@/components/drill";
+import { periodSource } from "@/lib/drill-formulas";
 import { C, money, param, PeriodFilter, periodFrom, ReportHeader, ReportTabs, RTable, withParams, type ReportParams } from "../report-ui";
 
 /**
@@ -24,6 +26,34 @@ export default async function FleetProfitPage({ searchParams }: { searchParams: 
   const total = { trips: sum((r) => r.trips), revenue: sum((r) => r.revenue), direct: sum((r) => r.directTotal), other: sum((r) => r.otherTotal), profit: sum((r) => r.profit) };
   const names = ids.map((i) => options.find((o) => o.value === String(i))?.label).filter(Boolean) as string[];
   const selected = names.length === 0 ? null : names.length <= 3 ? names.join("، ") : `${names.slice(0, 3).join("، ")} و${names.length - 3} أخرى`;
+  // «مصدر الرقم»: كل خانة تفتح قيودها بنفس نسبة التقرير (مركز تكلفة المركبة، أو سائق السطر ثم الشحنة ثم الإسناد)
+  const per = `من ${from} إلى ${to}`;
+  const src = periodSource(from, to);
+  type R = (typeof rows)[number];
+  const scope = (r: R | null) => (r == null ? { fleet: (by === "vehicle" ? "v" : "d") as "v" | "d" } : by === "vehicle" ? { vehicleId: r.id ?? undefined } : { driverId: r.id ?? 0, fleet: "d" as const });
+  const who = (r: R | null) => (r == null ? "الإجمالي" : r.name);
+  const cell = (r: R | null, label: string, codes: string[], sign: 1 | -1, expected: number) => src({ title: `${who(r)}: ${label}`, codes, sign, expected, ...scope(r) });
+  const profitF = (r: R | null, v: { revenue: number; direct: number; other: number; profit: number }): Formula => ({
+    title: `صافي ربح ${who(r)}`,
+    value: money(v.profit),
+    period: per,
+    rows: [
+      { label: "الإيرادات", note: "حسابات 4", value: money(v.revenue), href: cell(r, "الإيرادات", ["4"], -1, v.revenue) },
+      { op: "−", label: "التكاليف المباشرة", note: "حسابات 5", value: money(v.direct), href: cell(r, "التكاليف المباشرة", ["5"], 1, v.direct) },
+      { op: "−", label: "مصاريف أخرى", note: "حسابات 6 و7", value: money(v.other), href: cell(r, "مصاريف أخرى", ["6", "7"], 1, v.other) },
+    ],
+    allHref: cell(r, "صافي الربح", ["4", "5", "6", "7"], -1, v.profit),
+  });
+  const marginF = (r: R | null, v: { revenue: number; direct: number; other: number; profit: number }, pct: string): Formula => ({
+    title: `هامش ${who(r)}`,
+    value: pct,
+    period: per,
+    rows: [
+      { label: "صافي الربح", value: money(v.profit), formula: profitF(r, v) },
+      { op: "÷", label: "الإيرادات", value: money(v.revenue), href: cell(r, "الإيرادات", ["4"], -1, v.revenue) },
+    ],
+  });
+  const tripsHref = (r: R) => (r.id != null && r.trips ? `/waybills?q=${encodeURIComponent(r.name)}&from=${from}&to=${to}` : undefined);
   const head = [one, "الرحلات", "الإيرادات", ...columns.map((c) => c.name), "مصاريف أخرى", "إجمالي التكاليف", "صافي الربح", "الهامش", ...(by === "driver" ? ["المسارات والعملاء"] : [])];
 
   return (
@@ -74,11 +104,15 @@ export default async function FleetProfitPage({ searchParams }: { searchParams: 
                 r.name
               )}
             </C>
-            <C num>{r.trips || "—"}</C>
-            <C num>{money(r.revenue)}</C>
+            <C num>
+              <Drill href={tripsHref(r)} tip="الشحنات في الفترة">
+                {r.trips || "—"}
+              </Drill>
+            </C>
+            <C num>{r.revenue ? <Drill href={cell(r, "الإيرادات", ["4"], -1, r.revenue)}>{money(r.revenue)}</Drill> : money(r.revenue)}</C>
             {columns.map((c) => (
               <C key={c.code} num>
-                {money(r.direct[c.code] ?? 0)}
+                {r.direct[c.code] ? <Drill href={cell(r, `${c.code} ${c.name}`, [`=${c.code}`], 1, r.direct[c.code])}>{money(r.direct[c.code])}</Drill> : "—"}
               </C>
             ))}
             <C num>
@@ -91,7 +125,9 @@ export default async function FleetProfitPage({ searchParams }: { searchParams: 
                         <span>
                           {o.account} <span className="ltr-nums text-gray-400">{o.code}</span>
                         </span>
-                        <span className="ltr-nums">{money(o.amount)}</span>
+                        <span className="ltr-nums">
+                          <Drill href={cell(r, `${o.code} ${o.account}`, [`=${o.code}`], 1, o.amount)}>{money(o.amount)}</Drill>
+                        </span>
                       </li>
                     ))}
                   </ul>
@@ -100,9 +136,13 @@ export default async function FleetProfitPage({ searchParams }: { searchParams: 
                 "—"
               )}
             </C>
-            <C num>{money(r.directTotal + r.otherTotal)}</C>
-            <C num className={`font-semibold ${r.profit < 0 ? "text-red-600" : "text-green-700"}`}>{money(r.profit)}</C>
-            <C num>{r.margin != null ? `${r.margin.toFixed(1)}%` : "—"}</C>
+            <C num>
+              <Drill href={cell(r, "إجمالي التكاليف", ["5", "6", "7"], 1, r.directTotal + r.otherTotal)}>{money(r.directTotal + r.otherTotal)}</Drill>
+            </C>
+            <C num className={`font-semibold ${r.profit < 0 ? "text-red-600" : "text-green-700"}`}>
+              <FormulaDrill formula={profitF(r, { revenue: r.revenue, direct: r.directTotal, other: r.otherTotal, profit: r.profit })}>{money(r.profit)}</FormulaDrill>
+            </C>
+            <C num>{r.margin != null ? <FormulaDrill formula={marginF(r, { revenue: r.revenue, direct: r.directTotal, other: r.otherTotal, profit: r.profit }, `${r.margin.toFixed(1)}%`)}>{`${r.margin.toFixed(1)}%`}</FormulaDrill> : "—"}</C>
             {by === "driver" && (
               <C className="min-w-56 text-xs text-gray-600">
                 {r.routes.length > 0 && <div>{r.routes.map((x) => `${x.name} (${x.trips})`).join("، ")}</div>}
@@ -115,16 +155,30 @@ export default async function FleetProfitPage({ searchParams }: { searchParams: 
           <tr className="bg-asphalt-900 font-bold text-white print:bg-white print:text-black">
             <C>الإجمالي</C>
             <C num>{total.trips}</C>
-            <C num>{money(total.revenue)}</C>
+            <C num>
+              <Drill href={cell(null, "الإيرادات", ["4"], -1, total.revenue)}>{money(total.revenue)}</Drill>
+            </C>
             {columns.map((c) => (
               <C key={c.code} num>
-                {money(sum((r) => r.direct[c.code] ?? 0))}
+                <Drill href={cell(null, `${c.code} ${c.name}`, [`=${c.code}`], 1, sum((r) => r.direct[c.code] ?? 0))}>{money(sum((r) => r.direct[c.code] ?? 0))}</Drill>
               </C>
             ))}
-            <C num>{money(total.other)}</C>
-            <C num>{money(total.direct + total.other)}</C>
-            <C num>{money(total.profit)}</C>
-            <C num>{total.revenue ? `${((total.profit / total.revenue) * 100).toFixed(1)}%` : "—"}</C>
+            <C num>
+              <Drill href={cell(null, "مصاريف أخرى", ["6", "7"], 1, total.other)}>{money(total.other)}</Drill>
+            </C>
+            <C num>
+              <Drill href={cell(null, "إجمالي التكاليف", ["5", "6", "7"], 1, total.direct + total.other)}>{money(total.direct + total.other)}</Drill>
+            </C>
+            <C num>
+              <FormulaDrill formula={profitF(null, { revenue: total.revenue, direct: total.direct, other: total.other, profit: total.profit })}>{money(total.profit)}</FormulaDrill>
+            </C>
+            <C num>
+              {total.revenue ? (
+                <FormulaDrill formula={marginF(null, { revenue: total.revenue, direct: total.direct, other: total.other, profit: total.profit }, `${((total.profit / total.revenue) * 100).toFixed(1)}%`)}>{`${((total.profit / total.revenue) * 100).toFixed(1)}%`}</FormulaDrill>
+              ) : (
+                "—"
+              )}
+            </C>
             {by === "driver" && <C />}
           </tr>
         )}

@@ -2,6 +2,8 @@ import { db } from "@/db";
 import { requirePermission } from "@/lib/auth";
 import { todayRiyadh } from "@/lib/dates";
 import { purchasesBySupplier } from "@/lib/reports";
+import { Drill, FormulaDrill, type Formula } from "@/components/drill";
+import { periodSource } from "@/lib/drill-formulas";
 import { C, money, PeriodFilter, periodFrom, ReportHeader, RTable, type ReportParams } from "../report-ui";
 
 /** المشتريات حسب المورد: ما قُيد على ذمة كل مورد (فواتير، صيانة آجلة، مصروفات مستحقة) دون السداد، وضريبتها. */
@@ -12,6 +14,21 @@ export default async function PurchasesBySupplierPage({ searchParams }: { search
   const { from, to } = periodFrom(sp, today);
   const rows = await purchasesBySupplier(db, from, to);
   const sum = (k: "bills" | "net" | "vat" | "total") => rows.reduce((a, r) => a + r[k], 0);
+  // «مصدر الرقم»: قيود ذمم المورد 2101–2105 وضريبتها 1108 دون سندات الصرف (0 = كل الموردين)
+  const src = periodSource(from, to);
+  const PAY = ["=2101", "=2102", "=2103", "=2104", "=2105"];
+  const gross = (id: number, name: string, expected: number) => src({ title: `${name}: الإجمالي`, codes: PAY, partyId: id, excludeSourceTypes: ["payment"], sign: -1, expected });
+  const vat = (id: number, name: string, expected: number) => src({ title: `${name}: الضريبة`, codes: ["=1108"], partyId: id, excludeSourceTypes: ["payment"], sign: 1, expected });
+  const bills = (id: number, name: string) => src({ title: `فواتير ${name}`, codes: PAY, partyId: id, sourceTypes: ["purchase_invoice"] });
+  const netF = (id: number, name: string, r: { net: number; vat: number; total: number }): Formula => ({
+    title: `${name}: قبل الضريبة`,
+    value: money(r.net, false),
+    period: `من ${from} إلى ${to}`,
+    rows: [
+      { label: "الإجمالي", note: "ذمم المورد 2101–2105", value: money(r.total, false), href: gross(id, name, r.total) },
+      { op: "−", label: "الضريبة", note: "حساب 1108", value: money(r.vat, false), href: vat(id, name, r.vat) },
+    ],
+  });
   return (
     <>
       <ReportHeader title="المشتريات حسب المورد" period={`من ${from} إلى ${to}`} filename={`المشتريات-حسب-المورد-${from}-${to}`}>
@@ -32,20 +49,30 @@ export default async function PurchasesBySupplierPage({ searchParams }: { search
                 {r.name}
               </a>
             </C>
-            <C num>{r.bills || "—"}</C>
-            <C num>{money(r.net)}</C>
-            <C num>{money(r.vat)}</C>
+            <C num>{r.bills ? <Drill href={bills(r.id, r.name)}>{r.bills}</Drill> : "—"}</C>
+            <C num>
+              <FormulaDrill formula={netF(r.id, r.name, r)}>{money(r.net)}</FormulaDrill>
+            </C>
+            <C num>{r.vat ? <Drill href={vat(r.id, r.name, r.vat)}>{money(r.vat)}</Drill> : "—"}</C>
             <C num className="font-semibold">
-              {money(r.total)}
+              <Drill href={gross(r.id, r.name, r.total)}>{money(r.total)}</Drill>
             </C>
           </tr>
         ))}
         <tr className="bg-asphalt-900/5 font-bold text-brand-900">
           <C>الإجمالي</C>
-          <C num>{sum("bills")}</C>
-          <C num>{money(sum("net"), false)}</C>
-          <C num>{money(sum("vat"), false)}</C>
-          <C num>{money(sum("total"), false)}</C>
+          <C num>
+            <Drill href={bills(0, "كل الموردين")}>{sum("bills")}</Drill>
+          </C>
+          <C num>
+            <FormulaDrill formula={netF(0, "كل الموردين", { net: sum("net"), vat: sum("vat"), total: sum("total") })}>{money(sum("net"), false)}</FormulaDrill>
+          </C>
+          <C num>
+            <Drill href={vat(0, "كل الموردين", sum("vat"))}>{money(sum("vat"), false)}</Drill>
+          </C>
+          <C num>
+            <Drill href={gross(0, "كل الموردين", sum("total"))}>{money(sum("total"), false)}</Drill>
+          </C>
         </tr>
       </RTable>
       <p className="mt-2 text-xs text-gray-500">من ذمم الموردين 2101–2105 دون سندات الصرف، والضريبة من 1108 على سطور المورد. المشتريات النقدية دون مورد لا تظهر هنا (انظر المصروفات).</p>

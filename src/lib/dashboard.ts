@@ -145,12 +145,14 @@ export async function financials(db: Db, range: { from: string; to: string; prev
     amount: r2(-cur.filter((l) => g.codes.includes(l.code)).reduce((a, l) => a + l.net, 0)),
   }));
   const known = new Set(COST_GROUPS.flatMap((g) => g.codes));
-  const other = -cur.filter((l) => l.code.startsWith("5") && !known.has(l.code)).reduce((a, l) => a + l.net, 0);
+  const otherLines = cur.filter((l) => l.code.startsWith("5") && !known.has(l.code));
+  const other = -otherLines.reduce((a, l) => a + l.net, 0);
   if (Math.abs(other) > 0.005)
     costs.push({
       key: "other",
       label: "تكاليف أخرى",
-      codes: [],
+      // حساباتها نفسها، حتى يفتح «مصدر الرقم» قيودها
+      codes: otherLines.map((l) => l.code),
       amount: other,
     });
   const revenue = [
@@ -614,11 +616,13 @@ export async function cashFlow(db: Db, from: string, to: string) {
       href?: string;
       in: number;
       out: number;
+      codes: string[];
     }
   >();
   for (const r of counter) {
     const cat = cashCategory(r.code);
-    const g = groups.get(cat.key) ?? { ...cat, in: 0, out: 0 };
+    const g = groups.get(cat.key) ?? { ...cat, in: 0, out: 0, codes: [] };
+    g.codes.push(r.code);
     g.in += n(r.cash_in);
     g.out += n(r.cash_out);
     groups.set(cat.key, g);

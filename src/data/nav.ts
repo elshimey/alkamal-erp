@@ -121,6 +121,7 @@ const NAV_HREFS = new Set(NAV.flatMap((g) => g.items.map((x) => x.href)));
 // صفحات لا تظهر في القائمة الجانبية لكن يصل لها البحث الشامل
 export const EXTRA_PAGES: { href: string; label: string; group: string; entity?: Entity; admin?: boolean; keywords?: string }[] = [
   { href: "/notifications", label: "كل التنبيهات", group: "الرئيسية", keywords: "جرس إشعارات" },
+  { href: "/reports/source", label: "مصدر الرقم", group: "التقارير", entity: "financial_reports", keywords: "من أين جاء الرقم تتبع قيود" },
   // صفحات صارت تبويباً داخل صفحة في القائمة
   { href: "/payments/review", label: "سندات صرف تحت المراجعة", group: "المشتريات والمصروفات", entity: "payments", keywords: "لم يدفع مستحق غير مسدد عهدة لم تصرف مراجعة اعتماد" },
   { href: "/hr/advances", label: "مقدم العمولة", group: "الموظفون والرواتب", entity: "payroll", keywords: "سلفة عمولة سائق" },

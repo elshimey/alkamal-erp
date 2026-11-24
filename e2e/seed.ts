@@ -15,6 +15,7 @@ import { assignVehicle, createDriver, createVehicle } from "@/lib/fleet";
 import { createDriverLogin } from "@/lib/driver-app";
 import { addInvoiceChargesTx, createDirectInvoice } from "@/lib/invoices";
 import { createWaybill, setWaybillStatus } from "@/lib/waybills";
+import { createJournalEntry } from "@/lib/ledger";
 import { E2E } from "./data";
 
 async function main() {
@@ -46,6 +47,20 @@ async function main() {
   const driver = await createDriver(db, { nameAr: E2E.driver.name, mobile: E2E.driver.login, appLanguage: "ar" });
   await assignVehicle(db, { vehicleId: vehicle.id, driverId: driver.id, fromDate: `${year}-01-01` });
   await createDriverLogin(db, { driverId: driver.id, login: E2E.driver.login, password: E2E.driver.password });
+
+  // قيد إيراد مرحّل على مركبة الاختبار: «مصدر الرقم» في الرئيسية والتقارير يفتح قيوده (drilldown.spec.ts)
+  const acc = async (code: string) => (await db.select().from(s.accounts).where(eq(s.accounts.code, code)))[0].id;
+  await createJournalEntry(db, {
+    entryDate: new Date().toISOString().slice(0, 10),
+    post: true,
+    description: "إيراد اختبار مصدر الرقم",
+    // بمصدر حتى لا يُحسب «قيداً افتتاحياً» فتختفي خطوته من معالج الإعداد (جولة الإعداد في tours.spec.ts)
+    source: { type: "e2e_seed", id: 1 },
+    lines: [
+      { accountId: await acc("110101"), debit: 1500 },
+      { accountId: await acc("4101"), credit: 1500, costCenterId: vehicle.costCenterId },
+    ],
+  });
 
   // فاتورة مسودة عليها مصروف «لم يُدفع بعد» لعميل مستقل: رسالة منع إصدارها تحمل رابط «سندات صرف تحت المراجعة»
   // (msg-links.spec.ts). عميل مستقل حتى لا تُدمج فيها شحنات العميل الأساسي.
