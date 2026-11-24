@@ -14,6 +14,7 @@ import { createContract, createLocation, createParty, createRoute, setContractSt
 import { assignVehicle, createDriver, createVehicle } from "@/lib/fleet";
 import { createDriverLogin } from "@/lib/driver-app";
 import { addInvoiceChargesTx, createDirectInvoice } from "@/lib/invoices";
+import { createWaybill, setWaybillStatus } from "@/lib/waybills";
 import { E2E } from "./data";
 
 async function main() {
@@ -53,6 +54,19 @@ async function main() {
   const [customs] = await db.select().from(s.chargeTypes).where(eq(s.chargeTypes.nameAr, "رسوم جمركية باسم العميل"));
   const pending = await createDirectInvoice(db, { customerId: linkCustomer.id, invoiceDate: today, dueDate: today, currencyCode: "SAR", lines: [], hasCharges: true });
   await db.transaction((tx) => addInvoiceChargesTx(tx, pending.id, [{ chargeTypeId: customs.id, amount: 90, payer: "unpaid" }]));
+
+  // شحنتان معتمدتان لعميل مستقل ومركبة وسائق مستقلين (دون دخول للتطبيق): تُدمج وتُجمّع تحت صف الفاتورة (merged-groups.spec.ts)
+  const mergeCustomer = await createParty(db, { nameAr: E2E.mergeCustomer, roles: ["customer"] });
+  const mergeContract = await createContract(db, { customerId: mergeCustomer.id, number: "E2E-2", fromDate: `${year}-01-01`, toDate: `${year}-12-31` });
+  await db.insert(s.contractRates).values({ contractId: mergeContract.id, method: "route_fixed", routeId: route.id, price: "1800" });
+  await setContractStatus(db, mergeContract.id, "active");
+  const mergeVehicle = await createVehicle(db, { plate: E2E.mergePlate, chassis: "E2E-CH-2", odometer: 500 });
+  const mergeDriver = await createDriver(db, { nameAr: "سائق الدمج", mobile: "0555000999", appLanguage: "ar" });
+  await assignVehicle(db, { vehicleId: mergeVehicle.id, driverId: mergeDriver.id, fromDate: `${year}-01-01` });
+  for (let k = 0; k < 2; k++) {
+    const w = await createWaybill(db, { waybillDate: today, customerId: mergeCustomer.id, routeId: route.id, shipper: "مرسل الدمج", consignee: "مستلم الدمج", vehicleId: mergeVehicle.id, driverId: mergeDriver.id });
+    await setWaybillStatus(db, w.id, "approved", { canOverride: true, overrideReason: "تجهيز اختبار الدمج" });
+  }
 
   // شركة ثانية ببيانات سرية: لا يجب أن تظهر لمستخدمي الكمال ولا العكس
   const tdb = drizzle(tenantClient(client), { schema: s }) as unknown as Db;

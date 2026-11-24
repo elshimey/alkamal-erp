@@ -24,6 +24,10 @@ import { BulkPdfButton } from "@/components/bulk-pdf";
 import { DocToolbar } from "@/components/doc-toolbar";
 import { Icon } from "@/components/icons";
 import { RowCheck, SelectAll, SelectionGate, SelectionTotal } from "@/components/row-selection";
+import { GroupToggle } from "@/components/merged-group";
+import { listWaybills } from "@/lib/waybills";
+import { WAYBILL_STATUS } from "@/data/waybills";
+import { Plate } from "@/components/doc-card";
 import { ConfirmSubmit } from "@/components/confirm-submit";
 import { ClickRow } from "@/components/click-row";
 import { CashAccountField } from "@/components/cash-account-field";
@@ -37,9 +41,9 @@ import { AddModeBar, ListActions } from "@/components/list-actions";
 import { SheetEditor } from "@/components/sheet-editor";
 import { bulkInvoiceOps, invoiceAll, invoiceCustomer, issue, saveInvoicePanel, saveInvoiceRows, saveInvoiceSheet, sendToZatca } from "./actions";
 import { ActionsMenu, type MenuItem } from "@/components/actions-menu";
-import { DocCard, DocCards, SheetFacts, SheetMoney, sheetBtn, sheetPrimary } from "@/components/doc-card";
+import { DocCard, DocCards, DocGroupCard, SheetFacts, SheetMoney, sheetBtn, sheetPrimary } from "@/components/doc-card";
 import { MobileSheet } from "@/components/mobile-sheet";
-import { BulkBar, EdgeCell, NextStepCell, NumDateCell, PaidBar, StatusCell, StatusTabs, Sub } from "@/components/desk-list";
+import { BulkBar, EdgeCell, NextStepCell, NumDateCell, PaidBar, RouteLine, StatusCell, StatusTabs, Sub } from "@/components/desk-list";
 import { DeskDrawer } from "@/components/desk-drawer";
 import { fmt, fmtDate } from "@/lib/format";
 import { toAccountOptions } from "@/lib/lookups";
@@ -88,6 +92,10 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
     getInvoiceTemplate(db),
   ]);
   // أزرار الحالات بعددها (بنفس البحث والفترة)؛ الأصفر لما ينتظر إجراءً: مسودة تُصدر، ومتأخرة تُحصّل
+  // الفاتورة التي فيها أكثر من شحنة: سهم يفتح شحناتها تحتها (قرار أحمد 2026-11-24)
+  const mergedIds = view === "table" ? invoices.filter((x) => x.waybills > 1).map((x) => x.i.id) : [];
+  const kidRows = mergedIds.length ? (await listWaybills(db, { invoiceIds: mergedIds, sort: "date_asc" }, 2000)).rows : [];
+  const kidsOf = (id: number) => kidRows.filter((r) => r.invoiceId === id);
   const tabCounts = await Promise.all(INV_TABS.map((t) => summarizeSalesInvoices(db, { ...filter, status: t.status, pay: t.pay }).then((r) => r.n)));
   const [zatca, zatcaDoc, blocker] = openDoc ? await Promise.all([getSettings(db), latestDocument(db, { invoiceId: openDoc.i.id }), sendBlocker(db, { invoiceId: openDoc.i.id })]) : [null, null, null];
   const qrSvg = openDoc ? await invoiceQrSvg(company, openDoc.i, await clearedQr(db, openDoc.i.id)) : null;
@@ -269,6 +277,35 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
         {invoices.map(({ i, customer, waybills }) => {
           const st = state(i);
           const due = st.total - st.paid;
+          const kids = kidsOf(i.id);
+          if (kids.length > 1)
+            return (
+              <DocGroupCard
+                key={i.id}
+                number={i.number}
+                href={listUrl({ open: String(i.id) })}
+                status={{ label: INVOICE_STATUS[i.status].label, tone: INVOICE_STATUS[i.status].tone }}
+                extraBadge={st.pay}
+                date={i.invoiceDate}
+                count={kids.length}
+                party={customer}
+                meta={
+                  <span className={st.overdue ? "font-semibold text-st-bad-fg" : ""}>
+                    الاستحقاق <span className="ltr-nums">{fmtDate(i.dueDate)}</span>
+                  </span>
+                }
+                amount={fmt(st.total)}
+                currency={i.currencyCode}
+                next={i.status === "draft" ? (canIssue ? "أصدرها" : null) : due > 0.005 ? `باقي ${fmt(due)}` : null}
+                kids={kids.map((r) => ({
+                  key: r.w.id,
+                  href: `/waybills?open=${r.w.id}`,
+                  number: r.w.number,
+                  line: `${r.route} · ${r.plate ?? r.carrier ?? "—"} · ${fmtDate(r.w.waybillDate)}`,
+                  amount: fmt(r.w.amount),
+                }))}
+              />
+            );
           return (
             <DocCard
               key={i.id}
@@ -763,10 +800,29 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
               const due = st.total - st.paid;
               const late = st.overdue ? daysLate(i.dueDate) : 0;
               const tone = st.pay?.tone ?? INVOICE_STATUS[i.status].tone;
-              return (
-                <ClickRow key={i.id} href={open} className={`transition hover:bg-brand-50/40 ${i.id === openId ? "bg-brand-50/70" : ""}`}>
+              const kids = kidsOf(i.id);
+              const key = `inv-${i.id}`;
+              return [
+                <ClickRow key={i.id} href={open} className={`transition hover:bg-brand-50/40 ${i.id === openId ? "bg-brand-50/70" : kids.length > 1 ? "bg-[#f6f3ea]" : ""}`}>
                   <Td>{(canIssue || canUpdate || canRevert || canDelete) && <RowCheck form={BULK_FORM} id={i.id} amount={i.total} />}</Td>
-                  <NumDateCell number={i.number} date={i.invoiceDate} href={open} />
+                  {kids.length > 1 ? (
+                    <td className="px-4 py-2.5 whitespace-nowrap">
+                      <span className="flex items-center">
+                        <GroupToggle group={key} count={kids.length} />
+                        <span>
+                          <Link href={open} scroll={false} className="ltr-nums font-semibold text-asphalt-900 hover:text-brand-700 hover:underline">
+                            {i.number}
+                          </Link>
+                          <span className="ms-1.5 rounded-full bg-asphalt-900 px-2 py-px text-[11px] font-semibold text-brand-500">{kids.length} شحنات</span>
+                          <Sub>
+                            <span className="ltr-nums">{fmtDate(i.invoiceDate)}</span>
+                          </Sub>
+                        </span>
+                      </span>
+                    </td>
+                  ) : (
+                    <NumDateCell number={i.number} date={i.invoiceDate} href={open} />
+                  )}
                   <Td>
                     <span className="font-medium text-gray-800">{customer}</span>
                     <Sub className={st.overdue ? "font-semibold !text-st-bad-fg" : ""}>
@@ -787,8 +843,31 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
                   </StatusCell>
                   <NextStepCell {...rowNext(i, st)} />
                   <EdgeCell tone={tone} />
-                </ClickRow>
-              );
+                </ClickRow>,
+                ...(kids.length > 1
+                  ? kids.map((r, n) => (
+                      <ClickRow key={`w-${r.w.id}`} href={`/waybills?open=${r.w.id}`} kidOf={key} hidden className="bg-[#fcfaf4] transition hover:bg-brand-50/40">
+                        <Td />
+                        <NumDateCell number={r.w.number} date={r.w.waybillDate} href={`/waybills?open=${r.w.id}`} kid={n === kids.length - 1 ? "last" : "mid"} />
+                        <Td>
+                          <RouteLine from={r.route?.split(" ← ")[0]} to={r.route?.split(" ← ")[1]} />
+                          <Sub>
+                            {r.plate ? <Plate>{r.plate}</Plate> : r.carrier ? `ناقل: ${r.carrier}` : "—"} {r.driver ?? r.w.carrierDriverName ?? ""}
+                          </Sub>
+                        </Td>
+                        <Td className="whitespace-nowrap">
+                          <span className="ltr-nums font-display text-[13px] font-semibold text-gray-800">{fmt(r.w.amount)}</span>
+                          <Sub>قبل الضريبة</Sub>
+                        </Td>
+                        <Td>
+                          <Sub>شحنة {WAYBILL_STATUS[r.w.status].label}</Sub>
+                        </Td>
+                        <Td />
+                        <Td />
+                      </ClickRow>
+                    ))
+                  : []),
+              ];
             })}
           </Table>
           <Pager page={page} size={PAGE_SIZE} total={summary.n} hrefFor={(p) => listUrl({ page: p > 1 ? String(p) : undefined, open: undefined })} />

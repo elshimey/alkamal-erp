@@ -3,12 +3,12 @@ import { requirePermission } from "@/lib/auth";
 import { todayRiyadh } from "@/lib/dates";
 import { driverOptions, vehicleOptions } from "@/lib/lookups";
 import { fleetProfitability, type FleetBy } from "@/lib/reports";
-import { FormCombo } from "@/components/form-combo";
+import { MultiCheck } from "@/components/multi-check";
 import { C, money, param, PeriodFilter, periodFrom, ReportHeader, ReportTabs, RTable, withParams, type ReportParams } from "../report-ui";
 
 /**
  * ربحية المركبات والسائقين (الخطوة 5): عمود لكل حساب تكلفة مباشرة فيه أرقام، و«مصاريف أخرى» تتفتح تفاصيلها،
- * وعدد الرحلات، وعرض السائق يضيف مساراته وعملاءه. فلتر لمركبة واحدة أو سائق واحد.
+ * وعدد الرحلات، وعرض السائق يضيف مساراته وعملاءه. فلتر لعدة مركبات أو سائقين بمربعات تحديد (لا شيء = الكل).
  */
 export default async function FleetProfitPage({ searchParams }: { searchParams: Promise<ReportParams> }) {
   await requirePermission("financial_reports", "view");
@@ -16,12 +16,14 @@ export default async function FleetProfitPage({ searchParams }: { searchParams: 
   const today = todayRiyadh();
   const { from, to } = periodFrom(sp, today);
   const by: FleetBy = param(sp, "by") === "driver" ? "driver" : "vehicle";
-  const id = Number(param(sp, "id")) || null;
-  const [options, { columns, rows }] = await Promise.all([by === "vehicle" ? vehicleOptions() : driverOptions(), fleetProfitability(db, { from, to, by, id })]);
+  // id=4,9,12 (القديم id=4 يعمل كما هو)
+  const ids = [...new Set((param(sp, "id") ?? "").split(",").map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+  const [options, { columns, rows }] = await Promise.all([by === "vehicle" ? vehicleOptions() : driverOptions(), fleetProfitability(db, { from, to, by, ids })]);
   const one = by === "vehicle" ? "المركبة" : "السائق";
   const sum = (f: (r: (typeof rows)[number]) => number) => rows.reduce((a, r) => a + f(r), 0);
   const total = { trips: sum((r) => r.trips), revenue: sum((r) => r.revenue), direct: sum((r) => r.directTotal), other: sum((r) => r.otherTotal), profit: sum((r) => r.profit) };
-  const selected = id ? options.find((o) => o.value === String(id))?.label : null;
+  const names = ids.map((i) => options.find((o) => o.value === String(i))?.label).filter(Boolean) as string[];
+  const selected = names.length === 0 ? null : names.length <= 3 ? names.join("، ") : `${names.slice(0, 3).join("، ")} و${names.length - 3} أخرى`;
   const head = [one, "الرحلات", "الإيرادات", ...columns.map((c) => c.name), "مصاريف أخرى", "إجمالي التكاليف", "صافي الربح", "الهامش", ...(by === "driver" ? ["المسارات والعملاء"] : [])];
 
   return (
@@ -35,9 +37,9 @@ export default async function FleetProfitPage({ searchParams }: { searchParams: 
         <PeriodFilter from={from} to={to} today={today}>
           <input type="hidden" name="by" value={by} />
           <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-gray-700">{one} (اختياري)</span>
+            <span className="font-medium text-gray-700">{by === "vehicle" ? "المركبات" : "السائقون"} (اختياري)</span>
             <div className="w-64 max-w-full">
-              <FormCombo name="id" options={options} defaultValue={id ? String(id) : ""} placeholder={`كل ${by === "vehicle" ? "المركبات" : "السائقين"}`} />
+              <MultiCheck key={by} name="id" options={options} defaultValue={ids.map(String)} allLabel={`كل ${by === "vehicle" ? "المركبات" : "السائقين"}`} noun={by === "vehicle" ? "مركبات" : "سائقين"} />
             </div>
           </label>
         </PeriodFilter>
@@ -64,7 +66,7 @@ export default async function FleetProfitPage({ searchParams }: { searchParams: 
         {rows.map((r) => (
           <tr key={r.id ?? "none"} className={r.id == null ? "bg-gray-50 text-gray-600" : ""}>
             <C className="font-medium">
-              {r.id != null && !id ? (
+              {r.id != null && ids.length !== 1 ? (
                 <a href={withParams(sp, { id: String(r.id) })} className="text-brand-700 hover:underline">
                   {r.name}
                 </a>

@@ -622,7 +622,8 @@ export type FleetBy = "vehicle" | "driver";
  * الإيراد 4xxx، وكل حساب تكلفة مباشرة 5xxx عمود مستقل، وما سواها (6xxx و7xxx) «مصاريف أخرى» بتفاصيل حساباتها.
  * ما لا يُنسب لسائق يُجمع في سطر «دون سائق» حتى تتطابق المجاميع.
  */
-export async function fleetProfitability(db: Db, opts: { from: string; to: string; by: FleetBy; id?: number | null }) {
+/** ربحية المركبات أو السائقين؛ ids لعدة مركبات أو سائقين (الفارغ = الكل)، وid لواحد. */
+export async function fleetProfitability(db: Db, opts: { from: string; to: string; by: FleetBy; id?: number | null; ids?: number[] }) {
   const driverOf = sql`coalesce(l.driver_id, w.driver_id,
       (select va.driver_id from vehicle_assignments va
         where va.vehicle_id = v.id and va.from_date <= e.entry_date and (va.to_date is null or va.to_date >= e.entry_date)
@@ -710,7 +711,8 @@ export async function fleetProfitability(db: Db, opts: { from: string; to: strin
     };
   });
   result = result.filter((r) => r.revenue || r.directTotal || r.otherTotal || r.trips);
-  if (opts.id) result = result.filter((r) => r.id === opts.id);
+  const only = new Set([...(opts.ids ?? []), ...(opts.id ? [opts.id] : [])]);
+  if (only.size) result = result.filter((r) => r.id != null && only.has(r.id));
   // الأعمدة: حسابات 5xxx التي فيها أرقام في النتيجة المعروضة فقط
   const used = new Set(result.flatMap((r) => Object.keys(r.direct).filter((c) => r.direct[c])));
   const columns = [...directAccounts].filter(([code]) => used.has(code)).sort(([a], [b]) => a.localeCompare(b)).map(([code, name]) => ({ code, name }));
