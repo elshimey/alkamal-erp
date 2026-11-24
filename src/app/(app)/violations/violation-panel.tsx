@@ -20,7 +20,7 @@ export async function ViolationPanel({ closeHref }: { closeHref: string }) {
           <Input type="date" name="date" defaultValue={todayRiyadh()} required className="w-full" />
         </PanelField>
         <PanelField label="المركبة" required>
-          <FormCombo name="vehicleId" options={vehicles} create="vehicle" required placeholder="اكتب اللوحة…" />
+          <FormCombo name="vehicleId" options={vehicles} create="vehicle" required placeholder="اكتب اللوحة…" autoDriver={{ name: "driverId", dateName: "date" }} />
         </PanelField>
         <PanelField label="نوع المخالفة" required hint="سرعة، وقوف، حمولة… أو أضف نوعاً جديداً من القائمة">
           <FormCombo name="type" options={types} create="violation_type" required placeholder="اختر أو أضف…" />

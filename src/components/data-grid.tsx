@@ -36,20 +36,27 @@ export interface GridColumn {
   suggest?: string[];
   /** عمود السائق: اختياره يملأ عمود المركبة بالمسندة له في تاريخ الصف (ويبقى تغييرها ممكناً) */
   autoVehicle?: { key: string; dateKey?: string };
+  /** عمود المركبة: اختيارها يملأ عمود السائق بالمسند لها في تاريخ الصف (ويبقى تغييره ممكناً) */
+  autoDriver?: { key: string; dateKey?: string };
 }
 
 export type GridRow = Record<string, string>;
 type Cell = [number, number];
 
 export const emptyGridRow = (columns: GridColumn[]): GridRow => Object.fromEntries(columns.map((c) => [c.key, c.defaultValue ?? ""]));
-/** يملأ مركبة السائق المختار في الصف؛ onlyEmpty عند اللصق حتى لا تُستبدل مركبة ملصوقة. */
+/** يملأ مركبة السائق المختار (أو سائق المركبة المختارة) في الصف؛ onlyEmpty عند اللصق حتى لا تُستبدل قيمة ملصوقة. */
 function fillVehicle(columns: GridColumn[], row: GridRow, prev: GridRow, onlyEmpty: boolean) {
+  const filled = new Set<string>();
   for (const c of columns) {
-    if (!c.autoVehicle || row[c.key] === prev[c.key] || !row[c.key]) continue;
-    const target = c.autoVehicle.key;
+    const auto = c.autoVehicle ?? c.autoDriver;
+    if (!auto || filled.has(c.key) || row[c.key] === prev[c.key] || !row[c.key]) continue;
+    const target = auto.key;
     if (onlyEmpty && row[target]) continue;
-    const v = vehicleOnDate(c.options?.find((o) => o.value === row[c.key])?.periods, c.autoVehicle.dateKey ? row[c.autoVehicle.dateKey] : null);
-    if (v && columns.some((x) => x.key === target && x.options?.some((o) => o.value === v))) row[target] = v;
+    const v = vehicleOnDate(c.options?.find((o) => o.value === row[c.key])?.periods, auto.dateKey ? row[auto.dateKey] : null);
+    if (v && columns.some((x) => x.key === target && x.options?.some((o) => o.value === v))) {
+      row[target] = v;
+      filled.add(target);
+    }
   }
   return row;
 }

@@ -519,7 +519,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
               { key: "routeId", label: "المسار", type: "select", required: true, options: tripRoutes, width: "13rem", create: "route" },
               { key: "shipper", label: "المرسل", required: true, width: "10rem", suggest: tripShippers },
               { key: "consignee", label: "المستلم", required: true, width: "10rem", suggest: tripShippers },
-              { key: "vehicleId", label: "المركبة", type: "select", options: tripVehicles, width: "8rem", create: "vehicle" },
+              { key: "vehicleId", label: "المركبة", type: "select", options: tripVehicles, width: "8rem", create: "vehicle", autoDriver: { key: "driverId", dateKey: "date" } },
               { key: "driverId", label: "السائق", type: "select", options: tripDrivers, width: "9rem", create: "driver", autoVehicle: { key: "vehicleId", dateKey: "date" } },
               { key: "carrierId", label: "أو ناقل خارجي", type: "select", options: tripCarriers, width: "9rem", create: "carrier" },
               { key: "carrierCost", label: "تكلفة الناقل", type: "number", width: "6rem" },
