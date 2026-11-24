@@ -3458,7 +3458,7 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
       const [customs] = await db.select().from(s.chargeTypes).where(eq(s.chargeTypes.nameAr, "رسوم جمركية باسم العميل"));
       // الفحص قبل الحفظ: الصف الفارغ يُتجاهل، والناقص يُرفض برقمه
       expect(parseChargeRows(JSON.stringify([{ chargeTypeId: "", amount: "" }]), 1)).toEqual([]);
-      expect(() => parseChargeRows(JSON.stringify([{ chargeTypeId: String(customs.id), amount: "50", payer: "cash", cashAccountId: "" }]), 1)).toThrow("مصروف العميل 1: اختر الحساب الذي دفعت منه الشركة");
+      expect(() => parseChargeRows(JSON.stringify([{ chargeTypeId: String(customs.id), amount: "50", payer: "cash", cashAccountId: "" }]), 1)).toThrow("المصروف 1: اختر الحساب الذي دفعت منه الشركة");
       expect(() => parseChargeRows(JSON.stringify([{ chargeTypeId: String(customs.id), amount: "0" }]), 1)).toThrow("اكتب المبلغ");
 
       const w = await createWaybill(db, { waybillDate: D, customerId, routeId: intlRoute, shipper: "أ", consignee: "ب", vehicleId: vehicle.id, amount: 2000 });
@@ -3497,6 +3497,32 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
         }),
       ).rejects.toThrow("اختر المخلص");
       expect(await count()).toBe(n);
+    });
+
+    it("مصروف «على الشركة» من نافذة الشحنة أو الفاتورة: تكلفة على الرحلة ومركبتها، لا 1114 ولا سطر فاتورة", async () => {
+      const [customs] = await db.select().from(s.chargeTypes).where(eq(s.chargeTypes.nameAr, "رسوم جمركية باسم العميل"));
+      const rows = parseChargeRows(JSON.stringify([{ chargeTypeId: String(customs.id), amount: "90", billTo: "company", payer: "cash", cashAccountId: String(acc["110101"]) }]), 1);
+      expect(rows[0].charge.billTo).toBe("company");
+      expect(parseChargeRows(JSON.stringify([{ chargeTypeId: String(customs.id), amount: "5", payer: "unpaid" }]), 1)[0].charge.billTo).toBe("customer");
+
+      const w = await createWaybill(db, { waybillDate: D, customerId, routeId: intlRoute, shipper: "أ", consignee: "ب", vehicleId: vehicle.id, amount: 1500 });
+      await approveWaybill(db, w.id, { canOverride: true, overrideReason: "تجربة" });
+      const inv = await createInvoice(db, { customerId, invoiceDate: D });
+      const [added] = await addCustomerCharges(db, rows.map((r) => ({ ...r, waybillId: w.id })));
+      // لا يدخل الفاتورة
+      expect(added.invoice).toBeNull();
+      expect((await db.select().from(s.salesInvoiceLines).where(eq(s.salesInvoiceLines.invoiceId, inv.id))).filter((l) => l.kind === "expense")).toHaveLength(0);
+      const [row] = await db.select().from(s.waybillExpenses).where(eq(s.waybillExpenses.id, added.row.id));
+      expect(row.billTo).toBe("company");
+      const jl = await entryLines(row.journalEntryId!);
+      // مدين تكلفة الرحلة على مركز تكلفة المركبة، ودائن الصندوق
+      expect(jl.some((l) => l.code === "1114")).toBe(false);
+      const debit = jl.find((l) => l.debit > 0)!;
+      expect(debit.debit).toBe(90);
+      expect(debit.code.startsWith("5")).toBe(true);
+      expect(jl.find((l) => l.credit > 0)?.code).toBe("110101");
+      // ولا يظهر في تقرير مصاريف العملاء غير المفوترة
+      expect((await unbilledCharges(db)).some((c) => c.id === row.id)).toBe(false);
     });
 
     it("مصروف على العميل «لم يُدفع بعد»: لا قيد حتى يُعتمد، والفاتورة لا تصدر قبله، ثم يُسدد بسند صرف يقفل الالتزام", async () => {

@@ -16,12 +16,12 @@ test("فاتورة مباشرة بنقلها: تصدر وتُرسل للسائق
   await form.getByRole("combobox", { name: "المستلم*" }).fill("مستلم مباشر");
   await page.keyboard.press("Tab");
   // نفس أقسام الشحنة
-  await expect(form.getByText("التنفيذ", { exact: true })).toBeVisible();
+  await expect(form.locator("summary").getByText("التنفيذ", { exact: true })).toBeVisible();
   await pick(page, form, "المركبة*", "1234");
   await form.getByRole("textbox", { name: /^السعر الأساسي/ }).fill("3000");
   // المعاينة فيها سطر النقل
   await expect(form.getByLabel("معاينة الفاتورة").getByText(/خدمة نقل/).first()).toBeVisible();
-  await form.getByText("إرسال للسائق", { exact: true }).click();
+  await form.locator("summary").getByText("إرسال للسائق", { exact: true }).click();
   await form.getByRole("checkbox", { name: "أرسلها للسائق على مرحلة التسليم" }).check();
   await form.getByRole("button", { name: "حفظ وإصدار وإرسال للسائق" }).click();
   await expectToast(page, /صدرت برقم INV-/);

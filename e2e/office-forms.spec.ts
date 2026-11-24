@@ -22,7 +22,7 @@ test("Esc داخل التقويم يغلقه وحده، والإغلاق مع ت
   await page.goto("/vehicles?new=1");
   const title = page.getByRole("heading", { name: "إضافة مركبة" });
   await expect(title).toBeVisible();
-  await page.getByText("تفاصيل المركبة", { exact: true }).click();
+  await page.locator("summary").getByText("تفاصيل المركبة", { exact: true }).click();
   await page.getByRole("button", { name: "اختر من التقويم" }).first().click();
   const calendar = page.getByRole("dialog", { name: "التقويم" });
   await expect(calendar).toBeVisible();

@@ -165,7 +165,7 @@ export function LinesEditor({
       {cards ? (
         <div className="space-y-3" data-line-cards>
           {rows.map((r, n) => (
-            <div key={n} className="rounded-xl border border-gray-200 bg-gray-50/60 p-3" data-line-card>
+            <div key={n} className="line-in rounded-xl border border-gray-200 bg-gray-50/60 p-3 transition-shadow focus-within:border-brand-500 focus-within:shadow-[0_0_0_4px_rgb(245_184_46/0.14)]" data-line-card>
               <div className="mb-2 flex items-center justify-between text-xs text-gray-500">
                 <span>البند {n + 1}</span>
                 {rows.length > 1 && (
@@ -207,7 +207,7 @@ export function LinesEditor({
           </thead>
           <tbody className="divide-y divide-gray-100">
             {rows.map((r, n) => (
-              <tr key={n} className="group">
+              <tr key={n} className="line-in group">
                 <td className="ltr-nums py-1 text-center text-xs text-gray-400">{n + 1}</td>
                 {columns.map((c, ci) => (
                   <td key={c.key} className="px-1 py-1" onPaste={onPaste(n, ci)}>

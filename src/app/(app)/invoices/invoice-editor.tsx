@@ -384,8 +384,8 @@ export function InvoiceEditor({
           )}
           {(fixed.some((l) => l.kind === "expense") || canCharge) && (
             <PanelSection
-              title={`مصاريف على العميل${fixed.filter((l) => l.kind === "expense").length + charges.length ? ` (${fixed.filter((l) => l.kind === "expense").length + charges.length})` : ""}`}
-              hint="ما دفعته عن العميل (جمارك، رسوم ميناء…): كل مصروف سطر مستقل، يُقفل حساب المستردة 1114، وما يزيد على المدفوع إيراد"
+              title={`المصاريف${fixed.filter((l) => l.kind === "expense").length + charges.length ? ` (${fixed.filter((l) => l.kind === "expense").length + charges.length})` : ""}`}
+              hint="على العميل: سطر مستقل يُقفل 1114. على الشركة: تكلفة الرحلة ولا تدخل الفاتورة. دُفعت أو لم تُدفع بعد"
               optional
               open
             >
@@ -406,6 +406,7 @@ export function InvoiceEditor({
                     cashAccounts={chargeOptions.cashAccounts}
                     waybills={chargeOptions.waybills.length ? chargeOptions.waybills : undefined}
                     fleet={false}
+                    companyHint={chargeOptions.waybills.length ? undefined : "تُحمَّل على رحلة هذه الفاتورة (اختر المسار)."}
                     tripExpenses={chargeOptions.tripExpenses}
                     picked={billExpenses}
                     onPick={(ids) => {
@@ -650,7 +651,7 @@ function TripSections({
           <div className="space-y-2">
             <span className="block text-sm text-gray-700">مكونات إضافية على السعر</span>
             {trip.components.map((c, i) => (
-              <div key={i} className="grid grid-cols-[minmax(0,1fr)_4.5rem_6rem_auto] items-center gap-2">
+              <div key={i} className="line-in grid grid-cols-[minmax(0,1fr)_4.5rem_6rem_auto] items-center gap-2">
                 <ComboBox value={c.kind} options={componentKinds} create="price_component" allowEmpty={false} placeholder="وزن زائد، كم، انتظار…" onChange={(v, o) => setComp(i, { kind: v, label: o?.label ?? "" })} className={field} />
                 <input value={c.quantity} onChange={(e) => setComp(i, { quantity: e.target.value })} inputMode="decimal" placeholder="الكمية" aria-label="الكمية" className={`${field} ltr-nums`} />
                 <input value={c.unitPrice} onChange={(e) => setComp(i, { unitPrice: e.target.value })} inputMode="decimal" placeholder="سعر الوحدة" aria-label="سعر الوحدة" className={`${field} ltr-nums`} />

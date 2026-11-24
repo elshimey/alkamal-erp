@@ -336,12 +336,21 @@ export async function saveInvoicePanel(id: number | null, fd: FormData): Promise
     if (charges.some((c) => c.waybillId && !own.includes(c.waybillId))) throw new Error("المصروف لشحنة ليست في هذه الفاتورة");
     if (charges.length || billIds.length) await requirePermission("waybills", "update");
     const trip = id ? await currentTrip(db, id) : null;
-    input.hasCharges = charges.some((c) => !c.waybillId) || billIds.length > 0;
+    // «على الشركة» تكلفة رحلة لا سطر فاتورة: دون شحنة تُحمَّل على رحلة الفاتورة المباشرة نفسها
+    const onInvoice = charges.filter((c) => !c.waybillId && c.charge.billTo !== "company");
+    const companyLoose = charges.filter((c) => !c.waybillId && c.charge.billTo === "company");
+    input.hasCharges = onInvoice.length > 0 || billIds.length > 0;
     const inv = await db.transaction(async (tx) => {
       const saved = id ? await updateDirectInvoice(tx as unknown as typeof db, id, input) : await createDirectInvoice(tx as unknown as typeof db, { ...input, userId: user.id });
       if (billIds.length) await billTripExpensesToCustomer(tx, billIds, [...own, ...(trip ? [trip.id] : [])], user.id);
-      await addCustomerCharges(tx, charges.filter((c) => c.waybillId), user.id);
-      await addInvoiceChargesTx(tx, saved.id, charges.filter((c) => !c.waybillId).map((c) => c.charge), user.id);
+      let loose = companyLoose;
+      if (loose.length) {
+        const t = await currentTrip(tx, saved.id);
+        if (!t) throw new Error("المصروف «على الشركة» تكلفة رحلة: اختر المسار في قسم النقل، أو اجعله «على العميل»");
+        loose = loose.map((c) => ({ ...c, waybillId: t.id }));
+      }
+      await addCustomerCharges(tx, [...charges.filter((c) => c.waybillId), ...loose], user.id);
+      await addInvoiceChargesTx(tx, saved.id, onInvoice.map((c) => c.charge), user.id);
       return saved;
     });
     if (charges.length || billIds.length) {
