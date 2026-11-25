@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { EdgeCell } from "@/components/desk-list";
-import { and, desc, eq, gte, ilike, inArray, lte, or, type SQL } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, inArray, lte, or, sql, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import * as s from "@/db/schema";
@@ -58,8 +58,8 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
   const where: SQL[] = [];
   if (status) where.push(eq(s.expenses.status, status));
   if (q) {
-    const like = `%${q}%`;
-    where.push(or(ilike(s.expenses.number, like), ilike(s.expenses.description, like), ilike(s.accounts.nameAr, like), ilike(s.vehicles.plate, like), ilike(s.employees.nameAr, like), ilike(s.expenses.vendorName, like), ilike(s.expenses.reference, like), ilike(s.expenses.amount, like))!);
+    const like = `%${q.replace(/[%_\\]/g, "\\$&")}%`;
+    where.push(or(ilike(s.expenses.number, like), ilike(s.expenses.description, like), ilike(s.accounts.nameAr, like), ilike(s.vehicles.plate, like), ilike(s.employees.nameAr, like), ilike(s.expenses.vendorName, like), ilike(s.expenses.reference, like), ilike(sql`${s.expenses.amount}::text`, like))!);
   }
   const range = periodRange(period, today);
   if (range.from) where.push(gte(s.expenses.expenseDate, range.from));
