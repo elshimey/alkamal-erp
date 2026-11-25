@@ -14,6 +14,15 @@ const r2 = (v: number) => Math.round(v * 100) / 100 + 0;
 export function ReconcileTable(props: { id: number; editable: boolean; statement: number; priorCleared: number; book: number; items: Item[] }) {
   const { id, editable, statement, priorCleared, book, items } = props;
   const [checked, setChecked] = useState(() => new Set(items.filter((i) => i.cleared).map((i) => i.id)));
+  // A movement posted from «حركة في الكشف غير مسجلة» arrives already cleared on the server:
+  // merge server-cleared rows into the local marks without dropping unsaved ones.
+  const [seen, setSeen] = useState(items);
+  if (seen !== items) {
+    setSeen(items);
+    const before = new Set(seen.filter((i) => i.cleared).map((i) => i.id));
+    const added = items.filter((i) => i.cleared && !before.has(i.id)).map((i) => i.id);
+    if (added.length) setChecked((c) => new Set([...c, ...added]));
+  }
   const [filter, setFilter] = useState<"all" | "open" | "cleared">("all");
   const [state, setState] = useState<FormState>();
   const [pending, start] = useTransition();
