@@ -60,6 +60,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # المكتبات: لا مكتبة خارج القائمة المعتمدة، وكلها من سجل npm ببصمتها (ضد Slopsquatting)،
+      # ولا ثغرة عالية في مكتبات البرنامج، ولا ثغرة حرجة حتى في أدوات التطوير
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: المكتبات معتمدة ومن سجل npm
+        run: node scripts/check-deps.mjs
+      - name: ثغرات المكتبات (npm audit)
+        run: |
+          npm audit --omit=dev --audit-level=high
+          npm audit --audit-level=critical
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

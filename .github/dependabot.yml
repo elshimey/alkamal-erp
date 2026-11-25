@@ -1,0 +1,15 @@
+# Dependabot: يفتح طلب دمج تلقائياً حين تظهر ثغرة في مكتبة نستخدمها (تحديثات الأمان فقط).
+# تحديثات الإصدارات العادية متوقفة (open-pull-requests-limit: 0) حتى لا تكثر طلبات الدمج؛
+# التحديث العادي يُطلب يدوياً. يحتاج تفعيل «Dependabot alerts» و«security updates» من إعدادات المستودع.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 0
