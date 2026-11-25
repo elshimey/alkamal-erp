@@ -50,8 +50,8 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
   const cash = alias(s.accounts, "cash");
   const where: SQL[] = [];
   if (q) {
-    const like = `%${q}%`;
-    where.push(or(ilike(s.payments.number, like), ilike(s.parties.nameAr, like), ilike(s.employees.nameAr, like), ilike(s.payments.reference, like), ilike(s.payments.notes, like), ilike(s.payments.amount, like))!);
+    const like = `%${q.replace(/[%_\\]/g, "\\$&")}%`;
+    where.push(or(ilike(s.payments.number, like), ilike(s.parties.nameAr, like), ilike(s.employees.nameAr, like), ilike(s.payments.reference, like), ilike(s.payments.notes, like), ilike(sql`${s.payments.amount}::text`, like))!);
   }
   const range = periodRange(period, todayRiyadh());
   if (range.from) where.push(gte(s.payments.paymentDate, range.from));
