@@ -1,5 +1,6 @@
 // التسوية البنكية: حركة تُرحَّل من «حركة في الكشف غير مسجلة» تظهر مؤشراً عليها فوراً ويصبح الفرق صفراً
 // (كانت تُؤشَّر في القاعدة لكن الجدول يبقى على تأشيره القديم فلا يُفعَّل «إكمال التسوية»؛ ظهر أثناء تصوير فيديو الشرح).
+// الاسم يبدأ بـ zz ليعمل بعد اختبار الجولات: رصيده الافتتاحي قيد افتتاحي يغيّر خطوة «الأرصدة الافتتاحية» في معالج الإعداد.
 import { expect, test } from "@playwright/test";
 import { officeLogin, sql, unbalancedEntries } from "./helpers";
 
@@ -7,8 +8,9 @@ test("رسوم الكشف غير المسجلة تُرحَّل وتُؤشَّر 
   await officeLogin(page);
   await page.goto("/bank-accounts");
   const add = page.locator("main form").filter({ has: page.locator("select[name=kind]") }).last();
+  // صندوق لا حساب بنكي: اختبارات سابقة تقيد على 1102 مباشرة فلا يقبل حساباً فرعياً تحته
+  await add.locator("select[name=kind]").selectOption("cash");
   await add.locator("input[name=nameAr]").fill("بنك التسوية E2E");
-  await add.locator("input[name=bankName]").fill("بنك التسوية");
   await add.locator("input[name=openingBalance]").fill("1000");
   await add.locator("button[type=submit]").last().click();
   await expect.poll(async () => (await sql`select count(*)::int as n from accounts where name_ar = 'بنك التسوية E2E'`)[0].n).toBe(1);
