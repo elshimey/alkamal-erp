@@ -298,7 +298,7 @@ export async function quotationToInvoice(db: Db, id: number, input: { invoiceDat
 export type QuoteFilter = ReturnType<typeof parseQuoteFilter>;
 
 /** قائمة العروض بالبحث (رقم، عميل، مرجع، ملاحظات، بيان بند، مبلغ) والحالة والفترة والترتيب. */
-export async function listQuotations(db: Db | Tx, f?: QuoteFilter, limit = 500) {
+export async function listQuotations(db: Db | Tx, f?: QuoteFilter, limit = 500, offset = 0) {
   const where: SQL[] = [];
   if (f?.q) {
     const like = `%${f.q.replace(/[%_\\]/g, "\\$&")}%`;
@@ -326,13 +326,17 @@ export async function listQuotations(db: Db | Tx, f?: QuoteFilter, limit = 500) 
     party_asc: [asc(s.parties.nameAr), desc(s.quotations.quoteDate)],
   }[f?.sort ?? "date_desc"];
   return db
-    .select({ q: s.quotations, customer: s.parties.nameAr, invoice: s.salesInvoices.number })
+    .select({
+      n: sql<number>`count(*) over()`.mapWith(Number),
+      sumAll: sql<number>`coalesce(sum(${s.quotations.total}) over(), 0)`.mapWith(Number),
+      q: s.quotations, customer: s.parties.nameAr, invoice: s.salesInvoices.number })
     .from(s.quotations)
     .innerJoin(s.parties, eq(s.parties.id, s.quotations.customerId))
     .leftJoin(s.salesInvoices, eq(s.salesInvoices.id, s.quotations.salesInvoiceId))
     .where(where.length ? and(...where) : undefined)
     .orderBy(...order)
-    .limit(limit);
+    .limit(limit)
+    .offset(offset);
 }
 
 /** بنود عدة عروض دفعة واحدة (للورقة المفصلة). */

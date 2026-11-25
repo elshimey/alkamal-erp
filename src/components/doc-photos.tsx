@@ -26,7 +26,7 @@ export function DocPhotos({ photos, photoUrl = officePhotoUrl, grouped = false, 
               {g.map((p) => (
                 <a key={p.id} href={photoUrl(p.id)} target="_blank" rel="noreferrer" className="block break-inside-avoid text-center">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={photoUrl(p.id)} alt={KIND_LABEL[p.kind] ?? "صورة"} className="aspect-[4/3] w-full rounded-lg object-cover ring-1 ring-black/10" />
+                  <img src={photoUrl(p.id)} alt={KIND_LABEL[p.kind] ?? "صورة"} loading="lazy" decoding="async" className="aspect-[4/3] w-full rounded-lg object-cover ring-1 ring-black/10" />
                   <span className="ltr-nums mt-0.5 block text-[10px] text-gray-500">
                     {KIND_LABEL[p.kind] ?? "صورة"} · {when(p.createdAt)}
                   </span>

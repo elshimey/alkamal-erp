@@ -192,7 +192,7 @@ export interface ViolationFilter {
   q?: string;
 }
 
-export async function listViolations(db: Db, f: ViolationFilter = {}, limit = 300) {
+export async function listViolations(db: Db, f: ViolationFilter = {}, limit = 300, offset = 0) {
   const where: SQL[] = [];
   if (f.status) where.push(eq(s.trafficViolations.status, f.status));
   if (f.chargeTo) where.push(eq(s.trafficViolations.chargeTo, f.chargeTo));
@@ -207,6 +207,7 @@ export async function listViolations(db: Db, f: ViolationFilter = {}, limit = 30
   }
   return db
     .select({
+      n: sql<number>`count(*) over()`.mapWith(Number),
       v: s.trafficViolations,
       plate: s.vehicles.plate,
       driver: s.employees.nameAr,
@@ -222,7 +223,8 @@ export async function listViolations(db: Db, f: ViolationFilter = {}, limit = 30
     .leftJoin(s.payrollRuns, eq(s.payrollRuns.id, s.trafficViolations.payrollRunId))
     .where(where.length ? and(...where) : undefined)
     .orderBy(desc(s.trafficViolations.violationDate), desc(s.trafficViolations.id))
-    .limit(limit);
+    .limit(limit)
+    .offset(offset);
 }
 
 /** إجمالي غير المسدد للمرور، وما على السائقين ولم يُخصم بعد. */

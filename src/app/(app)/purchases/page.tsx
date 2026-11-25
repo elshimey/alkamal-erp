@@ -9,6 +9,7 @@ import { can } from "@/lib/permissions";
 import { vehicleOptions } from "@/lib/lookups";
 import { expenseAccountOptions, listPurchaseInvoices, purchaseInvoiceDoc, supplierOptions } from "@/lib/purchases";
 import { listHref, parseDocFilter, type DocListParams } from "@/lib/doc-filters";
+import { PAGE_SIZE, pageOf } from "@/lib/paging";
 import { todayRiyadh } from "@/lib/dates";
 import { PURCHASE_STATUS } from "@/data/purchases";
 import { paymentState } from "@/data/sales";
@@ -21,7 +22,7 @@ import { Icon } from "@/components/icons";
 import { PurchaseInvoiceDocument } from "@/components/purchase-invoice";
 import { RowCheck, SelectAll, SelectionTotal } from "@/components/row-selection";
 import { SheetEditor } from "@/components/sheet-editor";
-import { Badge, EmptyRow, LimitRow, PageHeader, Table, Td } from "@/components/ui";
+import { Badge, EmptyRow, PageHeader, Pager, Table, Td } from "@/components/ui";
 import { post, postMany, savePurchaseSheet, savePurchases } from "./actions";
 import { PurchasePanel } from "./purchase-panel";
 import { fmt, fmtDate } from "@/lib/format";
@@ -43,11 +44,12 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
   const adding = sp.add === "1" && canCreate;
   const creating = sp.new === "1" && canCreate;
   const openId = view === "table" ? Number(sp.open) || null : null;
+  const { page, offset } = pageOf(sp.page);
   const [suppliers, accounts, vehicles, list, openDoc, products, warehouses, taxes] = await Promise.all([
     adding ? supplierOptions(db) : Promise.resolve([]),
     adding ? expenseAccountOptions(db) : Promise.resolve([]),
     adding ? vehicleOptions() : Promise.resolve([]),
-    listPurchaseInvoices(db, filter),
+    listPurchaseInvoices(db, filter, PAGE_SIZE, offset),
     openId ? purchaseInvoiceDoc(db, openId) : Promise.resolve(null),
     adding ? productOptions(db).then((r) => r.map((p) => ({ value: String(p.id), label: `${p.code} ${p.nameAr}` }))) : Promise.resolve([]),
     adding ? db.select({ id: s.warehouses.id, nameAr: s.warehouses.nameAr }).from(s.warehouses).where(eq(s.warehouses.isActive, true)).then((r) => r.map((w) => ({ value: String(w.id), label: w.nameAr }))) : Promise.resolve([]),
@@ -106,7 +108,7 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
         </div>
       )}
 
-      <DocToolbar base={BASE} params={sp} statuses={STATUSES} exportName="فواتير-الموردين" count={list.length} />
+      <DocToolbar base={BASE} params={sp} statuses={STATUSES} exportName="فواتير-الموردين" count={list[0]?.n ?? 0} />
       <div className="mb-2 flex justify-end">
         <BulkPdfButton kind="purchases" ids={list.map((x) => x.i.id)} />
       </div>
@@ -237,7 +239,6 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
           )}
           <Table head={[canPost && drafts.length ? <SelectAll key="all" form={POST_FORM} /> : "", "الرقم", "التاريخ", "المورد", "رقم فاتورته", "الإجمالي", "المتبقي", "الاستحقاق", "الحالة", "السداد", "", ""]}>
             {list.length === 0 && <EmptyRow cols={12}>{filter.q || filter.status || filter.pay || filter.from ? "لا توجد فواتير بهذه الشروط" : "لا توجد فواتير موردين بعد"}</EmptyRow>}
-            <LimitRow cols={11} shown={list.length} limit={500} />
             {list.map(({ i, supplier }) => {
               const st = state(i);
               const open = listHref(BASE, sp, { open: String(i.id) });
@@ -275,6 +276,7 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
               );
             })}
           </Table>
+          <Pager page={page} size={PAGE_SIZE} total={list[0]?.n ?? 0} hrefFor={(p) => listHref(BASE, sp, { page: p > 1 ? String(p) : undefined, open: undefined })} />
         </>
       )}
       {creating && <PurchasePanel closeHref="/purchases" canPost={canPost} />}

@@ -329,7 +329,7 @@ export interface ReceiptFilter extends Pick<DocFilter, "q" | "from" | "to"> {
   sort?: "date_desc" | "date_asc" | "amount_desc" | "amount_asc";
 }
 
-export async function listReceipts(db: Db | Tx, f: ReceiptFilter, limit = 500) {
+export async function listReceipts(db: Db | Tx, f: ReceiptFilter, limit = 500, offset = 0) {
   const where: (SQL | undefined)[] = [];
   if (f.q) {
     const q = `%${f.q.replace(/[%_\\]/g, "\\$&")}%`;
@@ -349,6 +349,12 @@ export async function listReceipts(db: Db | Tx, f: ReceiptFilter, limit = 500) {
           : [desc(s.receipts.receiptDate), desc(s.receipts.id)];
   return db
     .select({
+      // العدد والمجموع وعدد كل نوع في كل الصفحات (الاسترداد بالسالب، بالريال)
+      n: sql<number>`count(*) over()`.mapWith(Number),
+      nInvoice: sql<number>`count(*) filter (where ${s.receipts.kind} = 'invoice_payment') over()`.mapWith(Number),
+      nAdvance: sql<number>`count(*) filter (where ${s.receipts.kind} = 'advance') over()`.mapWith(Number),
+      nRefund: sql<number>`count(*) filter (where ${s.receipts.kind} = 'refund') over()`.mapWith(Number),
+      sumSar: sql<number>`coalesce(sum(case when ${s.receipts.kind} = 'refund' then -1 else 1 end * ${s.receipts.amount} * ${s.receipts.exchangeRate}) over(), 0)`.mapWith(Number),
       r: s.receipts,
       customer: s.parties.nameAr,
       account: s.accounts.nameAr,
@@ -360,7 +366,8 @@ export async function listReceipts(db: Db | Tx, f: ReceiptFilter, limit = 500) {
     .innerJoin(s.accounts, eq(s.accounts.id, s.receipts.cashAccountId))
     .where(and(...where))
     .orderBy(...order)
-    .limit(limit);
+    .limit(limit)
+    .offset(offset);
 }
 
 /** السند بكل تفاصيله للمعاينة والطباعة. */

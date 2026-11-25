@@ -38,6 +38,7 @@ export interface QuoteListParams {
   sort?: string;
   view?: string;
   open?: string;
+  page?: string;
 }
 
 /** فلتر القائمة من رابط الصفحة (ومثله رابط التصدير)، فتبقى القائمة قابلة للمشاركة والرجوع. */

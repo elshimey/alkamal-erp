@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { loadLazyImages } from "@/lib/eager-images";
 
 export function PrintButton({ label = "طباعة" }: { label?: string }) {
   return (
@@ -13,7 +14,7 @@ export function PrintButton({ label = "طباعة" }: { label?: string }) {
 /** يفتح نافذة الطباعة بمجرد تحميل الصفحة (روابط «طباعة» من المعاينة الجانبية). */
 export function AutoPrint() {
   useEffect(() => {
-    const t = setTimeout(() => window.print(), 300);
+    const t = setTimeout(() => void loadLazyImages().then(() => window.print()), 300);
     return () => clearTimeout(t);
   }, []);
   return null;

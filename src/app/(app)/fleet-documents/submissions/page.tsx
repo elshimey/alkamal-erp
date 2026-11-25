@@ -34,7 +34,7 @@ export default async function SubmissionsPage() {
             ) : attachmentId ? (
               <a href={`/files/${attachmentId}`} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-xl border border-gray-200 bg-gray-50" title="فتح الصورة كاملة">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={`/files/${attachmentId}`} alt={type.nameAr} className="h-44 w-full object-cover md:h-full" />
+                <img src={`/files/${attachmentId}`} loading="lazy" decoding="async" alt={type.nameAr} className="h-44 w-full object-cover md:h-full" />
               </a>
             ) : (
               <div className="grid h-32 place-items-center rounded-xl bg-gray-50 text-xs text-gray-400">بلا صورة</div>

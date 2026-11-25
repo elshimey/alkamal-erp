@@ -13,7 +13,8 @@ import { DocToolbar } from "@/components/doc-toolbar";
 import { Icon } from "@/components/icons";
 import { ImportLink } from "@/components/import-link";
 import { ReceiptVoucher } from "@/components/receipt-voucher";
-import { Badge, EmptyRow, LimitRow, PageHeader, Table, Td } from "@/components/ui";
+import { Badge, EmptyRow, PageHeader, Pager, Table, Td } from "@/components/ui";
+import { PAGE_SIZE, pageOf } from "@/lib/paging";
 import { DocCard, DocCards, SheetFacts, SheetMoney, sheetBtn, sheetPrimary } from "@/components/doc-card";
 import { MobileSheet } from "@/components/mobile-sheet";
 import { ClickRow } from "@/components/click-row";
@@ -35,17 +36,19 @@ export default async function ReceiptsPage({ searchParams }: { searchParams: Pro
   const canCreate = can(user.perms, "receipts", "create");
   const f = parseDocFilter(sp, Object.keys(KINDS), todayRiyadh());
   const openId = Number(sp.open) || null;
+  const { page, offset } = pageOf(sp.page);
   const [list, openDoc, company, template] = await Promise.all([
-    listReceipts(db, { q: f.q, from: f.from, to: f.to, kind: f.status as ReceiptKind | undefined, sort: f.sort in SORTS ? (f.sort as keyof typeof SORTS) : undefined }),
+    listReceipts(db, { q: f.q, from: f.from, to: f.to, kind: f.status as ReceiptKind | undefined, sort: f.sort in SORTS ? (f.sort as keyof typeof SORTS) : undefined }, PAGE_SIZE, offset),
     openId ? receiptDoc(db, openId) : Promise.resolve(null),
     getCompany(db),
     getInvoiceTemplate(db),
   ]);
   // أزرار الأنواع بعددها: عند تصفية نوع يُعدّ الباقي من القائمة دون تصفية النوع
-  const allList = f.status ? await listReceipts(db, { q: f.q, from: f.from, to: f.to }) : list;
-  const kindCounts: Record<string, number> = {};
-  for (const { r } of allList) kindCounts[r.kind] = (kindCounts[r.kind] ?? 0) + 1;
-  const total = list.reduce((a, { r }) => a + (r.kind === "refund" ? -1 : 1) * Number(r.amount) * Number(r.exchangeRate), 0);
+  // (سطر واحد يكفي: أعمدة العدد محسوبة على كل السندات)
+  const all = (f.status ? await listReceipts(db, { q: f.q, from: f.from, to: f.to }, 1) : list)[0];
+  const kindCounts: Record<string, number> = { invoice_payment: all?.nInvoice ?? 0, advance: all?.nAdvance ?? 0, refund: all?.nRefund ?? 0 };
+  const total = list[0]?.sumSar ?? 0;
+  const rowsTotal = list[0]?.n ?? 0;
 
   const amountCell = (r: (typeof list)[number]["r"]) => (
     <span className={`ltr-nums font-semibold whitespace-nowrap ${r.kind === "refund" ? "text-amber-700" : "text-emerald-700"}`}>
@@ -170,8 +173,8 @@ export default async function ReceiptsPage({ searchParams }: { searchParams: Pro
         label="نوع السند"
         tabs={[{ key: "", label: "الكل" }, ...Object.entries(KINDS).map(([key, label]) => ({ key, label }))].map((t) => ({
           ...t,
-          href: listHref(BASE, sp, { status: t.key || undefined, open: undefined }),
-          count: t.key ? kindCounts[t.key] ?? 0 : allList.length,
+          href: listHref(BASE, sp, { status: t.key || undefined, open: undefined, page: undefined }),
+          count: t.key ? kindCounts[t.key] ?? 0 : all?.n ?? 0,
           active: (f.status ?? "") === t.key,
         }))}
         summary={
@@ -191,7 +194,7 @@ export default async function ReceiptsPage({ searchParams }: { searchParams: Pro
         sorts={SORTS}
         noun="سند"
         exportName="سندات-العملاء"
-        count={list.length}
+        count={rowsTotal}
         extra={
           list.length > 0 ? (
             <span className="max-md:hidden">
@@ -206,7 +209,6 @@ export default async function ReceiptsPage({ searchParams }: { searchParams: Pro
       <div className="max-md:hidden">
         <Table head={["السند", "العميل والحساب", "النوع", "المبلغ", "الحالة", "الخطوة التالية", ""]}>
           {list.length === 0 && <EmptyRow cols={7}>{f.q || f.status || f.from ? "لا توجد سندات بهذه الشروط" : "لا توجد سندات بعد"}</EmptyRow>}
-          <LimitRow cols={7} shown={list.length} limit={500} />
           {list.map(({ r, customer, account, invoiceCount, allocated }) => {
             const open = listHref(BASE, sp, { open: String(r.id) });
             const left = r.status === "posted" && r.kind !== "refund" ? Number(r.amount) - Number(allocated) : 0;
@@ -231,6 +233,7 @@ export default async function ReceiptsPage({ searchParams }: { searchParams: Pro
           })}
         </Table>
       </div>
+      <Pager page={page} size={PAGE_SIZE} total={rowsTotal} hrefFor={(p) => listHref(BASE, sp, { page: p > 1 ? String(p) : undefined, open: undefined })} />
       {openDoc && (
         <DeskDrawer
           closeHref={closeHref}

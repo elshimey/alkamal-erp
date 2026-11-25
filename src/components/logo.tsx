@@ -13,7 +13,7 @@ export function LogoMark({ size = 36 }: { size?: number }) {
 export function BrandMark({ logo, size = 36 }: { logo?: string | null; size?: number }) {
   if (!logo) return <LogoMark size={size} />;
   return (
-    // eslint-disable-next-line @next/next/no-img-element -- الشعار محفوظ كبيانات مضمنة
+    // eslint-disable-next-line @next/next/no-img-element -- الشعار من /brand-logo أو بيانات مضمنة
     <img src={logo} alt="" width={size} height={size} className="shrink-0 rounded-lg bg-white object-contain p-0.5" style={{ width: size, height: size }} />
   );
 }

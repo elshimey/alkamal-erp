@@ -2673,6 +2673,12 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     expect([Number(imported.o.subtotal), Number(imported.o.vatTotal), Number(imported.o.total)]).toEqual([1800, 225, 2025]);
     expect(imported.o.supplierId).toBe(ws.id);
     expect((await listOrders(db, { vehicleId: v.id, sort: "amount_desc" }))[0].o.id).toBe(imported.o.id);
+    // عدادات الحالات والإجمالي بالريال لكل الصفحات من الاستعلام نفسه (سطر واحد يكفي)
+    const every = await listOrders(db, { vehicleId: v.id });
+    const [head] = await listOrders(db, { vehicleId: v.id }, 1);
+    expect([head.n, head.nDraft + head.nApproved + head.nCompleted <= head.n]).toEqual([every.length, true]);
+    expect(head.nDraft).toBe(every.filter((x) => x.o.status === "draft").length);
+    expect(head.sumSar).toBeCloseTo(every.reduce((t, x) => t + Number(x.o.total) * Number(x.o.exchangeRate), 0), 2);
 
     const reqImport = await runImport(db, IMPORT_SPECS["breakdown-requests"], [{ row: 5, values: { reportDate: day, vehicle: "ص ي ن 4321", description: "إضاءة خلفية", priority: "عاجلة" } }], { dryRun: false });
     expect(reqImport.ok).toBe(1);
@@ -3261,6 +3267,14 @@ describe.skipIf(!url)("قاعدة البيانات", () => {
     expect((await f("PO-778")).map((x) => x.q.id)).toEqual([intl.id]);
     expect((await f("جدة")).map((x) => x.q.id)).toEqual([dom.id]);
     expect((await f("1150")).map((x) => x.q.id)).toContain(dom.id);
+
+    // الصفحات: عمود العدد والمجموع يشملان كل الصفحات، والإزاحة تأتي بالصفحة التالية
+    const all = await listQuotations(db, parseQuoteFilter({ period: "all" }, d));
+    const [first] = await listQuotations(db, parseQuoteFilter({ period: "all" }, d), 1, 0);
+    const [second] = await listQuotations(db, parseQuoteFilter({ period: "all" }, d), 1, 1);
+    expect(first.n).toBe(all.length);
+    expect(first.sumAll).toBeCloseTo(all.reduce((t, x) => t + Number(x.q.total), 0), 2);
+    expect(second.q.id).toBe(all[1].q.id);
 
     // النسخ يحتفظ بمدة الصلاحية ويبدأ مسودة
     const copy = await duplicateQuotation(db, intl.id, { date: `${YEAR + 1}-11-01`, userId: admin.id });

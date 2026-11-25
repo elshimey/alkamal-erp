@@ -278,9 +278,10 @@ const purchaseCols = {
   search: [s.purchaseInvoices.supplierInvoiceNo, s.purchaseInvoices.notes],
 };
 
-export async function listPurchaseInvoices(db: Db | Tx, f: DocFilter, limit = 500) {
+export async function listPurchaseInvoices(db: Db | Tx, f: DocFilter, limit = 500, offset = 0) {
   return db
     .select({
+      n: sql<number>`count(*) over()`.mapWith(Number),
       i: s.purchaseInvoices,
       supplier: s.parties.nameAr,
       lines: sql<number>`(select count(*) from purchase_invoice_lines l where l.invoice_id = ${s.purchaseInvoices.id})::int`,
@@ -290,7 +291,8 @@ export async function listPurchaseInvoices(db: Db | Tx, f: DocFilter, limit = 50
     .innerJoin(s.parties, eq(s.parties.id, s.purchaseInvoices.supplierId))
     .where(docWhere(purchaseCols, f, "posted"))
     .orderBy(...docOrder(purchaseCols, f.sort))
-    .limit(limit);
+    .limit(limit)
+    .offset(offset);
 }
 
 /** فاتورة المورد بجهتها وسطورها وحساباتها، للمعاينة والصفحة. */

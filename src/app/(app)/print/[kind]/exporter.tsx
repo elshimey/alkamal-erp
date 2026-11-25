@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
 import { downloadBlob, nodeToPdf, safeFileName } from "@/lib/pdf-client";
+import { loadLazyImages } from "@/lib/eager-images";
 
 /** يحوّل كل مستند في الصفحة إلى PDF مستقل ويجمعها في ملف مضغوط واحد للتنزيل. */
 export function BatchExporter({ title, auto, mode = "zip" }: { title: string; auto: boolean; mode?: "zip" | "pdf" | "print" }) {
@@ -44,7 +45,7 @@ export function BatchExporter({ title, auto, mode = "zip" }: { title: string; au
     if (!auto || started.current) return;
     started.current = true;
     // ننتظر تحميل الخطوط والصور قبل التحويل
-    const t = setTimeout(() => void document.fonts.ready.then(mode === "print" ? () => window.print() : run), 600);
+    const t = setTimeout(() => void Promise.all([document.fonts.ready, loadLazyImages()]).then(mode === "print" ? () => window.print() : run), 600);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auto]);

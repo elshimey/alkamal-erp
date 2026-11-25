@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { canvasToCompressed } from "@/lib/image-encode";
 
 const MAX_PDF = 5_000_000;
 
@@ -46,7 +47,7 @@ export function DocumentFileInput({ name = "file", label = "إرفاق صورة 
         canvas.width = Math.round(bmp.width * scale);
         canvas.height = Math.round(bmp.height * scale);
         canvas.getContext("2d")!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
-        setData(canvas.toDataURL("image/jpeg", 0.8));
+        setData(canvasToCompressed(canvas, 0.8));
       } else throw new Error("اختر صورة أو ملف PDF");
       setFileName(file.name);
     } catch (e) {
