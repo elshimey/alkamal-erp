@@ -467,7 +467,7 @@ export interface OrderFilter {
   sort?: keyof typeof ORDER_SORTS;
 }
 
-export async function listOrders(db: Db | Tx, f: OrderFilter = {}, limit = 300) {
+export async function listOrders(db: Db | Tx, f: OrderFilter = {}, limit = 300, offset = 0) {
   const where: SQL[] = [];
   const o = s.maintenanceOrders;
   if (f.status) where.push(eq(o.status, f.status));
@@ -493,6 +493,12 @@ export async function listOrders(db: Db | Tx, f: OrderFilter = {}, limit = 300) 
             : [desc(o.orderDate), desc(o.id)];
   return db
     .select({
+      // عدد السطور ومجاميعها في كل الصفحات (للعدادات والإجمالي) دون استعلام ثانٍ
+      n: sql<number>`count(*) over()`.mapWith(Number),
+      nDraft: sql<number>`count(*) filter (where ${o.status} = 'draft') over()`.mapWith(Number),
+      nApproved: sql<number>`count(*) filter (where ${o.status} = 'approved') over()`.mapWith(Number),
+      nCompleted: sql<number>`count(*) filter (where ${o.status} = 'completed') over()`.mapWith(Number),
+      sumSar: sql<number>`coalesce(sum(${o.total} * ${o.exchangeRate}) over(), 0)`.mapWith(Number),
       o,
       plate: s.vehicles.plate,
       supplier: s.parties.nameAr,
@@ -509,7 +515,8 @@ export async function listOrders(db: Db | Tx, f: OrderFilter = {}, limit = 300) 
     .leftJoin(s.lookupValues, eq(s.lookupValues.id, o.typeClassId))
     .where(where.length ? and(...where) : undefined)
     .orderBy(...order)
-    .limit(limit);
+    .limit(limit)
+    .offset(offset);
 }
 
 /** أمر الصيانة كاملاً للمعاينة والطباعة. */

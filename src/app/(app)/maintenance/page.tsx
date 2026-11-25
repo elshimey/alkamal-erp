@@ -8,6 +8,7 @@ import { getCompany, getInvoiceTemplate } from "@/lib/company";
 import { ORDER_SORTS, listOrders, orderDoc, type OrderFilter } from "@/lib/maintenance";
 import { listHref, parseDocFilter, type DocListParams } from "@/lib/doc-filters";
 import { todayRiyadh } from "@/lib/dates";
+import { PAGE_SIZE, pageOf } from "@/lib/paging";
 import { MAINTENANCE_PROVIDERS, MAINTENANCE_STATUS, MAINTENANCE_TYPES, type MaintenanceType } from "@/data/maintenance";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { BulkPdfButton } from "@/components/bulk-pdf";
@@ -17,7 +18,7 @@ import { Icon } from "@/components/icons";
 import { ListActions } from "@/components/list-actions";
 import { MaintenanceOrderDocument } from "@/components/maintenance-document";
 import { RowCheck, SelectAll, SelectionTotal } from "@/components/row-selection";
-import { Badge, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
+import { Badge, EmptyRow, Field, Input, PageHeader, Pager, Select, Table, Td } from "@/components/ui";
 import { MaintenanceTabs } from "./tabs";
 import { OrderPanel } from "./order-panel";
 import { approveOrder, bulkOrders, completeOrder, revertOrder, saveOrderSheet } from "./actions";
@@ -49,13 +50,14 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
   const view = sp.view === "sheet" ? "sheet" : "table";
   const fromSource = !!(sp.request || sp.plan);
   const openId = view === "table" ? Number(sp.open) || null : null;
+  const { page, offset } = pageOf(sp.page);
   const [vehicles, cashes, list, unfiltered, openDoc, company, template] = await Promise.all([
     vehicleOptions(),
     cashAccounts(db),
     // القادم من طلب عطل أو خطة بمركبة محددة يرى نافذة الإنشاء، لا تصفية القائمة بالمركبة
-    listOrders(db, fromSource ? { ...filter, vehicleId: undefined, type: undefined } : filter),
+    listOrders(db, fromSource ? { ...filter, vehicleId: undefined, type: undefined } : filter, PAGE_SIZE, offset),
     // عدادات الحالات لا تتأثر بفلتر الحالة نفسه
-    filter.status ? listOrders(db, { ...filter, status: undefined }) : Promise.resolve(null),
+    filter.status ? listOrders(db, { ...filter, status: undefined }, 1) : Promise.resolve(null),
     openId ? orderDoc(db, openId) : Promise.resolve(null),
     getCompany(db),
     getInvoiceTemplate(db),
@@ -66,8 +68,11 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
   const canApprove = can(user.perms, "maintenance", "approve");
   const canUpdate = can(user.perms, "maintenance", "update");
   const selectable = list.filter(({ o }) => (o.status === "draft" && canApprove) || (o.status === "approved" && canUpdate));
-  const count = (st: Status) => (unfiltered ?? list).filter(({ o }) => o.status === st).length;
-  const totalOf = () => list.reduce((t, { o }) => t + Number(o.total) * Number(o.exchangeRate), 0);
+  // العدادات والإجمالي لكل الصفحات من أعمدة المجموع في الاستعلام نفسه
+  const all = (unfiltered ?? list)[0];
+  const count = (st: Status) => (st === "draft" ? all?.nDraft : st === "approved" ? all?.nApproved : st === "completed" ? all?.nCompleted : 0) ?? 0;
+  const totalOf = () => list[0]?.sumSar ?? 0;
+  const rowsTotal = list[0]?.n ?? 0;
 
   return (
     <>
@@ -78,9 +83,9 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
 
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[
-          { label: "مسودات بانتظار الاعتماد", value: count("draft"), href: listHref(BASE, sp, { status: "draft", open: undefined }) },
-          { label: "تحت التنفيذ (المركبة في الورشة)", value: count("approved"), href: listHref(BASE, sp, { status: "approved", open: undefined }) },
-          { label: "مكتملة", value: count("completed"), href: listHref(BASE, sp, { status: "completed", open: undefined }) },
+          { label: "مسودات بانتظار الاعتماد", value: count("draft"), href: listHref(BASE, sp, { status: "draft", open: undefined, page: undefined }) },
+          { label: "تحت التنفيذ (المركبة في الورشة)", value: count("approved"), href: listHref(BASE, sp, { status: "approved", open: undefined, page: undefined }) },
+          { label: "مكتملة", value: count("completed"), href: listHref(BASE, sp, { status: "completed", open: undefined, page: undefined }) },
           { label: "إجمالي المعروض (ر.س)", value: totalOf(), money: true },
         ].map((k) => {
           const body = (
@@ -101,7 +106,7 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
         })}
       </div>
 
-      <DocToolbar base={BASE} params={sp} statuses={STATUSES} pay={false} sorts={ORDER_SORTS} noun="أمر" exportName="أوامر-الصيانة" count={list.length} placeholder="ابحث بالرقم أو اللوحة أو الورشة أو فاتورتها" />
+      <DocToolbar base={BASE} params={sp} statuses={STATUSES} pay={false} sorts={ORDER_SORTS} noun="أمر" exportName="أوامر-الصيانة" count={rowsTotal} placeholder="ابحث بالرقم أو اللوحة أو الورشة أو فاتورتها" />
       <form className="mb-4 flex flex-wrap items-center gap-2 text-sm print:hidden">
         {(["q", "period", "status", "sort", "view"] as const).map((k) => sp[k] && <input key={k} type="hidden" name={k} value={sp[k]} />)}
         <Select name="vehicle" defaultValue={filter.vehicleId ?? ""} className="w-36">
@@ -319,6 +324,7 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
               );
             })}
           </Table>
+          <Pager page={page} size={PAGE_SIZE} total={rowsTotal} hrefFor={(p) => listHref(BASE, listParams as Params, { page: p > 1 ? String(p) : undefined, open: undefined })} />
         </>
       )}
       {creating && (

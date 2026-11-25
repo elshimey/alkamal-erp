@@ -10,6 +10,7 @@ import { routeOptions } from "@/lib/lookups";
 import { getCompany, getInvoiceTemplate } from "@/lib/company";
 import { todayRiyadh } from "@/lib/dates";
 import { listHref } from "@/lib/doc-filters";
+import { PAGE_SIZE, pageOf } from "@/lib/paging";
 import { fmt, fmtDate } from "@/lib/format";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { ClickRow } from "@/components/click-row";
@@ -22,7 +23,7 @@ import { DocToolbar } from "@/components/doc-toolbar";
 import { Icon } from "@/components/icons";
 import { RowCheck, SelectAll, SelectionTotal } from "@/components/row-selection";
 import { SendDocument } from "@/components/send-document";
-import { Badge, EmptyRow, LimitRow, PageHeader, Table, Td } from "@/components/ui";
+import { Badge, EmptyRow, PageHeader, Pager, Table, Td } from "@/components/ui";
 import { bulkQuotations, convertQuotation, copyQuotation, quotationStatus, removeQuotation, saveQuotationPanel, saveQuotationSheet } from "./actions";
 import { QuotationEditor, type QuoteDraft } from "./quotation-editor";
 
@@ -50,14 +51,15 @@ export default async function QuotationsPage({ searchParams }: { searchParams: P
   const canDelete = can(user.perms, "sales_invoices", "delete");
   const view = sp.view === "sheet" ? "sheet" : "table";
   // معاملات القائمة فقط، فلا تبقى نافذة التعديل مفتوحة في الروابط
-  const lp: QuoteListParams = { q: sp.q, status: sp.status, period: sp.period, sort: sp.sort, view: sp.view };
+  const lp: QuoteListParams = { q: sp.q, status: sp.status, period: sp.period, sort: sp.sort, view: sp.view, page: sp.page };
+  const { page, offset } = pageOf(sp.page);
   const openId = view === "table" ? Number(sp.open) || null : null;
   const editId = Number(sp.edit) || null;
   const creating = canCreate && (sp.new === "1" || sp.add === "1");
   const filter = parseQuoteFilter(sp, today);
 
   const [rows, openDoc, editDoc, company, template] = await Promise.all([
-    listQuotations(db, filter),
+    listQuotations(db, filter, PAGE_SIZE, offset),
     openId ? quotationDoc(db, openId) : Promise.resolve(null),
     editId && canUpdate ? quotationDoc(db, editId) : Promise.resolve(null),
     getCompany(db),
@@ -177,7 +179,7 @@ export default async function QuotationsPage({ searchParams }: { searchParams: P
   const returnTo = view === "sheet" ? listUrl() : listUrl({ open: "{id}" }).replace("%7Bid%7D", "{id}");
 
   const lineRows = Map.groupBy(lines, (l) => l.quotationId);
-  const total = rows.reduce((t, { q }) => t + Number(q.total), 0);
+  const total = rows[0]?.sumAll ?? 0;
 
   return (
     <>
@@ -194,7 +196,7 @@ export default async function QuotationsPage({ searchParams }: { searchParams: P
         params={lp}
         statuses={STATUSES}
         exportName="عروض-الأسعار"
-        count={rows.length}
+        count={rows[0]?.n ?? 0}
         noun="عرض"
         pay={false}
         sorts={QUOTE_SORTS}
@@ -336,7 +338,6 @@ export default async function QuotationsPage({ searchParams }: { searchParams: P
           )}
           <Table head={[(canUpdate || canDelete) && rows.length ? <SelectAll key="all" form={BULK_FORM} /> : "", "الرقم", "التاريخ", "صالح حتى", "العميل", "نوع الشحن", "المرجع", "الإجمالي", "الحالة", "الفاتورة", "", ""]}>
             {rows.length === 0 && <EmptyRow cols={12}>{filter.q || filter.status || filter.from ? "لا توجد عروض بهذه الشروط" : "لا توجد عروض أسعار بعد؛ اضغط «إنشاء»"}</EmptyRow>}
-            <LimitRow cols={11} shown={rows.length} limit={500} />
             {rows.map(({ q, customer, invoice }) => {
               const open = listUrl({ open: String(q.id) });
               const expired = q.status === "sent" && q.validUntil < today;
@@ -382,6 +383,7 @@ export default async function QuotationsPage({ searchParams }: { searchParams: P
               );
             })}
           </Table>
+          <Pager page={page} size={PAGE_SIZE} total={rows[0]?.n ?? 0} hrefFor={(p) => listUrl({ page: p > 1 ? String(p) : undefined, open: undefined })} />
           {rows.length > 0 && (
             <p className="mt-3 text-xs text-gray-500">
               إجمالي المعروض <span className="ltr-nums font-semibold text-gray-700">{fmt(total)}</span>

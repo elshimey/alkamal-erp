@@ -16,7 +16,8 @@ import { PAYMENT_METHODS, RECEIPT_STATUS } from "@/data/sales";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { SheetEditor } from "@/components/sheet-editor";
 import { AddModeBar, ListActions } from "@/components/list-actions";
-import { Badge, Card, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
+import { Badge, Card, EmptyRow, PageHeader, Pager, Table, Td } from "@/components/ui";
+import { PAGE_SIZE, pageOf } from "@/lib/paging";
 import { post, remove, revert, savePaymentSheet, savePayments } from "./actions";
 import { PaymentPanel } from "./payment-panel";
 import { DocSheet, type DocSheetRow } from "@/components/doc-sheet";
@@ -28,7 +29,7 @@ import { DocCards } from "@/components/doc-card";
 import { DocCardFace, Facts, SheetActions, TapCard } from "@/components/list-card";
 import { payFromSheetOptions } from "@/lib/lookups";
 
-type Search = { add?: string; new?: string; edit?: string; open?: string; view?: string; q?: string; period?: string };
+type Search = { add?: string; new?: string; edit?: string; open?: string; view?: string; q?: string; period?: string; page?: string };
 const drawerBtn = "inline-flex h-10 items-center gap-1.5 rounded-xl border border-gray-300 bg-white px-3 text-sm text-gray-700 shadow-sm hover:bg-gray-50";
 
 export default async function PaymentsPage({ searchParams }: { searchParams: Promise<Search> }) {
@@ -44,9 +45,10 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
   const q = sp.q?.trim() || undefined;
   const period: Period = sp.period && sp.period in PERIODS ? (sp.period as Period) : "all";
   const href = (patch: Partial<Search> = {}) => {
-    const p = new URLSearchParams(Object.entries({ view: sp.view, q: sp.q, period: sp.period, ...patch }).filter((e): e is [string, string] => !!e[1]));
+    const p = new URLSearchParams(Object.entries({ view: sp.view, q: sp.q, period: sp.period, page: sp.page, ...patch }).filter((e): e is [string, string] => !!e[1]));
     return p.size ? `/payments?${p}` : "/payments";
   };
+  const { page, offset } = pageOf(sp.page);
   const cash = alias(s.accounts, "cash");
   const where: SQL[] = [];
   if (q) {
@@ -71,6 +73,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
     supplierBalances(db),
     db
       .select({
+        n: sql<number>`count(*) over()`.mapWith(Number),
         p: s.payments,
         party: s.parties.nameAr,
         driver: s.employees.nameAr,
@@ -86,7 +89,8 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
       .leftJoin(s.journalEntries, eq(s.journalEntries.id, s.payments.journalEntryId))
       .where(where.length ? and(...where) : undefined)
       .orderBy(desc(s.payments.paymentDate), desc(s.payments.id))
-      .limit(300),
+      .limit(PAGE_SIZE)
+      .offset(offset),
   ]);
 
   type P = (typeof list)[number]["p"];
@@ -97,6 +101,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
       await db
         .select({ paymentId: s.paymentAllocations.paymentId, invoiceId: sql<number>`min(${s.paymentAllocations.invoiceId})`, n: sql<number>`count(*)::int` })
         .from(s.paymentAllocations)
+        .where(inArray(s.paymentAllocations.paymentId, list.length ? list.map((x) => x.p.id) : [0]))
         .groupBy(s.paymentAllocations.paymentId)
     )
       .filter((a) => a.n === 1)
@@ -204,7 +209,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
           params={{ view: sp.view, q: sp.q, period: sp.period }}
           statuses={{}}
           exportName="سندات الصرف"
-          count={list.length}
+          count={list[0]?.n ?? 0}
           noun="سند"
           pay={false}
           sorts={{ date_desc: "الأحدث أولاً" }}
@@ -345,6 +350,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
       </Table>
       </div>
       )}
+      {!adding && <Pager page={page} size={PAGE_SIZE} total={list[0]?.n ?? 0} hrefFor={(p) => href({ page: p > 1 ? String(p) : undefined, open: undefined })} />}
       {openRow && !editing && (
         <DeskDrawer
           closeHref={href({ open: undefined })}

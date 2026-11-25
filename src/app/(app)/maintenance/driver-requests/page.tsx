@@ -146,7 +146,7 @@ export default async function DriverRequestsPage({ searchParams }: { searchParam
             {photos.has(open.e.id) && (
               <a href={`/files/${photos.get(open.e.id)}`} target="_blank" rel="noreferrer" className="mb-4 block">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={`/files/${photos.get(open.e.id)}`} alt="صورة الفاتورة" className="max-h-64 w-full rounded-lg border border-gray-200 object-contain" />
+                <img src={`/files/${photos.get(open.e.id)}`} loading="lazy" decoding="async" alt="صورة الفاتورة" className="max-h-64 w-full rounded-lg border border-gray-200 object-contain" />
               </a>
             )}
             {open.e.status === "pending" && canApprove && (

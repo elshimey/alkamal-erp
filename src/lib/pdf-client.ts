@@ -1,6 +1,7 @@
 // تحويل مستند معروض في الصفحة إلى PDF بمقاس A4 (في المتصفح)، والمستند الطويل على أكثر من صفحة.
 // يُرسم المستند بعرض ورقة A4 ثابت مهما كان عرض الشاشة (فلا يخرج من الجوال ضيقاً مكدّساً)،
 // ويُقسَّم على الصفحات عند حدود السطور والأقسام فلا ينقطع سطر بين صفحتين.
+import { loadLazyImages } from "@/lib/eager-images";
 const A4_PX = 760; // عرض محتوى A4 بهوامش 8 مم تقريباً بوحدة CSS
 
 /** أماكن القطع الآمنة: نهاية كل سطر جدول وكل قسم مباشر في المستند (بالبكسل من أعلاه). */
@@ -21,6 +22,7 @@ export async function nodeToPdf(node: HTMLElement): Promise<ArrayBuffer> {
   node.style.width = `${A4_PX}px`;
   node.style.maxWidth = "none";
   try {
+    await loadLazyImages(node);
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     const cssH = node.scrollHeight;
     const cuts = safeCuts(node);

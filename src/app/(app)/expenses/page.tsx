@@ -15,7 +15,8 @@ import { EXPENSE_PAYERS, EXPENSE_STATUS } from "@/data/purchases";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { SheetEditor } from "@/components/sheet-editor";
 import { AddModeBar, ListActions } from "@/components/list-actions";
-import { Badge, Card, EmptyRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
+import { Badge, Card, EmptyRow, Field, Input, PageHeader, Pager, Select, Table, Td } from "@/components/ui";
+import { PAGE_SIZE, pageOf } from "@/lib/paging";
 import { DialogButton } from "@/components/dialog-button";
 import { approve, approveMany, approveReviewed, reject, remove, revert, saveExpenseSheet, saveExpenses } from "./actions";
 import { DocSheet, type DocSheetRow } from "@/components/doc-sheet";
@@ -31,7 +32,7 @@ import { payFromSheetOptions, payFromTree, toAccountOptions } from "@/lib/lookup
 
 type Status = keyof typeof EXPENSE_STATUS;
 
-type Search = { status?: string; add?: string; new?: string; edit?: string; open?: string; view?: string; q?: string; period?: string; back?: string };
+type Search = { status?: string; add?: string; new?: string; edit?: string; open?: string; view?: string; q?: string; period?: string; back?: string; page?: string };
 const drawerBtn = "inline-flex h-10 items-center gap-1.5 rounded-xl border border-gray-300 bg-white px-3 text-sm text-gray-700 shadow-sm hover:bg-gray-50";
 
 export default async function ExpensesPage({ searchParams }: { searchParams: Promise<Search> }) {
@@ -43,7 +44,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
   const period: Period = sp.period && sp.period in PERIODS ? (sp.period as Period) : "all";
   // رابط القائمة بنفس الفلاتر مع تغيير بعضها (فتح المعاينة، التعديل، الشيت)
   const href = (patch: Partial<Search> = {}) => {
-    const p = new URLSearchParams(Object.entries({ status: raw, view: sp.view, q: sp.q, period: sp.period, ...patch }).filter((e): e is [string, string] => !!e[1]));
+    const p = new URLSearchParams(Object.entries({ status: raw, view: sp.view, q: sp.q, period: sp.period, page: sp.page, ...patch }).filter((e): e is [string, string] => !!e[1]));
     return p.size ? `/expenses?${p}` : "/expenses";
   };
   const canUpdate = can(user.perms, "expenses", "update");
@@ -54,6 +55,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
   const status: Status | undefined = raw && raw in EXPENSE_STATUS ? (raw as Status) : undefined;
   const today = todayRiyadh();
   const since = new Date(Date.parse(today) - 60 * 86_400_000).toISOString().slice(0, 10);
+  const { page, offset } = pageOf(sp.page);
   const cash = alias(s.accounts, "cash");
   const where: SQL[] = [];
   if (status) where.push(eq(s.expenses.status, status));
@@ -82,6 +84,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
     can(user.perms, "drivers", "view") ? custodyBalances(db) : Promise.resolve([]),
     db
       .select({
+        n: sql<number>`count(*) over()`.mapWith(Number),
         e: s.expenses,
         account: s.accounts.nameAr,
         code: s.accounts.code,
@@ -103,7 +106,8 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
       .leftJoin(s.maintenanceTypes, eq(s.maintenanceTypes.id, s.expenses.maintenanceTypeId))
       .where(where.length ? and(...where) : undefined)
       .orderBy(desc(s.expenses.expenseDate), desc(s.expenses.id))
-      .limit(300),
+      .limit(PAGE_SIZE)
+      .offset(offset),
     adding || view === "sheet" ? supplierOptions(db) : Promise.resolve([]),
   ]);
   // شحنات المصروفات الظاهرة تبقى في قائمة الشيت ولو أقدم من 60 يوماً
@@ -275,7 +279,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
         {[{ key: undefined, label: "الكل" }, ...(Object.keys(EXPENSE_STATUS) as Status[]).map((k) => ({ key: k, label: EXPENSE_STATUS[k].label }))].map((t) => (
           <Link
             key={t.label}
-            href={href({ status: t.key, open: undefined })}
+            href={href({ status: t.key, open: undefined, page: undefined })}
             className={`rounded-full px-3.5 py-1.5 transition ${t.key === status ? "bg-asphalt-900 font-semibold text-brand-500" : "bg-white text-gray-600 shadow-sm hover:bg-brand-50"}`}
           >
             {t.label}
@@ -293,7 +297,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
         params={{ status: raw, view: sp.view, q: sp.q, period: sp.period }}
         statuses={{}}
         exportName="المصروفات"
-        count={list.length}
+        count={list[0]?.n ?? 0}
         noun="مصروف"
         pay={false}
         sorts={{ date_desc: "الأحدث أولاً" }}
@@ -458,6 +462,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
       </div>
       </>
       )}
+      <Pager page={page} size={PAGE_SIZE} total={list[0]?.n ?? 0} hrefFor={(p) => href({ page: p > 1 ? String(p) : undefined, open: undefined })} />
         </>
       )}
       {openRow && !editing && (

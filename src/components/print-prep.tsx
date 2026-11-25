@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { loadLazyImages } from "@/lib/eager-images";
 
 /**
  * قبل الطباعة (Ctrl+P أو زر «طباعة» من الكمبيوتر أو الجوال): كل تفصيل مطوي يحمل `data-print-open`
@@ -12,6 +13,8 @@ export function PrintPrep() {
     const before = () => {
       opened = Array.from(document.querySelectorAll<HTMLDetailsElement>("details[data-print-open]:not([open])"));
       for (const d of opened) d.open = true;
+      // صور الرحلة المؤجلة (loading="lazy") تُطلب فوراً؛ المتصفح ينتظر الصور قيد التحميل قبل رسم الورق
+      void loadLazyImages();
     };
     const after = () => {
       for (const d of opened) d.open = false;

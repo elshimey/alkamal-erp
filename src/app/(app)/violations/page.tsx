@@ -9,7 +9,8 @@ import { listViolations, violationSummary, violationTypeOptions, type ViolationF
 import { todayRiyadh } from "@/lib/dates";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { SheetEditor } from "@/components/sheet-editor";
-import { Badge, Card, EmptyRow, LimitRow, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
+import { Badge, Card, EmptyRow, Field, Input, PageHeader, Pager, Select, Table, Td } from "@/components/ui";
+import { PAGE_SIZE, pageOf } from "@/lib/paging";
 import { pay, remove, revertPayment, saveViolations } from "./actions";
 import { RowCheck, SelectAll, SelectionTotal } from "@/components/row-selection";
 import { violationDoc } from "@/lib/violations";
@@ -48,11 +49,12 @@ export default async function ViolationsPage({ searchParams }: { searchParams: P
   };
   const today = todayRiyadh();
   const openId = Number(sp.open) || null;
+  const { page, offset } = pageOf(sp.page);
   const [vehicles, drivers, cashes, list, sum, openDoc, company, template, violationTypes] = await Promise.all([
     vehicleOptions(),
     driverOptions(),
     fundingAccounts(db),
-    listViolations(db, filter),
+    listViolations(db, filter, PAGE_SIZE, offset),
     violationSummary(db),
     openId ? violationDoc(db, openId) : Promise.resolve(null),
     getCompany(db),
@@ -157,7 +159,7 @@ export default async function ViolationsPage({ searchParams }: { searchParams: P
 
       {!adding && (
         <>
-      <DocToolbar base={BASE} params={sp} statuses={STATUSES} allStatuses="كل الحالات" pay={false} views={false} sorts={{}} noun="مخالفة" exportName="المخالفات" count={list.length} placeholder="ابحث بالرقم أو اللوحة أو السائق أو النوع" />
+      <DocToolbar base={BASE} params={sp} statuses={STATUSES} allStatuses="كل الحالات" pay={false} views={false} sorts={{}} noun="مخالفة" exportName="المخالفات" count={list[0]?.n ?? 0} placeholder="ابحث بالرقم أو اللوحة أو السائق أو النوع" />
       <form className="mb-4 flex flex-wrap items-center gap-2 text-sm print:hidden">
         {(["q", "period", "status"] as const).map((k) => sp[k] && <input key={k} type="hidden" name={k} value={sp[k]} />)}
         <Select name="charge" defaultValue={filter.chargeTo ?? ""} className="w-32">
@@ -296,7 +298,6 @@ export default async function ViolationsPage({ searchParams }: { searchParams: P
       <div className="max-md:hidden">
       <Table head={[canPay && unpaid.length ? <SelectAll key="all" form={PAY_FORM} /> : "", "الرقم", "التاريخ", "المركبة", "المخالفة", "على", "المبلغ", "الخصم من الراتب", "الحالة", ""]}>
         {list.length === 0 && <EmptyRow cols={10}>لا توجد مخالفات</EmptyRow>}
-        <LimitRow cols={10} shown={list.length} limit={300} />
         {list.map(({ v, plate, driver, entry, run, runStatus }) => (
           <tr key={v.id} className={v.id === openId ? "bg-brand-50/70" : undefined}>
             <Td>{canPay && v.status === "posted" && <RowCheck form={PAY_FORM} id={v.id} amount={v.amount} />}</Td>
@@ -345,6 +346,7 @@ export default async function ViolationsPage({ searchParams }: { searchParams: P
         ))}
       </Table>
       </div>
+      <Pager page={page} size={PAGE_SIZE} total={list[0]?.n ?? 0} hrefFor={(p) => listHref(BASE, sp, { page: p > 1 ? String(p) : undefined, open: undefined })} />
         </>
       )}
       {creating && <ViolationPanel closeHref={listHref(BASE, { ...sp, new: undefined } as DocListParams, {})} />}

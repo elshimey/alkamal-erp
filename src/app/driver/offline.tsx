@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { startTransition, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { PendingContext, type FormState } from "@/components/action-form";
 import { acceptTripAction, breakdownAction, documentAction, expenseAction, fuelAction, requestStageAction, stageAction, tripExpenseAction, tripRequestAction } from "./actions";
+import { canvasToCompressed } from "@/lib/image-encode";
 
 // العمل دون إنترنت: ما يُدخله السائق بلا شبكة يُحفظ في الجوال (IndexedDB) ويُرسل تلقائياً عند عودتها.
 // كل عملية تحمل معرّفاً (_op) فلا تتكرر في الخادم إن أُرسلت مرتين.
@@ -211,7 +212,7 @@ const readDataUrl = (file: File) =>
     r.readAsDataURL(file);
   });
 
-/** يصغّر الصورة إلى 1280 بكسل بجودة 70% (نحو 200 كيلوبايت). */
+/** يصغّر الصورة إلى 1280 بكسل بجودة 70% بصيغة WebP (نحو 150 كيلوبايت، أو JPEG إن لم يدعمها الجوال). */
 async function compressImage(file: File) {
   const bmp = await createImageBitmap(file);
   const scale = Math.min(1, 1280 / Math.max(bmp.width, bmp.height));
@@ -219,7 +220,7 @@ async function compressImage(file: File) {
   canvas.width = Math.round(bmp.width * scale);
   canvas.height = Math.round(bmp.height * scale);
   canvas.getContext("2d")!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/jpeg", 0.7);
+  return canvasToCompressed(canvas, 0.7);
 }
 
 const MAX_PDF_BYTES = 5_000_000;
