@@ -70,12 +70,12 @@ test("إسناد سابق بلا محضر: إنشاء محضره من الصف �
   const form = page.getByRole("dialog");
   await expect(form.getByRole("heading", { name: /محضر لإسناد سابق/ })).toBeVisible();
   await form.getByRole("button", { name: "+ طفاية حريق" }).click();
-  await form.getByRole("radio", { name: "ممتلئ" }).click();
+  await form.getByRole("radio", { name: "ثلاثة أرباع" }).click();
   await form.getByRole("button", { name: "حفظ", exact: true }).click();
   await page.waitForURL(/[?&]doc=\d+/);
   const docId = Number(new URL(page.url()).searchParams.get("doc"));
   const [h] = await sql`select number, kind, assignment_id, fuel_level from vehicle_handovers where id = ${docId}`;
-  expect(h).toMatchObject({ assignment_id: a.id, fuel_level: "full" });
+  expect(h).toMatchObject({ assignment_id: a.id, fuel_level: "three_quarters" });
 
   // التعديل من شريط المحضر، والمعاينة تتغير، ثم الحفظ يعود للمحضر نفسه
   await page.getByRole("link", { name: "تعديل المحضر" }).click();

@@ -12,7 +12,8 @@ import { Badge, Card, EmptyRow, PageHeader, Table, Td } from "@/components/ui";
 import { saveContracts } from "./actions";
 import { fmtDate } from "@/lib/format";
 import { DocCards } from "@/components/doc-card";
-import { cardShell, DocCardFace, STRIPE } from "@/components/list-card";
+import { DocCardFace } from "@/components/list-card";
+import { cardShell, STRIPE } from "@/components/card-styles";
 
 export default async function ContractsPage({ searchParams }: { searchParams: Promise<{ add?: string }> }) {
   const user = await requirePermission("contracts", "view");
